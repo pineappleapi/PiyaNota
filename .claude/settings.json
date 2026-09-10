@@ -1,4 +1,56 @@
 {
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \".claude/hooks/notify-session-done.ps1\" 2>/dev/null || true",
+            "timeout": 15,
+            "statusMessage": "Notifying session done..."
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \".claude/hooks/notify-subagent-done.ps1\" 2>/dev/null || true",
+            "timeout": 15,
+            "statusMessage": "Notifying subagent done..."
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \".claude/hooks/notify-awaiting-input.ps1\" 2>/dev/null || true",
+            "timeout": 15,
+            "statusMessage": "Notifying awaiting input..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \".claude/hooks/notify-bug-logged.ps1\" 2>/dev/null || true",
+            "timeout": 15,
+            "statusMessage": "Checking bug tracker..."
+          }
+        ]
+      }
+    ]
+  },
   "permissions": {
     "allow": [
       "Bash(git status:*)",
