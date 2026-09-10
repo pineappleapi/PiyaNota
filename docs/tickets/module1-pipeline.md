@@ -269,6 +269,11 @@ SATB dataset (supplemented with CPMS for photographic distortion) can't proceed 
 Camera-PrIMuS training run currently in progress finishes — per the user, still training as of this
 date. Revisit once that run completes; not pursuing a partial/parallel fine-tune in the meantime.
 
+**AC1 end-to-end cross-reference (2026-09-10):** See PIYA-107's AC1 end-to-end measurement note
+below — it runs the real CRNN decode path (not ground-truth tokens) end to end and is the closest
+proxy this project has to "does symbol transcription plus pitch inference actually work together,"
+which token-level SER alone can't answer.
+
 ---
 
 ### PIYA-107 — Pitch Inference (Clef-Aware Diatonic Mapping)
@@ -295,6 +300,29 @@ the notes as one chord. Consistent with the 2026-09-09 precedent recorded above 
 (chord grouping as a tick-onset heuristic producing tagged individual events, not merged geometry).
 Explicitly out of scope per the user: separating intra-voice divisi sections (e.g. Soprano 1 vs. 2)
 — PIYA-106/107 operate on the four SATB voice parts only.
+
+**AC1 end-to-end measurement (2026-09-10):** The 98.736% figure logged against BUG-009/BUG-010 fed
+ground-truth `.agnostic` tokens straight into `infer_pitch()`, isolating the pitch-mapping math from
+CRNN decoding — it answers "is the formula correct," not "how accurate is the pipeline in practice."
+Built a second scratch check (`end_to_end_pitch_check.py`, not committed — analysis tooling, same
+pattern as the earlier isolated check) that instead runs the real CRNN (`transcribe_strip`) on actual
+Camera-PrIMuS images, feeds its *predicted* tokens into `infer_pitch()`, and scores the resulting
+MIDI pitches against `.semantic` ground truth via edit-distance alignment (so CRNN note
+insertions/deletions score as errors too, not just substitutions on a length-matched subset like the
+isolated check did). Same 500-sample/seed-42 draw, 6960 expected notes:
+- **Clean images:** 98.118% pitch accuracy (6829 matches / 114 subs / 12 ins / 17 del) — clears AC1's
+  85% target with a wide margin, consistent with the isolated-math check.
+- **Distorted (synthetic photographic-distortion proxy):** 86.983% pitch accuracy (6054 matches / 655
+  subs / 41 ins / 251 del) — still clears AC1's 85% floor, but by under 2 points, not the wide margin
+  the clean/isolated numbers implied. The 15 worst-scoring samples were checked against clef tokens
+  and don't correlate with the deferred `clef.G-L1` BUG-010 gap — they're genuine CRNN misreads on
+  heavy distortion, not a pitch-math bug, so no bug-tracker change from this run.
+
+Practical read: AC1's 85% target is met on both proxy variants as measured today, but the distorted
+margin is thin enough that this shouldn't be treated as decisively closed. The next thing that would
+actually move this number is real camera photos, not more synthetic distortion — and real photos
+route through Stage 2 staff detection first, which is where BUG-001 (PIYA-121, open) currently caps
+usable input before this pitch-inference path is even reached.
 
 ---
 
