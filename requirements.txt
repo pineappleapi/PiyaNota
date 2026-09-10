@@ -1,17 +1,32 @@
 # PiyaNota — Python dependencies
 # Install with: pip install -r requirements.txt
+#
+# Pinned to exact versions (PIYA-112 AC1) against the project venv, Python 3.12.10:
+#   python -m venv venv
+#   venv\Scripts\activate          # Windows
+#   pip install -r requirements.txt
 
-opencv-python>=4.8.0
-numpy>=1.24.0
-ultralytics>=8.0.0       # YOLOv8
-Pillow>=9.5.0
-PyYAML>=6.0
+opencv-python==4.13.0.92
+numpy==1.26.4
+ultralytics==8.4.51       # YOLOv8
+Pillow==12.2.0
+PyYAML==6.0.3
+matplotlib==3.10.9        # stage3_transcription.py viz (--viz flag), imported unconditionally
+
+# ── Stage 5 — MIDI-based audio synthesis ──────────────────────────────────────
+MIDIUtil==1.2.1
+pydub==0.25.1
+midi2audio==0.1.1
+# midi2audio/pydub also require, as separate system installs (not pip-pinnable):
+#   - FluidSynth on PATH (fluidsynth command)
+#   - ffmpeg on PATH
+#   - a piano .sf2 soundfont (e.g. GeneralUser GS or FluidR3), path passed via --soundfont
 
 # ── PyTorch with CUDA 12.1 (NVIDIA GTX 1650, Python 3.12) ────────────────────
 # Do NOT install torch via this file directly — the CUDA build requires
 # a custom index URL. Run this separately instead:
 #
-#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+#   pip install torch==2.3.0 torchvision==0.18.0 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu121
 #
 # Verify GPU is working after install:
-#   python -c "import torch; print(torch.cuda.is_available())"venv\Scripts\activate
+#   python -c "import torch; print(torch.cuda.is_available())"
