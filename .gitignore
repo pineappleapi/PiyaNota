@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+*.egg-info/
+
+# Environment secrets
+.env
+
+# ML model weights/checkpoints
+*.pt
+*.pth
+*.onnx
+!yolov8n.pt
+!yolov8s.pt
+checkpoints/
+models/weights/
+
+# Android
+*.apk
+*.aab
+.gradle/
+local.properties
+/app/build/
+*.iml
+
+# Flask/backend
+instance/
+*.db
+*.sqlite3
+
+# OS/editor
+.DS_Store
+.vscode/
+
+#Training Data
+data/
+datasets/
+runs/
+staff_detector_files/weights/

@@ -1,0 +1,17 @@
+# PiyaNota — Python dependencies
+# Install with: pip install -r requirements.txt
+
+opencv-python>=4.8.0
+numpy>=1.24.0
+ultralytics>=8.0.0       # YOLOv8
+Pillow>=9.5.0
+PyYAML>=6.0
+
+# ── PyTorch with CUDA 12.1 (NVIDIA GTX 1650, Python 3.12) ────────────────────
+# Do NOT install torch via this file directly — the CUDA build requires
+# a custom index URL. Run this separately instead:
+#
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+#
+# Verify GPU is working after install:
+#   python -c "import torch; print(torch.cuda.is_available())"venv\Scripts\activate
