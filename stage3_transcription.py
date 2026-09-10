@@ -699,64 +699,36 @@ def _diatonic_delta(step: int, bottom_letter: str) -> int:
     start_idx = LETTER_ORDER.index(bottom_letter)
     return abs_semitone(start_idx + step) - abs_semitone(start_idx)
  
-# Pitch class name at each diatonic step for each clef.
-# Used to look up key-signature alterations for a given note.
-STEP_TO_PITCH_CLASS = {
-    # Treble — bottom line E4
-    "clef.G-L2": {
-        -4:"A", -3:"B", -2:"C", -1:"D",
-         0:"E",  1:"F",  2:"G",  3:"A",
-         4:"B",  5:"C",  6:"D",  7:"E",
-         8:"F",  9:"G", 10:"A", 11:"B", 12:"C",
-    },
-    "clef.G-L1": {
-        -4:"A", -3:"B", -2:"C", -1:"D",
-         0:"E",  1:"F",  2:"G",  3:"A",
-         4:"B",  5:"C",  6:"D",  7:"E",
-         8:"F",  9:"G", 10:"A", 11:"B", 12:"C",
-    },
-    # Bass — bottom line G2
-    "clef.F-L4": {
-        -4:"C", -3:"D", -2:"E", -1:"F",
-         0:"G",  1:"A",  2:"B",  3:"C",
-         4:"D",  5:"E",  6:"F",  7:"G",
-         8:"A",  9:"B", 10:"C", 11:"D", 12:"E",
-    },
-    "clef.F-L3": {
-        -4:"C", -3:"D", -2:"E", -1:"F",
-         0:"G",  1:"A",  2:"B",  3:"C",
-         4:"D",  5:"E",  6:"F",  7:"G",
-         8:"A",  9:"B", 10:"C", 11:"D", 12:"E",
-    },
-    # C-L1 soprano — bottom line C4
-    "clef.C-L1": {
-        -4:"F", -3:"G", -2:"A", -1:"B",
-         0:"C",  1:"D",  2:"E",  3:"F",
-         4:"G",  5:"A",  6:"B",  7:"C",
-         8:"D",  9:"E", 10:"F", 11:"G", 12:"A",
-    },
-    # C-L2 mezzo-soprano — bottom line A3
-    "clef.C-L2": {
-        -4:"D", -3:"E", -2:"F", -1:"G",
-         0:"A",  1:"B",  2:"C",  3:"D",
-         4:"E",  5:"F",  6:"G",  7:"A",
-         8:"B",  9:"C", 10:"D", 11:"E", 12:"F",
-    },
-    # C-L3 alto — bottom line F3, C4 on step 4
-    "clef.C-L3": {
-        -4:"B", -3:"C", -2:"D", -1:"E",
-         0:"F",  1:"G",  2:"A",  3:"B",
-         4:"C",  5:"D",  6:"E",  7:"F",
-         8:"G",  9:"A", 10:"B", 11:"C", 12:"D",
-    },
-    # C-L4 tenor C clef — bottom line D, C4 on step 6
-    "clef.C-L4": {
-        -4:"G", -3:"A", -2:"B", -1:"C",
-         0:"D",  1:"E",  2:"F",  3:"G",
-         4:"A",  5:"B",  6:"C",  7:"D",
-         8:"E",  9:"F", 10:"G", 11:"A", 12:"B",
-    },
+# Bottom-staff-line letter (step=0) for each clef -- used both by
+# _diatonic_delta (semitone offset) and _pitch_class_at_step (letter name,
+# for key-signature accidental lookup) below.
+CLEF_BOTTOM_LETTER = {
+    "clef.G-L2": "E",  # Treble
+    "clef.G-L1": "E",
+    "clef.F-L4": "G",  # Bass
+    "clef.F-L3": "G",
+    "clef.C-L1": "C",  # Soprano
+    "clef.C-L2": "A",  # Mezzo-soprano
+    "clef.C-L3": "F",  # Alto
+    "clef.C-L4": "D",  # Tenor C clef
 }
+
+
+def _pitch_class_at_step(step: int, bottom_letter: str) -> str:
+    """
+    Note-letter name at diatonic `step` for a clef whose bottom line is
+    `bottom_letter`. Used only to look up key-signature alterations for a
+    note (the letter repeats every octave, so this needs no semitone math).
+
+    Unlike a fixed-range lookup table, this has no bound on `step` -- real
+    Camera-PrIMuS scores use far-ledger-line notes (VOCAB includes suffixes
+    down to L-3/S-2 and up to L8/S8) whose diatonic step, after the BUG-009
+    pos-indexing fix, falls well outside any small hardcoded range; a fixed
+    table silently defaulting out-of-range steps to "C" gave wrong
+    key-signature accidentals on those notes (see BUG-010 investigation).
+    """
+    start_idx = LETTER_ORDER.index(bottom_letter)
+    return LETTER_ORDER[(start_idx + step) % 7]
  
 ACCIDENTAL_OFFSET = {
     "accidental.sharp":       1,
@@ -1240,14 +1212,18 @@ def infer_pitch(
                     }.get(beam_num, "eighth")
                     break
  
-            # Parse position suffix → diatonic step number
+            # Parse position suffix → diatonic step number.
+            # Camera-PrIMuS agnostic encoding numbers the bottom staff line
+            # L1 (not L0) and the space just above it S1 -- i.e. pos is
+            # 1-indexed from the bottom line, not 0-indexed -- so pos must be
+            # shifted down by one before doubling to land step=0 on the
+            # bottom line, matching STEP_TO_PITCH_CLASS/_diatonic_delta's own
+            # step=0-is-bottom-line convention (see BUG-009).
             loc  = pos_str[0]                        # "L" or "S"
             pos  = int(pos_str[1:])                  # integer, may be negative
-            step = pos * 2 if loc == "L" else pos * 2 + 1
+            step = (pos - 1) * 2 if loc == "L" else (pos - 1) * 2 + 1
  
-            clef_steps    = STEP_TO_PITCH_CLASS.get(
-                active_clef, STEP_TO_PITCH_CLASS["clef.G-L2"])
-            bottom_letter = clef_steps[0]
+            bottom_letter = CLEF_BOTTOM_LETTER.get(active_clef, "E")
             delta         = _diatonic_delta(step, bottom_letter)
  
             # Accidental: natural cancels key sig for this note only
@@ -1260,7 +1236,7 @@ def infer_pitch(
                     acc = pending_acc
             pending_acc = None
  
-            pitch_class = clef_steps.get(step, "C")
+            pitch_class = _pitch_class_at_step(step, bottom_letter)
             key_acc     = 0 if cancel_key else key_alterations.get(pitch_class, 0)
  
             midi_pitch  = max(0, min(127,
