@@ -1,0 +1,389 @@
+# Module 1: Recognition Pipeline (Backend — ML/Processing)
+
+_Covers: API tickets (client-facing), pipeline stage tickets (internal), infrastructure/reliability tickets._
+
+## API Tickets (Client-Facing)
+
+### PIYA-101 — Submit Score for Processing API
+**Method:** POST
+**Context:** Accepts image arrays only, in reading order. PDF pages must already be rasterized by the upload-handling layer (PIYA-310) before reaching this endpoint.
+
+**Acceptance Criteria:**
+1. Accepts an ordered array of page images (JPEG/PNG) and creates a new processing job scoped to the authenticated user's account.
+2. Returns 400 if the array is empty or exceeds 20 pages.
+3. Returns 415 if any submitted file is not JPEG or PNG.
+4. Returns a `job_id` and status `"queued"` within 1 second of submission; does not block until processing completes.
+5. Each page is tagged internally with its `page_index`, reflecting submission order, preserved through every downstream stage.
+6. If the processing queue is at capacity, returns 429 with an estimated wait time instead of silently dropping the request.
+7. The submission is logged with `job_id`, `user_id`, `page_count`, and timestamp.
+
+**Response Schema:**
+```json
+{
+  "data": {
+    "jobId": "job_8841",
+    "userId": 214,
+    "pageCount": 3,
+    "status": "queued",
+    "submittedAt": "2026-09-10T09:15:00Z"
+  },
+  "success": true,
+  "status": 202,
+  "message": "Score submitted for processing"
+}
+```
+
+---
+
+### PIYA-102 — Get Processing Status API
+**Method:** GET
+
+**Acceptance Criteria:**
+1. Returns current status (`queued` / `preprocessing` / `detecting_staff` / `transcribing` / `reconstructing` / `synthesizing` / `complete` / `failed`) for the given `job_id`, scoped to caller's account.
+2. Returns `current_page` and `total_pages` while status is not `complete`/`failed`.
+3. Returns `percent_complete` (0–100), calculated from completed stages across all pages.
+4. Returns 404 if `job_id` doesn't exist or doesn't belong to caller's account.
+5. If status is `failed`, includes `failure_reason` and the specific `page_index` that failed, when applicable.
+6. Response time under 500ms regardless of underlying job state.
+
+**Response Schema:**
+```json
+{
+  "data": {
+    "jobId": "job_8841",
+    "status": "transcribing",
+    "currentPage": 2,
+    "totalPages": 3,
+    "percentComplete": 75,
+    "failureReason": null,
+    "estimatedRemainingSeconds": 62
+  },
+  "success": true,
+  "status": 200,
+  "message": "Processing status retrieved"
+}
+```
+
+---
+
+### PIYA-103 — Get Processed Score Result API
+**Method:** GET
+
+**Acceptance Criteria:**
+1. Returns 409 (not 200) if job status is not yet `complete`.
+2. Once complete, returns all four SATB audio track URLs (soprano, alto, tenor, bass), preprocessed page image URL(s) for playback overlay, and tick-based timing metadata for the playback indicator.
+3. Returns 404 if `job_id` doesn't exist or doesn't belong to caller's account.
+4. Every returned audio track URL is independently playable/downloadable without additional auth beyond the session token.
+5. Repeated calls return cached results and do not re-trigger pipeline computation.
+
+**Response Schema:**
+```json
+{
+  "data": {
+    "jobId": "job_8841",
+    "scoreId": 552,
+    "audioTracks": {
+      "soprano": "https://cdn.piyanota.app/audio/job_8841_soprano.mp3",
+      "alto": "https://cdn.piyanota.app/audio/job_8841_alto.mp3",
+      "tenor": "https://cdn.piyanota.app/audio/job_8841_tenor.mp3",
+      "bass": "https://cdn.piyanota.app/audio/job_8841_bass.mp3"
+    },
+    "scoreImages": ["https://cdn.piyanota.app/pages/job_8841_p1.png"],
+    "timingMetadataUrl": "https://cdn.piyanota.app/timing/job_8841.json"
+  },
+  "success": true,
+  "status": 200,
+  "message": "Processed score result retrieved"
+}
+```
+
+---
+
+### PIYA-114 — Cancel Processing Job API
+**Method:** POST
+**Trigger:** Client action from PIYA-207 when user taps Cancel Scan.
+
+**Acceptance Criteria:**
+1. Requires a valid session token; accepts a `jobId`.
+2. Returns 404 if the job doesn't exist or doesn't belong to the caller.
+3. If job is `queued`, immediately marks it `cancelled`.
+4. If job is actively processing, orchestrator terminates processing gracefully at the next safe checkpoint.
+5. Deletes all temp files associated with the cancelled job within 60 seconds.
+6. Job cannot transition to `complete` after successful cancellation.
+7. Returns 409 if job is already in a terminal state (complete/failed/cancelled).
+8. Cancellation events logged with `jobId`, `userId`, timestamp, current stage.
+
+**Response Schema:**
+```json
+{
+  "data": { "jobID": "job_8841", "status": "cancelled" },
+  "success": true,
+  "status": 200,
+  "message": "Processing cancelled"
+}
+```
+
+---
+
+### PIYA-115 — Estimated Processing Time Tracking
+**Trigger:** Internal, invoked whenever PIYA-102 returns job status.
+
+**Acceptance Criteria:**
+1. Calculates estimated remaining time from: current stage, completed pages, historical average processing times per stage.
+2. Returns estimated time in seconds; updates continuously as processing progresses.
+3. Returns `null` when estimation confidence is insufficient.
+4. Returns `0` when status is `complete`.
+5. Estimation generation adds less than 50ms overhead to PIYA-102.
+
+---
+
+### PIYA-116 — Resubmit Failed Page API
+**Method:** POST
+**Trigger:** Invoked from PIYA-207 when user selects "Retake Page" after `no_staff_detected` or `preprocessing_error`.
+
+**Acceptance Criteria:**
+1. Requires authentication; accepts `jobId`, `pageIndex`, replacement image.
+2. Verifies ownership; returns 404 if job doesn't exist.
+3. Returns 409 if the job did not fail because of a page-specific error.
+4. Replaces only the failed page; preserves all unaffected pages.
+5. Creates a new processing job automatically; returns a new `jobId`.
+6. Logs original and replacement job relationships.
+
+**Response Schema:**
+```json
+{
+  "data": {
+    "originalJobId": "job_8841",
+    "replacementJobId": "job_8899",
+    "pageIndex": 2,
+    "status": "queued"
+  },
+  "success": true,
+  "status": 202,
+  "message": "Failed page resubmitted"
+}
+```
+
+## Pipeline Tickets (Internal Processing Stages)
+
+### PIYA-104 — Image Preprocessing Stage
+**Trigger:** Internal — invoked automatically after job dequeue, before Staff Region Detection.
+
+**Acceptance Criteria:**
+1. Converts every page to grayscale using the luminosity method (weighted RGB sum).
+2. Applies Gaussian blur, background subtraction, adaptive thresholding, producing a binary image per page.
+3. Applies Canny edge detection + Hough Line Transform to compute dominant skew angle; rotates page if angle exceeds 2°, otherwise leaves unchanged.
+4. Tags output as `(I_corrected, page_index)`, forwards to Staff Region Detection only after all four operations complete successfully.
+5. If a page fails preprocessing (corrupted/unreadable), sets job status to `failed` with `failure_reason = "preprocessing_error"` and identifies the `page_index`.
+6. Preprocessing for a single page at standard mobile-capture resolution (≤3000×4000px) completes in under 5 seconds on deployed hardware.
+
+---
+
+### PIYA-105 — Staff Region Detection (YOLOv8)
+**Trigger:** Internal — invoked after Image Preprocessing completes for a given page.
+
+**Acceptance Criteria:**
+1. Detects staff regions as bounding boxes, filters detections below the confidence threshold, applies Non-Maximum Suppression using the defined IoU threshold.
+2. Achieves mAP50 ≥ 85% when benchmarked against the hand-annotated Filipino SATB test set.
+3. Sorts detected regions top-to-bottom by vertical center within each page, then groups them into sets of four (one SATB system per group).
+4. **Staff-count validation (open-score enforcement):** after sorting detected regions, verifies the total detected staff count per page is evenly divisible into groups of 4.
+   - If a page's staff count is **not** a multiple of 4 (e.g., 2 staves per system, indicating closed-score format), sets job status to `failed` with `failure_reason = "unsupported_staff_layout"` and the specific `page_index`.
+   - Triggers the recapture prompt on the mobile client (FR-24) — same UX path as `no_staff_detected`, but with a **distinct reason code** so it can be logged and triaged separately (per PIYA-410) from a true zero-detection failure.
+5. Assigns voice labels within each group by fixed vertical index: 1 = Soprano, 2 = Alto, 3 = Tenor, 4 = Bass.
+6. Crops and resizes each detected region to a fixed height of 128 pixels, preserving aspect ratio, before passing to transcription.
+7. If zero staff regions are detected on a page, sets job status to `failed` with `failure_reason = "no_staff_detected"` and the specific `page_index`, triggering the recapture prompt (FR-24).
+8. Accumulates strips across multiple pages into four continuous per-voice sequences, preserving global reading order via `page_index`.
+
+---
+
+### PIYA-120 — Staff-Count Validation Recovery (Confidence Retry + Failure-Reason Disambiguation)
+**Trigger:** Proposed — not yet scheduled into a sprint. Depends on PIYA-105 #4 (already implemented). Recorded here as an explicitly-flagged extension beyond PIYA-105's literal text, not a restatement of it — needs sign-off before implementation, since it changes detection behavior (an extra inference pass) rather than just failure classification.
+
+**Context:** PIYA-105 #4 treats every non-multiple-of-4 staff count as `unsupported_staff_layout`, unconditionally. In practice a low-confidence missed detection on a genuinely valid open-score page (e.g. 15 boxes instead of 16) produces the same unrecoverable failure as a genuine 2-staff closed-score page, denying the user the retake option that would actually fix their case (PIYA-207 #7 withholds retake specifically for `unsupported_staff_layout`). This ticket proposes a bounded recovery attempt plus a more precise failure classification for that gap, without changing PIYA-105 #4's core validation rule.
+
+**Acceptance Criteria:**
+1. Before PIYA-105 #4 fails a page for a non-multiple-of-4 staff count, the page is re-run through Staff Region Detection exactly once at a reduced confidence threshold (e.g., `CONF_THRESHOLD − 0.1`), attempting to recover a missed low-confidence staff region.
+2. If the retry yields a staff count divisible by 4, the page proceeds normally through the rest of Stage 2 using the retry's detections; the retry event is logged (`job_id`, `page_index`, original count, recovered count) for later threshold tuning.
+3. If the retry still does not yield a multiple of 4, the page fails using the retry's detected count, classified as:
+   - **Odd count** → new `failure_reason = "ambiguous_staff_count"` — offers the same recapture-this-page UX as `no_staff_detected` (PIYA-207 #7), since an odd count is more consistent with a missed/spurious detection than a genuine 2-per-system layout.
+   - **Even, non-multiple-of-4 count** → `failure_reason = "unsupported_staff_layout"` (unchanged from PIYA-105 #4) — no recapture-this-page action offered.
+4. The retry adds at most one additional detection pass per *failing* page only — never on pages already passing the modulo-4 check — so it does not measurably affect the ≤2-min/page budget (NFR-1) on the happy path.
+5. `ambiguous_staff_count` is logged/triaged via the bug tracker (PIYA-410) as its own category, distinct from both `no_staff_detected` and `unsupported_staff_layout`, so its false-positive/negative rate can be evaluated independently.
+6. **Open design risk — validate before relying on this in live testing (Sprint 13/14):** the odd/even parity check is a best-effort heuristic, not a guarantee. A genuinely closed-score page with one staff occluded could register an odd count and be misclassified as recoverable; a genuinely open-score page with two independent misses could register an even count and be misclassified as unsupported. Spot-check heuristic accuracy against a labeled sample of known open- and closed-score images before Sprint 13.
+
+**Note (post real-data testing, see PIYA-121):** manual testing of the retry idea in AC1 against real detection output suggests it may be counterproductive — the spurious/duplicate boxes observed already fall within the normal confidence range of real detections (0.4–0.85), so lowering the threshold further is likely to admit more noise rather than recover missed staves. A gap-based dedup fix looked more promising on one input type (digital screenshots) but did not generalize to camera-captured images — see PIYA-121 for the evidence. AC1–2 should be revisited against that evidence before implementation.
+
+---
+
+### PIYA-121 — Camera-Capture Detection Reliability Gap (Investigation)
+**Trigger:** Proposed — not yet scheduled. Raised as a QA finding from manual diagnostic testing of `stage2_detection.py` (with PIYA-105 #4's staff-count validation in place), not derived from a written requirement. Needs a triage/priority decision before scheduling into a sprint. Tracked as `BUG-001` in `docs/bug-tracker.md` (PIYA-410) — this section remains the full evidence trace; keep both in sync if the investigation continues.
+
+**Context:** Testing PIYA-105 #4's staff-count validation against two real input samples surfaced a reliability gap specific to camera-captured images — the SOW's actual primary target input (`docs/sow.md` §1: "mobile-captured... choral sheet music"), as distinct from the digital screenshots that happened to be available for testing in `data/raw/Digital Screenshot`.
+
+**Evidence:**
+1. 7 camera-captured pages (`data/raw/Raw`, IMG_1081–1088) and 6 digital-screenshot pages (`data/raw/Digital Screenshot`) were run through Stage 1 → Stage 2 with identical settings (`staff_detector_files/weights/best.pt`, default `CONF_THRESHOLD`, `min_cy_gap=30`).
+2. Post-dedup staff-count-divisible-by-4 pass rate: **3/6 on screenshots, 1/7 on camera captures.**
+3. Screenshot failures traced to a single, cleanly separated cause: one near-duplicate box per failing page, 60–95px from a real detection, against a consistent real inter-staff spacing of 168–180px. Visually confirmed on one failing page (`IMG_5752 (1).PNG`) that the source image is genuinely valid open-score content — the failure was detector noise, not a real layout issue.
+4. Camera failures did not reduce to the same single cause. Manually traced `IMG_1082.JPG` (page 2): after accounting for the one obvious near-duplicate (36.1px gap, just over the current 30px dedup threshold), the resulting count was still not divisible by 4 — indicating additional missed and/or spuriously-extra detections beyond simple duplication. Raw (pre-dedup) detection counts hit the 16-box cap on 6 of 7 camera pages (vs. 8–10 on screenshot pages), with generally lower, more spread-out confidence scores (0.4–0.85 on camera vs. 0.65–0.9 on screenshots).
+5. The duplicate-vs-real gap boundary itself differs by input source: roughly 36px vs. 49px+ on camera pages, versus 95px vs. 168px+ on screenshots. No single hardcoded `min_cy_gap` value fits both, and a per-page-adaptive threshold (proposed for PIYA-120) addresses double-counted detections only — it does not address the missed/extra-detection pattern that dominates the camera failures.
+
+**Why this matters:** PIYA-105 #2 requires mAP50 ≥ 85% "when benchmarked against the hand-annotated Filipino SATB test set." This finding does not measure whether that target is currently met — mAP wasn't computed here — but it's a concrete signal that detection reliability on camera-sourced images may be materially worse than on cleaner digital sources, and that gap should be checked directly rather than assumed adequate because Stage 2 behaves reasonably on screenshots.
+
+**Proposed acceptance criteria (pending scope/priority decision):**
+1. Re-run or confirm PIYA-105's mAP50 benchmark specifically on the camera-captured subset of the Filipino SATB test set, reported separately from any digital-source subset.
+2. If mAP50 on camera-sourced images falls materially short of the 85% target, determine whether the gap is addressable via preprocessing quality (deskew/denoise), confidence-threshold tuning, or requires additional fine-tuning data — rather than defaulting to Stage 2 post-processing fixes to compensate for a detection-quality shortfall.
+3. Document the finding (met or not met) and, if not met, the corrective action taken, in a form usable for Chapter III/IV evaluation reporting.
+
+---
+
+### PIYA-106 — Symbol Transcription (CRNN-CTC)
+**Trigger:** Internal — invoked after Staff Region Detection produces a valid staff strip.
+
+**Acceptance Criteria:**
+1. Achieves Symbol Error Rate (SER) ≤ 15% against ground-truth annotated Filipino SATB test sequences.
+2. Applies CTC greedy decoding (remove blanks, merge duplicates) to produce final symbol sequence per strip.
+3. Detects vertically aligned noteheads sharing a stem and assigns a shared `chord_group_id`, preserved through decoding.
+4. Model trained on Camera-PrIMuS, supplemented with CPMS for photographic distortion, fine-tuned on the Filipino SATB dataset before production use.
+5. Each output symbol tagged with staff position and chord grouping for use by Pitch Inference.
+
+**Verification note (2026-09-09):** `stage3_transcription.py` implements PIYA-106 and PIYA-107 as
+one combined stage by design (its own header titles it "Music Symbol Transcription and Pitch
+Inference"), not two independently-tagged hand-off boundaries — confirmed acceptable by the user.
+Concretely: AC3's chord grouping is a tick-onset heuristic inside `infer_pitch()` (notes sharing
+the same onset tick), not geometric stem detection — confirmed by the user as the correct reading
+of "shared stem" for a CRNN-CTC decoder, which only ever sees a linear token sequence from one
+horizontally-scanned strip and structurally cannot detect notehead/stem geometry (that's Stage 2's
+domain, not decoding). AC5's staff-position + chord tagging is likewise produced inside
+`infer_pitch()`, not by `transcribe_strip()`/CTC decode itself. The code's field name is `chord_id`,
+not `chord_group_id` as written here — left as-is per the user; note it's also read by
+`stage4_reconstruction.py` (chord counting/reporting), so a future rename must update both files.
+
+---
+
+### PIYA-107 — Pitch Inference (Clef-Aware Diatonic Mapping)
+**Trigger:** Internal — invoked immediately after Symbol Transcription for each staff strip.
+
+**Acceptance Criteria:**
+1. Achieves pitch inference accuracy ≥ 85% against ground-truth pitch labels.
+2. Computes MIDI pitch as `M = R_c + Δ(p) + K + A`, where `R_c` = clef reference pitch, `Δ(p)` = position-based offset, `K` = key signature offset, `A` = accidental offset.
+3. If clef detection fails/missing, applies fallback by voice: treble for Soprano/Alto, treble-8vb for Tenor, bass for Bass.
+4. Defaults key signature to `K = 0` and time signature to 4/4 if either not detected on a staff.
+5. Groups chord-tagged noteheads (shared `chord_group_id`) into a single chord event; all others treated as individual note events.
+6. Every output pitch event includes pitch, duration, time signature, voice label, page index, position.
+
+---
+
+### PIYA-108 — SATB Part Reconstruction
+**Trigger:** Internal — invoked after Pitch Inference completes for all strips belonging to a job.
+
+**Acceptance Criteria:**
+1. Sorts all strips by `page_index`, then vertical position, to establish global reading order before assembly.
+2. Appends each strip's event sequence to its corresponding voice sequence (S/A/T/B) without altering event order.
+3. Preserves chord events, clefs, key signatures, time signatures, and barlines unmodified during assembly.
+4. Verifies all four voice sequences are non-empty before marking the stage complete.
+5. If any voice sequence is empty, sets job status to `failed` with `failure_reason = "incomplete_voice_sequence"`, identifying the missing voice, triggers recapture prompt (FR-24).
+
+---
+
+### PIYA-109 — MIDI-Based Piano Audio Synthesis
+**Trigger:** Internal — invoked after SATB Part Reconstruction confirms all four voices are complete.
+
+**Acceptance Criteria:**
+1. Encodes each voice as an independent MIDI track at 480 PPQ (pulses per quarter note).
+2. Applies default tempo of 90 BPM unless a detected tempo marking overrides it.
+3. Encodes dotted notes at 1.5× base duration, double-dotted at 1.75×.
+4. Encodes rests by advancing the tick counter without generating note events.
+5. Encodes chord notes with identical onset/offset ticks to guarantee simultaneous playback.
+6. Outputs exactly four independently playable audio files (S/A/T/B) per job upon successful synthesis.
+7. Synthesis for a 3-page score completes in under 30 seconds on deployed hardware, as part of the overall ≤2-min/page budget.
+
+## Infrastructure & Reliability Tickets
+
+### PIYA-110 — Model Loading & Inference Optimization
+**Trigger:** Internal — executed once at server startup, before API begins accepting requests.
+
+**Acceptance Criteria:**
+1. Both trained model weights loaded into memory exactly once at server startup, confirmed via startup log entry with load duration.
+2. No request handler reloads model weights from disk during normal operation.
+3. Average end-to-end processing time per page is logged for every completed job and does not exceed 2 minutes under single-job conditions.
+4. Server memory footprint after model load is documented and does not exceed deployed instance's available memory.
+
+---
+
+### PIYA-111 — Pipeline Failure & Timeout Handling
+**Trigger:** Internal — monitored continuously by the pipeline orchestrator for every active job. Distinct from per-stage validation failures already defined in PIYA-104 through PIYA-108.
+
+**Acceptance Criteria:**
+1. Each pipeline stage has a defined maximum execution time (e.g., 90 seconds/stage/page); exceeding it sets job status to `failed` with `failure_reason = "stage_timeout"` and identifies the stage.
+2. On any failure (validation or timeout), all partial output (temp files, incomplete audio) is deleted within 60 seconds.
+3. A crashed worker process does not leave job status stuck in a non-terminal state longer than the defined stage timeout — a watchdog marks it `failed` if no progress update occurs within that window.
+4. All failures logged with `job_id`, failed stage, timestamp for later review via bug tracker.
+
+---
+
+### PIYA-112 — Environment & Dependency Pinning
+**Trigger:** Internal — verified during Sprint 9 deployment.
+
+**Acceptance Criteria:**
+1. A `requirements.txt` (or equivalent) specifying exact versions of ML framework, CUDA version (if GPU), and all inference dependencies is committed to the repository.
+2. Deployed server's installed package versions match the pinned file exactly, verified via automated version check at startup.
+3. Any mismatch between pinned and installed versions blocks server startup and logs a clear error identifying the mismatched package.
+
+---
+
+### PIYA-113 — Server Restart Job Recovery
+**Trigger:** Internal — executed automatically on server startup, before API begins accepting new requests. Satisfies NFR-9; distinct from PIYA-111's per-stage timeout handling.
+
+**Acceptance Criteria:**
+1. On startup, any job left in a non-terminal status from before the restart is identified and marked `failed` with `failure_reason = "server_restart"`.
+2. Previously completed, saved scores (and their audio/image assets) are confirmed present and unaffected by the restart — recovery only touches in-flight jobs.
+3. Affected user's Processing Status screen (PIYA-207) reflects the failed status on next poll.
+4. This recovery check completes before the server's health-check endpoint (used in PIYA-401's smoke test) returns 200.
+
+---
+
+### PIYA-117 — Timing Metadata Generation
+**Trigger:** Internal, executed after PIYA-109 (MIDI Audio Synthesis) and before the score is marked complete.
+
+**Acceptance Criteria:**
+1. Generates timing metadata for every playback event.
+2. Converts MIDI tick values into timestamp values.
+3. Preserves page index, voice label, note position, chord position.
+4. Stores metadata as JSON; produces exactly one metadata file per completed score.
+5. Metadata generation adds less than 5 seconds to total processing time.
+6. Output is accessible through PIYA-103.
+
+**Example Record:**
+```json
+{ "timestampMs": 12500, "pageIndex": 1, "voice": "Soprano", "tick": 960, "eventId": 45 }
+```
+
+---
+
+### PIYA-118 — Playback Indicator Coordinate Generation
+**Trigger:** Internal, executed immediately after PIYA-117.
+
+**Acceptance Criteria:**
+1. Every playable event receives page index, timestamp, x-coordinate, y-coordinate.
+2. Coordinates reference the original preprocessed score image returned by PIYA-103.
+3. Supports multi-page scores and page transitions during playback.
+4. Coordinates remain aligned after image scaling performed by the mobile client.
+5. Position accuracy is visually validated against evaluation scores.
+6. Generated coordinates are stored within the timing metadata file.
+
+**Example Entry:**
+```json
+{ "timestampMs": 12500, "pageIndex": 1, "x": 1432, "y": 528 }
+```
+
+---
+
+### PIYA-119 — Score-to-Playback Synchronization Validation
+**Trigger:** Internal QA task performed before deployment and during regression testing.
+
+**Acceptance Criteria:**
+1. Playback indicator remains synchronized to audio within ±250ms.
+2. Seeking updates the indicator position within 200ms.
+3. Page transitions occur at the correct timestamps.
+4. A randomly sampled set of completed scores is validated visually.
+5. Any detected synchronization drift is logged through PIYA-410.
