@@ -748,6 +748,16 @@ ACCIDENTAL_OFFSET = {
     "accidental.doubleSharp": 2,
     "accidental.doubleFlat": -2,
 }
+
+# PIYA-107 AC4/AC6: metersign token -> time signature string. "metersign.C" and
+# "metersign.C/" are the only two metersign symbols in VOCAB (common time and
+# cut time); anything else (no metersign detected, or a token not in this map)
+# falls back to the AC4-mandated default of "4/4" via DEFAULT_TIME_SIGNATURE.
+TIME_SIG_TOKENS = {
+    "metersign.C":  "4/4",
+    "metersign.C/": "2/2",
+}
+DEFAULT_TIME_SIGNATURE = "4/4"
  
 SHARP_ORDER = ["F", "C", "G", "D", "A", "E", "B"]
 FLAT_ORDER  = ["B", "E", "A", "D", "G", "C", "F"]
@@ -934,6 +944,10 @@ def infer_pitch(
     pending_multirest_bars = 1
     events                 = []
     current_tick           = 0
+    # PIYA-107 AC4/AC6: defaults to 4/4 until an explicit metersign token is
+    # consumed (see "keysig" stage below); every emitted event carries this
+    # value regardless of whether the note itself is decorated with one.
+    time_signature         = DEFAULT_TIME_SIGNATURE
     # 0-based measure counter, incremented on every barline. Barline tokens
     # themselves are never appended as events (they only drive the key-sig
     # state machine below), so this is the only place measure boundaries are
@@ -947,6 +961,15 @@ def infer_pitch(
     mid_sharp       = 0
     mid_flat        = 0
     key_alterations = {}
+    # PIYA-107 AC4/AC6: Camera-PrIMuS encodes a numeric time signature (e.g.
+    # "3/4") as two consecutive digit.N tokens in the header, rather than a
+    # metersign.* token -- confirmed against ground truth: 1586/3996 (40%) of
+    # corpus samples carry no metersign token at all and rely solely on this
+    # digit-pair form. Only the first two header digit tokens are the time
+    # signature (numerator, then denominator); any further digit tokens
+    # before the first note/rest are unrelated noise and are ignored, same
+    # as prior (pre-PIYA-107) behaviour.
+    meter_digits = []
  
     # ── Commit helpers ────────────────────────────────────────────────────
  
@@ -1010,6 +1033,9 @@ def infer_pitch(
                 print(f"[Stage 3] Warning: {voice} p{page_index}: "
                       f"no clef detected — using fallback {active_clef}, C major assumed")
                 key_alterations = _commit_opening(0, 0)
+                if sym.startswith("metersign"):
+                    time_signature = TIME_SIG_TOKENS.get(
+                        sym.split("-")[0], time_signature)
                 ks_stage        = "body"
                 # fall through to body processing below
  
@@ -1038,11 +1064,25 @@ def infer_pitch(
                 continue
             elif sym.startswith("metersign"):
                 key_alterations = _commit_opening(ks_sharp, ks_flat)
+                time_signature  = TIME_SIG_TOKENS.get(
+                    sym.split("-")[0], time_signature)
                 ks_stage        = "body"
+                continue
+            elif sym.startswith("digit.") and len(meter_digits) < 2:
+                # Numeric time signature (e.g. "3/4"), Camera-PrIMuS's other
+                # encoding besides metersign.* -- see meter_digits comment
+                # at initialisation. A 3rd+ header digit (rare CTC noise /
+                # unrelated token) is left to the catch-all `else` below.
+                try:
+                    meter_digits.append(int(sym.split(".")[1].split("-")[0]))
+                except ValueError:
+                    pass
                 continue
             elif sym.startswith("note.") or sym.startswith("rest."):
                 # No meter sign (continuation strip) — commit on first note
                 key_alterations = _commit_opening(ks_sharp, ks_flat)
+                if len(meter_digits) == 2:
+                    time_signature = f"{meter_digits[0]}/{meter_digits[1]}"
                 ks_stage        = "body"
                 # fall through to body processing below
             else:
@@ -1157,6 +1197,7 @@ def infer_pitch(
                 "tick_onset":     current_tick,
                 "slur":           None,
                 "measure_index":  measure_index,
+                "time_signature": time_signature,
             })
             current_tick += ticks
             in_chord      = False
@@ -1237,6 +1278,7 @@ def infer_pitch(
                 "tick_onset":     current_tick,
                 "slur":           "middle" if slur_active else None,
                 "measure_index":  measure_index,
+                "time_signature": time_signature,
             })
             if not in_chord:
                 current_tick += ticks
@@ -1267,6 +1309,7 @@ def infer_pitch(
                 "tick_onset":     current_tick,
                 "slur":           None,
                 "measure_index":  measure_index,
+                "time_signature": time_signature,
             })
             current_tick += ticks
             # A multirest is engraved between exactly one pair of barlines
