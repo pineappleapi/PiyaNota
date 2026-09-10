@@ -258,6 +258,17 @@ domain, not decoding). AC5's staff-position + chord tagging is likewise produced
 not `chord_group_id` as written here — left as-is per the user; note it's also read by
 `stage4_reconstruction.py` (chord counting/reporting), so a future rename must update both files.
 
+**AC1 decision (2026-09-10):** No hand-annotated Filipino SATB test set exists yet to measure the
+15% SER target against directly. User decision: accept the Camera-PrIMuS-derived SER comparison
+(`compare_omr_baselines.py`) as an interim proxy metric for AC1 while a subset of the Filipino SATB
+set is hand-annotated in parallel. AC1 is not considered formally closed on the proxy number alone —
+final sign-off still requires re-measuring against the hand-annotated ground truth once available.
+
+**AC4 status (2026-09-10):** Blocked, dropped from active work for now. Fine-tuning on the Filipino
+SATB dataset (supplemented with CPMS for photographic distortion) can't proceed until the base
+Camera-PrIMuS training run currently in progress finishes — per the user, still training as of this
+date. Revisit once that run completes; not pursuing a partial/parallel fine-tune in the meantime.
+
 ---
 
 ### PIYA-107 — Pitch Inference (Clef-Aware Diatonic Mapping)
@@ -270,6 +281,20 @@ not `chord_group_id` as written here — left as-is per the user; note it's also
 4. Defaults key signature to `K = 0` and time signature to 4/4 if either not detected on a staff.
 5. Groups chord-tagged noteheads (shared `chord_group_id`) into a single chord event; all others treated as individual note events.
 6. Every output pitch event includes pitch, duration, time signature, voice label, page index, position.
+
+**AC5 decision (2026-09-10):** Two ways to satisfy "groups chord-tagged noteheads into a single
+chord event" were on the table: (a) merge same-onset noteheads into one multi-pitch event object,
+or (b) keep them as N separate note events that share a single `chord_id`. Recommended and adopted:
+**(b)**, matching the code's existing implementation — no change needed. Reasoning: every downstream
+consumer (`stage4_reconstruction.py`'s slur resolution and tick assignment, `stage5_synthesis.py`'s
+MIDI note emission) already operates per-event on single-pitch note dicts; a merged multi-pitch
+event would need a new dict shape threaded through both stages for no behavioral gain, since
+"simultaneous playback" (PIYA-109 AC5) is already achieved by giving chord members identical
+`tick_onset`/`duration_ticks`. `chord_id` is the grouping key a consumer uses if it needs to treat
+the notes as one chord. Consistent with the 2026-09-09 precedent recorded above for PIYA-106 AC3/AC5
+(chord grouping as a tick-onset heuristic producing tagged individual events, not merged geometry).
+Explicitly out of scope per the user: separating intra-voice divisi sections (e.g. Soprano 1 vs. 2)
+— PIYA-106/107 operate on the four SATB voice parts only.
 
 ---
 
