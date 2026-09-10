@@ -1649,10 +1649,11 @@ def process_strip(
     v_idx:      int = 0,
     viz_dir:    str = None,
     sys_idx:    int = 1,
+    strip_id:   str = "",
 ) -> list:
 
     """Transcribes one strip and returns pitch-assigned events for Stage 4."""
-    symbols = transcribe_strip(strip, model, device, img_height)
+    symbols = transcribe_strip(strip, model, device, img_height, strip_id=strip_id)
     events  = infer_pitch(symbols, voice=voice, page_index=page_index, sys_idx=sys_idx)
 
     print(f"[Stage 3] {voice} p{page_index}: "
@@ -1705,11 +1706,13 @@ def transcribe_voice_sequences(
     for voice, strips in voice_sequences.items():
         all_events = []
         for strip, page_index, sys_idx, voice_label, v_idx in strips:
+            strip_id = f"page{page_index:03d}_sys{sys_idx:02d}_{voice_label}_vidx{v_idx}"
             events = process_strip(strip, voice_label, page_index,
                     model, device, img_height,
                     v_idx=v_idx,
                     viz_dir=viz_dir,
-                    sys_idx=sys_idx)
+                    sys_idx=sys_idx,
+                    strip_id=strip_id)
             all_events.extend(events)
         all_events.sort(key=lambda e: (e["page_index"], e["sys_idx"], e["tick_onset"]))
         results[voice] = all_events
