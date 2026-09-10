@@ -629,7 +629,7 @@ CLEF_REFERENCE = {
     "clef.C-L1": 60,   # C4 — soprano clef
     "clef.C-L2": 57,   # A3 — mezzo-soprano clef
     "clef.C-L3": 53,   # F3 — alto clef
-    "clef.C-L4": 49,   # adjusted so offset[6]+49=60 — tenor C clef
+    "clef.C-L4": 50,   # D3 — tenor C clef
 }
  
 # Tenor voice sounds an octave lower than written when using a treble clef
@@ -671,70 +671,87 @@ def get_clef_reference(clef: str, voice: str) -> int:
     return CLEF_REFERENCE.get(clef, 64)
  
  
-# Diatonic semitone offsets from the staff bottom line (step=0) upward.
-# step = pos*2 for lines (L), pos*2+1 for spaces (S). pos can be negative.
-DIATONIC_OFFSET = {
-    -4: -7, -3: -5, -2: -4, -1: -2,
-     0:  0,
-     1:  2,  2:  4,  3:  5,  4:  7,
-     5:  9,  6: 11,  7: 12,
-     8: 14,  9: 16, 10: 17, 11: 19,
-    12: 21,
-}
+# Semitone offset of each natural note letter from C, within one octave.
+# Staff half-steps are fixed to the LETTER positions E-F and B-C regardless
+# of which note starts a given clef's own step=0 (bottom line) -- so the
+# offset from a clef's bottom line to a given diatonic step depends on that
+# clef's own bottom-line letter, not a single shared table. (Previously this
+# was one generic C-anchored table applied to every clef, which was only
+# correct for clef.C-L1 -- whose bottom line happens to be C -- and wrong by
+# up to a semitone for treble, bass, and the other C clefs; see BUG-007.)
+NATURAL_LETTER_SEMITONE = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
+LETTER_ORDER            = ["C", "D", "E", "F", "G", "A", "B"]
+
+
+def _diatonic_delta(step: int, bottom_letter: str) -> int:
+    """
+    Semitone offset from a clef's bottom line (step=0) to diatonic `step`,
+    for a clef whose bottom line is the note letter `bottom_letter`.
+
+    Staff steps advance one letter name per step (line-to-space or
+    space-to-line is always a diatonic 2nd), wrapping every 7 steps/12
+    semitones. `step` may be negative (ledger lines below the staff).
+    """
+    def abs_semitone(letter_idx: int) -> int:
+        octave, pos = divmod(letter_idx, 7)
+        return octave * 12 + NATURAL_LETTER_SEMITONE[LETTER_ORDER[pos]]
+
+    start_idx = LETTER_ORDER.index(bottom_letter)
+    return abs_semitone(start_idx + step) - abs_semitone(start_idx)
  
 # Pitch class name at each diatonic step for each clef.
 # Used to look up key-signature alterations for a given note.
 STEP_TO_PITCH_CLASS = {
     # Treble — bottom line E4
     "clef.G-L2": {
-        -4:"B", -3:"C", -2:"D", -1:"E",
+        -4:"A", -3:"B", -2:"C", -1:"D",
          0:"E",  1:"F",  2:"G",  3:"A",
          4:"B",  5:"C",  6:"D",  7:"E",
          8:"F",  9:"G", 10:"A", 11:"B", 12:"C",
     },
     "clef.G-L1": {
-        -4:"B", -3:"C", -2:"D", -1:"E",
+        -4:"A", -3:"B", -2:"C", -1:"D",
          0:"E",  1:"F",  2:"G",  3:"A",
          4:"B",  5:"C",  6:"D",  7:"E",
          8:"F",  9:"G", 10:"A", 11:"B", 12:"C",
     },
     # Bass — bottom line G2
     "clef.F-L4": {
-        -4:"D", -3:"E", -2:"F", -1:"G",
+        -4:"C", -3:"D", -2:"E", -1:"F",
          0:"G",  1:"A",  2:"B",  3:"C",
          4:"D",  5:"E",  6:"F",  7:"G",
          8:"A",  9:"B", 10:"C", 11:"D", 12:"E",
     },
     "clef.F-L3": {
-        -4:"D", -3:"E", -2:"F", -1:"G",
+        -4:"C", -3:"D", -2:"E", -1:"F",
          0:"G",  1:"A",  2:"B",  3:"C",
          4:"D",  5:"E",  6:"F",  7:"G",
          8:"A",  9:"B", 10:"C", 11:"D", 12:"E",
     },
     # C-L1 soprano — bottom line C4
     "clef.C-L1": {
-        -4:"G", -3:"A", -2:"B", -1:"C",
+        -4:"F", -3:"G", -2:"A", -1:"B",
          0:"C",  1:"D",  2:"E",  3:"F",
          4:"G",  5:"A",  6:"B",  7:"C",
          8:"D",  9:"E", 10:"F", 11:"G", 12:"A",
     },
     # C-L2 mezzo-soprano — bottom line A3
     "clef.C-L2": {
-        -4:"E", -3:"F", -2:"G", -1:"A",
+        -4:"D", -3:"E", -2:"F", -1:"G",
          0:"A",  1:"B",  2:"C",  3:"D",
          4:"E",  5:"F",  6:"G",  7:"A",
          8:"B",  9:"C", 10:"D", 11:"E", 12:"F",
     },
     # C-L3 alto — bottom line F3, C4 on step 4
     "clef.C-L3": {
-        -4:"C", -3:"D", -2:"E", -1:"F",
+        -4:"B", -3:"C", -2:"D", -1:"E",
          0:"F",  1:"G",  2:"A",  3:"B",
          4:"C",  5:"D",  6:"E",  7:"F",
          8:"G",  9:"A", 10:"B", 11:"C", 12:"D",
     },
     # C-L4 tenor C clef — bottom line D, C4 on step 6
     "clef.C-L4": {
-        -4:"A", -3:"B", -2:"C", -1:"D",
+        -4:"G", -3:"A", -2:"B", -1:"C",
          0:"D",  1:"E",  2:"F",  3:"G",
          4:"A",  5:"B",  6:"C",  7:"D",
          8:"E",  9:"F", 10:"G", 11:"A", 12:"B",
@@ -1228,7 +1245,10 @@ def infer_pitch(
             pos  = int(pos_str[1:])                  # integer, may be negative
             step = pos * 2 if loc == "L" else pos * 2 + 1
  
-            delta = DIATONIC_OFFSET.get(step, step * 2)
+            clef_steps    = STEP_TO_PITCH_CLASS.get(
+                active_clef, STEP_TO_PITCH_CLASS["clef.G-L2"])
+            bottom_letter = clef_steps[0]
+            delta         = _diatonic_delta(step, bottom_letter)
  
             # Accidental: natural cancels key sig for this note only
             cancel_key = False
@@ -1240,8 +1260,6 @@ def infer_pitch(
                     acc = pending_acc
             pending_acc = None
  
-            clef_steps  = STEP_TO_PITCH_CLASS.get(
-                active_clef, STEP_TO_PITCH_CLASS["clef.G-L2"])
             pitch_class = clef_steps.get(step, "C")
             key_acc     = 0 if cancel_key else key_alterations.get(pitch_class, 0)
  
