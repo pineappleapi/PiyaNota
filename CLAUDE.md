@@ -209,3 +209,12 @@ either decision changed, treat this as stale and re-confirm rather than trusting
 ## Git
 
 Commit messages: `PIYA-XXX: <summary>`. Never commit without explicit user review and approval first.
+
+## Agent Usage Rules
+- Use ml-cv-lead PROACTIVELY before writing any training/model-swap code,
+  and again after results are reported, to check for leakage/overfitting.
+- Use senior-reviewer MUST BE USED before any branch is proposed for merge.
+- Use backend-lead for any Module 3 (API/auth/DB) change.
+- Use frontend-lead for any Module 2 (Flutter/Android app) change.
+- Use prompt-enhancer when a task is described informally and needs
+  structuring before execution begins.

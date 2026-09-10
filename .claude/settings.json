@@ -65,7 +65,6 @@
       "Bash(curl:*)",
       "Bash(wget:*)",
       "WebFetch",
-      "Bash(git checkout:*)",
       "Bash(git reset:*)",
       "Read(./.env)",
       "Read(./.env.*)",

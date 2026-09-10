@@ -3,12 +3,16 @@ PiyaNota - Stage 2: Staff Region Detection (YOLOv8)
 Detects and extracts individual staff strips from preprocessed score pages.
 """
 
+import logging
+
 import cv2
 import numpy as np
 from pathlib import Path
 
 # Ultralytics YOLOv8 — install with: pip install ultralytics
 from ultralytics import YOLO
+
+logger = logging.getLogger(__name__)
 
 
 # ── Voice assignment by vertical index within a 4-staff SATB system ──────────
@@ -17,7 +21,10 @@ VOICE_MAP = {1: "Soprano", 2: "Alto", 3: "Tenor", 4: "Bass"}
 # Detection thresholds
 CONF_THRESHOLD = 0.4   # minimum confidence to keep a detection
 NMS_THRESHOLD  = 0.3   # IoU threshold for Non-Maximum Suppression
-STRIP_HEIGHT   = 250    # fixed height for CRNN-CTC input (px)
+STRIP_HEIGHT   = 250    # fixed height for CRNN-CTC input (px) — overridden below (BUG-011
+                        # review flagged this duplicate definition as a silent-flip risk if
+                        # the file is reordered; the line-250 reassignment is the one that
+                        # actually takes effect since Python resolves the global at call time)
 
 
 def detect_staff_regions(
@@ -100,11 +107,13 @@ def detect_staff_regions(
         for sys_idx, system in enumerate(systems, start=1):
             for v_idx, box in enumerate(system, start=1):
                 voice = VOICE_MAP.get(v_idx, f"Voice_{v_idx}")
-                strip = _crop_and_resize(image_bgr, box, STRIP_HEIGHT)
+                strip_id = f"page{page_index:03d}_sys{sys_idx:02d}_{voice}_vidx{v_idx}"
+                strip = _crop_and_resize(image_bgr, box, STRIP_HEIGHT, strip_id=strip_id)
                 voice_sequences[voice].append((strip, page_index, sys_idx, voice, v_idx))
+                logger.info("strip_id=%s dims=%dx%d (wxh)", strip_id, strip.shape[1], strip.shape[0])
 
                 if save_strips:
-                    fname = output_path / f"page{page_index:03d}_sys{sys_idx:02d}_{voice}_vidx{v_idx}.png"
+                    fname = output_path / f"{strip_id}.png"
                     cv2.imwrite(str(fname), strip)
 
     _report(voice_sequences)
@@ -249,8 +258,25 @@ def _extract_boxes(results) -> list:
 
 STRIP_HEIGHT = 64   # ← match Stage 3 img_height directly
 
+# ── BUG-011 / fix/bug002-label-bleed: left-margin (voice-label) blanking ─────
+# Two independent blanking techniques were tried and reverted here -- see
+# docs/bug-tracker.md BUG-011 and the fix/bug002-label-bleed branch history.
+# v1 (horizontal-continuity) clipped the clef on real samples; kernel/min-run
+# ablation proved this wasn't tunable. v2 (vertical-extent/tall-ink opening)
+# was geometrically correct -- verified to remove only the label text, never
+# the clef -- but *reduced* real-pipeline clef accuracy (2/43 -> 0/43 on the
+# 6-screenshot set, non-BUG-012 strips), including flipping two previously-
+# correct predictions to wrong on pixel-verified-unchanged notation. Both
+# ml-cv-lead and senior-reviewer recommended against merging either version;
+# the label-bleed hypothesis for BUG-011's clef misreads is not supported by
+# this evidence. Do not resurrect this approach without new evidence that
+# label text is actually a causal factor (this session's ablation argues the
+# opposite -- removing it made the model worse, not better).
+
+
 def _crop_and_resize(image: np.ndarray, box: dict, target_height: int,
-                     padding: float = 0.5) -> np.ndarray:  # ← 30% not 150%
+                     padding: float = 0.5,                # ← 30% not 150%
+                     strip_id: str = "") -> np.ndarray:
     img_h, img_w = image.shape[:2]
     x1, y1, x2, y2 = box["x1"], box["y1"], box["x2"], box["y2"]
 
@@ -262,6 +288,7 @@ def _crop_and_resize(image: np.ndarray, box: dict, target_height: int,
 
     if crop.size == 0:
         return np.zeros((target_height, target_height, 3), dtype=np.uint8)
+
     h, w = crop.shape[:2]
     new_w = int(w * (target_height / h))
     resized = cv2.resize(crop, (new_w, target_height), interpolation=cv2.INTER_AREA)

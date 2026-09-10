@@ -68,6 +68,7 @@ Changes vs original stage3_transcription.py
 """
  
 import itertools
+import logging
 import os
 import torch
 import torch.nn as nn
@@ -80,8 +81,10 @@ import matplotlib.patches as mpatches
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
 import json
- 
- 
+
+logger = logging.getLogger(__name__)
+
+
 # ── Vocabulary ────────────────────────────────────────────────────────────────
 # Camera-PrIMuS agnostic vocabulary — symbols the CRNN can output.
 # Blank token (index 0) is reserved for CTC.
@@ -1484,10 +1487,11 @@ def transcribe_strip(
     device:            torch.device,
     img_height:        int = 64,
     return_confidence: bool = False,
+    strip_id:          str = "",
 ) -> Union[List[str], List[Tuple[str, float]]]:
     """
     Runs CRNN-CTC inference on a single staff strip.
- 
+
     Args:
         image:      BGR or grayscale strip from Stage 2.
         model:      Loaded CRNN model in eval mode.
@@ -1499,7 +1503,12 @@ def transcribe_strip(
           symbol -- useful for flagging likely-wrong decodes on distorted
           input without ground truth. Defaults to False so every existing
           caller (process_strip, Stage 4's event pipeline) is unaffected.
- 
+        strip_id: Optional identifier (e.g. "page001_sys01_Soprano_vidx1")
+          used only to tag diagnostic logging -- lets BUG-011-style
+          misreads be traced back to a specific strip's input tensor shape
+          and raw (pre-infer_pitch) decoded tokens. Purely a log tag; has
+          no effect on inference.
+
     Returns:
         List[str] symbols in reading order (default), or
         List[Tuple[str, float]] (symbol, confidence) pairs if
@@ -1507,27 +1516,32 @@ def transcribe_strip(
     """
     if len(image.shape) == 3:
         image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
- 
+
     h, w = image.shape
     new_w = max(1, int(w * img_height / h))
     image = cv2.resize(image, (new_w, img_height), interpolation=cv2.INTER_AREA)
- 
+
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5], std=[0.5]),
     ])
     tensor = transform(image).unsqueeze(0).to(device)
- 
+    logger.info("transcribe_strip strip_id=%s input_tensor_shape=%s", strip_id, tuple(tensor.shape))
+
     with torch.no_grad():
         log_probs = model(tensor)           # (T, 1, V)
     log_probs = log_probs.squeeze(1)        # (T, V)
- 
+
     if return_confidence:
         indices, confidences = _greedy_ctc_decode_with_confidence(log_probs)
-        return [(IDX_TO_SYM.get(i, "<unk>"), c) for i, c in zip(indices, confidences)]
+        tokens = [(IDX_TO_SYM.get(i, "<unk>"), c) for i, c in zip(indices, confidences)]
+        logger.info("transcribe_strip strip_id=%s raw_tokens=%s", strip_id, [t for t, _ in tokens])
+        return tokens
 
     indices = _greedy_ctc_decode(log_probs)
-    return [IDX_TO_SYM.get(i, "<unk>") for i in indices]
+    tokens = [IDX_TO_SYM.get(i, "<unk>") for i in indices]
+    logger.info("transcribe_strip strip_id=%s raw_tokens=%s", strip_id, tokens)
+    return tokens
  
  
 # ── Visualization ─────────────────────────────────────────────────────────────
