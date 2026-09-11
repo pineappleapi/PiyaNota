@@ -4,7 +4,10 @@ Combines pitch-assigned event sequences from Stage 3 into four continuous
 voice sequences in correct reading order, ready for Stage 5 MIDI synthesis.
 """
 
+import logging
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 # ── Expected voices ───────────────────────────────────────────────────────────
@@ -41,6 +44,13 @@ def reconstruct_satb(
     Raises:
         ValueError if any voice sequence is missing or empty.
     """
+    # print(), not logger.info(): no file in this codebase calls
+    # logging.basicConfig()/addHandler() (confirmed via the independent
+    # /code-review pass on this same branch), so a bare logger.info() call is
+    # silently dropped by the default root WARNING level and never reaches the
+    # console -- unlike logger.warning() below, which still surfaces via
+    # Python's stderr "handler of last resort". This message was always-visible
+    # print() output before PIYA-124; keeping it print() preserves that.
     print("\n[Stage 4] Reconstructing SATB part sequences...")
 
     # ── Validate completeness ─────────────────────────────────────────────
@@ -79,6 +89,7 @@ def reconstruct_satb(
     _assign_global_ticks(reconstructed)
 
     _check_measure_duration_consistency(reconstructed)
+    _check_voice_pitch_range_plausibility(reconstructed)
     _report(reconstructed)
     return reconstructed
 
@@ -282,19 +293,91 @@ def _check_measure_duration_consistency(reconstructed: dict) -> None:
             mismatches += 1
             page_index, sys_idx, measure_index = measure_key
             detail = ", ".join(f"{v}={t}" for v, t in voice_ticks.items())
-            print(f"[Stage 4] WARNING: duration mismatch at page {page_index} "
-                  f"system {sys_idx} measure {measure_index}: {detail} "
-                  f"(ticks, spread={spread})")
+            logger.warning(
+                "duration mismatch strip_id=page%03d_sys%02d measure=%s: %s "
+                "(ticks, spread=%d)",
+                page_index, sys_idx if sys_idx is not None else -1,
+                measure_index, detail, spread,
+            )
 
     if mismatches:
-        print(f"[Stage 4] {mismatches} measure(s) with SATB duration mismatch "
-              f"(tolerance={DURATION_MISMATCH_TOLERANCE_TICKS} ticks) -- "
-              "check Stage 3 transcription for dropped/extra tokens on the flagged voice(s).")
+        logger.warning(
+            "%d measure(s) with SATB duration mismatch (tolerance=%d ticks) -- "
+            "check Stage 3 transcription for dropped/extra tokens on the flagged voice(s).",
+            mismatches, DURATION_MISMATCH_TOLERANCE_TICKS,
+        )
+
+
+# ── Per-voice pitch-range plausibility (diagnostic only) ───────────────────────
+
+# Practical choral MIDI pitch bounds per voice -- generous enough to cover
+# extended/divisi writing without false-flagging legitimate range; this is a
+# plausibility check, not an enforced vocal-range limit. Values are sounding
+# pitch: Tenor events are already octave-corrected by Stage 3's
+# get_clef_reference()/TENOR_CLEF_REFERENCE before reaching Stage 4, so no
+# further adjustment is needed here.
+# PIYA-124: confirmed by ml-cv-lead 2026-09-11. Tenor's low bound was raised
+# from G2 (43) to A2 (45) -- G2 was ungrounded in real tenor practice (true
+# extended floor is A2/Bb2) and, worse, overlapped Bass's range, directly
+# undercutting the Tenor/Bass clef-confusion pattern this diagnostic exists
+# to catch. All other bounds confirmed as-is (generously wide, not wrong).
+VOICE_MIDI_RANGE = {
+    "Soprano": (57, 86),   # A3-D6
+    "Alto":    (50, 79),   # D3-G5
+    "Tenor":   (45, 72),   # A2-C5 (sounding)
+    "Bass":    (36, 65),   # C2-F4
+}
+
+
+def _check_voice_pitch_range_plausibility(reconstructed: dict) -> None:
+    """
+    Read-only diagnostic: logs (does not correct) any note event whose pitch
+    falls outside VOICE_MIDI_RANGE[voice].
+
+    A pitch far outside a voice's practical range is typically a symptom of
+    Stage 3 resolving the wrong clef (e.g. BUG-011's Bass clef.C-L3 collapse)
+    or the wrong octave reference -- either shifts an entire strip's notes
+    by several semitones to an octave or more, rather than producing a
+    merely-unusual individual pitch, which is what this threshold is sized
+    to catch.
+
+    Copies _report()'s `e["type"] == "note" and e["pitch"] is not None`
+    guard: rest events carry pitch=None (see stage3_transcription.infer_pitch
+    rest handling), and _resolve_slurs() also sets pitch=None on absorbed
+    slur middle/end notes before they're filtered out -- both would raise on
+    the pitch comparison below without this guard.
+
+    This function never raises and never mutates `reconstructed`, matching
+    _check_measure_duration_consistency()'s diagnostic-only contract.
+
+    Args:
+        reconstructed: {voice: [event_dict, ...]}, already sorted and
+          slur-resolved -- the same dict _check_measure_duration_consistency
+          receives.
+    """
+    for voice, events in reconstructed.items():
+        low, high = VOICE_MIDI_RANGE.get(voice, (0, 127))
+        for e in events:
+            if e["type"] != "note" or e["pitch"] is None:
+                continue
+            if e["pitch"] < low or e["pitch"] > high:
+                page_index = e["page_index"]
+                sys_idx    = e.get("sys_idx")
+                logger.warning(
+                    "pitch range anomaly strip_id=page%03d_sys%02d voice=%s "
+                    "symbol=%s pitch=%d outside expected [%d, %d] -- "
+                    "possible clef/octave misread (flag only, not corrected)",
+                    page_index, sys_idx if sys_idx is not None else -1,
+                    voice, e.get("symbol"), e["pitch"], low, high,
+                )
 
 
 # ── Reporting ─────────────────────────────────────────────────────────────────
 
 def _report(reconstructed: dict):
+    # print(), not logger.info() -- see the comment in reconstruct_satb() above:
+    # this summary was always-visible console output before PIYA-124, and no
+    # logging handler is configured anywhere in this codebase to keep it that way.
     print("\n[Stage 4] Reconstructed voice sequences:")
     for voice in VOICES:
         events = reconstructed[voice]

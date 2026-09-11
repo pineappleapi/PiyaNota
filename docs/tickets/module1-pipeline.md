@@ -236,6 +236,40 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
 
 ---
 
+### PIYA-124 — Per-Voice Pitch-Range Sanity Check (BUG-011 diagnostic, Stage 4)
+**Trigger:** Proposed — not yet scheduled. Spawned from BUG-011 alongside PIYA-122/123; independent
+branch/session, not combined with either.
+
+**Context:** `stage4_reconstruction.py`'s `_check_measure_duration_consistency()` (lines 235-292) is
+an existing precedent: a read-only diagnostic that logs anomalies but never raises and never mutates
+`reconstructed`. A clef misread produces a uniform per-voice pitch offset — detectable via an
+expected-MIDI-range table per voice, following that same pattern.
+
+**Acceptance Criteria:**
+1. New diagnostic function in `stage4_reconstruction.py`, matching `_check_measure_duration_consistency`'s
+   contract exactly: takes `reconstructed: dict`, returns `None`, never reassigns into `reconstructed`
+   — state this explicitly in the function's docstring, not just as an informal convention.
+2. Guards against `pitch is None` (rest events, e.g. lines ~1182/~1299 in stage3) before any
+   min/max/numeric comparison — `_report()` (line 301) already needs this same guard for the same
+   reason; a naive range check without it will `TypeError` on the first rest. (senior-reviewer,
+   2026-09-11.)
+3. Flags (via `logger`, not `print` — Stage 4 currently has no `logging` usage at all, unlike Stage 3's
+   recent shift to structured `logger.info` for BUG-011 diagnostics; decide explicitly whether this
+   ticket also moves Stage 4 to `logger` or stays print-only, and note the choice in the PR) any voice
+   whose notes fall materially outside its expected MIDI range.
+4. No change to any event's `pitch`, `tick_onset`, or other field — diagnostic-only, verified by
+   confirming Stage 5 synthesis output is unaffected on the same input before/after.
+5. Verified against the BUG-011 6-screenshot set: confirm known clef-misread voices are flagged.
+
+**Deferred, not scheduled (do not build without separate go/no-go):** cross-system clef majority
+vote — see BUG-011 in `docs/bug-tracker.md` for the full reasoning (requires a Stage 3→4 event-schema
+change to persist which clef was used, which needs its own scrutiny separate from any diagnostic;
+the "flag-only, never auto-correct" boundary ml-cv-lead recommended is not currently enforceable in
+the data shape). Not given a PIYA number since it is explicitly out of scope for now, not just
+unscheduled.
+
+---
+
 ### PIYA-106 — Symbol Transcription (CRNN-CTC)
 **Trigger:** Internal — invoked after Staff Region Detection produces a valid staff strip.
 
