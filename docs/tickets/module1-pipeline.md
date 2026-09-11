@@ -236,6 +236,39 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
 
 ---
 
+### PIYA-122 — Surface CTC Clef-Token Confidence (BUG-011 diagnostic)
+**Trigger:** Proposed — not yet scheduled. Spawned from BUG-011 (`docs/bug-tracker.md`) after
+`fix/bug002-font` closed as a negative result; one of three independent no-new-data diagnostics
+(PIYA-122/123/124) recommended by ml-cv-lead and design-reviewed by senior-reviewer on 2026-09-11.
+Independent of PIYA-123 and PIYA-124 — run as its own branch/session, not combined into one diff.
+
+**Context:** `_greedy_ctc_decode_with_confidence` (`stage3_transcription.py:1440-1481`) and
+`transcribe_strip()`'s `return_confidence` parameter (line 1489) already compute genuine per-symbol
+CTC confidence, but the production call path (`process_strip()`, line 1656) never enables it — the
+signal exists and is currently unused. This does not fix any misread; it makes a low-confidence clef
+decode visible/loggable instead of silently passing through as a normal-looking token.
+
+**Acceptance Criteria:**
+1. `process_strip()` calls `transcribe_strip(..., return_confidence=True)` and extracts the clef
+   token's confidence value without changing the symbol sequence type passed to `infer_pitch()` or
+   `visualize_strip()` — both currently require plain `List[str]`, not `List[Tuple[str, float]]`, so
+   the confidence-tagged result must be unpacked into a separate plain-string list before reaching
+   either call. (senior-reviewer, 2026-09-11: this coupling is real and must be handled explicitly,
+   not left implicit — a naive bool flip will pass tuples into `infer_pitch()`'s `sym.split(...)`
+   calls and crash on the first clef token.)
+2. The clef token's confidence is included in the strip's log line (alongside the existing
+   `strip_id`), not just returned and silently dropped — `transcribe_strip()`'s current
+   `return_confidence=True` log branch logs bare tokens only, with confidence only in the return
+   value.
+3. No change to `infer_pitch()`'s pitch-resolution logic or to any event emitted to Stage 4 — this
+   is a logging/diagnostic addition only, verified by confirming Stage 4 output is byte-identical
+   before/after on the same input.
+4. Verified against at least one known-good and one known-misread strip (from the BUG-011 6-screenshot
+   set) to confirm the confidence value is materially lower on the misread case — if it isn't, the
+   signal isn't useful for triage and that finding should be reported, not hidden.
+
+---
+
 ### PIYA-106 — Symbol Transcription (CRNN-CTC)
 **Trigger:** Internal — invoked after Staff Region Detection produces a valid staff strip.
 

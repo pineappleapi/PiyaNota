@@ -1535,7 +1535,7 @@ def transcribe_strip(
     if return_confidence:
         indices, confidences = _greedy_ctc_decode_with_confidence(log_probs)
         tokens = [(IDX_TO_SYM.get(i, "<unk>"), c) for i, c in zip(indices, confidences)]
-        logger.info("transcribe_strip strip_id=%s raw_tokens=%s", strip_id, [t for t, _ in tokens])
+        logger.info("transcribe_strip strip_id=%s raw_tokens_with_confidence=%s", strip_id, tokens)
         return tokens
 
     indices = _greedy_ctc_decode(log_probs)
@@ -1653,8 +1653,22 @@ def process_strip(
 ) -> list:
 
     """Transcribes one strip and returns pitch-assigned events for Stage 4."""
-    symbols = transcribe_strip(strip, model, device, img_height, strip_id=strip_id)
-    events  = infer_pitch(symbols, voice=voice, page_index=page_index, sys_idx=sys_idx)
+    # return_confidence=True makes transcribe_strip return (symbol, confidence)
+    # tuples -- unpack into a plain-string list before infer_pitch/visualize_strip,
+    # both of which do string ops (sym.split, sym.startswith) on each symbol and
+    # would crash on a tuple.
+    raw_tokens  = transcribe_strip(strip, model, device, img_height,
+                                    return_confidence=True, strip_id=strip_id)
+    symbols     = [sym for sym, _ in raw_tokens]
+    confidences = [conf for _, conf in raw_tokens]
+
+    for sym, conf in zip(symbols, confidences):
+        if sym.startswith("clef."):
+            logger.info("process_strip strip_id=%s clef_token=%s clef_confidence=%.4f",
+                         strip_id, sym, conf)
+            break
+
+    events = infer_pitch(symbols, voice=voice, page_index=page_index, sys_idx=sys_idx)
 
     print(f"[Stage 3] {voice} p{page_index}: "
           f"{len(symbols)} symbols -> {len(events)} events")
