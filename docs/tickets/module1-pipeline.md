@@ -236,6 +236,36 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
 
 ---
 
+### PIYA-123 — Voice-vs-Clef Plausibility Check (BUG-011 diagnostic)
+**Trigger:** Proposed — not yet scheduled. Spawned from BUG-011 alongside PIYA-122/124; independent
+branch/session, not combined with either.
+
+**Context:** Stage 2's `VOICE_MAP` (`stage2_detection.py:19`) assigns voice by vertical position
+within a system, independent of any CRNN prediction — trustworthy even when clef decoding fails.
+`CLEF_FALLBACK` (`stage3_transcription.py:~655`) already encodes the expected clef family per voice
+(S/A/T → G-clef, Bass → F-clef). Nothing today compares the decoded clef against this expectation.
+
+**Acceptance Criteria:**
+1. After the clef stage of `infer_pitch()` (or in `process_strip()` before calling it) resolves the
+   first clef token — matching `infer_pitch()`'s own "first clef token wins" rule (lines ~1001-1008),
+   not just checking for the token's presence anywhere in the sequence, since a correct opening clef
+   followed by a spurious mid-piece hallucination must not false-flag — compare it against
+   `CLEF_FALLBACK`'s expected family for that voice.
+2. The comparison is **clef-family-level** (G vs. F vs. C), not exact-token, since Bass legitimately
+   produces both `clef.F-L3` and `clef.F-L4` per `CLEF_REFERENCE` — an exact-string match will
+   false-positive on legitimate variant tokens. (senior-reviewer, 2026-09-11.)
+3. A mismatch (e.g. Bass voice decoding to a G- or C-family clef) is logged with `strip_id`, decoded
+   clef, and expected family — flagged, not corrected. No event, pitch, or downstream Stage 4/5
+   output changes as a result of a mismatch.
+4. Document in the ticket/PR that this is a new heuristic introduced for triage purposes, not an
+   existing codebase rule being enforced (the "C clefs are rare" comment at line ~804 is about
+   key-signature-accidental placement accuracy, not clef plausibility generally — cited as supporting
+   domain knowledge, not as prior code precedent).
+5. Verified against the BUG-011 6-screenshot set: confirm every known Bass-voice `clef.C-L3` misread
+   is flagged, and confirm no false flags on any of the 2 known-correct predictions.
+
+---
+
 ### PIYA-106 — Symbol Transcription (CRNN-CTC)
 **Trigger:** Internal — invoked after Staff Region Detection produces a valid staff strip.
 

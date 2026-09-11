@@ -672,8 +672,72 @@ def get_clef_reference(clef: str, voice: str) -> int:
     if voice == "Tenor":
         return TENOR_CLEF_REFERENCE.get(clef, CLEF_REFERENCE.get(clef, 64))
     return CLEF_REFERENCE.get(clef, 64)
- 
- 
+
+
+def _check_voice_clef_plausibility(symbols: List[str], voice: str, strip_id: str = "") -> None:
+    """
+    PIYA-123 diagnostic (BUG-011): logs a warning if the clef token
+    infer_pitch() will use as this strip's INITIAL active clef belongs to a
+    different clef family than CLEF_FALLBACK expects for this voice.
+
+    Stage 2's voice label (VOICE_MAP, stage2_detection.py) is assigned by
+    vertical position within a system, independent of any CRNN prediction --
+    trustworthy even when clef decoding fails. A mismatch here is a strong
+    signal of a clef misread (e.g. BUG-011's Bass-voice clef.C-L3 collapse).
+
+    Family-level only (clef.G / clef.F / clef.C), not exact-token: Bass
+    legitimately decodes to either clef.F-L3 or clef.F-L4 per CLEF_REFERENCE,
+    so an exact-token comparison would false-positive on that legitimate
+    variant.
+
+    Replicates what active_clef will actually equal at the moment
+    infer_pitch() scores the strip's first note/rest event -- NOT just a
+    scan of its "clef" stage. All five reachable ks_stage values were traced
+    (confirmed exhaustive by grep -- there is no sixth): "clef" (1061-1066),
+    "keysig" (1098, clef branch 1112-1116), "post_bar" (1144, clef branch
+    1156-1161 -- reachable before the first note/rest, e.g. clef -> metersign
+    -> body -> barline moves ks_stage to "post_bar" with no note/rest scored
+    yet), "mid_keysig" (1168-1202, no dedicated clef branch -- a clef token
+    here forces the burst-end fallthrough at 1201-1202 into body's clef
+    branch the same iteration), and "body" (1213-1218). Every one of them
+    applies `active_clef = sym` the moment it sees any `sym in
+    CLEF_REFERENCE`, unconditionally, regardless of metersign/accidental/
+    digit/barline/dot tokens seen along the way, and a metersign or
+    accidental encountered first does NOT stop a later clef token from being
+    consulted -- it only advances ks_stage, and every stage it can advance
+    to still has its own clef-application branch, reached here before any
+    note/rest has actually been scored. So the only correct replica is: keep
+    the LAST clef.* token seen (if any, and if it's a recognized token) up
+    to the first note./rest. token, not the first, and don't stop scanning
+    on metersign/accidental/digit/barline/dot -- only on note./rest., which
+    is the one event type infer_pitch() actually applies active_clef to.
+    (An earlier version of this function stopped at the first metersign or
+    accidental token and kept only the first clef token; both were real
+    divergences from infer_pitch()'s actual behaviour, caught in review.)
+
+    Diagnostic only: never raises, never returns a value, never mutates
+    `symbols` or influences infer_pitch()'s own clef resolution in any way.
+    """
+    detected_clef = None
+    for sym in symbols:
+        if sym.startswith("note.") or sym.startswith("rest."):
+            break
+        if sym.startswith("clef.") and sym in CLEF_REFERENCE:
+            detected_clef = sym  # keep scanning -- a later clef token overrides an earlier one
+
+    if detected_clef is None:
+        return  # no clef decoded before the first note/rest -- infer_pitch() uses the fallback, nothing to flag
+
+    expected_family = CLEF_FALLBACK[voice].split("-")[0]
+    detected_family = detected_clef.split("-")[0]
+    if detected_family != expected_family:
+        logger.warning(
+            "process_strip strip_id=%s voice=%s decoded_clef=%s expected_family=%s "
+            "-- possible clef misread (flag only, not corrected)",
+            strip_id, voice, detected_clef, expected_family,
+        )
+
+
 # Semitone offset of each natural note letter from C, within one octave.
 # Staff half-steps are fixed to the LETTER positions E-F and B-C regardless
 # of which note starts a given clef's own step=0 (bottom line) -- so the
@@ -1654,6 +1718,7 @@ def process_strip(
 
     """Transcribes one strip and returns pitch-assigned events for Stage 4."""
     symbols = transcribe_strip(strip, model, device, img_height, strip_id=strip_id)
+    _check_voice_clef_plausibility(symbols, voice, strip_id)
     events  = infer_pitch(symbols, voice=voice, page_index=page_index, sys_idx=sys_idx)
 
     print(f"[Stage 3] {voice} p{page_index}: "
