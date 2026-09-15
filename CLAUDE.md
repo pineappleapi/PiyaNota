@@ -206,6 +206,62 @@ either decision changed, treat this as stale and re-confirm rather than trusting
   `docs/bug-tracker.md` (in-repo markdown, no external tooling) — log bugs found during work there
   going forward, tagged with the phase they were found in (dev-sprint/dry-run/live-testing).
 
+## Evaluation results snapshot (recorded 2026-09-14)
+
+Full detail and methodology live in `docs/bug-tracker.md` (BUG-011, BUG-004) and
+`docs/tickets/module1-pipeline.md` (PIYA-107). This is a summary pointer, not the source of truth —
+treat it as stale if either doc has moved on.
+
+- **CameraPrIMuS (CPM) — CRNN transcription + pitch inference (Stage 3):** strong on its own training
+  distribution but not representative of real-world performance.
+  - Ground-truth-token pitch math (`infer_pitch()` alone, real `.agnostic` tokens, no CRNN): 98.736%.
+  - End-to-end CRNN, clean CPM images (500 samples / 6960 notes): 98.118% pitch accuracy.
+  - End-to-end CRNN, synthetically distorted CPM images: 86.983% pitch accuracy (clears the 85% floor
+    by ~2 points only).
+  - SER baseline referenced in bug-tracker.md: ~98%+/~87% clean/distorted; a separate 0.70%/18.76%
+    clean/distorted SER figure is noted in the confidence-decoder docstring.
+  - **Does not transfer to real screenshots.** BUG-011: on 48 real phone-screenshot strips (post
+    BUG-012 fix), clef recognition is 2/48 correct — the CRNN collapses to `clef.C-L3` almost always.
+    Root-caused to a font/glyph domain gap (CPM's render font vs. real engraving fonts), confirmed
+    general across 3 fonts and "confidently wrong" (not low-confidence). No code-only/image-preprocessing
+    fix exists; requires retraining/fine-tuning on multi-font data (PIYA-106 AC4), blocked on the base
+    Camera-PrIMuS training run.
+  - **Correction (2026-09-14):** the previously-stated "~4.2% bounded" real-world pitch accuracy was a
+    math extrapolation from the clef-misread rate alone, assuming non-clef tokens (notes/accidentals/
+    rests) were otherwise correct — that assumption was false. Direct comparison of the CRNN's full
+    token output against manually-read ground truth (2 independent source pages, 4 strips) shows
+    non-clef output is also badly wrong: hallucinated note/rhythm clusters, missing rests, phantom
+    accidentals, wrong note-count vs. the real content. ~4.2% was a ceiling under a false assumption,
+    not a floor — true real-world accuracy is unmeasured and likely lower. See BUG-011 in
+    `docs/bug-tracker.md` for full detail and ml-cv-lead's review.
+
+- **DS2 Dense (DeepScoresV2) — YOLOv8 staff detector (Stage 2):** one number on record, and it is
+  compromised — do not present it as a clean result.
+  - Interim PIYA-105 eval logged 2026-09-10: mAP50 0.9766, mAP50-95 0.8654, precision 0.954,
+    recall 0.976.
+  - **BUG-004 (open):** `evaluate_model()` calls `model.val()` with no `split` argument, so this number
+    is actually the **val** split (134 images), not the **test** split (346 images) defined in
+    `dataset.yaml`, despite the function's docstring claiming a test-split eval. A follow-up run with
+    `split="test"` hit a separate, unresolved `RuntimeError: Numpy is not available` when the test-split
+    label cache had to be built fresh. There is currently no valid test-split number.
+
+## Retraining plan for BUG-011 (real-world font domain gap)
+
+Decision recorded 2026-09-14 in `docs/decisions/piya-106-crnn-font-retraining-plan.md`
+(ml-cv-lead reviewed) — full 7-step ordered plan, decides for PIYA-106 AC4. Summary: the CRNN
+(`training/pianota-transcription-training.ipynb`) is trained only on CameraPrIMuS's one synthetic
+engraving font, which is why it collapses on real screenshots (BUG-011, ~4.2% bounded real-world
+pitch accuracy) — this is a font/glyph domain gap, not a Filipino-content/language issue. Do **not**
+start by hand-labeling real Filipino sheet music; CameraPrIMuS ships an `.mei` file per sample that
+Verovio can re-render through 5 bundled SMuFL fonts with the existing `.agnostic`/`.semantic` labels
+still valid (zero manual transcription) — see `training/step1-font-rerender-kaggle-guide.md` (and the
+matching section built into `training/pianota-transcription-training.ipynb`) for verified, runnable
+step-1 instructions (font re-rendering). Switched from Colab to Kaggle 2026-09-15 since the base CRNN
+training already lives there. Steps 2–7 (fine-tune → fresh held-out
+real test set → single evaluation → confidence re-check) are not yet started; re-confirm with the
+user before beginning step 2, since fine-tuning is still blocked pending the base Camera-PrIMuS
+training run per BUG-011's tracker entry.
+
 ## Git
 
 Commit messages: `PIYA-XXX: <summary>`. Never commit without explicit user review and approval first.
