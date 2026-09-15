@@ -107,14 +107,30 @@ which cannot distinguish a transient epoch-1 bump from real, worsening catastrop
 - Every checkpoint (per-epoch, not just "best") now saves regardless of gate status, tagged with a
   `gate_mode` field and both threshold values, so which regime produced a given checkpoint is always
   recoverable from the file itself.
-- font_val_ser's stem-overlap leakage with the base model's original training data (already flagged
-  inline in notebook cell 12) is **not fixed by this amendment** — it remains a known caveat and a
-  separate follow-up (build a held-out font-val stem set disjoint from base-training stems). Do not
-  cite font_val_ser as evidence of font-domain generalization in any go/no-go call until that follow-up
-  lands.
+- **font_val_ser's stem-overlap leakage — confirmed 100%, not a residual risk (2026-09-16).**
+  Real Cell B output from the LR-sweep run: `359/359 font-val stems (100.0%) were already seen by the
+  base model during its original CameraPrIMuS training`. This is not sampling variance — it's
+  structural: `finetune_val_stems` is drawn from `combined_by_stem` after only `CANARY_VAL_STEMS` (the
+  base model's own 399-stem val slice) is excluded, so the remaining pool is *exactly*
+  `BASE_TRAIN_STEMS` (3596) by construction — any split of it is guaranteed ~100% base-training overlap,
+  not a possibility that happened to land at the high end. ml-cv-lead review (2026-09-16): this gives
+  `font_val_ser` **zero evidentiary value for font-domain generalization**, not reduced value — a
+  BiLSTM+CTC decoder can partially recall a memorized incipit's token sequence from a weak read of an
+  unfamiliar font via a learned sequence prior, so a low `font_val_ser` largely re-measures the same
+  thing `canary_clean_ser` already does (memorized-content stability), not font-learning quality. It is
+  **not fixed by this amendment** and does **not** block the plan's actual go/no-go (Step 4, gated on
+  Step 3's fresh real-world test set, which this leak never touched) — but do not cite `font_val_ser`,
+  including any number already produced by the live LR sweep, as evidence one LR "generalizes better"
+  than another; treat it only as a collapse/divergence sanity check until fixed. **Required before
+  `RUN_FINETUNING` is flipped to `True`:** carve a disjoint font-val stem set out of `BASE_TRAIN_STEMS`
+  itself (not `CANARY_VAL_STEMS`, which must stay reserved for the forgetting probe) and exclude it from
+  `finetune_train_stems` — a small change to cell 12's split logic, not a new data-collection effort.
+  The hard-cap/soft-floor canary gates are unaffected by this leak (computed on the genuinely disjoint
+  canary set) and remain valid stop/continue signals in the meantime.
 
 Next: re-run `lr_sweep([1e-5], sweep_epochs=3)` (smallest-breach candidate) for the full 3-epoch budget
-under this gate to get the actual clean/distorted canary trend, before touching `RUN_FINETUNING`.
+under this gate to get the actual clean/distorted canary trend, before touching `RUN_FINETUNING`. Per
+the leakage finding above, also patch cell 12's font-val split before that flag is flipped.
 
 ## Caveats carried forward from ml-cv-lead's review (do not silently drop these)
 
