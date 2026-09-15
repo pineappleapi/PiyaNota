@@ -324,6 +324,38 @@ actually move this number is real camera photos, not more synthetic distortion �
 route through Stage 2 staff detection first, which is where BUG-001 (PIYA-121, open) currently caps
 usable input before this pitch-inference path is even reached.
 
+**Real-screenshot AC1 measurement (2026-09-14) — target missed, root cause isolated:** the 98%/87%
+figures above are Camera-PrIMuS-only (clean and synthetically-distorted proxies of the *same*
+training-distribution font/rendering). Measuring against real, non-CPM screenshots
+(`data/raw/Digital Screenshot/IMG_5750`–`5755`, BUG-011) tells a different story: real-world pitch
+accuracy is bounded by clef accuracy at **~4.2%** (2/48 strips), since `infer_pitch()`'s formula
+(`M = R_c + Δ(p) + K + A`) is entirely clef-relative — an incorrect `R_c` from a wrong clef shifts
+every single pitch in that voice by the same wrong offset, with nothing downstream to catch it. AC3's
+fallback-by-voice (treble/treble-8vb/bass) only triggers when clef detection *fails/is missing*, not
+when the CRNN confidently emits the wrong clef token, so it does not help here. This is a large,
+qualitative miss of AC1's 85% floor, not a marginal one — and it is the dominant reason PiyaNota's
+real-world (non-CPM) pitch accuracy is far below target, not a secondary contributor.
+
+Root cause (full diagnostic trail in `docs/bug-tracker.md` BUG-011): eight image-level fix hypotheses
+were tested and falsified this session and prior sessions (padding dilution, capture-resolution
+ceiling, crop-margin/padding sweep, anisotropic stretch, voice-label bleed, BUG-012 content-
+destruction contamination, anti-aliasing/binarization mismatch, stroke-width in both directions —
+none moved the number off the 2-4/48 floor). ml-cv-lead reviewed this negative-result set, required
+three follow-ups (all now done): a statistical correction to the label-bleed write-up (downgraded to
+inconclusive, was previously held to a looser bar than the padding sweep), a per-symbol confidence
+check (the 46 misreads are confidently wrong, mean 0.79 softmax confidence, statistically the same as
+the 2 correct reads' 0.88 — not a low-confidence/uncertain decode), and a synthetic multi-font glyph
+test (a third, unrelated, well-formed font — Segoe UI Symbol — also fails 6/6, generalizing the
+domain-gap finding beyond this one screenshot's specific engraving software).
+
+**Decision point for the user:** the image-level/code-only fix space is exhausted. ml-cv-lead's
+recommendation is retraining/fine-tuning with multi-font-augmented training data (this ticket's own
+PIYA-106 AC4 — ties directly to that AC's fine-tuning-on-Filipino-SATB-data plan, already blocked
+pending the base Camera-PrIMuS training run's completion). No further code change on this branch
+family is expected to move real-world pitch accuracy materially; the next move requires either (a)
+the base training run finishing so AC4's fine-tune can proceed with explicit multi-font sourcing, or
+(b) a different user-directed path if that's not the preferred next step.
+
 ---
 
 ### PIYA-108 — SATB Part Reconstruction
@@ -440,3 +472,56 @@ usable input before this pitch-inference path is even reached.
 3. Page transitions occur at the correct timestamps.
 4. A randomly sampled set of completed scores is validated visually.
 5. Any detected synchronization drift is logged through PIYA-410.
+
+---
+
+### PIYA-125 — Fix Border-Blanking Content Destruction (BUG-012, Stage 1)
+**Trigger:** Found while investigating BUG-012 (near-blank Bass/system-2 strips on 5/6 real
+screenshots), previously mis-attributed to Stage 2 box geometry. Branch:
+`fix/bug012-border-blank-overreach`, cut from `5387968`.
+
+**Context:** `stage1_preprocessing.py`'s `_blank_border_if_no_staff()` blanks the page's top/bottom
+border bands (`BORDER_TOP_PX`/`BORDER_BOTTOM_PX`) except rows matching a literal long-horizontal-
+staffline mask. That mask protects only the staffline pixels themselves, not the musical content
+(noteheads, stems, clefs, accidentals, ties, dots) sharing the same band. When a real staff sits
+within the border zone — e.g. Bass/system-2 on a tightly-cropped digital screenshot, only 47px from
+the page bottom on `IMG_5750` — everything except ~5 bare staffline rows was wiped to white,
+producing a near-blank strip downstream. Confirmed via direct pixel comparison of raw source page vs.
+Stage 1 output at identical coordinates, and confirmed the YOLO box itself was geometrically normal
+(ruling out Stage 2 entirely).
+
+**Acceptance Criteria:**
+1. Extract the staff-band-detection logic already used by `blank_lyrics_regions()` into a shared
+   helper (`_detect_staff_bands()`), preserving its existing `MIN_RAW_LINE_BANDS`/
+   `MIN_MERGED_BAND_HEIGHT` reliability guards unchanged.
+2. `_blank_border_if_no_staff()` must not blank any row falling inside a detected staff's full
+   content zone (merged band ± margin), not just its literal staffline-mask rows.
+3. No change to `blank_lyrics_regions()`'s existing behavior/output on any image where staff
+   detection succeeds — verified by re-running it standalone pre/post-refactor on the same input.
+4. Verified against all 5 affected screenshots (`IMG_5750`/`5751`/`5752`/`5754`/`5755`): the
+   previously near-blank Bass/system-2 (or equivalent edge-adjacent) strip now contains real
+   notation — checked both by ink-density ratio (near-zero → ~19-22%) and visual inspection.
+5. No external callers of either function outside `stage1_preprocessing.py` (grep-confirmed), so no
+   other call site requires updating.
+6. senior-reviewer sign-off obtained before this branch is proposed for merge (mandatory per
+   CLAUDE.md Agent Usage Rules).
+
+**Status (2026-09-14):** Implemented and self-verified against ACs 1-5. Re-running the full BUG-011
+6-screenshot/48-strip clef-consistency check with this fix in place gave 2/48 correct — unchanged
+from the pre-fix (contaminated) figure — which confirms this fix does not itself move BUG-011's
+clef-misread rate, but does establish a clean, uncontaminated baseline for that separate
+investigation.
+
+AC6 complete: senior-reviewer reviewed this branch, verdict "recommend merge with changes," 7
+findings. 5 addressed via code edit (named `BORDER_PROTECT_MARGIN_RATIO` constant, extracted shared
+`_staff_line_mask()` helper, `logger.warning()` on the previously-silent `_detect_staff_bands() is
+None` fallback path, `context`-tagged SKIPPED logging, tightened return typing — see bug-tracker.md
+BUG-012 row for the full list). 1 addressed via branch hygiene: unrelated pre-existing
+`CLAUDE.md`/`docs/methodology.md` doc-reorg changes moved off this branch onto a separate
+`docs/methodology-reorg` branch cut from `main`, so this branch now contains only
+`stage1_preprocessing.py`, `docs/bug-tracker.md`, and this ticket file. 1 (CPM SER-baseline non-impact)
+upgraded from reasoned to empirically verified: `compare_omr_baselines.py` never imports
+`stage1_preprocessing`, so Stage 1 changes cannot affect the CPM 98%+/87% baseline. Re-ran the
+48-strip verification against the Finding-fixed code: identical 2/48 result, confirming no
+regression from the review-driven refactor. Ready for user merge approval — no code changes remain
+outstanding.

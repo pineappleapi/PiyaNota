@@ -2,9 +2,13 @@
 PiyaNota - Stage 1: Image Preprocessing Pipeline
 """
 
+import logging
+
 import cv2
 import numpy as np
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 # ── blank_lyrics_regions() safety guard thresholds ────────────────────────────
@@ -34,6 +38,14 @@ BORDER_BOTTOM_PX = 100
 # comparison (trailing barline/whitespace), so it keeps the larger margin.
 BORDER_LEFT_PX   = 20
 BORDER_RIGHT_PX  = 80
+
+# ── _blank_border_if_no_staff() content-protection margin ─────────────────────
+# Extends protection beyond a detected staff's literal 5-line band so ledger
+# lines, accidentals, and clef tails that extend past the staff proper aren't
+# clipped when the staff sits near a border. Not calibrated against a measured
+# max ledger-line extent -- deliberately generous (BUG-012 was a silent
+# content-destruction bug, so this errs toward under-blanking, not over-).
+BORDER_PROTECT_MARGIN_RATIO = 0.75
 
 # ── Perspective correction (camera-photo specific) ────────────────────────────
 # Corrects keystone/perspective distortion from off-axis phone photography —
@@ -327,41 +339,57 @@ def correct_to_grid(binary: np.ndarray, bgr: np.ndarray) -> tuple:
     return corrected, h_angle, v_angle
 
 
-def _blank_border_if_no_staff(binary: np.ndarray, top_px: int, bottom_px: int) -> np.ndarray:
+def _staff_line_mask(binary: np.ndarray) -> np.ndarray:
     """
-    Blanks the top/bottom border bands, but only rows that don't already look
-    like a real staffline — protects tightly-cropped pages (digital exports)
-    where real content sits right at the edge, while still killing camera
-    photos' hand/table-shadow rows near the border.
+    Per-row boolean mask: True where a row contains a long horizontal run of
+    ink (i.e. looks like a literal staffline). Single source of truth for
+    this detection signal -- `_detect_staff_bands()` and
+    `_blank_border_if_no_staff()`'s literal-mask baseline both consume this
+    exact mask, so the two can never silently diverge if the threshold/kernel
+    is tuned later.
     """
     h, w = binary.shape
     ink = cv2.bitwise_not(binary)
-
     min_len = max(int(w * 0.15), 50)
     h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (min_len, 1))
     staff_mask = cv2.morphologyEx(ink, cv2.MORPH_OPEN, h_kernel)
-    has_staff = np.sum(staff_mask, axis=1) > (w * 0.10)
-
-    result = binary.copy()
-    for y in range(min(top_px, h)):
-        if not has_staff[y]:
-            result[y, :] = 255
-    for y in range(max(0, h - bottom_px), h):
-        if not has_staff[y]:
-            result[y, :] = 255
-    return result
+    return np.sum(staff_mask, axis=1) > (w * 0.10)
 
 
-def blank_lyrics_regions(binary: np.ndarray) -> np.ndarray:
-    h, w = binary.shape
-    ink = cv2.bitwise_not(binary)
+def _detect_staff_bands(
+    binary: np.ndarray,
+    has_staff: np.ndarray | None = None,
+    context: str = "",
+) -> list[list[int]] | None:
+    """
+    Merges per-line staffline rows (from `_staff_line_mask()`) into per-staff
+    bands (top/bottom row of each 5-line staff), applying the same
+    reliability guards this detection has always used. Returns None if
+    detection looks unreliable on this image.
 
-    min_len = max(int(w * 0.15), 50)
-    h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (min_len, 1))
-    staff_mask = cv2.morphologyEx(ink, cv2.MORPH_OPEN, h_kernel)
+    Args:
+        has_staff: Precomputed `_staff_line_mask()` output, if the caller
+          already has one (avoids recomputing the same morphology pass
+          twice per page). Computed fresh if omitted.
+        context: Short label included in the SKIPPED log line so it's clear
+          which caller's guard tripped -- `_blank_border_if_no_staff()`
+          falling back to literal-staffline-only protection is a materially
+          different (BUG-012-shaped) consequence than
+          `blank_lyrics_regions()` leaving lyric zones unblanked.
 
-    row_sum = np.sum(staff_mask, axis=1)
-    has_staff = row_sum > (w * 0.10)
+    Shared by `_blank_border_if_no_staff()` and `blank_lyrics_regions()` so
+    both agree on where the real staves are. BUG-012: before this was
+    shared, `_blank_border_if_no_staff()` only protected literal
+    staffline-mask rows (the long horizontal lines themselves) — not the
+    notes/clef/accidentals sitting between and around them, none of which
+    are long horizontal lines. A staff whose band overlapped the border zone
+    (e.g. the last staff on a tightly-cropped digital page, sitting within
+    `bottom_px` of the page bottom) had its actual musical content erased
+    while the bare lines survived, producing a near-blank strip downstream.
+    """
+    h, _ = binary.shape
+    if has_staff is None:
+        has_staff = _staff_line_mask(binary)
 
     bands = []
     in_band = False
@@ -374,16 +402,16 @@ def blank_lyrics_regions(binary: np.ndarray) -> np.ndarray:
         bands.append((start, h))
 
     if not bands:
-        return binary
+        return None
 
     # ── Safety guard: don't trust a staffline mask that barely detected any
     # lines at all — that means detection failed on this image (common on
     # unnormalized camera photos), not that there's genuinely little content.
     if len(bands) < MIN_RAW_LINE_BANDS:
-        print(f"[Blank] SKIPPED — only {len(bands)} raw line-band(s) detected "
-              f"(need >= {MIN_RAW_LINE_BANDS}); staffline detection looks "
-              f"unreliable on this image, leaving it unblanked.")
-        return binary
+        print(f"[Staff detect{f' ({context})' if context else ''}] SKIPPED — only "
+              f"{len(bands)} raw line-band(s) detected (need >= {MIN_RAW_LINE_BANDS}); "
+              f"staffline detection looks unreliable on this image.")
+        return None
 
     merged = [list(bands[0])]
     for b in bands[1:]:
@@ -395,8 +423,67 @@ def blank_lyrics_regions(binary: np.ndarray) -> np.ndarray:
     # Drop merged bands too short to plausibly be a real staff (noise).
     merged = [b for b in merged if (b[1] - b[0]) >= MIN_MERGED_BAND_HEIGHT]
     if len(merged) < 2:
-        print(f"[Blank] SKIPPED — only {len(merged)} plausible staff band(s) "
-              f"after filtering; not enough to safely locate lyric zones.")
+        print(f"[Staff detect{f' ({context})' if context else ''}] SKIPPED — only "
+              f"{len(merged)} plausible staff band(s) after filtering; not enough to "
+              f"safely locate staff regions.")
+        return None
+
+    return merged
+
+
+def _blank_border_if_no_staff(binary: np.ndarray, top_px: int, bottom_px: int) -> np.ndarray:
+    """
+    Blanks the top/bottom border bands, but never touches a row inside a
+    detected staff's content zone — protects tightly-cropped pages (digital
+    exports) where a real staff sits right at the edge, while still killing
+    camera photos' hand/table-shadow rows near the border. See BUG-012 note
+    on `_detect_staff_bands()` for why "content zone" (a margin around each
+    merged staff band), not just literal staffline rows, is what must be
+    protected here.
+    """
+    h, w = binary.shape
+    protected = _staff_line_mask(binary)
+
+    bands = _detect_staff_bands(binary, has_staff=protected, context="border-blank")
+    if bands is None:
+        # Staff-band detection was unreliable on this image (see the SKIPPED
+        # log line above) -- falls back to the literal-staffline-only mask,
+        # which is exactly the BUG-012 mechanism this function exists to fix.
+        # Kept as the fallback rather than skipping border-blanking entirely
+        # (camera photos with genuinely unreliable staffline detection still
+        # need hand/table-shadow rows removed), but surfaced loudly since a
+        # real staff caught by this path would silently lose content again.
+        logger.warning(
+            "_blank_border_if_no_staff: staff-band detection unreliable, "
+            "falling back to literal-staffline-only border protection "
+            "(re-introduces the BUG-012 failure mode if a real staff sits "
+            "in the border zone on this image)."
+        )
+    else:
+        for start, end in bands:
+            # Generous margin (not blank_lyrics_regions()'s tighter 0.6x —
+            # this is a hard "never erase" guard, not a soft lyric-zone
+            # cutoff) so ledger-line notes, accidentals, and clefs that
+            # extend past the 5-line staff itself stay protected too.
+            margin = int((end - start) * BORDER_PROTECT_MARGIN_RATIO)
+            lo, hi = max(0, start - margin), min(h, end + margin)
+            protected[lo:hi] = True
+
+    result = binary.copy()
+    for y in range(min(top_px, h)):
+        if not protected[y]:
+            result[y, :] = 255
+    for y in range(max(0, h - bottom_px), h):
+        if not protected[y]:
+            result[y, :] = 255
+    return result
+
+
+def blank_lyrics_regions(binary: np.ndarray) -> np.ndarray:
+    h, w = binary.shape
+
+    merged = _detect_staff_bands(binary, context="lyric-blank")
+    if not merged:
         return binary
 
     staff_h = int(np.mean([e - s for s, e in merged]))
