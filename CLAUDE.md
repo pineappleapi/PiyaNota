@@ -262,11 +262,21 @@ sweep, an extended trend check, and a seed-replication check (2 seeds × 2 LRs) 
 confirmed lr=3e-5 as the LR to use; a first real `RUN_FINETUNING` attempt produced an invalid result
 (root-caused to leftover RNG state from re-running the notebook cell in-kernel without an explicit
 seed) and has been fixed (hard-fail assert on missing seed, real run restructured to always fine-tune
-under both seed=1 and seed=2). Full detail and current status: the 2026-09-16 amendment in
-`docs/decisions/piya-106-crnn-font-retraining-plan.md`. Immediate next action: user runs the corrected
-two-seed `RUN_FINETUNING` cell on Kaggle; ml-cv-lead reviews the result before either checkpoint is
-treated as Step 2's output. Steps 3–7 (fresh held-out real test set → single evaluation → confidence
-re-check) are not yet started.
+under both seed=1 and seed=2). The two-seed `RUN_FINETUNING` run then completed, but an isolated
+seed=1 reproduction check (rerun in a fresh kernel, same seed/data/hyperparameters) came back with a
+starkly different, worse trajectory (hard-cap breach by epoch 2 vs. a clean 4-epoch run originally) —
+root-caused to GPU-level cuDNN nondeterminism: `torch.manual_seed()` controls RNG state but not which
+(possibly nondeterministic) cuDNN convolution algorithm gets selected, so seeding alone did not make
+`finetune()` reproducible on GPU. Fixed 2026-09-17: `finetune()` now sets
+`torch.backends.cudnn.deterministic = True` / `torch.backends.cudnn.benchmark = False` alongside its
+existing seed calls. Full detail and current status: the 2026-09-16 amendment in
+`docs/decisions/piya-106-crnn-font-retraining-plan.md` (the cuDNN finding itself is not yet logged
+there — do that before treating any checkpoint from before this fix as trustworthy). **Immediate next
+action:** rerun the isolated seed=1 reproduction check under the cuDNN fix to confirm it now
+reproduces closely to the original seed=1 trajectory; if confirmed, redo the two-seed `RUN_FINETUNING`
+run under the fix (any checkpoint produced before 2026-09-17 is suspect and should not be treated as
+Step 2's output) before moving to Step 3. Steps 3–7 (fresh held-out real test set → single evaluation
+→ confidence re-check) are not yet started.
 
 ## Git
 
