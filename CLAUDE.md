@@ -257,10 +257,16 @@ Verovio can re-render through 5 bundled SMuFL fonts with the existing `.agnostic
 still valid (zero manual transcription) — see `training/step1-font-rerender-kaggle-guide.md` (and the
 matching section built into `training/pianota-transcription-training.ipynb`) for verified, runnable
 step-1 instructions (font re-rendering). Switched from Colab to Kaggle 2026-09-15 since the base CRNN
-training already lives there. Steps 2–7 (fine-tune → fresh held-out
-real test set → single evaluation → confidence re-check) are not yet started; re-confirm with the
-user before beginning step 2, since fine-tuning is still blocked pending the base Camera-PrIMuS
-training run per BUG-011's tracker entry.
+training already lives there. **Step 2 (fine-tuning) is actively in progress as of 2026-09-16** — LR
+sweep, an extended trend check, and a seed-replication check (2 seeds × 2 LRs) all completed and
+confirmed lr=3e-5 as the LR to use; a first real `RUN_FINETUNING` attempt produced an invalid result
+(root-caused to leftover RNG state from re-running the notebook cell in-kernel without an explicit
+seed) and has been fixed (hard-fail assert on missing seed, real run restructured to always fine-tune
+under both seed=1 and seed=2). Full detail and current status: the 2026-09-16 amendment in
+`docs/decisions/piya-106-crnn-font-retraining-plan.md`. Immediate next action: user runs the corrected
+two-seed `RUN_FINETUNING` cell on Kaggle; ml-cv-lead reviews the result before either checkpoint is
+treated as Step 2's output. Steps 3–7 (fresh held-out real test set → single evaluation → confidence
+re-check) are not yet started.
 
 ## Git
 

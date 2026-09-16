@@ -143,9 +143,75 @@ the leakage finding above, also patch cell 12's font-val split before that flag 
   in the Colab guide.
 - Label-bleed is inconclusive, not ruled out, per the bug-tracker.md correction log.
 
+## Amendment (2026-09-16): seed-replication check + RNG-leftover-state bug
+
+Step 2's fine-tuning is now underway (font_val_ser's 100%-overlap leakage from the amendment above
+was fixed by switching checkpoint/early-stop selection to `loo_font_ser`, measured on `LOO_FONT`
+(Leland), which is held out of training entirely — see the fixed notebook cell 13).
+
+**Extended trend check (no seed control):** `lr_sweep([3e-5, 1e-5], sweep_epochs=8, patience=2)` found
+lr=3e-5 best at epoch 1 (`loo_font_ser` 0.0485, canary fully clean) and lr=1e-5 best at epoch 3
+(0.0723). But a repeat of lr=1e-5 epoch 1 under the same uncontrolled conditions swung from 0.0608 to
+0.1111 (~83% relative) between two runs — bigger than the gap being used to rank LRs — so the 0.0485
+headline number could not yet be trusted.
+
+**Seed-replication check:** added an explicit `seed` parameter to `finetune()`/`lr_sweep()` and ran
+2 seeds (1, 2) × 2 LRs (3e-5, 1e-5) × 2 epochs, all else held fixed:
+
+| seed | lr=3e-5 (best) | lr=1e-5 (best) |
+|---|---|---|
+| 1 | 0.0540 (epoch 1) | 0.0702 (epoch 1) |
+| 2 | 0.0696 (epoch 2) | 0.0924 (epoch 2) |
+
+lr=3e-5 beat lr=1e-5 in both seeds by a consistent ~24% relative margin — real, replicated signal for
+picking lr=3e-5. But the earlier 0.0485 headline number sits *below* both seeded runs and should not
+be trusted as representative; treat 0.054–0.073 as the realistic range instead. Canary hard cap was
+never breached in any of the 4 runs.
+
+ml-cv-lead review of this data flagged two open risks carried into the real run: (1) `loo_font_ser`
+is itself noisy — lr=1e-5 epoch 1 still swung ~61% relative between seeds even under explicit seeding
+(0.0702 vs 0.1132), so single-epoch deltas under ~0.02 aren't trustworthy signal on their own; (2)
+epoch-of-best flips direction between seeds for lr=3e-5 (seed=1 peaked at epoch 1 then dropped ~81%
+relative by epoch 2; seed=2 was still improving at epoch 2), and neither seed had epoch-3+ data.
+Recommendation: keep lr=3e-5, raise `patience` from 2 to 3 (one more epoch of runway to tell a
+recoverable dip from real decline), keep `max_epochs=6`. Also flagged a procedural-leakage risk to
+carry forward: `loo_font_ser` off the single held-out font (Leland) is being used for both LR/
+checkpoint selection *and* will likely be the reported "did this work" number — not fixable without a
+second held-out font, but the eventual reported number should carry this caveat, not be presented as
+an independent confirmation.
+
+**RNG-leftover-state bug (found after the first real `RUN_FINETUNING` attempt):** the real run was
+launched without passing `seed=` (an oversight). It reported `loo_font_ser=0.0398` at epoch 1 — lower
+than every prior epoch-1 lr=3e-5 result, including the untrusted 0.0485 outlier — then degraded
+monotonically for 3 more epochs (0.0469 → 0.1024 → 0.1476), with canary-clean closing to within ~7%
+of its hard cap before stopping on the new patience=3. ml-cv-lead assessed this as implausible as an
+independent draw (below the minimum of the seeded band, and the *second* unseeded run in a row to
+beat every seeded run — a pattern, not noise) and flagged mechanism (a), leftover RNG state, as most
+likely. Root-caused directly: `finetune()` only touches RNG state when `seed is not None`, and this
+whole workflow runs by editing Cell C in place and re-running it in the *same* Kaggle kernel without
+restarting — so an unseeded call doesn't draw fresh randomness, it inherits whatever RNG state the
+previous cell execution left behind (here, the tail end of the seed-replication check's seed=2/
+lr=1e-5 sub-run). `0.0398` was a deterministic replay keyed on execution history, not a real result.
+
+**`crnn_weights/finetuned_font.pt` (the epoch-1 checkpoint from that run) must not be used downstream.**
+
+**Fix applied (notebook cell 13):** `finetune()` now hard-fails (`assert seed is not None`) if called
+without an explicit seed, closing off this class of bug. The real `RUN_FINETUNING` block is
+restructured to fine-tune under both validated seeds (1 and 2), each from a fresh copy of the base
+checkpoint (mirrors `lr_sweep()`'s pattern so seed 2 doesn't train on top of seed 1's weights), saving
+to `crnn_weights/finetuned_font_seed{1,2}.pt` and reporting `loo_font_ser` as a 2-seed distribution,
+not a single cherry-picked number.
+
+**Status:** rerun not yet executed by the user — this is the immediate next action (see
+`docs/NEXT-SESSION.md`). Once it completes, get ml-cv-lead sign-off on the 2-seed result before
+treating either checkpoint as this plan's Step 2 output and moving to Step 3.
+
 ## Not yet decided / blocked
 
 - Whether the base Camera-PrIMuS training run needs to finish first, or whether fine-tuning can
   start from the currently-deployed checkpoint directly — re-confirm with the user before step 2.
+  **Superseded in practice 2026-09-16:** fine-tuning has been actively running (LR sweep, extended
+  trend check, seed-replication check, and a real `RUN_FINETUNING` attempt) without this being
+  re-blocked, so treat this constraint as no longer in force unless the user says otherwise.
 - Sourcing a genuinely new real-world test set (step 3) requires new photos/screenshots the user
   needs to supply; not something this repo's existing data covers.
