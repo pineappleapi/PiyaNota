@@ -37,3 +37,24 @@ artifacts (`.dart_tool/`, `build/`, `.flutter-plugin-dependencies`, etc.) are ad
   `SharedPreferences`.
 - **frontend-lead review scope:** unchanged — the agent's Flutter assumption is now backed by this
   decision doc instead of being an undocumented default.
+
+## Addendum (2026-09-17, discovered during PIYA-201 implementation)
+
+`flutter_riverpod: ^3.4.3` (the version this project pinned) **removed the legacy `StateProvider`**
+that most Riverpod examples/docs still assume — `StateProvider<T>(...)` no longer compiles
+(`undefined_function`). For simple mutable ephemeral state (e.g. PIYA-201's in-flow voice-part
+selection), use a small hand-written `Notifier<T>` instead:
+
+```dart
+class MyValue extends Notifier<T> {
+  @override
+  T build() => initialValue;
+}
+final myValueProvider = NotifierProvider<MyValue, T>(MyValue.new);
+```
+
+Note `Notifier.state` is `protected` in this version (not publicly settable via
+`ref.read(provider.notifier).state = x` the way `StateNotifier` allowed) — expose a named method
+(e.g. `void select(T value) => state = value;`) instead of reaching for `.state` from outside the
+class. Non-ephemeral persisted state should still go through a real service (see
+`OnboardingPrefsService` for the `shared_preferences`-backed pattern) rather than a bare `Notifier`.

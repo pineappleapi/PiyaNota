@@ -43,6 +43,8 @@ dependencies:
   file_picker: ^13.1.0
   just_audio: ^0.10.6
   path_provider: ^2.1.6
+  shared_preferences: ^2.5.5
+  google_fonts: ^8.2.1
 
 dev_dependencies:
   flutter_test:
@@ -65,6 +67,9 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  assets:
+    - assets/branding/
 
   # To add assets to your application, add an assets section, like this:
   # assets:
