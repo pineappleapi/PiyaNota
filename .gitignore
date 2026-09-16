@@ -25,6 +25,12 @@ local.properties
 /app/build/
 *.iml
 
+# Flutter (mobile/piyanota_application/ also has its own generated .gitignore)
+mobile/piyanota_application/.dart_tool/
+mobile/piyanota_application/build/
+mobile/piyanota_application/.flutter-plugins-dependencies
+mobile/piyanota_application/.flutter-plugins
+
 # Flask/backend
 instance/
 *.db
