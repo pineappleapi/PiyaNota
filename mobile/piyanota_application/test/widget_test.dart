@@ -11,7 +11,7 @@ void main() {
 
     await tester.pumpWidget(const ProviderScope(child: PiyaNotaApp()));
     await tester.pump(); // resolve onboardingCompletedProvider
-    await tester.pump(const Duration(milliseconds: 2600)); // splash animation
+    await tester.pump(const Duration(milliseconds: 4600)); // splash animation
     await tester.pump(const Duration(milliseconds: 300)); // post-splash settle
 
     expect(find.text('Skip'), findsOneWidget);

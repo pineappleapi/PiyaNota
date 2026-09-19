@@ -18,10 +18,10 @@ const _stepCount = 3;
 // reveal onboarding) timing, phased as fractions of _introController's
 // 0.0-1.0 range. Eyeballed — no Figma frame exists for this sequence, so
 // these are tunable, not pinned.
-const _introDuration = Duration(milliseconds: 2600);
-const _iconFadeInterval = Interval(0.0, 0.25, curve: Curves.easeIn);
-const _joinInterval = Interval(0.28, 0.58, curve: Curves.easeOut);
-const _handoffInterval = Interval(0.75, 1.0, curve: Curves.easeInOut);
+const _introDuration = Duration(milliseconds: 4600);
+const _iconFadeInterval = Interval(0.0, 0.1, curve: Curves.easeIn);
+const _joinInterval = Interval(0.435, 0.87, curve: Curves.easeOut);
+const _handoffInterval = Interval(0.87, 1.0, curve: Curves.easeInOut);
 
 // Lockup geometry. The icon fades in at a larger "solo" size, then shrinks
 // down to the lockup size as it slides in next to the text. The icon
