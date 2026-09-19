@@ -88,6 +88,13 @@ class _OnboardingFlowScreenState extends ConsumerState<OnboardingFlowScreen>
     Navigator.of(context).pushReplacementNamed(AppRoutes.login);
   }
 
+  void _back() {
+    _pageController.previousPage(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
+  }
+
   Future<void> _next() async {
     if (_currentPage < _stepCount - 1) {
       _pageController.nextPage(
@@ -137,14 +144,16 @@ class _OnboardingFlowScreenState extends ConsumerState<OnboardingFlowScreen>
             child: SafeArea(
               child: Column(
                 children: [
-                  Align(
-                    alignment: Alignment.topRight,
-                    child: Padding(
-                      padding: const EdgeInsets.only(right: 8, top: 4),
-                      child: TextButton(
-                        onPressed: _skip,
-                        child: const Text('Skip'),
-                      ),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 8, top: 4),
+                    child: Align(
+                      alignment: Alignment.topLeft,
+                      child: _currentPage > 0
+                          ? IconButton(
+                              onPressed: _back,
+                              icon: const Icon(Icons.arrow_back),
+                            )
+                          : const SizedBox(height: 48),
                     ),
                   ),
                   Expanded(
@@ -152,10 +161,10 @@ class _OnboardingFlowScreenState extends ConsumerState<OnboardingFlowScreen>
                       controller: _pageController,
                       onPageChanged: (index) =>
                           setState(() => _currentPage = index),
-                      children: const [
-                        PurposeStep(),
-                        WorkflowStep(),
-                        VoiceSelectionStep(),
+                      children: [
+                        const PurposeStep(),
+                        const WorkflowStep(),
+                        VoiceSelectionStep(onConductorTap: _skip),
                       ],
                     ),
                   ),
@@ -164,15 +173,22 @@ class _OnboardingFlowScreenState extends ConsumerState<OnboardingFlowScreen>
                     currentStep: _currentPage,
                   ),
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(32, 24, 32, 16),
+                    padding: const EdgeInsets.fromLTRB(32, 24, 32, 4),
                     child: SizedBox(
                       width: double.infinity,
                       child: PrimaryPillButton(
                         label: isLastStep ? 'Get Started' : 'Next',
-                        backgroundColor: AppTheme.primaryBlue,
+                        backgroundColor: AppTheme.onboardingButtonBlue,
                         foregroundColor: Colors.white,
                         onPressed: _next,
                       ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _skip,
+                    child: Text(
+                      'Skip',
+                      style: TextStyle(color: AppTheme.onboardingSkipText),
                     ),
                   ),
                 ],
