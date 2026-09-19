@@ -19,9 +19,9 @@ const _stepCount = 3;
 // 0.0-1.0 range. Eyeballed — no Figma frame exists for this sequence, so
 // these are tunable, not pinned.
 const _introDuration = Duration(milliseconds: 4600);
-const _iconFadeInterval = Interval(0.0, 0.1, curve: Curves.easeIn);
-const _joinInterval = Interval(0.435, 0.87, curve: Curves.easeOut);
-const _handoffInterval = Interval(0.87, 1.0, curve: Curves.easeInOut);
+const _iconFadeInterval = Interval(0.1, 0.2, curve: Curves.easeIn);
+const _joinInterval = Interval(0.4, 0.8, curve: Curves.easeOut);
+const _handoffInterval = Interval(0.8, 1.0, curve: Curves.easeInOut);
 
 // Lockup geometry. The icon fades in at a larger "solo" size, then shrinks
 // down to the lockup size as it slides in next to the text. The icon
@@ -30,10 +30,10 @@ const _handoffInterval = Interval(0.87, 1.0, curve: Curves.easeInOut);
 // aspect ratio.
 const _soloIconSize = 120.0;
 const _splashIconSize = 88.0;
-const _splashTextHeight = 54.0;
+const _splashTextHeight = 50.0;
 const _splashTextAspect = 2000 / 596;
-const _lockupGap = 8.0;
-const _textSlideInOffset = 40.0;
+const _lockupGap = -20.0;
+const _textSlideInOffset = 20.0;
 
 // Vertical anchor for the lockup: "near the top, not dead-center" per the
 // reference request, expressed as a fraction of screen height so it scales
