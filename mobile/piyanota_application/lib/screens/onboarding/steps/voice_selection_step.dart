@@ -26,67 +26,73 @@ class VoiceSelectionStep extends ConsumerWidget {
     final selected = ref.watch(selectedVoicePartProvider);
     final textTheme = Theme.of(context).textTheme;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          OnboardingHeadingBlock(
-            titleSpans: [
-              const TextSpan(text: 'What part\ndo you '),
-              TextSpan(
-                text: 'sing',
-                style: TextStyle(color: AppTheme.onboardingAccent),
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              OnboardingHeadingBlock(
+                titleSpans: [
+                  const TextSpan(text: 'What part\ndo you '),
+                  TextSpan(
+                    text: 'sing',
+                    style: TextStyle(color: AppTheme.onboardingAccent),
+                  ),
+                  const TextSpan(text: '?'),
+                ],
+                subtitle: "We'll remember your part so it's the first thing "
+                    'you hear.',
               ),
-              const TextSpan(text: '?'),
-            ],
-            subtitle:
-                "We'll remember your part so it's the first thing you hear.",
-          ),
-          const SizedBox(height: 24),
-          GridView.count(
-            crossAxisCount: 2,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            mainAxisSpacing: 16,
-            crossAxisSpacing: 16,
-            childAspectRatio: 1.5,
-            children: VoicePart.values.map((part) {
-              final isSelected = selected == part;
-              final badgeColor = AppTheme.voiceAccents[part]!;
+              const SizedBox(height: 24),
+              GridView.count(
+                crossAxisCount: 2,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                mainAxisSpacing: 16,
+                crossAxisSpacing: 16,
+                childAspectRatio: 1.5,
+                children: VoicePart.values.map((part) {
+                  final isSelected = selected == part;
+                  final badgeColor = AppTheme.voiceAccents[part]!;
 
-              return _VoiceCard(
-                label: part.label,
-                badgeColor: badgeColor,
-                isSelected: isSelected,
-                onTap: () =>
-                    ref.read(selectedVoicePartProvider.notifier).select(part),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton(
-              onPressed: onConductorTap,
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: _conductorButtonBorder),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                padding: const EdgeInsets.symmetric(vertical: 16),
+                  return _VoiceCard(
+                    label: part.label,
+                    badgeColor: badgeColor,
+                    isSelected: isSelected,
+                    onTap: () => ref
+                        .read(selectedVoicePartProvider.notifier)
+                        .select(part),
+                  );
+                }).toList(),
               ),
-              child: Text(
-                "I'm a Conductor / I'm not sure yet",
-                style: textTheme.bodyMedium?.copyWith(
-                  color: AppTheme.onboardingHeadingDark,
-                  decoration: TextDecoration.underline,
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: onConductorTap,
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: _conductorButtonBorder),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                  child: Text(
+                    "I'm a Conductor / I'm not sure yet",
+                    style: textTheme.bodyMedium?.copyWith(
+                      color: AppTheme.onboardingHeadingDark,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
                 ),
               ),
-            ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
