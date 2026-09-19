@@ -1,33 +1,48 @@
 # Next Session — Start Here
 
 Handoff doc for continuing PiyaNota work in a fresh session. Read this first; it links out to the
-full detail rather than repeating it. Written 2026-09-14, rewritten 2026-09-16.
+full detail rather than repeating it. Written 2026-09-14, rewritten 2026-09-16, rewritten 2026-09-19.
 
 ## Immediate next action
 
-**Run the corrected two-seed final fine-tune on Kaggle** — Step 2 of the CRNN retraining plan
-(`training/pianota-transcription-training.ipynb`, cell 13, `RUN_FINETUNING` block):
+**The real two-seed `RUN_FINETUNING` run (under the cuDNN fix) is DONE.** Both checkpoints are valid
+and not invalidated: `crnn_weights/finetuned_font_seed1.pt` (best epoch 1, `loo_font_ser` 0.0523) and
+`crnn_weights/finetuned_font_seed2.pt` (best epoch **2**, `loo_font_ser` 0.0886, with an epoch-3
+canary-clean spike to ~89% of the hard cap before partially recovering). ml-cv-lead's fourth review
+this session: **conditional GO to Step 3 — Step 2 is not formally closed.**
 
-1. Paste the *current* Cell C fresh into the Kaggle kernel (don't patch just the lines that errored —
-   the whole cell was rewritten this session).
-2. Confirm `RUN_SEED_REPLICATION_CHECK = False` and set `RUN_FINETUNING = True`.
-3. Run it. It fine-tunes from the base checkpoint under **both** seed=1 and seed=2 (not just one —
-   this was an explicit choice over the cheaper single-seed option), saving
-   `crnn_weights/finetuned_font_seed1.pt` and `crnn_weights/finetuned_font_seed2.pt`, and prints a
-   ranked summary of `loo_font_ser` by seed at the end.
-4. Paste back the full output (both `### Final fine-tune: seed=... ###` blocks plus the ranked
-   summary).
+**Start Step 3 now** — collect a fresh real-world test set (different piece/tool than the 48 strips
+already used for BUG-011 diagnosis; needs new photos/screenshots from the user). This can run in
+parallel with the open item below; neither blocks the other.
 
-**Then consult ml-cv-lead again** (per CLAUDE.md's Agent Usage Rules) before treating either
-checkpoint as final or moving to Step 3 — this is required, not optional, and has been the pattern
-for every round of results so far this plan.
+**Open items carried forward, not blocking Step 3 but not resolved — don't let these quietly drop:**
+- Seed=2's best epoch was 2, not 1 — this **disconfirms** the earlier read (from two isolated seed=1
+  repro runs) that "epoch-1-is-always-best" was a real property of `lr=3e-5`; it was
+  checkpoint-selection luck. Do not switch to the `1e-5` runner-up candidate — it lacks equivalent
+  seed-replication rigor and already lost to `3e-5` by ~24% relative in earlier seeded runs.
+- Seed=2's epoch-3 canary-clean spike to ~89% of the hard cap is independently concerning — a real
+  oscillation/stability signature, not just "the cap held."
+- The ~70% relative gap between seed=1's best (0.0523) and seed=2's best (0.0886) is *not* cleanly
+  within the established same-seed noise floor (7–29%, measured same-epoch/same-seed) — plausibly
+  explained instead by `finetune_train_loader` (notebook cell 12) still having `shuffle=True` with no
+  seeded `generator=`/`worker_init_fn`. **Report both seed checkpoints as a range going forward — never
+  cherry-pick seed=1's better number.** Apply the DataLoader seeding fix before treating `lr=3e-5` as
+  fully settled.
+- At Step 4, evaluate both seed checkpoints separately against the real test set — do not average them.
+- None of this round's findings say anything about whether the actual BUG-011 real-screenshot fix
+  works — it's purely a training-stability question. The confidence/uncertainty problem (plan step 7)
+  remains completely untouched.
 
-Full narrative of how we got here (seed-replication check results, two ml-cv-lead reviews, the
-RNG-leftover-state bug and its fix): 2026-09-16 amendment in
+Full narrative (seed-replication check results, RNG-leftover-state bug, cuDNN-nondeterminism bug and
+fix, the lost-baseline finding, both reproduction runs, the real two-seed run, and all four ml-cv-lead
+reviews from this session): 2026-09-16 and **2026-09-19 amendments** in
 `docs/decisions/piya-106-crnn-font-retraining-plan.md`.
 
-**Do not use `crnn_weights/finetuned_font.pt`** — it's the invalidated output of the first
-(unseeded, buggy) `RUN_FINETUNING` attempt. See the amendment doc for why.
+**Do not use `crnn_weights/finetuned_font.pt`** (first unseeded, buggy `RUN_FINETUNING` attempt) or
+either `crnn_weights/finetuned_font_seed{1,2}.pt` produced **before** the 2026-09-17 cuDNN fix — those
+are invalidated; only the versions from the completed run above are valid. The two
+`crnn_weights/repro_check_seed1.pt` runs from this session are diagnostic-only, not Step 2 deliverables
+either.
 
 ## Branches / commit state
 
@@ -71,11 +86,17 @@ Full plan + amendments: `docs/decisions/piya-106-crnn-font-retraining-plan.md`
 
 1. **Font re-render CameraPrIMuS via Verovio** — **done.**
 2. **Fine-tune the existing CRNN checkpoint, watch clean/distorted CameraPrIMuS SER as a forgetting
-   canary** — **in progress.** LR sweep, extended trend check, and seed-replication check are done
-   (lr=3e-5 confirmed over lr=1e-5, replicated across 2 seeds); the real two-seed final run is the
-   immediate next action above.
+   canary** — **substantively done, not formally closed.** LR sweep, extended trend check, and
+   seed-replication check are done (lr=3e-5 confirmed over lr=1e-5, replicated across 2 seeds); the
+   cuDNN-nondeterminism bug found after the first real two-seed run is fixed; the real two-seed final
+   run under the fix is **complete** (`finetuned_font_seed1.pt` best epoch 1 / loo 0.0523,
+   `finetuned_font_seed2.pt` best epoch 2 / loo 0.0886) and ml-cv-lead's fourth review gave a
+   conditional GO. Not formally closed because of the open items above (DataLoader seeding gap, the
+   seed1/seed2 divergence, seed=2's near-cap wobble) — none block starting Step 3, but should be
+   resolved before calling Step 2 fully done.
 3. Collect a **fresh** real-world test set (different piece/tool than the 48 strips already used for
-   BUG-011 diagnosis) — **not started**, needs new photos/screenshots from the user.
+   BUG-011 diagnosis) — **not started, now the active item**, needs new photos/screenshots from the
+   user.
 4. Evaluate once on that fresh set; token-level SER + insertion/deletion rate, not just clef/pitch
    accuracy — **not started**, blocked on step 3.
 5. Only if still far short of target: escalate to hand-labeling real strips — **not started**.
@@ -85,8 +106,20 @@ Full plan + amendments: `docs/decisions/piya-106-crnn-font-retraining-plan.md`
 
 ## Things not to do without re-checking first
 
-- Don't use `crnn_weights/finetuned_font.pt` — invalidated (see above).
-- Don't skip ml-cv-lead review of the two-seed final-run output before calling Step 2 done.
+- Don't use `crnn_weights/finetuned_font.pt`, either `finetuned_font_seed{1,2}.pt` from before the
+  2026-09-17 cuDNN fix, or `crnn_weights/repro_check_seed1.pt` — all invalidated or diagnostic-only
+  (see above). The post-fix `finetuned_font_seed1.pt` / `finetuned_font_seed2.pt` (from the completed
+  two-seed run) ARE valid and usable — but report them as a range (0.0523–0.0886 loo_font_ser), never
+  cherry-pick seed=1's better number.
+- Don't treat "epoch-1-is-always-best" as settled — that was a read from 2/2 *isolated seed=1* repro
+  runs, and the real seed=2 run's best epoch was 2. Checkpoint-selection luck, not a property of
+  `lr=3e-5`; disconfirmed, not confirmed, by the real two-seed run.
+- Don't ignore seed=2's epoch-3 canary-clean spike (~89% of hard cap) — a real stability signature,
+  flagged by ml-cv-lead's fourth review, not yet investigated.
+- Don't assume the seed1/seed2 loo_font_ser gap (~70% relative) is just noise — it's larger than the
+  established same-seed noise floor (7–29%) and is plausibly caused by the still-unfixed
+  `finetune_train_loader` DataLoader seeding gap (cell 12, `shuffle=True`, no `generator=`/
+  `worker_init_fn`).
 - Don't hand-label real Filipino sheet music as a first move — the diagnosed cause is font/glyph
   shape, not content or language.
 - Don't reuse the 48 BUG-011 diagnostic strips to report the retrained model's accuracy.

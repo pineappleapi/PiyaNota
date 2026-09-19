@@ -269,14 +269,43 @@ root-caused to GPU-level cuDNN nondeterminism: `torch.manual_seed()` controls RN
 (possibly nondeterministic) cuDNN convolution algorithm gets selected, so seeding alone did not make
 `finetune()` reproducible on GPU. Fixed 2026-09-17: `finetune()` now sets
 `torch.backends.cudnn.deterministic = True` / `torch.backends.cudnn.benchmark = False` alongside its
-existing seed calls. Full detail and current status: the 2026-09-16 amendment in
-`docs/decisions/piya-106-crnn-font-retraining-plan.md` (the cuDNN finding itself is not yet logged
-there — do that before treating any checkpoint from before this fix as trustworthy). **Immediate next
-action:** rerun the isolated seed=1 reproduction check under the cuDNN fix to confirm it now
-reproduces closely to the original seed=1 trajectory; if confirmed, redo the two-seed `RUN_FINETUNING`
-run under the fix (any checkpoint produced before 2026-09-17 is suspect and should not be treated as
-Step 2's output) before moving to Step 3. Steps 3–7 (fresh held-out real test set → single evaluation
-→ confidence re-check) are not yet started.
+existing seed calls. **2026-09-19: the original seed=1 sub-run's per-epoch checkpoints (the reference
+this fix was meant to reproduce) were confirmed permanently lost** — not recoverable, so
+"reproducible" can now only be judged as same-seed-vs-same-seed agreement under the fix, not against
+that lost baseline. Two independent isolated seed=1 reproduction runs were done instead (identical
+config, fresh kernel each time): both landed on best epoch 1 (`loo_font_ser` 0.0561 and 0.0523), same
+epoch-1-best/soft-floor-breach-from-epoch-2/hard-cap-never-crossed/patience-stop-at-epoch-4 shape in
+both — categorically unlike the pre-fix failure (hard-cap breach by epoch 2). A ~26–29% relative
+divergence at epoch 3 between the two runs is real residual nondeterminism (root-caused to
+`finetune_train_loader` in notebook cell 12 having `shuffle=True` with no seeded `generator=`/
+`worker_init_fn` — confirmed in the notebook, not yet fixed, optional follow-up) but the metric
+actually used for checkpoint selection only diverged ~7%, so it doesn't block proceeding. ml-cv-lead
+reviewed all of this (three rounds) and gave a **GO** on the real two-seed `RUN_FINETUNING` run.
+Separately flagged and **not yet resolved**: epoch-1-best-then-monotonic-decline showed up identically
+in both reproduction runs, which ml-cv-lead reads as a real, reproducible property of `lr=3e-5` (not
+noise) — fine-tuning past epoch 1 looks actively counterproductive. Shipping the epoch-1 checkpoint is
+fine since checkpoint selection already picks it, but this is a separate open item, not to be silently
+dropped. **The real two-seed `RUN_FINETUNING` run has since completed** (under the cuDNN fix):
+seed=1 best epoch 1 (`loo_font_ser` 0.0523, exact numeric match to the second isolated repro run);
+seed=2 best epoch **2**, not 1 (`loo_font_ser` 0.0886), with an epoch-3 canary-clean spike to ~89% of
+the hard cap before partially recovering. Both checkpoints
+(`crnn_weights/finetuned_font_seed{1,2}.pt`) are valid, neither invalidated. **ml-cv-lead's fourth
+review: conditional GO to Step 3, Step 2 not formally closed.** Seed=2's best-epoch=2 disconfirms the
+"epoch-1-is-always-best" read from the reproduction runs — that was checkpoint-selection luck, not a
+real `lr=3e-5` property; do not switch to the `1e-5` runner-up, which lacks equivalent
+seed-replication rigor and already lost to `3e-5` by ~24% relative in earlier seeded runs. The
+epoch-3 near-cap spike is independently concerning (real oscillation, not just "cap held"). The ~70%
+gap between seed=1's and seed=2's best values isn't cleanly within the established same-seed noise
+floor (7–29%) — plausibly explained by the still-unfixed unseeded `finetune_train_loader` DataLoader
+shuffle/worker RNG (notebook cell 12) rather than genuine seed-to-seed model variance. **Report both
+seed checkpoints as a range — never cherry-pick seed=1's better number.** Full detail: the 2026-09-19
+amendment in `docs/decisions/piya-106-crnn-font-retraining-plan.md`. **Immediate next action:** Step 3
+(collect a fresh real-world test set, different piece/tool than the 48 BUG-011 diagnostic strips) may
+start now, in parallel with — at the user's discretion — applying the DataLoader seeding fix; both are
+needed before Step 2 is fully closed and Step 4 evaluation begins. None of this round's findings speak
+to whether the actual BUG-011 real-screenshot fix works — it's purely about training stability; the
+confidence/uncertainty problem (step 7) remains untouched. Steps 3–7 (fresh held-out real test set →
+single evaluation → confidence re-check) are not yet started.
 
 ## Git
 

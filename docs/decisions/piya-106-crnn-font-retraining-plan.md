@@ -206,6 +206,98 @@ not a single cherry-picked number.
 `docs/NEXT-SESSION.md`). Once it completes, get ml-cv-lead sign-off on the 2-seed result before
 treating either checkpoint as this plan's Step 2 output and moving to Step 3.
 
+## Amendment (2026-09-19): cuDNN-fix reproduction confirmed via same-seed comparison; GO on the real two-seed run
+
+**Original baseline is permanently lost.** The per-epoch checkpoints from the real two-seed
+`RUN_FINETUNING` run's seed=1 sub-run (the "clean 4-epoch" reference the cuDNN fix above was meant to
+reproduce) are confirmed gone — user does not have them, not recoverable. This closes off directly
+comparing a post-fix rerun against real original numbers; "reproducible" can only mean same-seed-vs-
+same-seed agreement under the fix from here on.
+
+**Two independent isolated seed=1 reproduction runs**, same config each time (`seed=1`, `lr=3e-5`,
+`max_epochs=6`, `patience=3`, fresh kernel), both via the dedicated `repro_model = ...` cell
+(`weights_out="crnn_weights/repro_check_seed1.pt"` — diagnostic-only, not a Step 2 deliverable):
+
+| Epoch | Run 1 loo_font_ser | Run 1 canary clean | Run 2 loo_font_ser | Run 2 canary clean |
+|---|---|---|---|---|
+| 1 | 0.0561 | 0.0490 | 0.0523 | 0.0445 |
+| 2 | 0.0925 | 0.0872 | 0.0789 | 0.0706 |
+| 3 | 0.1198 | 0.1153 | 0.0855 | 0.0851 |
+| 4 | 0.1067 | 0.0982 | 0.0906 | 0.0878 |
+
+Both runs: best epoch 1, soft-floor breach every epoch from 2 on (diagnostic only), hard caps (clean
+0.1502 / distorted 0.6261) never crossed, patience-stop at epoch 4. Same shape both times —
+categorically unlike the pre-fix failure (hard-cap breach by epoch 2 vs. a clean run), which is the
+property that actually matters for trusting a checkpoint-selection run.
+
+**ml-cv-lead reviewed this in three rounds** (all three async reviews this session):
+1. After run 1 alone: *partial confirmation, not a clean go* — flagged n=1 as thin evidence, flagged
+   that the comparison was against a verbal description of the lost original (not real numbers), and
+   flagged the epoch-1-best-then-decline shape as a possible independent LR/schedule concern.
+2. Follow-up once the original checkpoints were confirmed unrecoverable: recommended a second
+   same-seed=1 repro (the only way left to test the fix's actual determinism claim) before spending
+   compute on the real two-seed run; noted best-checkpoint selection already de-risks shipping even if
+   the decline's cause stays unexplained, but said not to close that finding silently.
+3. After run 2: **GO.** The two runs agreeing on every qualitative property (not just magnitude) is
+   what matters. The ~26–29% relative divergence at epoch 3 (loo_font_ser 0.1198 vs 0.0855; canary
+   clean 0.1153 vs 0.0851) is real residual nondeterminism, not just noise — but the metric actually
+   acted on, best-checkpoint selection, only diverged ~7% (epoch 1: 0.0561 vs 0.0523), so it doesn't
+   block proceeding.
+
+**Root cause of the residual divergence, confirmed in the notebook (not yet fixed):**
+`finetune_train_loader = DataLoader(finetune_train_ds, batch_size=16, shuffle=True, ...)` in cell 12
+has no seeded `generator=` and no `worker_init_fn` — unseeded shuffle/worker RNG is the likely source.
+Offered to the user as an optional parallel improvement (per ml-cv-lead, not required to trust this
+run's output); not applied as of this writing. Open follow-up.
+
+**Epoch-1-best-then-monotonic-decline, identical in 2/2 independent runs, is flagged as MORE
+concerning, not less.** ml-cv-lead's read: this is a real, reproducible property of `lr=3e-5` (fine-
+tuning past epoch 1 is actively counterproductive on this metric), not noise. Shipping the epoch-1
+checkpoint is pragmatically fine since checkpoint selection already picks it — but this must be logged
+as a separate open item and not silently closed once Step 2 wraps.
+
+**The real two-seed `RUN_FINETUNING` run (under the cuDNN fix) has now completed.** Results:
+
+| seed | best epoch | best loo_font_ser | notes |
+|---|---|---|---|
+| 1 | 1 | 0.0523 | exact numeric match to the second isolated seed=1 repro run above |
+| 2 | 2 | 0.0886 | epoch 3 canary-clean spiked to 0.1344 — ~89% of the 0.1502 hard cap, closest any run has come to breaching it, before partially recovering by epoch 4–5 |
+
+Checkpoints: `crnn_weights/finetuned_font_seed1.pt`, `crnn_weights/finetuned_font_seed2.pt` — both
+valid (produced under the cuDNN fix), neither invalidated.
+
+**ml-cv-lead's final review (fourth round this session): conditional GO to Step 3, Step 2 not fully
+closed.**
+1. Seed=2's best-epoch=2 **disconfirms** the "epoch-1-is-always-best" read from the two isolated repro
+   runs — that was checkpoint-selection luck on `lr=3e-5`, not a real property of it. Do **not** switch
+   to the `1e-5` runner-up candidate though — it's never had equivalent seed-replication rigor at this
+   budget, and `3e-5` still beat it ~24% relative in the earlier seeded 2-epoch runs; swapping now would
+   trade a known instability for an unquantified one.
+2. The epoch-3 near-hard-cap spike (seed=2) is **independently concerning** — a real
+   stability/oscillation signature, not just "never technically breached." The hard cap's safety margin
+   is thinner in practice than assumed when `CANARY_HARD_CAP_MULTIPLIER = 3.0` was set.
+3. The ~70% relative gap between seed=1's best (0.0523) and seed=2's best (0.0886) is **not cleanly
+   "within the established noise floor"** — that floor (7%/26–29%) was same-epoch, same-seed; this
+   compares different best-epochs across different seeds. More telling: seed=1's own epoch-2 value
+   (0.0782) is already close to seed=2's epoch-2 best (0.0886) — suggesting seed=2 had a systematically
+   noisier trajectory overall, plausibly from the still-unfixed unseeded `finetune_train_loader`
+   shuffle/worker RNG (see above), not a clean independent draw from one distribution.
+4. **Carry forward BOTH seed checkpoints, reported as a range — do not cherry-pick seed=1's better
+   number** (the plan already required this). **Step 3 (fresh real-world test set collection) may start
+   in parallel** — it's orthogonal to this finding. But the epoch-1-vs-2 flip and the near-cap wobble
+   must be logged as open, unresolved findings, not silently closed, and the DataLoader seeding fix
+   should be applied before treating `lr=3e-5` as fully settled. At Step 4, evaluate both seed
+   checkpoints separately against real data — do not average them. None of this is evidence about
+   whether the actual BUG-011 real-screenshot fix works — it's purely about training stability; the
+   confidence/uncertainty problem (plan step 7) remains completely untouched regardless of outcome.
+
+**Status:** Step 2 substantively done (both checkpoints exist, usable, not invalidated) but **not
+formally closed** — the LR-stability question above is an open item, not a blocker for starting Step 3.
+**Immediate next action:** start Step 3 — collect a fresh real-world test set (different piece/tool
+than the 48 BUG-011 diagnostic strips) — in parallel with, at the user's discretion, applying the
+DataLoader seeding fix noted above. Both are needed before Step 2 can be called fully closed and before
+Step 4 evaluation begins.
+
 ## Not yet decided / blocked
 
 - Whether the base Camera-PrIMuS training run needs to finish first, or whether fine-tuning can
