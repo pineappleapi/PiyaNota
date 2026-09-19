@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../theme/app_theme.dart';
 import '../widgets/onboarding_heading_block.dart';
 
 /// Step 2 (PIYA-201 AC2): the 3-step Capture → Wait → Listen workflow.
@@ -8,32 +9,56 @@ class WorkflowStep extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 32),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const OnboardingHeadingBlock(
-            title: 'How It Works',
-            subtitle: 'Three simple steps from page to playback.',
+          const Row(
+            children: [
+              Expanded(
+                child: _WorkflowTile(
+                  color: AppTheme.workflowTileCapture,
+                  icon: Icons.camera_alt_outlined,
+                  step: 1,
+                  label: 'CAPTURE',
+                ),
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: _WorkflowTile(
+                  color: AppTheme.workflowTileWait,
+                  icon: Icons.autorenew,
+                  step: 2,
+                  label: 'WAIT',
+                ),
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: _WorkflowTile(
+                  color: AppTheme.workflowTileListen,
+                  icon: Icons.headphones_outlined,
+                  step: 3,
+                  label: 'LISTEN',
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 40),
-          const _WorkflowRow(
-            icon: Icons.camera_alt_outlined,
-            label: 'Capture',
-            description: 'Photograph an open-score SATB page.',
-          ),
-          const SizedBox(height: 24),
-          const _WorkflowRow(
-            icon: Icons.hourglass_top_outlined,
-            label: 'Wait',
-            description: 'PiyaNota transcribes and separates each voice.',
-          ),
-          const SizedBox(height: 24),
-          const _WorkflowRow(
-            icon: Icons.headphones_outlined,
-            label: 'Listen',
-            description: 'Play back your voice part on demand.',
+          const SizedBox(height: 32),
+          OnboardingHeadingBlock(
+            titleSpans: [
+              const TextSpan(text: 'Three steps.\n'),
+              gradientTitleLine(
+                "That's all it takes.",
+                textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            ],
+            subtitle: 'Photograph your score and get audio in minutes — '
+                'then use it to follow along, learn your part, and build '
+                'your reading skills.',
           ),
         ],
       ),
@@ -41,55 +66,60 @@ class WorkflowStep extends StatelessWidget {
   }
 }
 
-class _WorkflowRow extends StatelessWidget {
-  const _WorkflowRow({
+class _WorkflowTile extends StatelessWidget {
+  const _WorkflowTile({
+    required this.color,
     required this.icon,
+    required this.step,
     required this.label,
-    required this.description,
   });
 
+  final Color color;
   final IconData icon;
+  final int step;
   final String label;
-  final String description;
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = Theme.of(context).textTheme;
-
-    return Row(
-      children: [
-        Container(
-          width: 52,
-          height: 52,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.15),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(icon, color: Colors.white, size: 26),
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: textTheme.titleMedium?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                ),
+    return Container(
+      height: 160,
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          Icon(icon, color: Colors.white, size: 32),
+          Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.white.withValues(alpha: 0.3),
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              '$step',
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
               ),
-              const SizedBox(height: 4),
-              Text(
-                description,
-                style: textTheme.bodySmall?.copyWith(
-                  color: Colors.white.withValues(alpha: 0.9),
-                ),
-              ),
-            ],
+            ),
           ),
-        ),
-      ],
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+              fontSize: 12,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

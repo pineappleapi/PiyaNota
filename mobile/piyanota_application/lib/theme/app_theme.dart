@@ -21,30 +21,40 @@ class AppTheme {
 
   static const Color primaryBlue = gradientStart;
 
-  // Approximate — no dedicated dot color was sampled from Figma.
+  // Dropper-sampled from references/PIYA201_Onboarding_Steps.png (2026-09-19).
   static const Color dotActive = Color(0xFF1F2937);
-  static const Color dotInactive = Color(0xFFD9D9D9);
+  static const Color dotInactive = Color(0xFFC4C4C4);
 
-  // Approximate voice-part accent colors, read by eye off the PIYA-201
-  // voice-selection frame. Confirm/replace with exact hex once available.
-  static const Map<VoicePart, ({Color background, Color icon})> voiceAccents =
-      {
-    VoicePart.soprano: (
-      background: Color(0xFFF7DCE4),
-      icon: Color(0xFFE0648A),
-    ),
-    VoicePart.alto: (
-      background: Color(0xFFE3DEF6),
-      icon: Color(0xFF8B7ED8),
-    ),
-    VoicePart.tenor: (
-      background: Color(0xFFDBF2E3),
-      icon: Color(0xFF4FAE7C),
-    ),
-    VoicePart.bass: (
-      background: Color(0xFFDBEAF7),
-      icon: Color(0xFF4A90D9),
-    ),
+  // Onboarding-guide (PIYA-201) text/button tokens, dropper-sampled from
+  // references/PIYA201_Onboarding_Steps.png. Distinct from primaryBlue: the
+  // reference's onboarding CTA is measurably brighter than the brand blue
+  // used elsewhere.
+  static const Color onboardingHeadingDark = Color(0xFF272727);
+  static const Color onboardingBody = Color(0xFF717171);
+  static const Color onboardingSkipText = Color(0xFF8F8F8F);
+  static const Color onboardingButtonBlue = Color(0xFF38A3D5);
+
+  // Flat approximation of the teal->blue gradient the reference uses on
+  // accent heading text. A full-line accent (e.g. step 1/2's second heading
+  // line) renders with the real primaryGradient via ShaderMask instead; this
+  // flat token only covers partial-line accents (e.g. just the word "sing"
+  // mid-sentence), where shading part of a single text run isn't practical.
+  static const Color onboardingAccent = Color(0xFF109DB8);
+
+  // Workflow step (PIYA-201 step 2) tile fills, dropper-sampled.
+  static const Color workflowTileCapture = Color(0xFF52DDD1);
+  static const Color workflowTileWait = Color(0xFF3BB9CF);
+  static const Color workflowTileListen = Color(0xFF5FB7DA);
+
+  // Voice-selection card badge colors, dropper-sampled off the PIYA-201
+  // voice-selection frame. Each badge is a solid pastel circle with a flat
+  // white mic icon on top — unlike the old design, the color no longer needs
+  // a separate darker "icon" tone.
+  static const Map<VoicePart, Color> voiceAccents = {
+    VoicePart.soprano: Color(0xFFF1BDCE),
+    VoicePart.alto: Color(0xFFD0BFE4),
+    VoicePart.tenor: Color(0xFFBFEEBF),
+    VoicePart.bass: Color(0xFFB6D5EC),
   };
 
   /// Darkens [color] for a pressed-state SOP (see frontend-piyanota.md
