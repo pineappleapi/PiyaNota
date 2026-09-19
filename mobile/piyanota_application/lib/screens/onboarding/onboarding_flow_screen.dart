@@ -14,40 +14,41 @@ import 'widgets/progress_dots.dart';
 
 const _stepCount = 3;
 
-// Intro sequence (logo reveal -> header) timing, phased as fractions of
-// _introController's 0.0-1.0 range. Eyeballed against the reference capture
-// (mobile/piyanota_application/references/PiyaNota-Screens.mp4, 0:00-0:04) —
-// no Figma frame exists for this sequence, so these are tunable, not pinned.
-const _introDuration = Duration(milliseconds: 3000);
-const _iconFadeInterval = Interval(0.0, 0.22, curve: Curves.easeIn);
-const _joinInterval = Interval(0.22, 0.48, curve: Curves.easeOut);
-const _toHeaderInterval = Interval(0.62, 1.0, curve: Curves.easeInOut);
-const _bodyFadeInterval = Interval(0.75, 1.0, curve: Curves.easeIn);
+// Intro sequence (icon fade-in -> joins wordmark -> whole splash fades to
+// reveal onboarding) timing, phased as fractions of _introController's
+// 0.0-1.0 range. Eyeballed — no Figma frame exists for this sequence, so
+// these are tunable, not pinned.
+const _introDuration = Duration(milliseconds: 2600);
+const _iconFadeInterval = Interval(0.0, 0.25, curve: Curves.easeIn);
+const _joinInterval = Interval(0.28, 0.58, curve: Curves.easeOut);
+const _handoffInterval = Interval(0.75, 1.0, curve: Curves.easeInOut);
 
-// Lockup geometry at full (pre-header-shrink) size. The icon asset's canvas
-// is square, so width == height at any scale. The text asset's canvas is
-// 2000x596, so its width is derived from height via that aspect ratio.
+// Lockup geometry. The icon fades in at a larger "solo" size, then shrinks
+// down to the lockup size as it slides in next to the text. The icon
+// asset's canvas is square, so width == height at any scale. The text
+// asset's canvas is 2000x596, so its width is derived from height via that
+// aspect ratio.
+const _soloIconSize = 120.0;
 const _splashIconSize = 88.0;
 const _splashTextHeight = 54.0;
 const _splashTextAspect = 2000 / 596;
 const _lockupGap = 8.0;
 const _textSlideInOffset = 40.0;
 
-// Header (post-shrink, resting) geometry.
-const _headerIconSize = 28.0;
-const _headerTopPadding = 12.0;
-const _headerHeight = _headerTopPadding * 2 + _headerIconSize;
-const _headerScale = _headerIconSize / _splashIconSize;
+// Vertical anchor for the lockup: "near the top, not dead-center" per the
+// reference request, expressed as a fraction of screen height so it scales
+// across device sizes; clamped so it never crowds the status bar.
+const _logoAnchorFraction = 0.30;
 
 /// Orchestrates PIYA-201: a single continuous intro (icon fade-in -> joins
-/// wordmark text -> shrinks into a persistent header) followed by the
-/// 3-step swipeable guide (purpose -> workflow -> voice selection) ->
-/// Login (Skip) or Sign-Up (Get Started, final step only).
+/// wordmark text -> whole splash layer fades away) followed by the 3-step
+/// swipeable guide (purpose -> workflow -> voice selection) -> Login (Skip)
+/// or Sign-Up (Get Started, final step only).
 ///
 /// The intro used to be a separate `OnboardingSplash` screen that got
-/// swapped out entirely once finished. Per the reference capture, the logo
-/// instead morphs into this screen's header rather than cross-fading away,
-/// so the whole sequence now lives in one controller/build here.
+/// swapped out entirely once finished; it now lives in this screen's own
+/// controller so the handoff can be a real cross-fade instead of a hard
+/// widget swap.
 class OnboardingFlowScreen extends ConsumerStatefulWidget {
   const OnboardingFlowScreen({super.key});
 
@@ -112,132 +113,134 @@ class _OnboardingFlowScreenState extends ConsumerState<OnboardingFlowScreen>
     final isLastStep = _currentPage == _stepCount - 1;
     final size = MediaQuery.of(context).size;
     final topInset = MediaQuery.of(context).padding.top;
-    final screenCenter = Offset(size.width / 2, size.height / 2);
-    final headerCenter = Offset(
-      size.width / 2,
-      topInset + _headerTopPadding + _headerIconSize / 2,
+    final logoAnchorY = (size.height * _logoAnchorFraction).clamp(
+      topInset + _soloIconSize / 2 + 8,
+      size.height,
     );
+    final groupCenter = Offset(size.width / 2, logoAnchorY);
 
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(gradient: AppTheme.primaryGradient),
-        child: Stack(
-          children: [
-            SafeArea(
-              child: AnimatedBuilder(
-                animation: _introController,
-                builder: (context, child) {
-                  final bodyOpacity = _bodyFadeInterval.transform(
-                    _introController.value,
-                  );
-                  return IgnorePointer(
-                    ignoring: bodyOpacity < 1.0,
-                    child: Opacity(opacity: bodyOpacity, child: child),
-                  );
-                },
-                child: Column(
-                  children: [
-                    // Reserved space the animated logo settles into — keeps
-                    // this layout stable once the intro finishes.
-                    const SizedBox(height: _headerHeight),
-                    Align(
-                      alignment: Alignment.topRight,
-                      child: Padding(
-                        padding: const EdgeInsets.only(right: 8, top: 4),
-                        child: TextButton(
-                          onPressed: _skip,
-                          style: TextButton.styleFrom(
-                            foregroundColor: Colors.white,
-                          ),
-                          child: const Text('Skip'),
-                        ),
+      body: Stack(
+        children: [
+          // Onboarding content — revealed as the splash layer fades away.
+          AnimatedBuilder(
+            animation: _introController,
+            builder: (context, child) {
+              final bodyOpacity = _handoffInterval.transform(
+                _introController.value,
+              );
+              return IgnorePointer(
+                ignoring: bodyOpacity < 1.0,
+                child: Opacity(opacity: bodyOpacity, child: child),
+              );
+            },
+            child: SafeArea(
+              child: Column(
+                children: [
+                  Align(
+                    alignment: Alignment.topRight,
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 8, top: 4),
+                      child: TextButton(
+                        onPressed: _skip,
+                        child: const Text('Skip'),
                       ),
                     ),
-                    Expanded(
-                      child: PageView(
-                        controller: _pageController,
-                        onPageChanged: (index) =>
-                            setState(() => _currentPage = index),
-                        children: const [
-                          PurposeStep(),
-                          WorkflowStep(),
-                          VoiceSelectionStep(),
-                        ],
+                  ),
+                  Expanded(
+                    child: PageView(
+                      controller: _pageController,
+                      onPageChanged: (index) =>
+                          setState(() => _currentPage = index),
+                      children: const [
+                        PurposeStep(),
+                        WorkflowStep(),
+                        VoiceSelectionStep(),
+                      ],
+                    ),
+                  ),
+                  ProgressDots(
+                    stepCount: _stepCount,
+                    currentStep: _currentPage,
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(32, 24, 32, 16),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: PrimaryPillButton(
+                        label: isLastStep ? 'Get Started' : 'Next',
+                        backgroundColor: AppTheme.primaryBlue,
+                        foregroundColor: Colors.white,
+                        onPressed: _next,
                       ),
                     ),
-                    ProgressDots(
-                      stepCount: _stepCount,
-                      currentStep: _currentPage,
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(32, 24, 32, 16),
-                      child: SizedBox(
-                        width: double.infinity,
-                        child: PrimaryPillButton(
-                          label: isLastStep ? 'Get Started' : 'Next',
-                          backgroundColor: Colors.white,
-                          foregroundColor: AppTheme.primaryBlue,
-                          onPressed: _next,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
-            AnimatedBuilder(
-              animation: _introController,
-              builder: (context, _) {
-                final t = _introController.value;
-                final iconFadeT = _iconFadeInterval.transform(t);
-                final joinT = _joinInterval.transform(t);
-                final headerT = _toHeaderInterval.transform(t);
+          ),
+          // Splash layer — gradient background + logo lockup, fades out to
+          // hand off to the onboarding content beneath it.
+          AnimatedBuilder(
+            animation: _introController,
+            builder: (context, _) {
+              final t = _introController.value;
+              final iconFadeT = _iconFadeInterval.transform(t);
+              final joinT = _joinInterval.transform(t);
+              final splashOpacity = 1 - _handoffInterval.transform(t);
 
-                final groupScale = lerpDouble(1.0, _headerScale, headerT)!;
-                final groupCenter = Offset.lerp(
-                  screenCenter,
-                  headerCenter,
-                  headerT,
-                )!;
+              final textWidth = _splashTextHeight * _splashTextAspect;
+              final lockupWidth = _splashIconSize + _lockupGap + textWidth;
+              final iconLocalX = -(lockupWidth / 2 - _splashIconSize / 2);
+              final textLocalX = lockupWidth / 2 - textWidth / 2;
 
-                final textWidth = _splashTextHeight * _splashTextAspect;
-                final lockupWidth = _splashIconSize + _lockupGap + textWidth;
-                final iconLocalX = -(lockupWidth / 2 - _splashIconSize / 2);
-                final textLocalX = lockupWidth / 2 - textWidth / 2;
+              final iconSize = lerpDouble(
+                _soloIconSize,
+                _splashIconSize,
+                joinT,
+              )!;
+              final iconEntranceScale = lerpDouble(0.85, 1.0, iconFadeT)!;
+              final iconX = lerpDouble(0, iconLocalX, joinT)!;
+              final textX = lerpDouble(
+                textLocalX + _textSlideInOffset,
+                textLocalX,
+                joinT,
+              )!;
 
-                final iconX = lerpDouble(0, iconLocalX, joinT)!;
-                final textX = lerpDouble(
-                  textLocalX + _textSlideInOffset,
-                  textLocalX,
-                  joinT,
-                )!;
-
-                final iconEntranceScale = lerpDouble(0.85, 1.0, iconFadeT)!;
-                final iconRenderScale = iconEntranceScale * groupScale;
-                final textRenderScale = groupScale;
-
-                return Stack(
-                  children: [
-                    _LogoPiece(
-                      asset: 'assets/branding/Piyanota_App_Logo.png',
-                      center: groupCenter + Offset(iconX * groupScale, 0),
-                      width: _splashIconSize * iconRenderScale,
-                      height: _splashIconSize * iconRenderScale,
-                      opacity: iconFadeT,
+              return IgnorePointer(
+                child: Opacity(
+                  opacity: splashOpacity,
+                  child: Container(
+                    decoration: const BoxDecoration(
+                      gradient: AppTheme.primaryGradient,
                     ),
-                    _LogoPiece(
-                      asset: 'assets/branding/Piyanota_iyanota-text_logo.png',
-                      center: groupCenter + Offset(textX * groupScale, 0),
-                      width: textWidth * textRenderScale,
-                      height: _splashTextHeight * textRenderScale,
-                      opacity: joinT,
+                    width: double.infinity,
+                    height: double.infinity,
+                    child: Stack(
+                      children: [
+                        _LogoPiece(
+                          asset: 'assets/branding/Piyanota_App_Logo.png',
+                          center: groupCenter + Offset(iconX, 0),
+                          width: iconSize * iconEntranceScale,
+                          height: iconSize * iconEntranceScale,
+                          opacity: iconFadeT,
+                        ),
+                        _LogoPiece(
+                          asset:
+                              'assets/branding/Piyanota_iyanota-text_logo.png',
+                          center: groupCenter + Offset(textX, 0),
+                          width: textWidth,
+                          height: _splashTextHeight,
+                          opacity: joinT,
+                        ),
+                      ],
                     ),
-                  ],
-                );
-              },
-            ),
-          ],
-        ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
       ),
     );
   }
