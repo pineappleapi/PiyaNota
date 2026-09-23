@@ -81,7 +81,7 @@ later stages import functions from earlier ones rather than duplicating logic.
    group to strip lyric text before detection — active in `preprocess_score_image` (this doc
    previously said it was disabled/commented out; verified 2026-09-09 that it has actually been
    active all along, unrelated to the in-progress illumination-normalization/border-blanking rework).
-   **Camera-photo rectification (2026-09-24, branch `piya106/two-seed-rerun-amendment`, uncommitted/unmerged;
+   **Camera-photo rectification (2026-09-24, branch `piya106/two-seed-rerun-amendment`, committed, unmerged;
    BUG-013/BUG-001):** `track_staff_curves()` follows each 5-line staff as a curve (tolerates tilt, curl,
    uneven spacing); `dewarp_to_staff_grid()` straightens each staff with a per-column vertical remap, only
    when drift ≥ `DEWARP_MIN_DRIFT_PX` (5 px) so clean screenshots stay bit-identical; tracked staff rows are
