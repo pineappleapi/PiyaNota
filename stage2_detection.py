@@ -3,6 +3,7 @@ PiyaNota - Stage 2: Staff Region Detection (YOLOv8)
 Detects and extracts individual staff strips from preprocessed score pages.
 """
 
+import json
 import logging
 
 import cv2
@@ -11,6 +12,8 @@ from pathlib import Path
 
 # Ultralytics YOLOv8 — install with: pip install ultralytics
 from ultralytics import YOLO
+
+from stage1_preprocessing import StaffCurve, track_staff_curves
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +30,15 @@ STRIP_HEIGHT   = 250    # fixed height for CRNN-CTC input (px) — overridden be
                         # actually takes effect since Python resolves the global at call time)
 
 
+# Classical-prior reconciliation (BUG-001). YOLO alone returns 10/12 staves on
+# some camera photos; an independent line-tracking count validates and repairs it.
+BINARY_THRESHOLD = 127          # preprocessed pages are already binary; any mid value works
+MATCH_MAX_CENTER_SPACINGS = 2.5  # YOLO box center may sit this many line-spacings off a curve and still "agree"
+CLASSICAL_BOX_HALF_SPACINGS = 2.75  # half-height of a classical box: 2 spacings of staff + ~0.75 margin
+MAX_BOXES_PER_PAGE = 16          # Rule 2 cap (4 systems x 4 voices)
+STAFFS_PER_SYSTEM = 4
+
+
 def detect_staff_regions(
     preprocessed_images: list,
     model_weights: str = "staff_detector_files\\weights\\best.pt",
@@ -34,7 +46,15 @@ def detect_staff_regions(
     save_strips: bool = True,
     save_viz: bool = False,          # ← new flag
     viz_dir: str = "data/detection_viz",
+    manifest_path: str | None = None,
 ) -> dict:
+    """Detects staves per page and crops one fixed-height strip per staff.
+
+    Args:
+        manifest_path: If set, writes a JSON list of {strip_id, page, system,
+            voice, box, source} so a strip can be traced back to its page region.
+    """
+    manifest: list[dict] = []
     output_path = Path(output_dir)
     if save_strips:
         output_path.mkdir(parents=True, exist_ok=True)
@@ -74,6 +94,9 @@ def detect_staff_regions(
         # Rule 3.5: remove duplicate detections on the same staff
         boxes = _remove_duplicates(boxes, min_cy_gap=30)
 
+        # Rule 3.55: cross-check against the classical staff tracker (BUG-001).
+        boxes = _reconcile_with_classical(boxes, image_bgr, page_index)
+
         # Rule 3.6: staff-count validation — open-score enforcement (PIYA-105 #4)
         if len(boxes) != 0 and len(boxes) % 4 != 0:
             raise ValueError(
@@ -110,14 +133,78 @@ def detect_staff_regions(
                 strip_id = f"page{page_index:03d}_sys{sys_idx:02d}_{voice}_vidx{v_idx}"
                 strip = _crop_and_resize(image_bgr, box, STRIP_HEIGHT, strip_id=strip_id)
                 voice_sequences[voice].append((strip, page_index, sys_idx, voice, v_idx))
+                manifest.append({
+                    "strip_id": strip_id, "page": page_index, "system": sys_idx,
+                    "voice": voice, "source": box.get("source", "yolo"),
+                    "box": {k: int(box[k]) for k in ("x1", "y1", "x2", "y2")},
+                })
                 logger.info("strip_id=%s dims=%dx%d (wxh)", strip_id, strip.shape[1], strip.shape[0])
 
                 if save_strips:
                     fname = output_path / f"{strip_id}.png"
                     cv2.imwrite(str(fname), strip)
 
+    if manifest_path is not None:
+        Path(manifest_path).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     _report(voice_sequences)
     return voice_sequences
+
+def _classical_boxes(image_bgr: np.ndarray) -> tuple[list[dict], list[StaffCurve]]:
+    """Finds staves by line tracking and returns one full-width box per staff.
+
+    Why classical: it has no training distribution, so it cannot share YOLO's
+    font/domain gap, and it gives an independent staff count on tilted pages.
+
+    Args:
+        image_bgr: Preprocessed page (Stage 1 output).
+
+    Returns:
+        (boxes sorted top-to-bottom, matching curves).
+    """
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+    _, binary = cv2.threshold(gray, BINARY_THRESHOLD, 255, cv2.THRESH_BINARY)
+    curves = track_staff_curves(binary)
+    img_h, img_w = binary.shape
+    boxes: list[dict] = []
+    for c in curves:
+        spacing = float(np.median(c.spacing_at(np.linspace(c.x_min, c.x_max, 32))))
+        half = CLASSICAL_BOX_HALF_SPACINGS * spacing
+        cy = c.mean_center
+        boxes.append({
+            "x1": 0, "x2": img_w,
+            "y1": max(0, int(round(cy - half))), "y2": min(img_h, int(round(cy + half))),
+            "cy": cy, "conf": 1.0, "source": "classical", "spacing": spacing,
+        })
+    return boxes, curves
+
+
+def _reconcile_with_classical(boxes: list, image_bgr: np.ndarray, page_index: int) -> list:
+    """Keeps YOLO's boxes when the classical tracker agrees; otherwise repairs them.
+
+    Agreement means the same count and every YOLO center within
+    MATCH_MAX_CENTER_SPACINGS of its curve, so clean pages keep YOLO's exact
+    output (no regression). On disagreement the classical boxes replace YOLO's
+    (fills missed staves, drops spurious/duplicate ones) but only if they form a
+    valid open-score layout; otherwise YOLO's result is returned and the caller's
+    divisible-by-4 validation still applies (PIYA-105 #4).
+    """
+    classical, _ = _classical_boxes(image_bgr)
+    n_c, n_y = len(classical), len(boxes)
+    if n_c == 0 or n_c > MAX_BOXES_PER_PAGE:
+        return boxes
+    if n_c == n_y and all(
+        abs(y["cy"] - c["cy"]) <= MATCH_MAX_CENTER_SPACINGS * c["spacing"]
+        for y, c in zip(boxes, classical)
+    ):
+        return boxes
+    if n_c % STAFFS_PER_SYSTEM != 0:
+        print(f"[Stage 2] page {page_index}: classical count {n_c} not divisible by "
+              f"{STAFFS_PER_SYSTEM}; keeping YOLO's {n_y}.")
+        return boxes
+    print(f"[Stage 2] page {page_index}: YOLO found {n_y}, line tracker found {n_c} "
+          f"-> using line-tracked staves.")
+    return classical
+
 
 def _remove_duplicates(boxes: list, min_cy_gap: int = 30) -> list:
     """
@@ -147,7 +234,8 @@ def _draw_and_save_viz(image_bgr, boxes, page_index, output_path,
     for sys_idx, system in enumerate(systems, start=1):
         for v_idx, box in enumerate(system, start=1):
             voice = VOICE_MAP.get(v_idx, f"Voice_{v_idx}")
-            label = f"S{sys_idx} {voice} ({box['conf']:.2f})"
+            src = box.get("source", "yolo")
+            label = f"S{sys_idx} {voice} ({src} {box['conf']:.2f})"
             cv2.rectangle(canvas, (box["x1"], box["y1"]),
                           (box["x2"], box["y2"]), box_color, box_thickness)
             (tw, th), baseline = cv2.getTextSize(
