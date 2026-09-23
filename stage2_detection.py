@@ -24,10 +24,7 @@ VOICE_MAP = {1: "Soprano", 2: "Alto", 3: "Tenor", 4: "Bass"}
 # Detection thresholds
 CONF_THRESHOLD = 0.4   # minimum confidence to keep a detection
 NMS_THRESHOLD  = 0.3   # IoU threshold for Non-Maximum Suppression
-STRIP_HEIGHT   = 250    # fixed height for CRNN-CTC input (px) — overridden below (BUG-011
-                        # review flagged this duplicate definition as a silent-flip risk if
-                        # the file is reordered; the line-250 reassignment is the one that
-                        # actually takes effect since Python resolves the global at call time)
+STRIP_HEIGHT   = 64     # fixed height for CRNN-CTC input (px); must equal Stage 3's img_height
 
 
 # Classical-prior reconciliation (BUG-001). YOLO alone returns 10/12 staves on
@@ -357,8 +354,6 @@ def _extract_boxes(results) -> list:
             })
     return boxes
 
-
-STRIP_HEIGHT = 64   # ← match Stage 3 img_height directly
 
 # ── BUG-011 / fix/bug002-label-bleed: left-margin (voice-label) blanking ─────
 # Two independent blanking techniques were tried and reverted here -- see

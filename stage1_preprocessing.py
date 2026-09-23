@@ -110,6 +110,13 @@ STAFF_EXT_SLOPE_POINTS   = 5      # trailing points used to re-estimate the loca
 STAFF_PROTECT_MARGIN_SPACINGS = 1.25  # rows kept around a tracked staff (ledger lines, clef tails) when undoing over-blanking
 DEWARP_MIN_DRIFT_PX      = 5.0    # skip dewarp unless some staff drifts at least this much (already-straight input stays bit-identical)
 STAFF_LINES_PER_STAFF    = 5
+STAFF_GROUP_TOL_ABS_PX   = 1.8    # 5-line grouping: absolute floor on the gap-match tolerance (px)...
+STAFF_GROUP_TOL_REL      = 0.2    # ...or this fraction of the line gap, whichever is larger
+STAFF_FIT_CUBIC_MIN_POINTS = 25   # enough block detections to trust a cubic center-line fit
+STAFF_FIT_QUAD_MIN_POINTS  = 12   # enough for a quadratic; fewer falls back to a straight line
+STAFF_PREDICT_POINTS     = 6      # trailing points used to predict where a track continues
+STAFF_END_STATE_POINTS   = 8      # points nearest a track end used to estimate its end slope
+KNOT_EPSILON_PX          = 1e-3   # per-knot nudge that keeps dewarp remap knots strictly increasing
 
 
 @dataclass
@@ -470,7 +477,7 @@ def _group_five_lines(peaks: list[float]) -> list[tuple[float, float]]:
             chain, last = [i, j], j
             for _ in range(STAFF_LINES_PER_STAFF - 2):
                 target = peaks[last] + gap
-                tol = max(1.8, 0.2 * gap)
+                tol = max(STAFF_GROUP_TOL_ABS_PX, STAFF_GROUP_TOL_REL * gap)
                 cands = [m for m in range(last + 1, n) if abs(peaks[m] - target) <= tol]
                 if not cands:
                     break
@@ -548,7 +555,7 @@ def _group_five_lines_with_hint(peaks: list[float], spacing: float) -> list[tupl
 
 def _predict_track_y(track: dict, x: float) -> float:
     """Predicts a track's center y at column x from a line through its last points."""
-    pts = track["pts"][-6:]
+    pts = track["pts"][-STAFF_PREDICT_POINTS:]
     if len(pts) >= 3:
         xs = np.array([p[0] for p in pts])
         ys = np.array([p[1] for p in pts])
@@ -586,8 +593,8 @@ def _link_block_detections(per_block: list[list[tuple[float, float, float]]], sp
 
 
 def _end_state(track: dict, at_end: bool) -> tuple[float, float, float]:
-    """(x, y, slope) at one end of a track, slope from the ~8 points nearest that end."""
-    pts = track["pts"][-8:] if at_end else track["pts"][:8]
+    """(x, y, slope) at one end of a track, slope from the STAFF_END_STATE_POINTS points nearest that end."""
+    pts = track["pts"][-STAFF_END_STATE_POINTS:] if at_end else track["pts"][:STAFF_END_STATE_POINTS]
     xs = np.array([p[0] for p in pts])
     ys = np.array([p[1] for p in pts])
     slope = float(np.polyfit(xs, ys, 1)[0]) if len(pts) >= 3 and np.ptp(xs) > 0 else 0.0
@@ -710,7 +717,12 @@ def _fit_staff_curve(pts: list[tuple[float, float, float]]) -> StaffCurve | None
     ds = np.array([p[2] for p in pts], dtype=np.float64)
     order = np.argsort(xs)
     xs, ys, ds = xs[order], ys[order], ds[order]
-    degree = 3 if len(xs) >= 25 else 2 if len(xs) >= 12 else 1
+    if len(xs) >= STAFF_FIT_CUBIC_MIN_POINTS:
+        degree = 3
+    elif len(xs) >= STAFF_FIT_QUAD_MIN_POINTS:
+        degree = 2
+    else:
+        degree = 1
     coeffs = np.polyfit(xs, ys, degree)
     keep = np.abs(np.polyval(coeffs, xs) - ys) <= STAFF_FIT_OUTLIER_PX
     if keep.sum() >= max(degree + 2, STAFF_TRACK_MIN_POINTS):
@@ -840,7 +852,7 @@ def dewarp_to_staff_grid(image: np.ndarray, curves: list[StaffCurve]) -> np.ndar
     # Destination knots must stay strictly increasing even if two staves'
     # mean centers are unusually close.
     order = np.arange(len(dst_knots))
-    dst_knots = np.maximum.accumulate(dst_knots + order * 1e-3)
+    dst_knots = np.maximum.accumulate(dst_knots + order * KNOT_EPSILON_PX)
 
     src_knots = np.empty((len(dst_knots), w))
     for k, c in enumerate(curves):
@@ -848,7 +860,7 @@ def dewarp_to_staff_grid(image: np.ndarray, curves: list[StaffCurve]) -> np.ndar
         d = c.spacing_at(xs)
         src_knots[2 * k] = center - half * d
         src_knots[2 * k + 1] = center + half * d
-    src_knots = np.maximum.accumulate(src_knots + order[:, None] * 1e-3, axis=0)
+    src_knots = np.maximum.accumulate(src_knots + order[:, None] * KNOT_EPSILON_PX, axis=0)
 
     rows = np.arange(h, dtype=np.float64)
     map_y = np.empty((h, w), dtype=np.float32)
@@ -864,7 +876,13 @@ def dewarp_to_staff_grid(image: np.ndarray, curves: list[StaffCurve]) -> np.ndar
 
 
 def needs_dewarp(curves: list[StaffCurve]) -> bool:
-    """True when at least one staff drifts enough for axis-aligned boxes to cut across it."""
+    """True when at least one staff drifts enough for axis-aligned boxes to cut across it.
+
+    Deliberately ``any`` rather than a majority: a single badly bent staff already makes
+    axis-aligned boxes cut through it. The trade-off is that one phantom curve (a false
+    tracker hit) can trigger a whole-page warp; the tracker's span/residual filters are
+    the guard against that.
+    """
     return any(c.drift_px >= DEWARP_MIN_DRIFT_PX for c in curves)
 
 
@@ -879,7 +897,7 @@ def _binarize(gray: np.ndarray) -> np.ndarray:
     )
 
 
-def _draw_staff_curves(binary: np.ndarray, curves: list["StaffCurve"]) -> np.ndarray:
+def _draw_staff_curves(binary: np.ndarray, curves: list[StaffCurve]) -> np.ndarray:
     """Debug overlay: each tracked staff's center-line and its 5-line extent."""
     canvas = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
     xs = np.arange(0, binary.shape[1], 8, dtype=np.float64)
