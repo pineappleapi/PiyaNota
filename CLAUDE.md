@@ -81,6 +81,11 @@ later stages import functions from earlier ones rather than duplicating logic.
    group to strip lyric text before detection — active in `preprocess_score_image` (this doc
    previously said it was disabled/commented out; verified 2026-09-09 that it has actually been
    active all along, unrelated to the in-progress illumination-normalization/border-blanking rework).
+   **Camera-photo rectification (2026-09-24, branch `piya106/two-seed-rerun-amendment`, uncommitted/unmerged;
+   BUG-013/BUG-001):** `track_staff_curves()` follows each 5-line staff as a curve (tolerates tilt, curl,
+   uneven spacing); `dewarp_to_staff_grid()` straightens each staff with a per-column vertical remap, only
+   when drift ≥ `DEWARP_MIN_DRIFT_PX` (5 px) so clean screenshots stay bit-identical; tracked staff rows are
+   restored after border/lyric blanking (which previously erased real staves on camera pages).
 
 2. **`stage2_detection.py`** — runs a fine-tuned YOLOv8 model (`staff_detector_files/weights/best.pt`)
    to find staff-line bounding boxes on each preprocessed page, then:
@@ -92,6 +97,11 @@ later stages import functions from earlier ones rather than duplicating logic.
      layout with no missing/extra staves per system**
    - crops + resizes each staff into a fixed-height strip (`STRIP_HEIGHT = 64`, matching Stage 3's
      CRNN input height) for the CRNN
+   - `_reconcile_with_classical()` cross-checks YOLO against Stage 1's tracked staves: same count and
+     centres → YOLO boxes kept unchanged; otherwise tracked staves are used **only if** their count is
+     divisible by 4, else YOLO's boxes stay and the divisible-by-4 `ValueError` still fires. On the 7
+     Both Sides Now camera photos (tracker + YOLO) this gives 12/12/12/12/12/12/8 staves, all correct (was
+     6–13 per page). Developed on those photos — not an independent eval; see BUG-013.
    Also contains `train_yolov8()` / `evaluate_model()`, reused by `train_staff_detector.py`.
 
 3. **`stage3_transcription.py`** — the core recognition stage: `CRNN` (ResNet-style CNN backbone →
