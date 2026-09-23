@@ -307,6 +307,21 @@ to whether the actual BUG-011 real-screenshot fix works — it's purely about tr
 confidence/uncertainty problem (step 7) remains untouched. Steps 3–7 (fresh held-out real test set →
 single evaluation → confidence re-check) are not yet started.
 
+## Run provenance & inference determinism (in progress, 2026-09-23)
+
+**Start with `docs/NEXT-SESSION.md` → "2026-09-23 session"**; it has the full state and the ordered
+checklist. Summary: `run_manifest.py` (new, PIYA-106, on branch `feature/piya106-run-manifest`,
+**uncommitted, not yet fully verified**) writes `runs/omr/<run_id>/manifest.json` per pipeline run. It
+records checkpoint SHA-256 hashes plus the CRNN epoch, input hashes, git commit, environment, params,
+per-stage timings, and per-strip raw CRNN tokens with confidences. Stages 1/2/3/5 take an optional
+`manifest=` argument, and the Stage 3/4/5 CLIs create one (`--runs-dir`). Verification is blocked on
+**BUG-013 (suspected)**: on the dev GPU (GTX 1650), unmodified Stage 3 gave different events across
+two runs with byte-identical strips, then cuDNN crashed and the driver hung. **Until BUG-013 is
+resolved, treat any accuracy number measured on this machine's GPU as unverified.** Findings from the
+same session's Tenor-strip diagnosis are logged as BUG-014 (viz filename collision), BUG-015 (tuplets
+unrepresentable), BUG-016 (binarized-input / bracket / spacing train–inference mismatch, hypothesis)
+and BUG-017 (no provenance + dead `D:\PiyaNota (Code)` defaults).
+
 ## Git
 
 Commit messages: `PIYA-XXX: <summary>`. Never commit without explicit user review and approval first.

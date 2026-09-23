@@ -7,6 +7,10 @@ import logging
 import cv2
 import numpy as np
 from pathlib import Path
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from run_manifest import RunManifest
 
 logger = logging.getLogger(__name__)
 
@@ -516,7 +520,8 @@ def blank_lyrics_regions(binary: np.ndarray) -> np.ndarray:
     return result
 
 
-def preprocess_batch(image_dir: str, output_dir: str, save_debug: bool = False) -> list:
+def preprocess_batch(image_dir: str, output_dir: str, save_debug: bool = False,
+                     manifest: Optional["RunManifest"] = None) -> list:
     input_path = Path(image_dir)
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -536,6 +541,8 @@ def preprocess_batch(image_dir: str, output_dir: str, save_debug: bool = False) 
         cv2.imwrite(str(out_file), corrected)
         print(f"  Saved -> {out_file}")
         results.append((corrected, i))
+        if manifest is not None:
+            manifest.add_input(i, img_file, preprocessed_path=out_file)
 
     print(f"\n[Stage 1] Preprocessed {len(results)} page(s). Output: {output_dir}")
     return results

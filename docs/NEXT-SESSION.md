@@ -1,7 +1,172 @@
 # Next Session — Start Here
 
 Handoff doc for continuing PiyaNota work in a fresh session. Read this first; it links out to the
-full detail rather than repeating it. Written 2026-09-14, rewritten 2026-09-16, rewritten 2026-09-19.
+full detail rather than repeating it. Written 2026-09-14, rewritten 2026-09-16, rewritten 2026-09-19,
+**2026-09-23 section prepended** (the 2026-09-19 retraining handoff below it is still current).
+
+## 2026-09-23 session — resume here after the PC restart
+
+**Why the restart:** mid-session the GPU/driver wedged (`CUDNN_STATUS_EXECUTION_FAILED` in the CRNN's
+BiLSTM, then `nvidia-smi` itself hung). The user restarted the PC to reset it. First thing to check on
+resume: `nvidia-smi` responds and `python -c "import torch; print(torch.cuda.is_available())"` is
+`True`.
+
+**Current branch:** `feature/piya106-run-manifest` (branched from `main` @ `2351623`). **Nothing
+committed yet** — all work below is uncommitted in the working tree. Don't commit without the user's
+review (standing rule); senior-reviewer must review before any merge.
+
+### What was done
+
+1. **Tenor strip diagnosis (ml-cv-lead).** The user asked whether Stage 3 correctly transcribed
+   `data/strips/page001_sys02_Tenor_vidx3.png` (source `data/raw/IMG_1085.JPG`) with the **base**
+   checkpoint `music_symbol_detection/crnn_cameraprimus_transcription.pt`. Verdict: **no** — wrong
+   clef (`clef.C-L3` vs treble-8vb `G-L2`), flats instead of the 4-sharp key signature, a hallucinated
+   `metersign.C`, invented eighth/beamed/sixteenth-rest content, every duration wrong; only the
+   barline count (3) matched. Ranked causes: (1) font domain gap = BUG-011 (dominant, needs
+   retraining); (2) binarized input + 3× thick stafflines vs Camera-PrIMuS grayscale (BUG-016,
+   preprocessing-testable); (3) system bracket/double barline left of the clef possibly read as a
+   C-clef half (BUG-016, hypothesis); (4) triplets unrepresentable in the vocabulary (BUG-015);
+   (5) ~2–3× wider note spacing than training (BUG-016, hypothesis). Ruled out: staff height/padding,
+   normalization/polarity. Also logged: viz filename collision across systems (BUG-014).
+   Suggested single-variable experiments are listed in BUG-016's repro column.
+2. **Run provenance tracking — `run_manifest.py` (new, PIYA-106, closes the provenance half of
+   BUG-017).** User decisions: ticket **PIYA-106**; manifests saved per run to
+   **`runs/omr/<run_id>/manifest.json`** (`runs/` is already git-ignored); **per-strip raw tokens +
+   per-token confidences included**. Records git commit/dirty files, argv/args, environment
+   (Python, torch/CUDA/cuDNN, GPU, pinned package versions), SHA-256 + size + mtime of CRNN/YOLO/
+   soundfont (CRNN also records its `epoch`), raw input image hashes → page index, params (YOLO
+   thresholds, `STRIP_HEIGHT`, CRNN img height, device, bpm), per-stage status + duration, per-strip
+   tokens/confidences, hashed outputs (events JSONs, audio). Used as a context manager so failed runs
+   still write a manifest with the failing stage + traceback.
+   - Wiring (all additive, `manifest: Optional[RunManifest] = None`): `preprocess_batch()` (Stage 1),
+     `detect_staff_regions()` (Stage 2), `process_strip()` + `transcribe_voice_sequences()`
+     (Stage 3), `run_full_pipeline()` (Stage 5); the `__main__` blocks of Stages 3/4/5 create the
+     manifest and gained a `--runs-dir` flag. `process_strip()` now calls `transcribe_strip(...,
+     return_confidence=True)` — the decoded symbols are identical by construction
+     (`_greedy_ctc_decode` wraps the confidence decoder), but this is **not yet empirically
+     confirmed** (see below).
+   - Diff: `run_manifest.py` (new), `stage1_preprocessing.py`, `stage2_detection.py`,
+     `stage3_transcription.py`, `stage4_reconstruction.py`, `stage5_synthesis.py`.
+
+### Verified so far
+
+- All six files compile (`python -m py_compile`).
+- One full Stage 1→3 CLI run into scratch dirs wrote a correct manifest: base CRNN identified by
+  sha256 `b1c9803c…d47e`, epoch 11; YOLO `f55bb851…8213`; GTX 1650 / CUDA 12.4 / cuDNN 90100.
+- Fixed a bug where `git status --porcelain` output was `.strip()`-ed, eating the first file's
+  leading character (`.gitignore` → `gitignore`); re-checked.
+
+### NOT yet verified — do these next, in order
+
+1. **BUG-013 determinism check (blocks everything below) — DONE for the purpose of unblocking the
+   rest; GPU-side stress-testing deliberately stopped short.** Post-restart, `nvidia-smi`/
+   `torch.cuda.is_available()` both came back healthy. Ran a fresh version of last session's scratch
+   script (3× fresh-process decode of the 48 saved strips, `load_model()` + `transcribe_strip()` on
+   `sorted(glob(strips/*.png))`) on CPU and CUDA. **CPU: 3/3 identical — confirmed stable, not a
+   code-level nondeterminism.** **CUDA: crashed on the 2nd of 3 runs** with the same
+   `CUDNN_STATUS_EXECUTION_FAILED` as before the restart — reproduced, so this is real and
+   GPU-specific, not a fluke. Right after, the GPU briefly refused even a trivial matmul
+   (`CUDA-capable device(s) is/are busy or unavailable`) but self-recovered within ~1 min this time, no
+   second restart needed. Full detail: BUG-013 in `docs/bug-tracker.md`. **User decision (2026-09-23):
+   stop GPU testing, proceed CPU-only** — remaining sub-checks (GPU-stable 3/3, CPU==GPU, retry with
+   `cudnn.deterministic=True`/`benchmark=False`) are intentionally not done and are **not planned**
+   unless the user asks to resume them. All verification below runs CPU-only per that decision.
+2. **No-behaviour-change check for the manifest branch — DONE, 2026-09-23, CPU-only, identical.** Ran
+   HEAD's Stage 1–3 (exported via `git show HEAD:<file>` into a scratch dir, confirmed zero
+   `run_manifest`/`RunManifest` references) against the branch's Stage 1–3 (working tree, wired through
+   a real `RunManifest` exactly as the CLI's `__main__` block does), same input
+   (`data/raw/IMG_1085.JPG`), both CPU-forced. CPU-forcing note: `CUDA_VISIBLE_DEVICES=""` alone wasn't
+   enough — Ultralytics' YOLO call carries a `device="0"` default baked into the checkpoint's training
+   args, which crashes (`Invalid device id`) once the GPU is hidden from torch, and something in its
+   `device="cpu"` codepath also re-enables `torch.cuda.is_available()` afterwards; the test harness
+   (disposable driver scripts, not repo code) patches `ultralytics.engine.model.Model.__call__` to
+   default `device="cpu"` and pins `torch.cuda.is_available = lambda: False` before Stage 3 loads.
+   Result: preprocessed page, all detected strip crops, and all 4 voice `events.json` files
+   (soprano/alto/tenor/bass) are **byte-for-byte identical** between HEAD and the branch (`diff`/
+   `diff -rq` both clean). The branch's `manifest.json` for that run shows `status: completed`, all
+   three stages `completed` with durations, correct dirty git commit — confirms the manifest captures
+   provenance without altering pipeline output.
+3. **Failure-path test — DONE, 2026-09-23, all checks pass.** `with RunManifest(runs_root=<scratch>)
+   as m:` with `stage1_preprocessing` completing normally then `stage2_detection` raising
+   `ValueError`. Confirmed: exception re-raised out of the `with` block (not swallowed); manifest
+   top-level `status: "failed"`; `stages` shows `stage1_preprocessing: completed`,
+   `stage2_detection: failed`; `error` block present with `type: "ValueError"`, the original message,
+   and a non-empty traceback. One environment wrinkle (not a `run_manifest.py` bug): `_environment_info()`
+   calls `torch.cuda.get_device_name(0)` gated on `torch.cuda.is_available()`, and in this environment
+   `CUDA_VISIBLE_DEVICES=""` alone doesn't reliably make `is_available()` return `False` (same quirk hit
+   in item 2 — see there for detail), so the CPU-only test harness pins
+   `torch.cuda.is_available = lambda: False` directly rather than relying on the env var.
+4. **Stage 4 CLI path and Stage 5 `run_full_pipeline()` path — DONE, 2026-09-23, both clean, CPU-only.**
+   Stage 4's own `__main__` (Stages 1→4, real `RunManifest`) ran to completion: 48/37/32/36 events for
+   S/A/T/B (matching item 2's counts exactly, same input), 5 pre-existing SATB duration-mismatch
+   warnings printed (expected data-quality noise from this test image's transcription, unrelated to the
+   manifest diff — not a regression). `run_full_pipeline()` (Stages 1→5) also ran to completion:
+   `pydub`/`midi2audio` are confirmed not installed in this environment, so Stage 5 hit the documented
+   fallback and returned `.mid` paths for all 4 voices instead of `.mp3` — exactly the anticipated,
+   acceptable outcome, not a failure. Both manifests show `status: "completed"`, all 4–5 stages
+   `completed` with durations; the Stage 5 manifest additionally shows the missing `soundfont/piano.sf2`
+   recorded honestly as `{"exists": false}` rather than silently dropped or crashing, and all 8 expected
+   `outputs` entries (4× events, 4× audio) present. One self-inflicted slip during this check: the Stage
+   4 driver script omitted explicit `events_dir`/`viz_dir` overrides, so `transcribe_voice_sequences()`
+   fell through to its dead `D:\PiyaNota (Code)\...` default (BUG-017, already logged, out of scope)
+   and wrote 8 scratch files there — noticed and deleted immediately, not left behind; this was a test
+   script oversight, not a manifest-branch behavior change.
+5. **Self-verify + senior-reviewer — DONE, 2026-09-23. Verdict: recommend merge with changes; one
+   real bug found and fixed.** senior-reviewer's most important finding: `RunManifest.__exit__`
+   (`run_manifest.py`) only guarded `write()` against `OSError`, but `write()`'s `json.dump()` had no
+   `default=` fallback — a non-JSON-serializable value anywhere in the manifest data (concretely:
+   `checkpoint.get("epoch")` flowing into `add_asset(..., extra=...)` at
+   `stage3_transcription.py:1721`, whose type depends on how the Kaggle notebook serialized it) would
+   raise `TypeError` inside `__exit__`, which Python would then substitute for the real pipeline
+   exception already propagating — silently discarding the actual failure this feature exists to make
+   traceable. **Fixed:** `write()` now passes `default=str` to `json.dump`; `__exit__`'s guard widened
+   from `except OSError` to `except (OSError, TypeError, ValueError)`. Verified with two targeted
+   scenarios: (a) a non-serializable value in manifest data now writes cleanly via the `str` fallback;
+   (b) an unfixable write error (circular reference, which `default=str` can't help) occurring while an
+   original `ValueError` is already propagating now correctly surfaces the original `ValueError`, not
+   the write failure — confirmed the original masking behavior is gone. Re-ran the item-2
+   no-behaviour-change check after the fix: all 4 voice `events.json` files still byte-identical to
+   HEAD — the fix doesn't touch the normal-path data captured, only the failure path.
+
+   Six other findings, **not yet acted on, left for you to weigh in on**:
+   - `process_strip()` always calls `transcribe_strip(..., return_confidence=True)` even when
+     `manifest=None`, paying for confidence-decode overhead on every strip regardless of whether
+     anything reads it — not an output-correctness bug (verified: decoded symbols are identical
+     either way), but not literally free/additive either. Could gate on `return_confidence=manifest is
+     not None`.
+   - The shared hash-cache file (`sha256_file()`'s size+mtime fingerprint cache) has no file locking
+     and a non-atomic write — safe for a single sequential pipeline run (confirmed: a changed file
+     always re-hashes, a corrupted cache self-heals), but a real race risk if this backend ever serves
+     concurrent pipeline runs (relevant if Module 3 becomes multi-worker).
+   - Several new `RunManifest` methods (`set_params`, `add_input`, `add_stage_info`, `write`,
+     `__enter__`/`__exit__`) have no docstring, inconsistent with the rest of the module
+     (`add_asset`/`add_strip`/`stage()` are documented) and with CLAUDE.md's blanket Google-style-
+     docstring rule.
+   - `self.data`'s loose `Dict[str, JsonValue]` typing needs six `# type: ignore[...]` comments to
+     mutate — a `TypedDict` or small per-section dataclass would model it more honestly.
+   - Git hygiene: the working tree currently mixes the actual PIYA-106/BUG-017 code change with this
+     session's unrelated doc updates (BUG-013–016, this file, a CLAUDE.md section) *and* untracked,
+     pre-existing cruft from the earlier PIYA-201 mobile-scaffold session
+     (`.claude/skills/video-analyzer/`, `mobile/piyanota_application/references/` — the latter has a
+     51 MB `.mp4`) — a `git add -A`/`git add .` when committing would sweep all of it in. Must stage
+     named files only; the BUG-013–016 doc updates arguably belong in a separate commit from the
+     BUG-017 code fix.
+   - `_greedy_ctc_decode` was refactored to route through a new `_greedy_ctc_decode_with_confidence`
+     rather than left untouched with confidence tracking bolted on separately — behavior-preserving
+     (backed by the byte-identical no-behaviour-change result) but worth calling out explicitly as a
+     second, distinct kind of change bundled into what's otherwise described as additive wiring.
+
+   Commit message prefix: `PIYA-106:` — only after user approval; still nothing committed.
+
+### Deliberately out of scope (logged, not fixed)
+
+- Dead `D:\PiyaNota (Code)\...` defaults in `stage3_transcription.py` (BUG-017, second half).
+- Viz filename collision (BUG-014), tuplets (BUG-015), input-distribution experiments (BUG-016).
+- The user was offered — and has not yet answered — a small script to run BUG-016's experiments.
+
+---
+
+## Retraining handoff (written 2026-09-19 — still current)
 
 ## Immediate next action
 
@@ -46,7 +211,7 @@ either.
 
 ## Branches / commit state
 
-- **`fix/bug012-border-blank-overreach`** (current branch) — no longer a single uncommitted unit; it
+- **`fix/bug012-border-blank-overreach`** — *(2026-09-23: since merged into `main` @ `2351623`; no longer the current branch)* — no longer a single uncommitted unit; it
   now carries multiple merged-in-sequence commits from BUG-012's fix through this session's Step 2
   work:
   - `59212f7` PIYA-125: fix Stage 1 border-blanking content destruction (BUG-012)

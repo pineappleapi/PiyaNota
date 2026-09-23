@@ -11,8 +11,13 @@ Dependencies:
 """
 
 import os
+from contextlib import nullcontext
 from pathlib import Path
+from typing import TYPE_CHECKING, Optional
 from midiutil import MIDIFile
+
+if TYPE_CHECKING:
+    from run_manifest import RunManifest
 
 # ── MIDI constants ────────────────────────────────────────────────────────────
 PPQ          = 480          # pulses per quarter note (ticks per beat)
@@ -205,10 +210,16 @@ def run_full_pipeline(
     soundfont_path: str = "soundfont/piano.sf2",
     bpm:            int = DEFAULT_BPM,
     img_height:     int = 64,
+    manifest:       Optional["RunManifest"] = None,
 ) -> dict:
     """
     Runs the complete PiyaNota pipeline from raw images to MP3 files.
     Stages 1 → 2 → 3 → 4 → 5.
+
+    Args:
+        manifest: Optional run-provenance recorder. When given, each stage is
+          timed and the checkpoints/soundfont/inputs/outputs are hashed into it;
+          the caller owns writing it (use it as a context manager).
     """
     from stage1_preprocessing  import preprocess_batch
     from stage2_detection      import detect_staff_regions
@@ -219,33 +230,53 @@ def run_full_pipeline(
     print("PiyaNota — Full Pipeline")
     print("=" * 60)
 
+    # Without a manifest, stage timing is a no-op so the flow below stays single-path.
+    stage = manifest.stage if manifest is not None else (lambda _name: nullcontext())
+
     # Stage 1
-    pages = preprocess_batch(input_dir, prep_dir, save_debug=False)
+    with stage("stage1_preprocessing"):
+        pages = preprocess_batch(input_dir, prep_dir, save_debug=False,
+                                 manifest=manifest)
 
     # Stage 2
-    voice_strips = detect_staff_regions(
-        pages,
-        model_weights=yolo_weights,
-        output_dir=strips_dir,
-    )
+    with stage("stage2_detection"):
+        voice_strips = detect_staff_regions(
+            pages,
+            model_weights=yolo_weights,
+            output_dir=strips_dir,
+            manifest=manifest,
+        )
 
     # Stage 3
-    voice_events = transcribe_voice_sequences(
-        voice_strips,
-        model_weights=crnn_weights,
-        img_height=img_height,
-    )
+    with stage("stage3_transcription"):
+        voice_events = transcribe_voice_sequences(
+            voice_strips,
+            model_weights=crnn_weights,
+            img_height=img_height,
+            manifest=manifest,
+        )
 
     # Stage 4
-    satb = reconstruct_satb(voice_events)
+    with stage("stage4_reconstruction"):
+        satb = reconstruct_satb(voice_events)
 
     # Stage 5
-    mp3_files = synthesize_satb(
-        satb,
-        output_dir=output_dir,
-        bpm=bpm,
-        soundfont_path=soundfont_path,
-    )
+    if manifest is not None:
+        manifest.add_stage_info("stage4_reconstruction",
+                                events_per_voice={v: len(e) for v, e in satb.items()})
+        manifest.add_asset("soundfont", soundfont_path)
+        manifest.set_params(bpm=bpm)
+    with stage("stage5_synthesis"):
+        mp3_files = synthesize_satb(
+            satb,
+            output_dir=output_dir,
+            bpm=bpm,
+            soundfont_path=soundfont_path,
+        )
+    if manifest is not None:
+        # May be .mid rather than .mp3 when audio rendering deps are missing.
+        for voice, path in mp3_files.items():
+            manifest.add_output(f"audio_{voice.lower()}", path)
 
     print("=" * 60)
     print("PiyaNota complete.")
@@ -260,6 +291,7 @@ def run_full_pipeline(
 
 if __name__ == "__main__":
     import argparse
+    from run_manifest import DEFAULT_RUNS_ROOT, RunManifest
 
     parser = argparse.ArgumentParser(
         description="PiyaNota Stage 5 — MIDI-Based Piano Audio Synthesis")
@@ -276,18 +308,22 @@ if __name__ == "__main__":
     parser.add_argument("--bpm",       type=int, default=DEFAULT_BPM,
                         help="Playback tempo in BPM")
     parser.add_argument("--img-height", type=int, default=64)
+    parser.add_argument("--runs-dir",  default=DEFAULT_RUNS_ROOT,
+                        help="Where per-run manifest.json provenance files are written")
     args = parser.parse_args()
 
-    mp3s = run_full_pipeline(
-        input_dir      = args.input,
-        prep_dir       = args.prep,
-        strips_dir     = args.strips,
-        output_dir     = args.output,
-        crnn_weights   = args.weights,
-        yolo_weights   = args.yolo,
-        soundfont_path = args.soundfont,
-        bpm            = args.bpm,
-        img_height     = args.img_height,
-    )
+    with RunManifest(runs_root=args.runs_dir, args=vars(args)) as manifest:
+        mp3s = run_full_pipeline(
+            input_dir      = args.input,
+            prep_dir       = args.prep,
+            strips_dir     = args.strips,
+            output_dir     = args.output,
+            crnn_weights   = args.weights,
+            yolo_weights   = args.yolo,
+            soundfont_path = args.soundfont,
+            bpm            = args.bpm,
+            img_height     = args.img_height,
+            manifest       = manifest,
+        )
 
     print(f"\nStage 5 complete. {len(mp3s)} audio file(s) ready.")

@@ -79,8 +79,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 import json
+
+if TYPE_CHECKING:
+    from run_manifest import RunManifest
 
 logger = logging.getLogger(__name__)
 
@@ -1650,11 +1653,23 @@ def process_strip(
     viz_dir:    str = None,
     sys_idx:    int = 1,
     strip_id:   str = "",
+    manifest:   Optional["RunManifest"] = None,
 ) -> list:
 
     """Transcribes one strip and returns pitch-assigned events for Stage 4."""
-    symbols = transcribe_strip(strip, model, device, img_height, strip_id=strip_id)
+    # Confidence decode yields the same symbols as the plain decode (see
+    # _greedy_ctc_decode, which wraps it), so this doesn't change events.
+    scored  = transcribe_strip(strip, model, device, img_height,
+                               return_confidence=True, strip_id=strip_id)
+    symbols = [sym for sym, _ in scored]
     events  = infer_pitch(symbols, voice=voice, page_index=page_index, sys_idx=sys_idx)
+
+    if manifest is not None:
+        manifest.add_strip(strip_id, voice, page_index, sys_idx, v_idx,
+                           tokens=symbols,
+                           confidences=[conf for _, conf in scored],
+                           n_events=len(events),
+                           strip_shape=strip.shape)
 
     print(f"[Stage 3] {voice} p{page_index}: "
           f"{len(symbols)} symbols -> {len(events)} events")
@@ -1673,6 +1688,7 @@ def transcribe_voice_sequences(
     img_height:      int = 64,
     viz_dir:         str = r"D:\PiyaNota (Code)\data\symbol_detection_viz",
     events_dir:      str = r"D:\PiyaNota (Code)\data\transcribed_symbols",   # ← add this
+    manifest:        Optional["RunManifest"] = None,
 ) -> dict:
     """
     Processes all voice strips from Stage 2 and returns event sequences.
@@ -1701,6 +1717,11 @@ def transcribe_voice_sequences(
     model.eval()
     print(f"[Stage 3] Loaded weights -> {model_weights} "
           f"(epoch {checkpoint.get('epoch', '?')})")
+    if manifest is not None:
+        manifest.add_asset("crnn_weights", model_weights,
+                           extra={"epoch": checkpoint.get("epoch")})
+        manifest.set_params(crnn_img_height=img_height, device=str(device),
+                            vocab_size=VOCAB_SIZE)
  
     results = {}
     for voice, strips in voice_sequences.items():
@@ -1712,7 +1733,8 @@ def transcribe_voice_sequences(
                     v_idx=v_idx,
                     viz_dir=viz_dir,
                     sys_idx=sys_idx,
-                    strip_id=strip_id)
+                    strip_id=strip_id,
+                    manifest=manifest)
             all_events.extend(events)
         all_events.sort(key=lambda e: (e["page_index"], e["sys_idx"], e["tick_onset"]))
         results[voice] = all_events
@@ -1726,6 +1748,8 @@ def transcribe_voice_sequences(
             with open(path, "w") as f:
                 json.dump(events, f, indent=2)
             print(f"[Stage 3] Events saved -> {path}")
+            if manifest is not None:
+                manifest.add_output(f"events_{voice.lower()}", path)
  
     _report(results)
     return results
@@ -1779,6 +1803,7 @@ if __name__ == "__main__":
     import argparse
     from stage2_detection import detect_staff_regions
     from stage1_preprocessing import preprocess_batch
+    from run_manifest import DEFAULT_RUNS_ROOT, RunManifest
  
     parser = argparse.ArgumentParser(
         description="PiyaNota Stage 3 — CRNN-CTC Transcription (inference only)")
@@ -1796,16 +1821,25 @@ if __name__ == "__main__":
     parser.add_argument("--events-dir",
                     default=r"D:\PiyaNota (Code)\data\transcribed_symbols",
                     help="Directory to save per-voice pitch event JSONs")
+    parser.add_argument("--runs-dir",   default=DEFAULT_RUNS_ROOT,
+                        help="Where per-run manifest.json provenance files are written")
     args = parser.parse_args()
  
-    pages  = preprocess_batch(args.input, args.prep, save_debug=False)
-    voices = detect_staff_regions(pages,
-                                  model_weights=args.yolo,
-                                  output_dir=args.strips)
-    events = transcribe_voice_sequences(voices,
-                                    model_weights=args.weights,
-                                    img_height=args.img_height,
-                                    viz_dir=args.viz_dir,
-                                    events_dir=args.events_dir)
+    with RunManifest(runs_root=args.runs_dir, args=vars(args)) as manifest:
+        with manifest.stage("stage1_preprocessing"):
+            pages  = preprocess_batch(args.input, args.prep, save_debug=False,
+                                      manifest=manifest)
+        with manifest.stage("stage2_detection"):
+            voices = detect_staff_regions(pages,
+                                          model_weights=args.yolo,
+                                          output_dir=args.strips,
+                                          manifest=manifest)
+        with manifest.stage("stage3_transcription"):
+            events = transcribe_voice_sequences(voices,
+                                            model_weights=args.weights,
+                                            img_height=args.img_height,
+                                            viz_dir=args.viz_dir,
+                                            events_dir=args.events_dir,
+                                            manifest=manifest)
     print("\nStage 3 complete. Events ready for Stage 4 (SATB reconstruction).")
  

@@ -315,6 +315,7 @@ if __name__ == "__main__":
     from stage1_preprocessing import preprocess_batch
     from stage2_detection import detect_staff_regions
     from stage3_transcription import transcribe_voice_sequences
+    from run_manifest import DEFAULT_RUNS_ROOT, RunManifest
 
     parser = argparse.ArgumentParser(
         description="PiyaNota Stage 4 — SATB Part Reconstruction")
@@ -324,15 +325,27 @@ if __name__ == "__main__":
     parser.add_argument("--weights", default="crnn_weights/best.pt")
     parser.add_argument("--yolo",    default="staff_detector_files/weights/best.pt")
     parser.add_argument("--img-height", type=int, default=64)
+    parser.add_argument("--runs-dir", default=DEFAULT_RUNS_ROOT,
+                        help="Where per-run manifest.json provenance files are written")
     args = parser.parse_args()
 
-    pages  = preprocess_batch(args.input, args.prep, save_debug=False)
-    voices = detect_staff_regions(pages,
-                                  model_weights=args.yolo,
-                                  output_dir=args.strips)
-    events = transcribe_voice_sequences(voices,
-                                        model_weights=args.weights,
-                                        img_height=args.img_height)
-    satb   = reconstruct_satb(events)
+    with RunManifest(runs_root=args.runs_dir, args=vars(args)) as manifest:
+        with manifest.stage("stage1_preprocessing"):
+            pages  = preprocess_batch(args.input, args.prep, save_debug=False,
+                                      manifest=manifest)
+        with manifest.stage("stage2_detection"):
+            voices = detect_staff_regions(pages,
+                                          model_weights=args.yolo,
+                                          output_dir=args.strips,
+                                          manifest=manifest)
+        with manifest.stage("stage3_transcription"):
+            events = transcribe_voice_sequences(voices,
+                                                model_weights=args.weights,
+                                                img_height=args.img_height,
+                                                manifest=manifest)
+        with manifest.stage("stage4_reconstruction"):
+            satb   = reconstruct_satb(events)
+        manifest.add_stage_info("stage4_reconstruction",
+                                events_per_voice={v: len(e) for v, e in satb.items()})
 
     print("\nStage 4 complete. SATB sequences ready for Stage 5 (MIDI synthesis).")

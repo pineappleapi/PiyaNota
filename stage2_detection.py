@@ -8,6 +8,10 @@ import logging
 import cv2
 import numpy as np
 from pathlib import Path
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from run_manifest import RunManifest
 
 # Ultralytics YOLOv8 — install with: pip install ultralytics
 from ultralytics import YOLO
@@ -34,6 +38,7 @@ def detect_staff_regions(
     save_strips: bool = True,
     save_viz: bool = False,          # ← new flag
     viz_dir: str = "data/detection_viz",
+    manifest: Optional["RunManifest"] = None,
 ) -> dict:
     output_path = Path(output_dir)
     if save_strips:
@@ -44,6 +49,11 @@ def detect_staff_regions(
         viz_path.mkdir(parents=True, exist_ok=True)
 
     model = YOLO(model_weights)
+    if manifest is not None:
+        manifest.add_asset("yolo_weights", model_weights)
+        manifest.set_params(yolo_conf_threshold=CONF_THRESHOLD,
+                            yolo_nms_threshold=NMS_THRESHOLD,
+                            strip_height=STRIP_HEIGHT)
 
     voice_sequences = {"Soprano": [], "Alto": [], "Tenor": [], "Bass": []}
 
@@ -97,6 +107,9 @@ def detect_staff_regions(
             continue
 
         print(f"[Stage 2] Page {page_index}: {len(boxes)} staff region(s) detected.")
+        if manifest is not None:
+            manifest.add_stage_info("stage2_detection",
+                                    **{f"page{page_index:03d}_staff_count": len(boxes)})
 
         # ── Visualization after validation ────────────────────────────────
         if save_viz:
