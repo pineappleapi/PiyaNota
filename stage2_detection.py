@@ -34,7 +34,10 @@ STRIP_HEIGHT   = 250    # fixed height for CRNN-CTC input (px) — overridden be
 # some camera photos; an independent line-tracking count validates and repairs it.
 BINARY_THRESHOLD = 127          # preprocessed pages are already binary; any mid value works
 MATCH_MAX_CENTER_SPACINGS = 2.5  # YOLO box center may sit this many line-spacings off a curve and still "agree"
-CLASSICAL_BOX_HALF_SPACINGS = 2.75  # half-height of a classical box: 2 spacings of staff + ~0.75 margin
+# Half-height of a classical box. 2.1 spacings (box ~4.2) matches YOLO's typical box height on
+# these photos (~3.8-4.5): crop padding scales with box height, so a taller box would shrink
+# the staff to ~36% of the strip vs ~50% for YOLO boxes and change the CRNN's glyph scale.
+CLASSICAL_BOX_HALF_SPACINGS = 2.1
 MAX_BOXES_PER_PAGE = 16          # Rule 2 cap (4 systems x 4 voices)
 STAFFS_PER_SYSTEM = 4
 
@@ -127,11 +130,14 @@ def detect_staff_regions(
 
         systems = [boxes[i:i+4] for i in range(0, len(boxes), 4)]
 
+        box_index = {id(b): i for i, b in enumerate(boxes)}
         for sys_idx, system in enumerate(systems, start=1):
             for v_idx, box in enumerate(system, start=1):
                 voice = VOICE_MAP.get(v_idx, f"Voice_{v_idx}")
                 strip_id = f"page{page_index:03d}_sys{sys_idx:02d}_{voice}_vidx{v_idx}"
-                strip = _crop_and_resize(image_bgr, box, STRIP_HEIGHT, strip_id=strip_id)
+                strip = _crop_and_resize(
+                    image_bgr, box, STRIP_HEIGHT, strip_id=strip_id,
+                    limits=_neighbor_limits(boxes, box_index[id(box)], img_h))
                 voice_sequences[voice].append((strip, page_index, sys_idx, voice, v_idx))
                 manifest.append({
                     "strip_id": strip_id, "page": page_index, "system": sys_idx,
@@ -145,6 +151,7 @@ def detect_staff_regions(
                     cv2.imwrite(str(fname), strip)
 
     if manifest_path is not None:
+        Path(manifest_path).parent.mkdir(parents=True, exist_ok=True)
         Path(manifest_path).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     _report(voice_sequences)
     return voice_sequences
@@ -198,9 +205,16 @@ def _reconcile_with_classical(boxes: list, image_bgr: np.ndarray, page_index: in
     ):
         return boxes
     if n_c % STAFFS_PER_SYSTEM != 0:
+        logger.warning(
+            "page=%d yolo=%d classical=%d source=yolo reason=classical_count_not_divisible_by_%d",
+            page_index, n_y, n_c, STAFFS_PER_SYSTEM)
         print(f"[Stage 2] page {page_index}: classical count {n_c} not divisible by "
               f"{STAFFS_PER_SYSTEM}; keeping YOLO's {n_y}.")
         return boxes
+    # Loud on purpose: the tracker has no confidence output and was tuned on 7 photos, so any
+    # override must be traceable to a page (strip manifests carry source="classical").
+    logger.warning("page=%d yolo=%d classical=%d source=classical (tracker overrides YOLO)",
+                   page_index, n_y, n_c)
     print(f"[Stage 2] page {page_index}: YOLO found {n_y}, line tracker found {n_c} "
           f"-> using line-tracked staves.")
     return classical
@@ -362,15 +376,127 @@ STRIP_HEIGHT = 64   # ← match Stage 3 img_height directly
 # opposite -- removing it made the model worse, not better).
 
 
+# Content-adaptive strip extent. A fixed pad (0.5 x box height) matches CameraPrIMuS's
+# ~50% staff/height ratio on average, but clips the treble clef, ledger-line notes and
+# long stems on real photos. CameraPrIMuS crops follow the content extent, so we keep the
+# fixed pad as the MINIMUM and grow outward to whatever is physically attached to the staff.
+CROP_MIN_PAD = 0.5          # x box height, per side; the previous fixed padding
+CROP_MAX_PAD = 1.5          # x box height, per side; bounds growth into neighbouring staves
+CROP_X_SKIP_FRAC = 0.10     # ignore the left brace/bracket/voice label when scanning
+CROP_LINE_KERNEL_HEIGHTS = 2.0  # x box height; horizontal opening this long removes staff lines
+CROP_MIN_COMPONENT_PX = 6   # ignore specks so dust does not extend the crop
+CROP_MAX_COMPONENT_HEIGHTS = 2.5  # x box height; taller than any real glyph (a treble clef
+                                  # is ~2x) so it is a brace/bracket/barline spanning staves
+CROP_EDGE_MARGIN_PX = 2     # breathing room beyond the outermost attached ink
+CROP_LINE_REMOVAL_PAD_PX = 1    # extra rows removed above/below each staff line
+CROP_STROKE_MIN_SPACINGS = 1.0  # vertical run (x line spacing) that counts as a stem/clef
+                                # stroke rather than a staff line crossing it
+CROP_STAFF_SPACINGS = 4.0   # a box spans 4 line spacings (5 lines)
+CROP_SLIVER_MAX_WIDTH_PX = 4    # narrower than this AND taller than the staff = bracket sliver
+CROP_SLIVER_MIN_HEIGHTS = 1.25  # x box height
+
+
+def _content_extent(image: np.ndarray, box: dict,
+                    limits: tuple[int, int] | None = None) -> tuple[int, int]:
+    """Returns (y1, y2) of the strip crop, grown to include ink attached to the staff.
+
+    Why: notes, stems, slurs and the clef routinely extend past a fixed margin. Staff
+    lines are removed first because they touch every notehead and would otherwise chain
+    the whole page into one component; what remains is noteheads, stems, clef, accidentals
+    and slurs. Only components overlapping the staff's own rows count, so lyrics and
+    dynamics (separate glyphs) and neighbouring staves do not stretch the crop. The result
+    stays within [CROP_MIN_PAD, CROP_MAX_PAD] of the box.
+
+    Args:
+        limits: (upper, lower) page rows, normally the midpoints to the adjacent staves.
+            Growth beyond the minimum pad stops there: barlines that span two staves are
+            "attached" glyphs and would otherwise drag the next staff into the crop.
+    """
+    img_h, img_w = image.shape[:2]
+    gray = image if image.ndim == 2 else cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    x1 = max(int(box["x1"]), 0) + int((box["x2"] - box["x1"]) * CROP_X_SKIP_FRAC)
+    x2 = min(int(box["x2"]), img_w)
+    y1, y2 = int(box["y1"]), int(box["y2"])
+    height = max(y2 - y1, 1)
+    min_pad, max_pad = int(height * CROP_MIN_PAD), int(height * CROP_MAX_PAD)
+
+    win_top, win_bottom = max(0, y1 - max_pad), min(img_h, y2 + max_pad)
+    ink = (gray[win_top:win_bottom, x1:x2] < BINARY_THRESHOLD).astype(np.uint8)
+    if ink.size == 0:
+        return max(0, y1 - min_pad), min(img_h, y2 + min_pad)
+
+    kernel = cv2.getStructuringElement(
+        cv2.MORPH_RECT, (max(int(height * CROP_LINE_KERNEL_HEIGHTS), 3), 1))
+    staff_lines = cv2.morphologyEx(ink, cv2.MORPH_OPEN, kernel)
+    line_mask = cv2.dilate(
+        staff_lines, np.ones((2 * CROP_LINE_REMOVAL_PAD_PX + 1, 1), np.uint8))
+    # Removing a staff line also cuts every stem and the clef where they cross it. Vertically
+    # long strokes are restored so their parts above/below the staff stay connected to the
+    # staff, without a blind bridge that would also glue nearby dynamics/lyrics on.
+    stroke_rows = max(int(height / CROP_STAFF_SPACINGS * CROP_STROKE_MIN_SPACINGS), 3)
+    strokes = cv2.morphologyEx(
+        ink, cv2.MORPH_OPEN, np.ones((stroke_rows, 1), np.uint8))
+    glyphs = (ink & (1 - line_mask)) | strokes
+
+    count, _, stats, _ = cv2.connectedComponentsWithStats(glyphs, connectivity=8)
+    box_top, box_bottom = y1 - win_top, y2 - win_top
+    top, bottom = y1, y2
+    for i in range(1, count):
+        comp_top = stats[i, cv2.CC_STAT_TOP]
+        comp_bottom = comp_top + stats[i, cv2.CC_STAT_HEIGHT]
+        if stats[i, cv2.CC_STAT_AREA] < CROP_MIN_COMPONENT_PX:
+            continue
+        comp_h = stats[i, cv2.CC_STAT_HEIGHT]
+        if comp_h > height * CROP_MAX_COMPONENT_HEIGHTS:
+            continue  # system brace/bracket spanning staves, not this staff's own content
+        if (stats[i, cv2.CC_STAT_WIDTH] <= CROP_SLIVER_MAX_WIDTH_PX
+                and comp_h > height * CROP_SLIVER_MIN_HEIGHTS):
+            continue  # slanted bracket sliver; real stems are shorter than the staff+
+        if comp_bottom < box_top or comp_top > box_bottom:
+            continue  # does not touch this staff's rows
+        top = min(top, win_top + comp_top)
+        bottom = max(bottom, win_top + comp_bottom)
+
+    top = min(y1 - min_pad, top - CROP_EDGE_MARGIN_PX)
+    bottom = max(y2 + min_pad, bottom + CROP_EDGE_MARGIN_PX)
+    top, bottom = max(y1 - max_pad, top), min(y2 + max_pad, bottom)
+    if limits is not None:
+        # Never shrink below the old fixed pad, even on tightly spaced staves.
+        top = max(top, min(limits[0], y1 - min_pad))
+        bottom = min(bottom, max(limits[1], y2 + min_pad))
+    return max(0, top), min(img_h, bottom)
+
+
+def _neighbor_limits(boxes: list, index: int, img_h: int) -> tuple[int, int]:
+    """Returns the page rows halfway to the staves above and below boxes[index]."""
+    box = boxes[index]
+    upper = (boxes[index - 1]["y2"] + box["y1"]) // 2 if index > 0 else 0
+    lower = (box["y2"] + boxes[index + 1]["y1"]) // 2 if index + 1 < len(boxes) else img_h
+    return int(upper), int(lower)
+
+
 def _crop_and_resize(image: np.ndarray, box: dict, target_height: int,
-                     padding: float = 0.5,                # ← 30% not 150%
-                     strip_id: str = "") -> np.ndarray:
+                     padding: float = CROP_MIN_PAD,
+                     strip_id: str = "",
+                     adaptive_extent: bool = True,
+                     limits: tuple[int, int] | None = None) -> np.ndarray:
+    """Crops one staff to a full-width strip and resizes it to target_height.
+
+    Args:
+        padding: Minimum per-side padding as a fraction of box height.
+        adaptive_extent: Grow the crop to the staff's attached content (see
+            _content_extent). False restores the old fixed-padding crop.
+        limits: Adjacent-staff midpoints bounding adaptive growth (see _content_extent).
+    """
     img_h, img_w = image.shape[:2]
     x1, y1, x2, y2 = box["x1"], box["y1"], box["x2"], box["y2"]
 
-    pad = int((y2 - y1) * padding)
-    y1 = max(0, y1 - pad)
-    y2 = min(img_h, y2 + pad)
+    if adaptive_extent:
+        y1, y2 = _content_extent(image, box, limits)
+    else:
+        pad = int((y2 - y1) * padding)
+        y1 = max(0, y1 - pad)
+        y2 = min(img_h, y2 + pad)
 
     crop = image[y1:y2, max(0, x1):x2]
 

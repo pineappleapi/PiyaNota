@@ -56,7 +56,9 @@ def main() -> None:
         page_info = []
         for k, b in enumerate(boxes, start=1):
             b["x1"], b["x2"] = 0, img_w
-            strip = s2._crop_and_resize(img, b, s2.STRIP_HEIGHT, strip_id=f"p{page_no}c{k}")
+            strip = s2._crop_and_resize(
+                img, b, s2.STRIP_HEIGHT, strip_id=f"p{page_no}c{k}",
+                limits=s2._neighbor_limits(boxes, k - 1, img_h))
             cv2.imwrite(str(out / "candidates" / f"page{page_no:03d}_cand{k:02d}.png"), strip)
             cv2.rectangle(canvas, (0, b["y1"]), (img_w, b["y2"]), (0, 0, 255), 2)
             cv2.putText(canvas, f"#{k} {b['conf']:.2f}", (8, max(b["y1"] - 4, 16)),
