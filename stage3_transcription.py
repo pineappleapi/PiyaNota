@@ -1654,10 +1654,10 @@ def process_strip(
  
 def transcribe_voice_sequences(
     voice_sequences: dict,
-    model_weights:   str = r"D:\PiyaNota (Code)\music_symbol_detection\crnn_cameraprimus_transcription.pt",
+    model_weights:   str = r"D:\PiyaNota\music_symbol_detection\crnn_cameraprimus_transcription.pt",
     img_height:      int = 64,
-    viz_dir:         str = r"D:\PiyaNota (Code)\data\symbol_detection_viz",
-    events_dir:      str = r"D:\PiyaNota (Code)\data\transcribed_symbols",   # ← add this
+    viz_dir:         str = r"D:\PiyaNota\data\symbol_detection_viz",
+    events_dir:      str = r"D:\PiyaNota\data\transcribed_symbols",
 ) -> dict:
     """
     Processes all voice strips from Stage 2 and returns event sequences.
@@ -1765,7 +1765,7 @@ if __name__ == "__main__":
  
     parser = argparse.ArgumentParser(
         description="PiyaNota Stage 3 — CRNN-CTC Transcription (inference only)")
-    parser.add_argument("--weights",    default=r"D:\PiyaNota (Code)\music_symbol_detection\crnn_cameraprimus_transcription.pt",
+    parser.add_argument("--weights",    default=r"D:\PiyaNota\music_symbol_detection\crnn_cameraprimus_transcription.pt",
                         help="CRNN weights trained on Kaggle")
     parser.add_argument("--input",      default="data/raw")
     parser.add_argument("--prep",       default="data/preprocessed")
@@ -1774,10 +1774,10 @@ if __name__ == "__main__":
     parser.add_argument("--img-height", type=int, default=64,
                         help="Must match Kaggle training height")
     parser.add_argument("--viz-dir",
-                    default=r"D:\PiyaNota (Code)\data\symbol_detection_viz",
+                    default=r"D:\PiyaNota\data\symbol_detection_viz",
                     help="Directory to save symbol visualizations")
     parser.add_argument("--events-dir",
-                    default=r"D:\PiyaNota (Code)\data\transcribed_symbols",
+                    default=r"D:\PiyaNota\data\transcribed_symbols",
                     help="Directory to save per-voice pitch event JSONs")
     args = parser.parse_args()
  
