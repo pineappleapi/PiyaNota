@@ -4,7 +4,7 @@ Implements step 1 of `docs/decisions/piya-106-crnn-font-retraining-plan.md`. Pro
 already-labeled training images in 4 real music-engraving font styles the CRNN has never seen,
 without any manual transcription.
 
-**Now built directly into `training/pianota-transcription-training.ipynb`** as its first section
+**Now built directly into `training/piyanota-training-ver-2.ipynb`** as its first section
 (the notebook Step 2 fine-tuning will extend) — this file is the standalone writeup/rationale; run the
 notebook cells rather than copy-pasting from here if you're doing this for real. Switched from Colab
 to Kaggle (2026-09-15) because the base CRNN training run already lives there (see CLAUDE.md: "trained
@@ -32,7 +32,7 @@ hand-labeling of real Filipino sheet music.
 1. Open (or create) the notebook in Kaggle, then **Add Data** → search `cameraprimus` → attach
    `piamac/cameraprimus`. It mounts read-only at
    `/kaggle/input/datasets/piamac/cameraprimus/CameraPrIMuS - Copy` — the same path
-   `pianota-transcription-training.ipynb`'s existing cells already read from, so no download/auth step
+   `piyanota-training-ver-2.ipynb`'s existing cells already read from, so no download/auth step
    is needed (unlike Colab, which had to `kagglehub.dataset_download` it over the network each run).
 2. **Settings → Internet: On** (needs phone verification on your Kaggle account once) — required for
    the `apt-get`/`pip install` calls below.
@@ -150,7 +150,7 @@ Do these before trusting the output — a silent rendering bug here would poison
 ## What this does NOT yet do
 
 - Does not touch the training loop or `CameraPrIMuSDataset` in
-  `training/pianota-transcription-training.ipynb` — that's step 2 (fine-tuning), not started.
+  `training/piyanota-training-ver-2.ipynb` — that's step 2 (fine-tuning), not started.
 - Does not add Condition B (realistic strip context / label-text clutter) — the script above is
   Condition A only (bare re-render). ml-cv-lead's review flagged that Condition B needs testing too
   before concluding font-swap alone closes the gap; that requires compositing label-style text next

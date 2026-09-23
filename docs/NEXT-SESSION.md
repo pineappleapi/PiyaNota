@@ -142,7 +142,7 @@ Full plan + amendments: `docs/decisions/piya-106-crnn-font-retraining-plan.md`
 - `docs/decisions/piya-106-crnn-font-retraining-plan.md` — the full retraining decision record,
   including the 2026-09-16 amendment with the seed-replication data and RNG-bug root cause.
 - `training/step1-font-rerender-kaggle-guide.md` — verified, runnable Step 1 instructions (Kaggle).
-- `training/pianota-transcription-training.ipynb` — the CRNN training notebook. Cell 13
+- `training/piyanota-training-ver-2.ipynb` — the CRNN training notebook. Cell 13
   (`finetune()`/`lr_sweep()`/`RUN_FINETUNING`) is the active edit surface for Step 2; requires an
   explicit `seed=` argument now (hard assert), and the real run always trains both seed=1 and
   seed=2 from a fresh copy of the base checkpoint.

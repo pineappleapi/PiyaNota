@@ -8,7 +8,7 @@ BUG-011.
 
 BUG-011 (bug-tracker.md) root-caused the CRNN's real-screenshot failure (clef misread on 46/48 real
 strips, ~4.2% bounded real-world pitch accuracy) to a **font/glyph domain gap**: the CRNN
-(`training/pianota-transcription-training.ipynb`) is trained and validated exclusively on
+(`training/piyanota-training-ver-2.ipynb`) is trained and validated exclusively on
 CameraPrIMuS — one synthetic engraving font, clean plus a programmatic camera-distortion simulation
 of that *same* font. It has never seen real engraving-software output (MuseScore/Finale/Sibelius/
 Verovio-default styles), and nothing image-preprocessing-only has fixed it (thresholding, dilation,
@@ -37,7 +37,7 @@ durable as the font list; a 6th unseen engraving tool could still fail until add
 
 1. **Font re-rendering (this ticket's immediate next step).** Re-render every CameraPrIMuS sample's
    `.mei` through the 5 bundled Verovio SMuFL fonts, producing new image+label pairs with no manual
-   labeling. Built directly into `training/pianota-transcription-training.ipynb` (top section); see
+   labeling. Built directly into `training/piyanota-training-ver-2.ipynb` (top section); see
    `training/step1-font-rerender-kaggle-guide.md` for verified, runnable instructions and rationale.
    Switched from Colab to Kaggle 2026-09-15 — the base CRNN training already runs there, and Kaggle
    attaches the CameraPrIMuS dataset natively with no download step.

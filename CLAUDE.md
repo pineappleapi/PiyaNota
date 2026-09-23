@@ -249,13 +249,13 @@ treat it as stale if either doc has moved on.
 
 Decision recorded 2026-09-14 in `docs/decisions/piya-106-crnn-font-retraining-plan.md`
 (ml-cv-lead reviewed) — full 7-step ordered plan, decides for PIYA-106 AC4. Summary: the CRNN
-(`training/pianota-transcription-training.ipynb`) is trained only on CameraPrIMuS's one synthetic
+(`training/piyanota-training-ver-2.ipynb`) is trained only on CameraPrIMuS's one synthetic
 engraving font, which is why it collapses on real screenshots (BUG-011, ~4.2% bounded real-world
 pitch accuracy) — this is a font/glyph domain gap, not a Filipino-content/language issue. Do **not**
 start by hand-labeling real Filipino sheet music; CameraPrIMuS ships an `.mei` file per sample that
 Verovio can re-render through 5 bundled SMuFL fonts with the existing `.agnostic`/`.semantic` labels
 still valid (zero manual transcription) — see `training/step1-font-rerender-kaggle-guide.md` (and the
-matching section built into `training/pianota-transcription-training.ipynb`) for verified, runnable
+matching section built into `training/piyanota-training-ver-2.ipynb`) for verified, runnable
 step-1 instructions (font re-rendering). Switched from Colab to Kaggle 2026-09-15 since the base CRNN
 training already lives there. **Step 2 (fine-tuning) is actively in progress as of 2026-09-16** — LR
 sweep, an extended trend check, and a seed-replication check (2 seeds × 2 LRs) all completed and
