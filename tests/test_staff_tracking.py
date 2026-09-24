@@ -60,6 +60,59 @@ def test_strip_height_matches_stage3() -> None:
     assert s2.STRIP_HEIGHT == 64
 
 
+def _masked_pair(draw) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Returns (page, unmasked strip, masked strip) for the first synthetic staff."""
+    page = _synthetic_page(0.0)
+    draw(page)
+    box = {"x1": 0, "x2": PAGE_W, "y1": 200 - 2 * SPACING_PX, "y2": 200 + 2 * SPACING_PX}
+    off = s2._crop_and_resize(page, box, s2.STRIP_HEIGHT, mask_lyrics=False)
+    on = s2._crop_and_resize(page, box, s2.STRIP_HEIGHT, mask_lyrics=True)
+    return page, off, on
+
+
+def _draw_note_and_lyric(page: np.ndarray) -> None:
+    cv2.ellipse(page, (300, 200 + SPACING_PX // 2), (7, 5), 0, 0, 360, 0, -1)  # notehead
+    page[200 - 3 * SPACING_PX:200 + SPACING_PX // 2, 306:308] = 0  # stem up
+    for k in range(6):  # lyric-like word blobs 1.5 spacings below the bottom line
+        page[200 + 3 * SPACING_PX + 2:200 + 3 * SPACING_PX + 10, 500 + k * 12:500 + k * 12 + 8] = 0
+
+
+def test_mask_removes_lyric_blob_below_staff() -> None:
+    _, off, on = _masked_pair(_draw_note_and_lyric)
+    assert (off < 128).sum() > (on < 128).sum()
+    lyric_cols = slice(int(500 * on.shape[1] / PAGE_W), int(575 * on.shape[1] / PAGE_W))
+    lyric_rows = slice(int(on.shape[0] * 0.8), on.shape[0])
+    assert (on[lyric_rows, lyric_cols] < 128).sum() == 0
+    assert (off[lyric_rows, lyric_cols] < 128).sum() > 0
+
+
+def test_mask_keeps_attached_note_and_staff() -> None:
+    _, off, on = _masked_pair(_draw_note_and_lyric)
+    col = int(300 * on.shape[1] / PAGE_W)
+    window = (slice(0, on.shape[0]), slice(col - 6, col + 6))
+    assert (on[window] < 128).sum() == (off[window] < 128).sum()
+    # Every staff pixel of the unmasked strip is still ink in the masked one.
+    mid = on.shape[0] // 2
+    assert np.array_equal(on[mid - 3:mid + 3, :int(200 * on.shape[1] / PAGE_W)],
+                          off[mid - 3:mid + 3, :int(200 * on.shape[1] / PAGE_W)])
+
+
+def test_mask_keeps_ledger_line_note() -> None:
+    def draw(page: np.ndarray) -> None:
+        y = 200 - 3 * SPACING_PX  # first ledger line above the staff
+        page[y - 1:y + 1, 380:420] = 0
+        cv2.ellipse(page, (400, y), (8, 5), 0, 0, 360, 0, 2)  # open whole note on it
+    _, off, on = _masked_pair(draw)
+    assert (on < 128).sum() == (off < 128).sum()
+
+
+def test_mask_off_reproduces_unmasked_crop() -> None:
+    page, off, _ = _masked_pair(_draw_note_and_lyric)
+    box = {"x1": 0, "x2": PAGE_W, "y1": 200 - 2 * SPACING_PX, "y2": 200 + 2 * SPACING_PX}
+    again = s2._crop_and_resize(page, box, s2.STRIP_HEIGHT, mask_lyrics=False)
+    assert np.array_equal(off, again)
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

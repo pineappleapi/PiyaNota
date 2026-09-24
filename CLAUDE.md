@@ -102,6 +102,10 @@ later stages import functions from earlier ones rather than duplicating logic.
      divisible by 4, else YOLO's boxes stay and the divisible-by-4 `ValueError` still fires. On the 7
      Both Sides Now camera photos (tracker + YOLO) this gives 12/12/12/12/12/12/8 staves, all correct (was
      6–13 per page). Developed on those photos — not an independent eval; see BUG-013.
+   - **Lyric masking (2026-09-24, same branch, BUG-015):** `_crop_and_resize(mask_lyrics=True)` (default; toggle
+     via `detect_staff_regions(mask_lyrics=...)`) blanks ink that is neither the staff nor attached to it
+     (`_non_staff_ink_mask`). Known residuals: dynamics touching the staff, lyric stubs at crop edges, left-edge
+     label text ('S.'); Stage 3 effect unmeasured.
    Also contains `train_yolov8()` / `evaluate_model()`, reused by `train_staff_detector.py`.
 
 3. **`stage3_transcription.py`** — the core recognition stage: `CRNN` (ResNet-style CNN backbone →
