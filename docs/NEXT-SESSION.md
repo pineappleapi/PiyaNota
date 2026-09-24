@@ -33,6 +33,25 @@ all committed on that branch:
 instruction** even though this branch's fixes resolve it for this specific photo set — it needs a
 fresh, different camera set to pass before it can be closed.
 
+**senior-reviewer's verdict on the full branch (687de98..HEAD, 2026-09-24): "ready with changes
+(nits only — no blocking correctness issues found)."** The nits (missing type hint, no per-strip
+masking log, two test docstrings overclaiming what they check, stats not independently
+reproducible from committed code) were fixed in a follow-up commit after the review. senior-reviewer
+also raised three questions it explicitly left for a human, not resolved by that review and not
+decided by this session — read before merging:
+1. Whether to merge the partial BUG-015 mitigation now and decide the YOLO text-line fallback in a
+   follow-up, or wait for the pixel-exact residual re-verification first — this directly gates
+   whether Stage 3 testing can start (the "don't test Stage 3 until masking is adequate" instruction
+   is itself unresolved).
+2. The branch name `piya106/two-seed-rerun-amendment` no longer describes its content (this session's
+   work is PIYA-121 Stage 1/2 fixes, unrelated to the PIYA-106 two-seed CRNN rerun the name
+   references) — cosmetic, consider a rename before merge so history doesn't mislead future readers.
+3. It couldn't find a separate committed ml-cv-lead artifact for the page006_sys03_Bass finding
+   beyond the bug-tracker correction note — that finding came from a live diagnostic session (ml-cv-lead
+   instrumented and traced `_non_staff_ink_mask`'s actual component decisions on that strip, not a
+   new commit), so there's no separate file to point to; flagging here in case that's insufficient
+   provenance for a merge decision.
+
 **Stage 3/CRNN has deliberately NOT been run on any of these 80 strips** — explicit user instruction:
 no Stage 3 testing until lyric masking is judged adequate (masking is not yet judged complete, see
 BUG-015 above). This is the actual Step 4 evaluation set; don't spend it on masking-tuning iteration.

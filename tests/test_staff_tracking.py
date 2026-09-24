@@ -57,7 +57,19 @@ def test_neighbor_limits_stop_at_midpoints() -> None:
 
 
 def test_strip_height_matches_stage3() -> None:
-    assert s2.STRIP_HEIGHT == 64
+    """Stage 2 must emit strips at the height Stage 3's CRNN was trained on.
+
+    Cross-checks against the actual default on stage3_transcription.transcribe_voice_sequences
+    (the Stage 2 -> 3 entry point) via introspection, not a second hardcoded literal, so this
+    catches real drift between the files rather than just guarding stage2's own former
+    duplicate-STRIP_HEIGHT definition (see d374c2b).
+    """
+    import inspect
+
+    import stage3_transcription as s3
+
+    stage3_default = inspect.signature(s3.transcribe_voice_sequences).parameters["img_height"].default
+    assert s2.STRIP_HEIGHT == stage3_default == 64
 
 
 def _masked_pair(draw) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -107,10 +119,21 @@ def test_mask_keeps_ledger_line_note() -> None:
 
 
 def test_mask_off_reproduces_unmasked_crop() -> None:
+    """mask_lyrics=False must reproduce the pre-BUG-015 crop, not just be deterministic.
+
+    Recomputes the crop independently of _crop_and_resize's mask_lyrics branch (via
+    _content_extent + a plain slice + resize, i.e. what _crop_and_resize did before that
+    branch existed) and compares pixel-for-pixel, so this catches the masking code leaking
+    into the mask_lyrics=False path, which a same-call-twice determinism check cannot.
+    """
     page, off, _ = _masked_pair(_draw_note_and_lyric)
     box = {"x1": 0, "x2": PAGE_W, "y1": 200 - 2 * SPACING_PX, "y2": 200 + 2 * SPACING_PX}
-    again = s2._crop_and_resize(page, box, s2.STRIP_HEIGHT, mask_lyrics=False)
-    assert np.array_equal(off, again)
+    y1, y2 = s2._content_extent(page, box)
+    pre_mask_crop = page[y1:y2, max(0, box["x1"]):box["x2"]]
+    h, w = pre_mask_crop.shape[:2]
+    new_w = int(w * (s2.STRIP_HEIGHT / h))
+    expected = cv2.resize(pre_mask_crop, (new_w, s2.STRIP_HEIGHT), interpolation=cv2.INTER_AREA)
+    assert np.array_equal(off, expected)
 
 
 if __name__ == "__main__":

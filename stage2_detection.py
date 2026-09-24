@@ -422,7 +422,9 @@ LEDGER_THIN_ROW_FRAC = 0.8        # rows this close to the peak count as "the li
 LEDGER_MAX_LINE_SPACINGS = 0.3    # ...and must be no thicker than this (letters like "o" are thicker)
 
 
-def _staff_glyph_components(image: np.ndarray, box: dict, x_skip: int = 0):
+def _staff_glyph_components(
+    image: np.ndarray, box: dict, x_skip: int = 0
+) -> tuple[int, np.ndarray, np.ndarray, np.ndarray, int, np.ndarray, np.ndarray, np.ndarray] | None:
     """Splits the ink around one staff into staff lines and connected glyph components.
 
     Shared by the crop-extent scan and the lyric mask so both agree on what is "attached".
@@ -675,6 +677,11 @@ def _crop_and_resize(image: np.ndarray, box: dict, target_height: int,
             raise ValueError(f"lyric mask {sub.shape} does not cover crop {crop.shape[:2]}")
         crop = crop.copy()
         crop[sub] = BACKGROUND_VALUE
+        # Debug, not info/warning: this fires once per strip (up to 80+/run) and BUG-015's
+        # residuals are still open, so a strip that looks wrong needs a per-strip pixel count
+        # to check without re-running the mask by hand.
+        logger.debug("strip_id=%s mask_lyrics removed=%d/%d px",
+                     strip_id, int(sub.sum()), int(sub.size))
 
     if crop.size == 0:
         return np.zeros((target_height, target_height, 3), dtype=np.uint8)
