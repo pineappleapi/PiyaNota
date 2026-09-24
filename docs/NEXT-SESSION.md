@@ -1,9 +1,49 @@
 # Next Session — Start Here
 
 Handoff doc for continuing PiyaNota work in a fresh session. Read this first; it links out to the
-full detail rather than repeating it. Written 2026-09-14, rewritten 2026-09-16, rewritten 2026-09-19.
+full detail rather than repeating it. Written 2026-09-14, rewritten 2026-09-16, rewritten 2026-09-19,
+rewritten 2026-09-24.
 
-## Immediate next action
+## Immediate next action (2026-09-24 update)
+
+**PIYA-106 Step 3 (fresh real-world test set) is actively in progress**, on branch
+`piya106/two-seed-rerun-amendment` (worktree `D:\PiyaNota-training`; **committed, unmerged into
+main**; senior-reviewer review of the full branch requested but not yet returned at write time —
+check for its report before treating this branch as merge-ready). Source material: 7 camera photos of
+"Both Sides Now" (`D:\PiyaNota\data\raw\Raw\IMG_1081-1084,1086-1088.JPG`), different piece/tool from
+the 48 BUG-011 diagnostic strips, matching the "Start Step 3 now" instruction below.
+
+Getting Stage 1/2 to detect these camera photos accurately at all turned into three sequential fixes,
+all committed on that branch:
+- **BUG-013** — Stage 1 staff curve tracking (`track_staff_curves`) + dewarp
+  (`dewarp_to_staff_grid`) + Stage 2 tracker cross-check (`_reconcile_with_classical`). Fixed wrong
+  staff counts (was 6-13 per page); now 12/12/12/12/12/12/8 = 80 staves, all correct on this photo
+  set. Tuned on these same 7 photos, not an independent eval.
+- **BUG-014** — content-adaptive strip crop (`_content_extent`/`_crop_and_resize`) fixed notes being
+  clipped at strip edges.
+- **BUG-015** — lyric masking (`_non_staff_ink_mask`, `mask_lyrics=` toggle, default on). Blanks ink
+  not attached to the staff. Partial fix: 0 staff-band ink lost, ~5.8% of out-of-band ink removed
+  across the 80 strips, but real residuals remain (confirmed by pixel-exact check, not just
+  eyeballing — see the 2026-09-24 correction note in `docs/bug-tracker.md` BUG-015, which also
+  retracts one prior false-positive residual claim). **Open decision, not yet made: whether a YOLO
+  text-line detector fallback is needed.** Don't decide this from the eyeballed residual list — it
+  has at least one confirmed false entry; re-verify pixel-exactly first.
+
+**BUG-001 (camera photos fail the divisible-by-4 staff count check) remains open by explicit user
+instruction** even though this branch's fixes resolve it for this specific photo set — it needs a
+fresh, different camera set to pass before it can be closed.
+
+**Stage 3/CRNN has deliberately NOT been run on any of these 80 strips** — explicit user instruction:
+no Stage 3 testing until lyric masking is judged adequate (masking is not yet judged complete, see
+BUG-015 above). This is the actual Step 4 evaluation set; don't spend it on masking-tuning iteration.
+
+**Once masking is settled (either "good enough" or the YOLO fallback is built), the next action is
+Step 4: evaluate both seed checkpoints (`finetuned_font_seed1.pt` / `finetuned_font_seed2.pt`, see
+below) on this set once, reporting them as a range — do not average or cherry-pick.**
+
+---
+
+## Earlier context: PIYA-106 Step 2 (CRNN fine-tuning) status, as of 2026-09-19
 
 **The real two-seed `RUN_FINETUNING` run (under the cuDNN fix) is DONE.** Both checkpoints are valid
 and not invalidated: `crnn_weights/finetuned_font_seed1.pt` (best epoch 1, `loo_font_ser` 0.0523) and
@@ -11,9 +51,8 @@ and not invalidated: `crnn_weights/finetuned_font_seed1.pt` (best epoch 1, `loo_
 canary-clean spike to ~89% of the hard cap before partially recovering). ml-cv-lead's fourth review
 this session: **conditional GO to Step 3 — Step 2 is not formally closed.**
 
-**Start Step 3 now** — collect a fresh real-world test set (different piece/tool than the 48 strips
-already used for BUG-011 diagnosis; needs new photos/screenshots from the user). This can run in
-parallel with the open item below; neither blocks the other.
+Step 3 (above) is now underway per that conditional GO; the open items below still aren't resolved
+and still don't block Step 3.
 
 **Open items carried forward, not blocking Step 3 but not resolved — don't let these quietly drop:**
 - Seed=2's best epoch was 2, not 1 — this **disconfirms** the earlier read (from two isolated seed=1
@@ -46,7 +85,14 @@ either.
 
 ## Branches / commit state
 
-- **`fix/bug012-border-blank-overreach`** (current branch) — no longer a single uncommitted unit; it
+- **`piya106/two-seed-rerun-amendment`** (worktree `D:\PiyaNota-training`, **current active branch as
+  of 2026-09-24**) — Step 3 camera-photo test-set work (BUG-013/014/015 above). Commits, top to
+  bottom: `b322457` lyric masking (BUG-015), `d374c2b` review follow-ups (named constants, dedupe
+  `STRIP_HEIGHT`, synthetic tests), `7be14ee`/`a908579` crop fix (BUG-014) + docs, `30b5b41`/`4d46d46`
+  tracker/dewarp fix (BUG-013). Not pushed (no remote on this worktree), not merged into
+  `D:\PiyaNota`'s checkout. senior-reviewer review of this branch was requested at end of session —
+  confirm its outcome before merging.
+- **`fix/bug012-border-blank-overreach`** (earlier branch, superseded as the active one) — no longer a single uncommitted unit; it
   now carries multiple merged-in-sequence commits from BUG-012's fix through this session's Step 2
   work:
   - `59212f7` PIYA-125: fix Stage 1 border-blanking content destruction (BUG-012)
@@ -131,6 +177,13 @@ Full plan + amendments: `docs/decisions/piya-106-crnn-font-retraining-plan.md`
   quoted, don't present it as an independent confirmation.
 - Don't commit `docs/decisions/module2-flutter-framework.md` as part of PIYA-106 work — unrelated.
 - Don't commit anything without the user's explicit review/approval first (standing rule).
+- Don't run Stage 3/CRNN on the 80-strip Step 3 test set until lyric masking (BUG-015) is judged
+  adequate — explicit user instruction, still in force as of 2026-09-24.
+- Don't treat the BUG-015 eyeballed residual list as accurate without pixel-exact re-verification —
+  it has at least one confirmed false positive (page005_sys02_Alto) and the rest of the list beyond
+  page006_sys03_Bass is unconfirmed either way.
+- Don't close BUG-001 — still open by explicit user instruction even though this branch's fixes
+  resolve it for the one photo set tested so far.
 
 ## Reference index
 
