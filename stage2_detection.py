@@ -408,6 +408,18 @@ MASK_HALO_PX = 1  # blank this far around removed ink so grey halos vanish
 # measured 1-3 px at 6.75-9.5 px spacing).
 MASK_BEAM_MIN_PX = 4
 MASK_BEAM_MIN_SPACINGS = 0.4
+# A long flat tie/slur also survives the line opening, and being thin it looks like a neighbour's
+# staff line. It is told apart by what it connects: a tie/slur ends on two staff-attached glyphs
+# (noteheads), and is much shorter than the page. A neighbour's staff line runs (nearly) edge to
+# edge, so the width cap rejects it even though barlines touch both of its ends.
+MASK_BRIDGE_END_SPACINGS = 1.0   # x line spacing; end zone of a run that must touch attached ink
+MASK_BRIDGE_JOIN_PX = 2          # px; stub ink sits up to CROP_LINE_REMOVAL_PAD_PX + 1 from the run
+MASK_BRIDGE_MAX_WIDTH_FRAC = 0.5  # x crop width; wider runs are staff lines, not ties/slurs
+# A run this close to the band is this staff's own outer-line wobble, or a slur fused with that
+# line (its ends need not touch attached ink). On the 80 Step 3 strips such runs sit 0.3-0.5
+# spacing from the band. 1.0 was tried and also kept neighbour lines (out-of-band ink removed
+# fell from 47% to 23%), so this value was picked on the same set it is reported on.
+MASK_BRIDGE_HUG_BAND_SPACINGS = 0.5  # x line spacing
 # Ledger-line notes: a notehead centred on a short ledger line floats 1+ spacings off the
 # staff, so it does not overlap the staff rows, yet it is content. It is told apart from
 # text by shape: a compact glyph with ink on BOTH sides of one short horizontal line
@@ -553,6 +565,76 @@ def _looks_like_ledger_note(comp: np.ndarray, stat: np.ndarray, band_top: int,
     return line_row >= side and (bottom - top - line_row) >= side
 
 
+def _label_attached(glyphs: np.ndarray, band_top: int, band_bottom: int,
+                    tol: int) -> tuple[int, np.ndarray, np.ndarray, np.ndarray]:
+    """Labels glyph components and flags those touching the staff rows.
+
+    Any component touching the staff rows (within ``tol``) is content: notes, stems hanging
+    below the staff, ties/slurs hugging it and staff-line fragments on tilted pages all live
+    there. Tried and rejected: demanding a minimum overlap to drop the "f"/"p" of dynamics
+    whose descender dips into the staff -- it also deleted down-stems of second-voice notes
+    and slurs. Dynamics that touch the staff therefore stay (known residual).
+
+    Returns:
+        (count, labels, stats, attached): connectedComponentsWithStats outputs plus a bool
+        per label (label 0, the background, is never attached).
+    """
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(
+        glyphs.astype(np.uint8), connectivity=8)
+    tops = stats[:, cv2.CC_STAT_TOP]
+    bottoms = tops + stats[:, cv2.CC_STAT_HEIGHT]
+    attached = (bottoms >= band_top - tol) & (tops <= band_bottom + tol)
+    attached[0] = False
+    return count, labels, stats, attached
+
+
+def _tie_bridge_runs(off_band: np.ndarray, labels: np.ndarray, attached: np.ndarray,
+                     spacing: float, band_top: int, band_bottom: int) -> np.ndarray:
+    """Returns pixels of off-band thin runs that are long ties/slurs, not neighbour staff lines.
+
+    Why: a long flat tie survives the staff-line opening and, being thin and off the band, was
+    removed as a neighbour's staff line, leaving a stub at each end and a tie token the CRNN
+    can no longer see (BUG-015). A run is a tie/slur if it is well short of the crop width and
+    both of its end zones touch a staff-attached component (the noteheads it joins). Lyric
+    text never touches attached ink; a neighbour's staff line runs edge to edge. Runs hugging
+    the band (MASK_BRIDGE_HUG_BAND_SPACINGS) are this staff's own ink and are kept outright.
+
+    Args:
+        off_band: Opened runs outside the staff band (window-sized, uint8).
+        labels, attached: from _label_attached on the first-pass glyph mask.
+        spacing: Staff-line spacing in px.
+        band_top, band_bottom: Staff rows in window coordinates.
+    """
+    count, run_labels, run_stats, _ = cv2.connectedComponentsWithStats(off_band, connectivity=8)
+    runs = np.zeros(off_band.shape, dtype=bool)
+    max_width = MASK_BRIDGE_MAX_WIDTH_FRAC * off_band.shape[1]
+    end_px = max(int(round(spacing * MASK_BRIDGE_END_SPACINGS)), 1)
+    hug_px = spacing * MASK_BRIDGE_HUG_BAND_SPACINGS
+    join = np.ones((2 * MASK_BRIDGE_JOIN_PX + 1,) * 2, np.uint8)
+    for i in range(1, count):
+        left = int(run_stats[i, cv2.CC_STAT_LEFT])
+        width = int(run_stats[i, cv2.CC_STAT_WIDTH])
+        run_top = int(run_stats[i, cv2.CC_STAT_TOP])
+        run_bottom = run_top + int(run_stats[i, cv2.CC_STAT_HEIGHT])
+        gap = max(band_top - run_bottom, run_top - band_bottom, 0)
+        rows = slice(max(run_top - MASK_BRIDGE_JOIN_PX, 0), run_bottom + MASK_BRIDGE_JOIN_PX)
+        cols = slice(left, left + width)
+        run = run_labels[rows, cols] == i
+        if gap <= hug_px:
+            runs[rows, cols] |= run
+            continue
+        if width > max_width or width <= 2 * end_px:
+            continue
+        reach = cv2.dilate(run.astype(np.uint8), join) > 0
+        touched = np.where(reach, labels[rows, cols], 0)
+        touched[~attached[touched]] = 0  # keep only staff-attached components
+        if touched[:, :end_px].any() and touched[:, width - end_px:].any():
+            runs[rows, cols] |= run
+    # Cover the rows the line-removal pad blanked around each accepted run.
+    return cv2.dilate(runs.astype(np.uint8),
+                      np.ones((2 * CROP_LINE_REMOVAL_PAD_PX + 1, 1), np.uint8)) > 0
+
+
 def _non_staff_ink_mask(image: np.ndarray, box: dict) -> tuple[int, int, np.ndarray]:
     """Finds ink around one staff that is neither the staff nor attached to it (lyrics etc.).
 
@@ -561,7 +643,8 @@ def _non_staff_ink_mask(image: np.ndarray, box: dict) -> tuple[int, int, np.ndar
     beams, clefs, accidentals, rests, barlines, ties and dynamics that touch the staff.
     Staff lines are kept only inside the staff's own row band, so a neighbouring staff's lines
     that fall inside the crop are blanked too. Thick off-band opened runs (beams) are kept as
-    glyph ink; thin ones are treated as lines. Unlike the extent scan, over-tall components
+    glyph ink; thin ones are treated as lines unless they bridge two attached glyphs (a long
+    tie/slur, see _tie_bridge_runs). Unlike the extent scan, over-tall components
     (barlines, brace) are kept whole: they are real ink of this staff and dropping them would
     change the strip content, not just remove text.
 
@@ -601,20 +684,15 @@ def _non_staff_ink_mask(image: np.ndarray, box: dict) -> tuple[int, int, np.ndar
     all_lines = cv2.dilate(
         staff_lines, np.ones((2 * CROP_LINE_REMOVAL_PAD_PX + 1, 1), np.uint8)) > 0
     glyphs = ((ink > 0) & ~all_lines) | (strokes > 0) | (beams > 0)
-    count, labels, stats, _ = cv2.connectedComponentsWithStats(
-        glyphs.astype(np.uint8), connectivity=8)
-
     tol = int(round(spacing * MASK_ATTACH_TOL_SPACINGS))
 
-    tops = stats[:, cv2.CC_STAT_TOP]
-    bottoms = tops + stats[:, cv2.CC_STAT_HEIGHT]
-    # Any component touching the staff rows (within a small tolerance) is content: notes, stems
-    # hanging below the staff, ties/slurs hugging it and staff-line fragments on tilted pages
-    # all live there. Tried and rejected: demanding a minimum overlap to drop the "f"/"p" of
-    # dynamics whose descender dips into the staff -- it also deleted down-stems of second-voice
-    # notes and slurs. Dynamics that touch the staff therefore stay (known residual).
-    attached = (bottoms >= band_top - tol) & (tops <= band_bottom + tol)
-    attached[0] = False  # label 0 is background
+    count, labels, stats, attached = _label_attached(glyphs, band_top, band_bottom, tol)
+    bridges = _tie_bridge_runs(off_band, labels, attached, spacing, band_top, band_bottom)
+    if bridges.any():
+        # Re-label with the accepted ties/slurs restored so their end stubs and fringe pixels
+        # join into one component that is attached through its noteheads.
+        glyphs |= bridges & (ink > 0)
+        count, labels, stats, attached = _label_attached(glyphs, band_top, band_bottom, tol)
 
     for i in np.nonzero(~attached)[0][1:]:
         attached[i] = _looks_like_ledger_note(

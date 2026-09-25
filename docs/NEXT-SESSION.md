@@ -23,12 +23,9 @@ all committed on that branch:
   clipped at strip edges.
 - **BUG-015** — lyric masking (`_non_staff_ink_mask`, `mask_lyrics=` toggle, default on). Pixel-exact audit
   2026-09-25 (`training/step3_mask_audit.py`, reproducible): 0 px removed in staff band on all 80 strips;
-  79,789 px removed = 5.8% of ALL ink (46.8% of out-of-band ink by the script's definition). True lyric
+  (pre-tie-fix figures) 79,789 px removed = 5.8% of ALL ink (46.8% of out-of-band ink by the script's definition). True lyric
   residuals: 2 of 80 (page006_sys03_Tenor 'Aah', page003_sys01_Bass minor) + 1 unverified tiny fragment;
-  dynamics/labels/brace slivers remain (non-lyric). **New defect: long ties/slurs are partially deleted
-  (17 strips visually confirmed, 20 flagged)** — mask-logic issue, not fixed by a text-line detector;
-  needs a user decision. YOLO text-line fallback not warranted by the lyric rate. Stage 3 effect still
-  unmeasured (Step 3 held out). See BUG-015 in `docs/bug-tracker.md`.
+  dynamics/labels/brace slivers remain (non-lyric). **Tie/slur deletion defect: fixed on this branch 2026-09-25** (`_tie_bridge_runs` in `stage2_detection.py`). Re-audit on the same 80 strips (not independent): 79,789 -> 41,962 px removed, still 0 px removed in the staff band, audit 'bridging removed piece' flags 20 -> 2 strips; the new strips are a strict superset of the old ones and the difference (220 pieces) was enumerated: 209 pieces are outer-staff-line wobble now kept, 11 are ties/slurs (no lyric/neighbour fragments among them). Viewed at native resolution for ~15 of the 20 flagged strips including page003_sys02_Bass and page006_sys03_Bass; the other 5 and the original 17-strip confirmed list were NOT re-checked individually, and the 0.5 hug threshold was picked on these same strips. Two small tie/slur residuals remain (page007_sys02_Soprano arc fragment, page002_sys03_Alto tie bottom). Lyric residual unchanged at 2/80. See BUG-015 in `docs/bug-tracker.md`.
 
 **BUG-001 (camera photos fail the divisible-by-4 staff count check) remains open by explicit user
 instruction** even though this branch's fixes resolve it for this specific photo set — it needs a

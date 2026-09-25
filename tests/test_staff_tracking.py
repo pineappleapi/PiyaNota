@@ -118,6 +118,52 @@ def test_mask_keeps_ledger_line_note() -> None:
     assert (on < 128).sum() == (off < 128).sum()
 
 
+def test_mask_keeps_long_tie_but_removes_neighbor_line_and_lyric() -> None:
+    """A long flat tie between two noteheads survives; an edge-to-edge line and lyrics do not.
+
+    Regression for the BUG-015 tie/slur damage: the tie's flat middle survives the staff-line
+    opening, is thin and off the band, and used to be blanked as a "neighbour staff line".
+    The stand-in neighbour line here is bounded by barlines that touch the staff, so it also
+    guards against the bridge rule mistaking a line that touches attached ink at both ends
+    for a tie: only its edge-to-edge length tells them apart.
+    """
+    page = _synthetic_page(0.0)
+    head_y = 200 - SPACING_PX  # notehead on the line above the middle
+    for x in (300, 500):
+        cv2.ellipse(page, (x, head_y), (7, 5), 0, 0, 360, 0, -1)
+    tie_y = 200 - 3 * SPACING_PX + 2  # 1+ spacing above the top line: well off the band
+    cv2.polylines(page, [np.array([(300, head_y - 5), (306, tie_y + 8), (316, tie_y),
+                                   (484, tie_y), (494, tie_y + 8), (500, head_y - 5)],
+                                  np.int32)], False, 0, 2)
+    neighbor_y = 200 + 3 * SPACING_PX  # a "neighbour staff line" below, inside the crop
+    page[neighbor_y - 1:neighbor_y + 1, 60:1140] = 0
+    for x in (60, 1140):  # system barlines touching the staff and both ends of that line
+        page[200 - 2 * SPACING_PX:neighbor_y + 6, x - 1:x + 1] = 0
+    lyric_top = neighbor_y + 7
+    for k in range(6):
+        page[lyric_top:lyric_top + 8, 700 + k * 12:700 + k * 12 + 8] = 0
+
+    box = {"x1": 0, "x2": PAGE_W, "y1": 200 - 2 * SPACING_PX, "y2": 200 + 2 * SPACING_PX}
+    win_top, x_start, remove = s2._non_staff_ink_mask(page, box)
+    removed = np.zeros(page.shape, dtype=bool)
+    removed[win_top:win_top + remove.shape[0], x_start:x_start + remove.shape[1]] = remove
+    ink = page < 128
+
+    tie_zone = np.zeros_like(ink)
+    tie_zone[tie_y - 2:tie_y + 3, 320:480] = True  # the flat middle, clear of both stubs
+    assert (ink & tie_zone).sum() > 0
+    assert not (removed & ink & tie_zone).any(), "tie middle was deleted"
+    assert not (removed & ink & (np.arange(PAGE_W) >= 295) & (np.arange(PAGE_W) <= 505)
+                & (np.arange(PAGE_H)[:, None] < 200 - 2 * SPACING_PX)).any()
+
+    line_zone = np.zeros_like(ink)
+    line_zone[neighbor_y - 1:neighbor_y + 1, 100:1100] = True
+    assert removed[ink & line_zone].all(), "neighbour staff line was kept"
+    lyric_zone = np.zeros_like(ink)
+    lyric_zone[lyric_top:lyric_top + 8, 700:772] = True
+    assert removed[ink & lyric_zone].all(), "lyric blob was kept"
+
+
 def test_mask_off_reproduces_unmasked_crop() -> None:
     """mask_lyrics=False must reproduce the pre-BUG-015 crop, not just be deterministic.
 
