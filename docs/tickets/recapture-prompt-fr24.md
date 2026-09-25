@@ -1,6 +1,9 @@
-# Recapture prompt & page replacement (FR-24)
+# PIYA-127 - Recapture prompt & page replacement (FR-24)
 
-Ticket ID: **unassigned** (raised 2026-09-26; assign a PIYA-XXX number when it is scheduled).
+Ticket ID: **PIYA-127** (raised 2026-09-26; next number after PIYA-126 in `module1-pipeline.md`).
+Related: PIYA-116 (Resubmit Failed Page API - already specifies replace-one-page-and-new-jobId; this ticket
+adds the pipeline reason codes, the checklist screen and the page-id rules it depends on), PIYA-105 #4/#7,
+PIYA-108 #5, PIYA-120, PIYA-207 (Processing Status screen).
 Split out of BUG-001, which is signed off. Modules: 1 (reason codes), 3 (API/job state), 2 (app UI).
 Bug-tracker entry: BUG-018.
 
