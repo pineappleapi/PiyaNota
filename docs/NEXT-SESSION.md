@@ -21,13 +21,14 @@ all committed on that branch:
   set. Tuned on these same 7 photos, not an independent eval.
 - **BUG-014** — content-adaptive strip crop (`_content_extent`/`_crop_and_resize`) fixed notes being
   clipped at strip edges.
-- **BUG-015** — lyric masking (`_non_staff_ink_mask`, `mask_lyrics=` toggle, default on). Blanks ink
-  not attached to the staff. Partial fix: 0 staff-band ink lost, ~5.8% of out-of-band ink removed
-  across the 80 strips, but real residuals remain (confirmed by pixel-exact check, not just
-  eyeballing — see the 2026-09-24 correction note in `docs/bug-tracker.md` BUG-015, which also
-  retracts one prior false-positive residual claim). **Open decision, not yet made: whether a YOLO
-  text-line detector fallback is needed.** Don't decide this from the eyeballed residual list — it
-  has at least one confirmed false entry; re-verify pixel-exactly first.
+- **BUG-015** — lyric masking (`_non_staff_ink_mask`, `mask_lyrics=` toggle, default on). Pixel-exact audit
+  2026-09-25 (`training/step3_mask_audit.py`, reproducible): 0 px removed in staff band on all 80 strips;
+  79,789 px removed = 5.8% of ALL ink (46.8% of out-of-band ink by the script's definition). True lyric
+  residuals: 2 of 80 (page006_sys03_Tenor 'Aah', page003_sys01_Bass minor) + 1 unverified tiny fragment;
+  dynamics/labels/brace slivers remain (non-lyric). **New defect: long ties/slurs are partially deleted
+  (17 strips visually confirmed, 20 flagged)** — mask-logic issue, not fixed by a text-line detector;
+  needs a user decision. YOLO text-line fallback not warranted by the lyric rate. Stage 3 effect still
+  unmeasured (Step 3 held out). See BUG-015 in `docs/bug-tracker.md`.
 
 **BUG-001 (camera photos fail the divisible-by-4 staff count check) remains open by explicit user
 instruction** even though this branch's fixes resolve it for this specific photo set — it needs a
