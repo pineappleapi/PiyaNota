@@ -118,6 +118,48 @@ STAFF_PREDICT_POINTS     = 6      # trailing points used to predict where a trac
 STAFF_END_STATE_POINTS   = 8      # points nearest a track end used to estimate its end slope
 KNOT_EPSILON_PX          = 1e-3   # per-knot nudge that keeps dewarp remap knots strictly increasing
 
+# ── Working resolutions ───────────────────────────────────────────────────────
+# Detection/tracking run on the 1600px page (every STAFF_* constant above was tuned there).
+# Strips are cut from a SECOND, native-resolution page built through the same perspective and
+# dewarp geometry. Measured (PIYA-121, DSMN page 1): downscaling the gray image and denoising
+# cost nothing (rest-glyph correlation with the native gray 0.97, NLM identical), but
+# binarizing the 1600px gray (rest strokes are ~1.6 px, partial-volume gray) drops thin
+# strokes/line segments and re-thresholding after the gray dewarp bloats bands +24% ink mass;
+# binarizing at native resolution and only then shrinking to the 64px strip keeps the mass at
+# 1.00 (see docs/bug-tracker.md BUG-016).
+DETECT_MAX_DIM = 1600            # px; detection / tracking working size
+STRIP_SOURCE_MAX_DIM = 4032      # px; native phone resolution is kept up to this size
+STRIP_SOURCE_BLUR_SIGMA_PER_SCALE = 0.4  # gaussian sigma per unit of native/detect scale: 1.0 px at the
+                                         # 2.52x of a 4032px phone photo (measured), 0.8 (the old 3x3) at 1x
+STRIP_SOURCE_BLUR_MIN_SIGMA_PX = 0.8
+STRIP_SOURCE_BLOCK_SIZE_1600 = 31  # adaptive-threshold block at 1600px (see _binarize); scaled with the page
+STRIP_SOURCE_THRESHOLD_C = 10     # same offset as _binarize
+
+# ── Non-staff ink (lyric/text) mask, run once on the straightened page ────────
+# Everything that is neither a tracked staff nor connected to one is removed. "Connected"
+# means: a component of the ink (nothing subtracted, so beams/ties/rests cannot be cut off
+# their stems or noteheads by a line-removal step) that has a pixel within MASK_ATTACH_TOL_SPACINGS
+# of some tracked staff band. This replaces the old per-strip Stage 2 mask, whose staff-line
+# opening treated thin flat beams and long ties as neighbouring staff lines.
+MASK_ATTACH_TOL_SPACINGS = 0.75  # x line spacing; ink this close to a band counts as touching the staff
+MASK_LINK_RADIUS_SPACINGS = 0.2  # x line spacing; gaps this small between ink pieces (ties/heads) are bridged
+# Ledger-line notes: a notehead centred on a short ledger line floats 1+ spacings off the staff
+# yet is content. Told apart from text by shape: compact glyph with ink on BOTH sides of one
+# short horizontal line (a lyric extender/underscore has ink only above it).
+LEDGER_MAX_REACH_SPACINGS = 3.5
+LEDGER_RUN_MIN_SPACINGS = 1.2
+LEDGER_RUN_MAX_SPACINGS = 3.0
+LEDGER_MAX_HEIGHT_SPACINGS = 2.5
+LEDGER_MAX_WIDTH_SPACINGS = 3.5
+LEDGER_SIDE_MIN_SPACINGS = 0.25
+LEDGER_THIN_ROW_FRAC = 0.8
+LEDGER_MAX_LINE_SPACINGS = 0.3
+# A staff the tracker missed has no band, so its ink would be deleted as "not attached". Any
+# unattached component this wide that contains several long horizontal runs is staff-like and kept.
+MASK_STAFFLIKE_MIN_WIDTH_FRAC = 0.15  # x page width
+MASK_STAFFLIKE_MIN_RUNS = 3
+STAFFLIKE_RUN_SPACINGS = 6.0  # a 'long horizontal run' is at least this many line spacings
+
 
 @dataclass
 class StaffCurve:
@@ -169,20 +211,200 @@ class StaffCurve:
 
 
 
+@dataclass(frozen=True)
+class StaffBand:
+    """A tracked staff as the mask sees it, in the page's current (post-dewarp) geometry."""
+    center: float
+    spacing: float
+    slack: float = 0.0  # residual vertical wander (px) of an un-dewarped staff
+
+
+@dataclass
+class PreprocessedPage:
+    """Stage 1 result for one page.
+
+    Attributes:
+        detect: Binary page at DETECT_MAX_DIM for YOLO and the staff tracker (ink = 0).
+        strip_source: Native-resolution binary page in the same (dewarped, masked) geometry, or
+            None when the non-staff mask could not be applied (Stage 2 then cuts strips from
+            ``detect``). Strips are cut from this page so thin glyphs (rests, flags, ties) are
+            not lost to a 1600px binarization.
+        angle: Staffline angle measured by correct_to_grid (degrees).
+        mask_applied: Whether the non-staff-ink mask ran on this page.
+        removed_px: Ink pixels removed by the mask at detection resolution (0 if not applied).
+        strip_unmasked: Same page as ``strip_source`` before the mask (audit only; None unless
+            keep_unmasked was requested).
+        strip_staves: The tracked staves in ``strip_source`` pixels (audit only).
+        strip_gray: The native normalized+dewarped gray page the strip source was thresholded
+            from (audit only): the analog reference thin-glyph fidelity is measured against.
+    """
+    detect: np.ndarray
+    strip_source: np.ndarray | None
+    angle: float
+    mask_applied: bool
+    removed_px: int
+    strip_unmasked: np.ndarray | None = None
+    strip_staves: list[StaffBand] | None = None
+    strip_gray: np.ndarray | None = None
+
+
+def _band_row_mask(height: int, staves: list[StaffBand], tol_spacings: float) -> np.ndarray:
+    """Bool per-row mask of the rows within `tol_spacings` of any staff's outer lines."""
+    rows = np.zeros(height, dtype=bool)
+    half = (STAFF_LINES_PER_STAFF - 1) / 2.0
+    for s in staves:
+        reach = (half + tol_spacings) * s.spacing + s.slack
+        lo = max(0, int(np.floor(s.center - reach)))
+        hi = min(height, int(np.ceil(s.center + reach)) + 1)
+        rows[lo:hi] = True
+    return rows
+
+
+def _is_ledger_note(comp: np.ndarray, top: int, bottom: int, staves: list[StaffBand],
+                    spacing: float) -> bool:
+    """True if a detached component is a notehead sitting on a short ledger line.
+
+    Args:
+        comp: Bool mask of the component's ink inside its bounding box.
+        top, bottom: Bounding-box rows on the page.
+        staves: Tracked staves.
+        spacing: Median line spacing.
+    """
+    half = (STAFF_LINES_PER_STAFF - 1) / 2.0
+    gap = min(max(s.center - half * s.spacing - bottom, top - (s.center + half * s.spacing), 0.0)
+              for s in staves)
+    if gap > LEDGER_MAX_REACH_SPACINGS * spacing:
+        return False
+    height, width = comp.shape
+    if height > LEDGER_MAX_HEIGHT_SPACINGS * spacing or width > LEDGER_MAX_WIDTH_SPACINGS * spacing:
+        return False
+    rows = comp.sum(axis=1)
+    line_row = int(rows.argmax())
+    if not LEDGER_RUN_MIN_SPACINGS * spacing <= rows[line_row] <= LEDGER_RUN_MAX_SPACINGS * spacing:
+        return False
+    thickness = int((rows >= LEDGER_THIN_ROW_FRAC * rows[line_row]).sum())
+    if thickness > max(2, LEDGER_MAX_LINE_SPACINGS * spacing):
+        return False
+    side = LEDGER_SIDE_MIN_SPACINGS * spacing
+    return line_row >= side and (height - line_row) >= side
+
+
+def _is_staff_like(comp: np.ndarray, page_width: int, spacing: float) -> bool:
+    """True if a wide detached component holds several long horizontal runs (an untracked staff)."""
+    if comp.shape[1] < MASK_STAFFLIKE_MIN_WIDTH_FRAC * page_width:
+        return False
+    kernel = np.ones((1, max(int(round(STAFFLIKE_RUN_SPACINGS * spacing)), 3)), np.uint8)
+    runs = cv2.morphologyEx(comp.astype(np.uint8), cv2.MORPH_OPEN, kernel).any(axis=1)
+    groups = int(np.count_nonzero(runs[1:] & ~runs[:-1])) + int(runs[0])
+    return groups >= MASK_STAFFLIKE_MIN_RUNS
+
+
+def non_staff_ink_mask(binary: np.ndarray, staves: list[StaffBand]) -> np.ndarray:
+    """Finds ink that is neither a tracked staff nor connected to one (lyrics, titles, dust).
+
+    Runs on the straightened page. Connectivity is decided on the ink itself, gap-bridged by
+    MASK_LINK_RADIUS_SPACINGS, with nothing subtracted first: beams, ties, flags and rests stay
+    joined to the stems/noteheads that are on the staff, so they cannot be mistaken for
+    neighbouring lines or text. A component is kept if it has a pixel within
+    MASK_ATTACH_TOL_SPACINGS of any tracked staff's outer lines, or looks like a ledger-line
+    note or an untracked staff.
+
+    Args:
+        binary: Page, ink = 0.
+        staves: Tracked staves (at least one).
+
+    Returns:
+        Bool mask of the ink pixels to erase.
+    """
+    ink = binary < 128
+    if not staves or not ink.any():
+        return np.zeros(ink.shape, dtype=bool)
+    height, width = ink.shape
+    spacing = float(np.median([s.spacing for s in staves]))
+    band_rows = _band_row_mask(height, staves, MASK_ATTACH_TOL_SPACINGS)
+
+    link = max(1, int(round(MASK_LINK_RADIUS_SPACINGS * spacing)))
+    linked = cv2.dilate(ink.astype(np.uint8),
+                        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * link + 1, 2 * link + 1)))
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(linked, connectivity=8)
+    keep = np.zeros(count, dtype=bool)
+    keep[np.unique(labels[band_rows])] = True
+    for i in range(1, count):
+        if keep[i]:
+            continue
+        left, top = int(stats[i, cv2.CC_STAT_LEFT]), int(stats[i, cv2.CC_STAT_TOP])
+        w_i, h_i = int(stats[i, cv2.CC_STAT_WIDTH]), int(stats[i, cv2.CC_STAT_HEIGHT])
+        if w_i < LEDGER_RUN_MIN_SPACINGS * spacing and w_i < MASK_STAFFLIKE_MIN_WIDTH_FRAC * width:
+            continue  # narrower than any ledger line and than an untracked staff: text speck
+        comp = (labels[top:top + h_i, left:left + w_i] == i) & ink[top:top + h_i, left:left + w_i]
+        keep[i] = (_is_ledger_note(comp, top, top + h_i, staves, spacing)
+                   or _is_staff_like(comp, width, spacing))
+    keep[0] = False
+    return ink & ~keep[labels]
+
+
+def _border_region(shape: tuple[int, int], border_rows: np.ndarray, left_px: int, right_px: int) -> np.ndarray:
+    """Bool region blanked by the border step on the detection page (transferred to native)."""
+    region = np.zeros(shape, dtype=bool)
+    region[border_rows, :] = True
+    region[:, :left_px] = True
+    if right_px > 0:
+        region[:, -right_px:] = True
+    return region
+
+
 def preprocess_score_image(image_path: str, save_debug: bool = False) -> tuple:
+    """Backward-compatible wrapper: returns (detection-resolution binary page, angle)."""
+    page = preprocess_score_page(image_path, save_debug=save_debug, build_strip_source=False)
+    return page.detect, page.angle
+
+
+def _odd(value: float) -> int:
+    """Nearest odd integer >= 3 (adaptive-threshold block sizes must be odd)."""
+    return max(3, int(round(value)) | 1)
+
+
+def preprocess_score_page(
+    image_path: str,
+    save_debug: bool = False,
+    mask_non_staff_ink: bool = True,
+    build_strip_source: bool = True,
+    keep_unmasked: bool = False,
+) -> PreprocessedPage:
+    """Runs Stage 1 on one photo.
+
+    Args:
+        image_path: Input photo.
+        save_debug: Write intermediate images next to the input.
+        mask_non_staff_ink: Remove lyrics/text/dust not connected to a tracked staff (runs on
+            the straightened page). Needs at least one tracked staff.
+        build_strip_source: Also build the native-resolution page used for strips (requires the
+            mask to have been applied).
+        keep_unmasked: Also return the native page before the mask and its staves, for auditing
+            what the mask removed.
+
+    Returns:
+        A PreprocessedPage.
+    """
     img_path = Path(image_path)
-    bgr = cv2.imread(str(img_path))
-    if bgr is None:
+    full = cv2.imread(str(img_path))
+    if full is None:
         raise ValueError(f"Could not read image: {image_path}")
 
-    # Step 0: Downscale large phone images
-    MAX_DIM = 1600
+    # Step 0: Downscale large phone images to the detection size; keep a native-resolution copy
+    # (capped at STRIP_SOURCE_MAX_DIM) for the strip source.
+    bgr = full
     ph, pw = bgr.shape[:2]
-    if max(ph, pw) > MAX_DIM:
-        scale = MAX_DIM / max(ph, pw)
+    if max(ph, pw) > DETECT_MAX_DIM:
+        scale = DETECT_MAX_DIM / max(ph, pw)
         bgr = cv2.resize(bgr, (int(pw * scale), int(ph * scale)),
                          interpolation=cv2.INTER_AREA)
         print(f"[Stage 1] Downscaled {ph}x{pw} -> {bgr.shape[0]}x{bgr.shape[1]}")
+    hi = full
+    if max(ph, pw) > STRIP_SOURCE_MAX_DIM:
+        scale = STRIP_SOURCE_MAX_DIM / max(ph, pw)
+        hi = cv2.resize(full, (int(pw * scale), int(ph * scale)), interpolation=cv2.INTER_AREA)
+    pre_k = (hi.shape[1] / bgr.shape[1], hi.shape[0] / bgr.shape[0])
 
     # Step 0.5: Perspective correction — must run here, on the raw color image,
     # for two reasons: (1) it needs intact page-boundary edges to find the quad
@@ -194,7 +416,14 @@ def preprocess_score_image(image_path: str, save_debug: bool = False) -> tuple:
     # perspective skew — worse, uncorrected perspective can bias that angle
     # estimate, since stafflines converging toward a vanishing point don't all
     # measure the same angle.
-    bgr = correct_perspective(bgr)
+    bgr, persp = _correct_perspective(bgr)
+    if persp is not None:
+        # Conjugate the matrix by the detect->native scale so the native page gets the same warp.
+        s_m = np.diag([pre_k[0], pre_k[1], 1.0])
+        hi = cv2.warpPerspective(
+            hi, s_m @ persp @ np.linalg.inv(s_m),
+            (int(round(bgr.shape[1] * pre_k[0])), int(round(bgr.shape[0] * pre_k[1]))),
+            flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
     _dbg_save(save_debug, img_path, bgr, "0a_perspective")
 
     # Step 1: Grayscale
@@ -227,11 +456,13 @@ def preprocess_score_image(image_path: str, save_debug: bool = False) -> tuple:
     # to the old path) when no staff drifts >= DEWARP_MIN_DRIFT_PX.
     curves = track_staff_curves(binary)
     dewarped = needs_dewarp(curves)
+    map_y: np.ndarray | None = None
     if dewarped:
         print(f"[Dewarp] {len(curves)} staff curve(s), max drift "
               f"{max(c.drift_px for c in curves):.1f}px -> straightening staves")
         _dbg_save(save_debug, img_path, _draw_staff_curves(binary, curves), "3_staff_tracks")
-        denoised = dewarp_to_staff_grid(denoised, curves)
+        map_y = staff_grid_map(denoised.shape, curves)
+        denoised = _remap_rows(denoised, map_y)
         binary = _binarize(denoised)
     else:
         print(f"[Dewarp] {len(curves)} staff curve(s), no significant drift -> unchanged")
@@ -252,7 +483,8 @@ def preprocess_score_image(image_path: str, save_debug: bool = False) -> tuple:
     # comment above) rather than by content detection. Bounds-guarded so a
     # page narrower than the border constants can't blank its entire width.
     pre_blank = binary.copy()
-    binary = _blank_border_if_no_staff(binary, BORDER_TOP_PX, BORDER_BOTTOM_PX)
+    border_rows = _border_rows_to_blank(binary, BORDER_TOP_PX, BORDER_BOTTOM_PX)
+    binary[border_rows, :] = 255
     left_px = min(BORDER_LEFT_PX, binary.shape[1])
     binary[:, :left_px] = 255
     right_px = min(BORDER_RIGHT_PX, binary.shape[1])
@@ -261,7 +493,34 @@ def preprocess_score_image(image_path: str, save_debug: bool = False) -> tuple:
 
     _dbg_save(save_debug, img_path, binary, "3_binary")
 
-    # Step 3.2: Blank lyrics
+    # Step 3.15: Non-staff ink (lyric/text) mask, on the straightened page. Post-dewarp each
+    # staff sits at its curve's mean_center with median spacing (see staff_grid_map); an
+    # un-dewarped staff drifts < DEWARP_MIN_DRIFT_PX, half of which is carried as band slack.
+    staves = [StaffBand(
+        center=c.mean_center,
+        spacing=float(np.median(c.spacing_at(np.linspace(c.x_min, c.x_max, 32)))),
+        slack=0.0 if dewarped else c.drift_px / 2.0) for c in curves]
+    remove: np.ndarray | None = None
+    removed_px = 0
+    if mask_non_staff_ink and staves:
+        candidate_remove = non_staff_ink_mask(binary, staves)
+        candidate = binary.copy()
+        candidate[candidate_remove] = 255
+        # A staff the tracker missed has no band; the staff-like rule protects most of those and
+        # this recount catches any that would still be damaged.
+        if len(track_staff_curves(candidate)) >= len(curves):
+            remove, removed_px = candidate_remove, int(candidate_remove.sum())
+            print(f"[Mask] {len(staves)} tracked staff(s): removed {removed_px} px of non-staff ink.")
+            binary = candidate
+            pre_blank[candidate_remove] = 255  # keep the row-restore below from resurrecting it
+        else:
+            logger.warning("non-staff mask changed the tracked staff count on %s; mask discarded",
+                           img_path.name)
+    elif mask_non_staff_ink:
+        logger.warning("no tracked staves on %s; non-staff mask skipped", img_path.name)
+
+    # Step 3.2: Blank lyrics (kept for the detection page: YOLO/tracker behaviour is unchanged;
+    # strips do not use this page's ink, they come from the strip source).
     binary = blank_lyrics_regions(binary)
 
     # Step 3.3: Undo blanking that erased tracked staves (BUG-001). The band
@@ -270,15 +529,19 @@ def preprocess_score_image(image_path: str, save_debug: bool = False) -> tuple:
     # independently verified 5-line groups, so their rows are never blank-worthy.
     # Side columns are re-blanked so shadow ink is not resurrected with them.
     if curves:
-        # Post-dewarp each staff sits at its curve's mean_center with median spacing
-        # (see dewarp_to_staff_grid); undewarped staves drift < DEWARP_MIN_DRIFT_PX.
-        centers = [(c.mean_center, float(np.median(c.spacing_at(np.linspace(c.x_min, c.x_max, 32)))))
-                   for c in curves]
-        binary = _restore_staff_rows(binary, pre_blank, centers)
+        binary = _restore_staff_rows(binary, pre_blank, [(b.center, b.spacing) for b in staves])
         binary[:, :left_px] = 255
         if right_px > 0:
             binary[:, -right_px:] = 255
     _dbg_save(save_debug, img_path, binary, "3a_blanked")
+
+    strip_source: np.ndarray | None = None
+    unmasked: np.ndarray | None = None
+    hi_staves: list[StaffBand] | None = None
+    strip_gray: np.ndarray | None = None
+    if build_strip_source and remove is not None:
+        strip_source, unmasked, hi_staves, strip_gray = _build_strip_source(
+            hi, bg, map_y, _border_region(binary.shape, border_rows, left_px, right_px), staves)
 
     # Step 4: Grid alignment using stafflines + barlines
     # After a dewarp the staves are horizontal by construction; a further global
@@ -287,8 +550,65 @@ def preprocess_score_image(image_path: str, save_debug: bool = False) -> tuple:
     corrected, h_angle, v_angle = correct_to_grid(binary, bgr, apply_rotation=not dewarped)
     _dbg_save(save_debug, img_path, corrected, "4_corrected")
     print(f"[Stage 1] '{img_path.name}' -> h={h_angle:.2f} deg v={v_angle:.2f} deg")
+    if strip_source is not None and not dewarped:
+        rot = grid_correction_deg(h_angle, v_angle)
+        if abs(rot) > GRID_ROTATION_MIN_DEG:
+            sh, sw = strip_source.shape
+            rot_m = cv2.getRotationMatrix2D((sw // 2, sh // 2), -rot, 1.0)
+            strip_source = cv2.warpAffine(strip_source, rot_m, (sw, sh), flags=cv2.INTER_NEAREST,
+                                          borderMode=cv2.BORDER_REPLICATE)
+            if unmasked is not None:
+                unmasked = cv2.warpAffine(unmasked, rot_m, (sw, sh), flags=cv2.INTER_NEAREST,
+                                          borderMode=cv2.BORDER_REPLICATE)
+            if strip_gray is not None:
+                strip_gray = cv2.warpAffine(strip_gray, rot_m, (sw, sh), flags=cv2.INTER_LINEAR,
+                                            borderMode=cv2.BORDER_REPLICATE)
 
-    return corrected, h_angle
+    return PreprocessedPage(corrected, strip_source, h_angle, remove is not None, removed_px,
+                            unmasked if keep_unmasked else None, hi_staves if keep_unmasked else None,
+                            strip_gray if keep_unmasked else None)
+
+
+def _build_strip_source(hi: np.ndarray, bg: np.ndarray, map_y: np.ndarray | None,
+                        border_lo: np.ndarray, staves: list[StaffBand]
+                        ) -> tuple[np.ndarray, np.ndarray, list[StaffBand], np.ndarray]:
+    """Builds the native-resolution, lyric-masked binary page in the detection page's geometry.
+
+    Same steps as the detection path (normalize, dewarp with the same tracked curves,
+    adaptive threshold, border blank) but at native resolution, then the same non-staff mask
+    decided again on the native ink. It is decided again, not transferred from the 1600px page:
+    native-only specks (dust) and thin strokes the 1600px binarization dropped need a verdict
+    too, and components are whole here so no erase halo is needed.
+
+    Args:
+        hi: Perspective-corrected native BGR page.
+        bg: Local-background estimate from the detection page (a smooth field, so upsampling it
+            is accurate enough and avoids a 12 MP morphological dilation).
+        map_y: Detection-resolution dewarp row map, or None if the page was not dewarped.
+        border_lo: Detection-resolution region blanked by the border step.
+        staves: Tracked staves in detection pixels.
+
+    Returns:
+        (masked page, page before the mask, staves in native pixels, normalized dewarped gray).
+    """
+    gray = cv2.cvtColor(hi, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape
+    scale = h / bg.shape[0]
+    norm = cv2.divide(gray, cv2.resize(bg, (w, h), interpolation=cv2.INTER_LINEAR), scale=255)
+    sigma = max(STRIP_SOURCE_BLUR_MIN_SIGMA_PX, STRIP_SOURCE_BLUR_SIGMA_PER_SCALE * scale)
+    norm = cv2.GaussianBlur(norm, (0, 0), sigma)
+    if map_y is not None:
+        norm = _remap_rows(norm, map_y)
+    binary = cv2.adaptiveThreshold(
+        norm, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY,
+        _odd(STRIP_SOURCE_BLOCK_SIZE_1600 * scale), STRIP_SOURCE_THRESHOLD_C)
+    binary[cv2.resize(border_lo.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST) > 0] = 255
+    # Pixel-centre mapping between the two grids (same convention as _remap_rows).
+    hi_staves = [StaffBand(scale * (s.center + 0.5) - 0.5, s.spacing * scale, s.slack * scale)
+                 for s in staves]
+    unmasked = binary.copy()
+    binary[non_staff_ink_mask(binary, hi_staves)] = 255
+    return binary, unmasked, hi_staves, norm
 
 
 def _restore_staff_rows(
@@ -315,6 +635,11 @@ def _restore_staff_rows(
 
 
 def correct_perspective(bgr: np.ndarray) -> np.ndarray:
+    """Image-only wrapper around _correct_perspective (kept for existing callers)."""
+    return _correct_perspective(bgr)[0]
+
+
+def _correct_perspective(bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray | None]:
     """Warps a photographed page to a fronto-parallel rectangle, if confident.
 
     Looks for a single large convex quadrilateral (the page boundary) via
@@ -330,8 +655,9 @@ def correct_perspective(bgr: np.ndarray) -> np.ndarray:
         bgr: Post-downscale BGR image, prior to any grayscale/threshold step.
 
     Returns:
-        The perspective-corrected BGR image, or `bgr` unchanged if no
-        confident page-boundary quad was found.
+        (image, matrix): the perspective-corrected BGR image and the 3x3 warp matrix that
+        produced it, or (`bgr`, None) if no confident page-boundary quad was found. The matrix
+        lets the native-resolution strip source be warped identically.
     """
     h, w = bgr.shape[:2]
     frame_area = float(h * w)
@@ -347,7 +673,7 @@ def correct_perspective(bgr: np.ndarray) -> np.ndarray:
     contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         print("[Perspective] no contours found — leaving image unchanged")
-        return bgr
+        return bgr, None
 
     largest = max(contours, key=cv2.contourArea)
     perimeter = cv2.arcLength(largest, True)
@@ -356,18 +682,18 @@ def correct_perspective(bgr: np.ndarray) -> np.ndarray:
     if len(approx) != 4:
         print(f"[Perspective] largest contour approximates to {len(approx)} points, "
               f"not 4 — leaving image unchanged")
-        return bgr
+        return bgr, None
 
     if not cv2.isContourConvex(approx):
         print("[Perspective] 4-point contour is not convex — leaving image unchanged")
-        return bgr
+        return bgr, None
 
     quad_area = cv2.contourArea(approx)
     area_ratio = quad_area / frame_area
     if area_ratio < PERSPECTIVE_MIN_AREA_RATIO:
         print(f"[Perspective] quad covers only {area_ratio:.2f} of frame "
               f"(need >= {PERSPECTIVE_MIN_AREA_RATIO}) — leaving image unchanged")
-        return bgr
+        return bgr, None
 
     # Margin-inset gate: reject quads flush (or nearly flush) against the
     # frame border. A tightly-cropped strip with no real background margin
@@ -383,7 +709,7 @@ def correct_perspective(bgr: np.ndarray) -> np.ndarray:
         print(f"[Perspective] quad touches frame border (bbox x=[{min_x:.0f},{max_x:.0f}] "
               f"y=[{min_y:.0f},{max_y:.0f}] of {w}x{h}, need >= {margin_x:.0f}px/{margin_y:.0f}px "
               f"margin) — leaving image unchanged")
-        return bgr
+        return bgr, None
 
     tl, tr, br, bl = _order_quad_points(approx.reshape(4, 2).astype(np.float32))
 
@@ -391,7 +717,7 @@ def correct_perspective(bgr: np.ndarray) -> np.ndarray:
     dst_h = int(max(np.linalg.norm(bl - tl), np.linalg.norm(br - tr)))
     if dst_w <= 0 or dst_h <= 0:
         print("[Perspective] degenerate quad (zero width/height) — leaving image unchanged")
-        return bgr
+        return bgr, None
 
     src_pts = np.array([tl, tr, br, bl], dtype=np.float32)
     dst_pts = np.array([
@@ -408,7 +734,7 @@ def correct_perspective(bgr: np.ndarray) -> np.ndarray:
         borderMode=cv2.BORDER_REPLICATE
     )
     print(f"[Perspective] quad detected (area_ratio={area_ratio:.2f}) -> warped to {dst_w}x{dst_h}")
-    return warped
+    return warped, M
 
 
 def _order_quad_points(pts: np.ndarray) -> np.ndarray:
@@ -821,8 +1147,8 @@ def _drop_duplicate_curves(curves: list[StaffCurve], spacing: float) -> list[Sta
     return kept
 
 
-def dewarp_to_staff_grid(image: np.ndarray, curves: list[StaffCurve]) -> np.ndarray:
-    """Remaps `image` vertically so every tracked staff becomes a straight horizontal band.
+def staff_grid_map(shape: tuple[int, int], curves: list[StaffCurve]) -> np.ndarray:
+    """Builds the per-column vertical remap that straightens every tracked staff.
 
     For each output column, a piecewise-linear map is built through knots at
     every staff's top and bottom line: output (straight staff at its mean
@@ -833,13 +1159,13 @@ def dewarp_to_staff_grid(image: np.ndarray, curves: list[StaffCurve]) -> np.ndar
     barline tracking we do not have.
 
     Args:
-        image: Grayscale or binary page.
+        shape: (height, width) of the page the curves were tracked on.
         curves: Output of track_staff_curves(), top-to-bottom, non-empty.
 
     Returns:
-        Image of the same shape with staves straightened.
+        float32 (h, w) array: source row for every output pixel.
     """
-    h, w = image.shape[:2]
+    h, w = shape[:2]
     half = (STAFF_LINES_PER_STAFF - 1) / 2.0  # staff spans center +/- 2 spacings
     xs = np.arange(w, dtype=np.float64)
 
@@ -870,9 +1196,39 @@ def dewarp_to_staff_grid(image: np.ndarray, curves: list[StaffCurve]) -> np.ndar
         k_dst = np.concatenate([[dst_knots[0] - h], dst_knots, [dst_knots[-1] + h]])
         k_src = np.concatenate([[src_knots[0, x] - h], src_knots[:, x], [src_knots[-1, x] + h]])
         map_y[:, x] = np.interp(rows, k_dst, k_src)
+    return map_y
+
+
+def _remap_rows(image: np.ndarray, map_y: np.ndarray, out_shape: tuple[int, int] | None = None) -> np.ndarray:
+    """Applies a row map from staff_grid_map(), optionally to a higher-resolution image.
+
+    For a higher-resolution `image`, the detection-resolution map is upsampled bilinearly (it is
+    a smooth field) and its row values rescaled through pixel centres, so the native page is
+    warped by the same geometry the staves were tracked in. Bilinear gray interpolation only:
+    the caller binarizes AFTER this, so no glyph is thickened or eroded by the warp itself.
+    """
+    h, w = image.shape[:2]
+    mh, mw = map_y.shape
+    if (h, w) != (mh, mw):
+        ky = h / mh
+        map_y = cv2.resize(map_y, (w, h), interpolation=cv2.INTER_LINEAR)
+        map_y = (ky * (map_y + 0.5) - 0.5).astype(np.float32)
     map_x = np.tile(np.arange(w, dtype=np.float32), (h, 1))
     return cv2.remap(image, map_x, map_y, interpolation=cv2.INTER_LINEAR,
                      borderMode=cv2.BORDER_REPLICATE)
+
+
+def dewarp_to_staff_grid(image: np.ndarray, curves: list[StaffCurve]) -> np.ndarray:
+    """Remaps `image` vertically so every tracked staff becomes a straight horizontal band.
+
+    Args:
+        image: Grayscale or binary page.
+        curves: Output of track_staff_curves(), top-to-bottom, non-empty.
+
+    Returns:
+        Image of the same shape with staves straightened (see staff_grid_map).
+    """
+    return _remap_rows(image, staff_grid_map(image.shape, curves))
 
 
 def needs_dewarp(curves: list[StaffCurve]) -> bool:
@@ -908,6 +1264,14 @@ def _draw_staff_curves(binary: np.ndarray, curves: list[StaffCurve]) -> np.ndarr
         cv2.putText(canvas, str(k + 1), (int(pts[0, 0]) + 4, int(pts[0, 1]) - 6),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2, cv2.LINE_AA)
     return canvas
+
+
+GRID_ROTATION_MIN_DEG = 0.3  # smaller global rotations are measurement noise and are not applied
+
+
+def grid_correction_deg(h_angle: float, v_angle: float) -> float:
+    """Global rotation (degrees) correct_to_grid applies; shared so the strip source matches."""
+    return h_angle if abs(v_angle) < GRID_ROTATION_MIN_DEG else (h_angle + v_angle) / 2.0
 
 
 def correct_to_grid(binary: np.ndarray, bgr: np.ndarray, apply_rotation: bool = True) -> tuple:
@@ -970,10 +1334,10 @@ def correct_to_grid(binary: np.ndarray, bgr: np.ndarray, apply_rotation: bool = 
     print(f"[Grid] h_angle={h_angle:.2f}°  v_angle={v_angle:.2f}°")
 
     # ── Apply correction ──────────────────────────────────────────────────
-    correction = h_angle if abs(v_angle) < 0.3 else (h_angle + v_angle) / 2.0
+    correction = grid_correction_deg(h_angle, v_angle)
 
     corrected = binary.copy()
-    if apply_rotation and abs(correction) > 0.3:
+    if apply_rotation and abs(correction) > GRID_ROTATION_MIN_DEG:
         M = cv2.getRotationMatrix2D((w // 2, h // 2), -correction, 1.0)
         corrected = cv2.warpAffine(corrected, M, (w, h),
             flags=cv2.INTER_NEAREST,
@@ -1074,9 +1438,9 @@ def _detect_staff_bands(
     return merged
 
 
-def _blank_border_if_no_staff(binary: np.ndarray, top_px: int, bottom_px: int) -> np.ndarray:
+def _border_rows_to_blank(binary: np.ndarray, top_px: int, bottom_px: int) -> np.ndarray:
     """
-    Blanks the top/bottom border bands, but never touches a row inside a
+    Returns the bool row mask of top/bottom border rows to blank, never touches a row inside a
     detected staff's content zone — protects tightly-cropped pages (digital
     exports) where a real staff sits right at the edge, while still killing
     camera photos' hand/table-shadow rows near the border. See BUG-012 note
@@ -1112,13 +1476,16 @@ def _blank_border_if_no_staff(binary: np.ndarray, top_px: int, bottom_px: int) -
             lo, hi = max(0, start - margin), min(h, end + margin)
             protected[lo:hi] = True
 
+    blanked = np.zeros(h, dtype=bool)
+    blanked[:min(top_px, h)] = True
+    blanked[max(0, h - bottom_px):] = True
+    return blanked & ~protected
+
+
+def _blank_border_if_no_staff(binary: np.ndarray, top_px: int, bottom_px: int) -> np.ndarray:
+    """Blanks the border rows chosen by _border_rows_to_blank (see there for the rationale)."""
     result = binary.copy()
-    for y in range(min(top_px, h)):
-        if not protected[y]:
-            result[y, :] = 255
-    for y in range(max(0, h - bottom_px), h):
-        if not protected[y]:
-            result[y, :] = 255
+    result[_border_rows_to_blank(binary, top_px, bottom_px), :] = 255
     return result
 
 
@@ -1174,11 +1541,16 @@ def preprocess_batch(image_dir: str, output_dir: str, save_debug: bool = False) 
 
     results = []
     for i, img_file in enumerate(image_files, start=1):
-        corrected, angle = preprocess_score_image(str(img_file), save_debug=save_debug)
+        page = preprocess_score_page(str(img_file), save_debug=save_debug)
         out_file = output_path / f"page_{i:03d}_preprocessed.png"
-        cv2.imwrite(str(out_file), corrected)
+        cv2.imwrite(str(out_file), page.detect)
         print(f"  Saved -> {out_file}")
-        results.append((corrected, i))
+        if page.strip_source is not None:
+            src_file = output_path / f"page_{i:03d}_strip_source.png"
+            cv2.imwrite(str(src_file), page.strip_source)
+            print(f"  Saved -> {src_file}")
+        # (detection page, page index, native strip source or None); Stage 2 accepts 2-tuples too.
+        results.append((page.detect, i, page.strip_source))
 
     print(f"\n[Stage 1] Preprocessed {len(results)} page(s). Output: {output_dir}")
     return results

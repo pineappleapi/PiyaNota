@@ -37,7 +37,6 @@ MATCH_MAX_CENTER_SPACINGS = 2.5  # YOLO box center may sit this many line-spacin
 CLASSICAL_BOX_HALF_SPACINGS = 2.1
 MAX_BOXES_PER_PAGE = 16          # Rule 2 cap (4 systems x 4 voices)
 STAFFS_PER_SYSTEM = 4
-MASK_LYRICS_DEFAULT = True       # blank non-staff ink in strips; mask_lyrics=False restores the old strips
 
 
 def detect_staff_regions(
@@ -48,14 +47,17 @@ def detect_staff_regions(
     save_viz: bool = False,          # ← new flag
     viz_dir: str = "data/detection_viz",
     manifest_path: str | None = None,
-    mask_lyrics: bool = MASK_LYRICS_DEFAULT,
 ) -> dict:
     """Detects staves per page and crops one fixed-height strip per staff.
 
     Args:
+        preprocessed_images: Stage 1 output: (page, page_index) or
+            (page, page_index, strip_source) tuples. Boxes are found on ``page``; when a native-
+            resolution ``strip_source`` (same geometry, already lyric-masked) is given, strips
+            are cut from it and shrunk to STRIP_HEIGHT with INTER_AREA, so thin glyphs
+            (rests, flags, ties) are not lost to the 1600px detection binarization.
         manifest_path: If set, writes a JSON list of {strip_id, page, system,
             voice, box, source} so a strip can be traced back to its page region.
-        mask_lyrics: Blank lyric/dynamic/label ink that is not attached to the staff.
     """
     manifest: list[dict] = []
     output_path = Path(output_dir)
@@ -70,7 +72,9 @@ def detect_staff_regions(
 
     voice_sequences = {"Soprano": [], "Alto": [], "Tenor": [], "Bass": []}
 
-    for image, page_index in preprocessed_images:
+    for page in preprocessed_images:
+        image, page_index = page[0], page[1]
+        strip_source = page[2] if len(page) > 2 else None
         if len(image.shape) == 2:
             image_bgr = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
         else:
@@ -138,7 +142,7 @@ def detect_staff_regions(
                 strip = _crop_and_resize(
                     image_bgr, box, STRIP_HEIGHT, strip_id=strip_id,
                     limits=_neighbor_limits(boxes, box_index[id(box)], img_h),
-                    mask_lyrics=mask_lyrics)
+                    source=strip_source)
                 voice_sequences[voice].append((strip, page_index, sys_idx, voice, v_idx))
                 manifest.append({
                     "strip_id": strip_id, "page": page_index, "system": sys_idx,
@@ -394,44 +398,8 @@ CROP_STAFF_SPACINGS = 4.0   # a box spans 4 line spacings (5 lines)
 CROP_SLIVER_MAX_WIDTH_PX = 4    # narrower than this AND taller than the staff = bracket sliver
 CROP_SLIVER_MIN_HEIGHTS = 1.25  # x box height
 
-# Lyric masking. The CRNN was trained on lyric-free strips, but the crop still contains
-# neighbouring staves' lyrics/dynamics (they sit between staves). Everything that is not the
-# staff or ink attached to it is blanked in the crop itself; cropping tighter cannot do this
-# because lyrics can lie inside the rows that notes need.
-BACKGROUND_VALUE = 255          # preprocessed pages are white-on-black-ink; blanked = white
-# x line spacing; a component within this of the outer lines counts as touching the staff
-# (JPEG/threshold jitter). 0.5 deleted triplet brackets.
-MASK_ATTACH_TOL_SPACINGS = 0.75
-MASK_LINE_BAND_SPACINGS = 0.3   # x line spacing; box edges may miss the true outer line by this much
-MASK_HALO_PX = 1  # blank this far around removed ink so grey halos vanish
-# Off-band opened runs at least this thick are beams, not a neighbour's staff lines (which
-# measured 1-3 px at 6.75-9.5 px spacing).
-MASK_BEAM_MIN_PX = 4
-MASK_BEAM_MIN_SPACINGS = 0.4
-# A long flat tie/slur also survives the line opening, and being thin it looks like a neighbour's
-# staff line. It is told apart by what it connects: a tie/slur ends on two staff-attached glyphs
-# (noteheads), and is much shorter than the page. A neighbour's staff line runs (nearly) edge to
-# edge, so the width cap rejects it even though barlines touch both of its ends.
-MASK_BRIDGE_END_SPACINGS = 1.0   # x line spacing; end zone of a run that must touch attached ink
-MASK_BRIDGE_JOIN_PX = 2          # px; stub ink sits up to CROP_LINE_REMOVAL_PAD_PX + 1 from the run
-MASK_BRIDGE_MAX_WIDTH_FRAC = 0.5  # x crop width; wider runs are staff lines, not ties/slurs
-# A run this close to the band is this staff's own outer-line wobble, or a slur fused with that
-# line (its ends need not touch attached ink). On the 80 Step 3 strips such runs sit 0.3-0.5
-# spacing from the band. 1.0 was tried and also kept neighbour lines (out-of-band ink removed
-# fell from 47% to 23%), so this value was picked on the same set it is reported on.
-MASK_BRIDGE_HUG_BAND_SPACINGS = 0.5  # x line spacing
-# Ledger-line notes: a notehead centred on a short ledger line floats 1+ spacings off the
-# staff, so it does not overlap the staff rows, yet it is content. It is told apart from
-# text by shape: a compact glyph with ink on BOTH sides of one short horizontal line
-# (a lyric extender/underscore has ink only above it).
-LEDGER_MAX_REACH_SPACINGS = 3.5   # component's near edge is at most this far from the staff
-LEDGER_RUN_MIN_SPACINGS = 1.2     # the ledger line is longer than a notehead...
-LEDGER_RUN_MAX_SPACINGS = 3.0     # ...but far shorter than an extender line
-LEDGER_MAX_HEIGHT_SPACINGS = 2.5  # notehead (+ledger) height; words with ascenders/descenders vary
-LEDGER_MAX_WIDTH_SPACINGS = 3.5   # ledger note width; a lyric word + extender is wider
-LEDGER_SIDE_MIN_SPACINGS = 0.25   # ink required above AND below the ledger row
-LEDGER_THIN_ROW_FRAC = 0.8        # rows this close to the peak count as "the line"...
-LEDGER_MAX_LINE_SPACINGS = 0.3    # ...and must be no thicker than this (letters like "o" are thicker)
+# Lyric/text masking moved to Stage 1 (stage1_preprocessing.non_staff_ink_mask): it runs once
+# on the straightened page, and Stage 2 cuts strips from the already-masked pages.
 
 
 def _staff_glyph_components(
@@ -534,182 +502,6 @@ def _content_extent(image: np.ndarray, box: dict,
     return max(0, top), min(img_h, bottom)
 
 
-def _looks_like_ledger_note(comp: np.ndarray, stat: np.ndarray, band_top: int,
-                            band_bottom: int, spacing: float) -> bool:
-    """True if a component near the staff is a notehead sitting on a ledger line.
-
-    Args:
-        comp: Bool mask (window-sized) of the component.
-        stat: Its connectedComponentsWithStats row.
-        band_top, band_bottom: Staff rows in window coordinates.
-        spacing: Staff-line spacing in px.
-    """
-    top = int(stat[cv2.CC_STAT_TOP])
-    bottom = top + int(stat[cv2.CC_STAT_HEIGHT])
-    left = int(stat[cv2.CC_STAT_LEFT])
-    right = left + int(stat[cv2.CC_STAT_WIDTH])
-    gap = top - band_bottom if top > band_bottom else band_top - bottom
-    if gap > LEDGER_MAX_REACH_SPACINGS * spacing:
-        return False
-    if (bottom - top > LEDGER_MAX_HEIGHT_SPACINGS * spacing
-            or right - left > LEDGER_MAX_WIDTH_SPACINGS * spacing):
-        return False
-    rows = comp[top:bottom, left:right].sum(axis=1)
-    line_row = int(rows.argmax())
-    if not LEDGER_RUN_MIN_SPACINGS * spacing <= rows[line_row] <= LEDGER_RUN_MAX_SPACINGS * spacing:
-        return False
-    thickness = int((rows >= LEDGER_THIN_ROW_FRAC * rows[line_row]).sum())
-    if thickness > max(2, LEDGER_MAX_LINE_SPACINGS * spacing):
-        return False
-    side = LEDGER_SIDE_MIN_SPACINGS * spacing
-    return line_row >= side and (bottom - top - line_row) >= side
-
-
-def _label_attached(glyphs: np.ndarray, band_top: int, band_bottom: int,
-                    tol: int) -> tuple[int, np.ndarray, np.ndarray, np.ndarray]:
-    """Labels glyph components and flags those touching the staff rows.
-
-    Any component touching the staff rows (within ``tol``) is content: notes, stems hanging
-    below the staff, ties/slurs hugging it and staff-line fragments on tilted pages all live
-    there. Tried and rejected: demanding a minimum overlap to drop the "f"/"p" of dynamics
-    whose descender dips into the staff -- it also deleted down-stems of second-voice notes
-    and slurs. Dynamics that touch the staff therefore stay (known residual).
-
-    Returns:
-        (count, labels, stats, attached): connectedComponentsWithStats outputs plus a bool
-        per label (label 0, the background, is never attached).
-    """
-    count, labels, stats, _ = cv2.connectedComponentsWithStats(
-        glyphs.astype(np.uint8), connectivity=8)
-    tops = stats[:, cv2.CC_STAT_TOP]
-    bottoms = tops + stats[:, cv2.CC_STAT_HEIGHT]
-    attached = (bottoms >= band_top - tol) & (tops <= band_bottom + tol)
-    attached[0] = False
-    return count, labels, stats, attached
-
-
-def _tie_bridge_runs(off_band: np.ndarray, labels: np.ndarray, attached: np.ndarray,
-                     spacing: float, band_top: int, band_bottom: int) -> np.ndarray:
-    """Returns pixels of off-band thin runs that are long ties/slurs, not neighbour staff lines.
-
-    Why: a long flat tie survives the staff-line opening and, being thin and off the band, was
-    removed as a neighbour's staff line, leaving a stub at each end and a tie token the CRNN
-    can no longer see (BUG-015). A run is a tie/slur if it is well short of the crop width and
-    both of its end zones touch a staff-attached component (the noteheads it joins). Lyric
-    text never touches attached ink; a neighbour's staff line runs edge to edge. Runs hugging
-    the band (MASK_BRIDGE_HUG_BAND_SPACINGS) are this staff's own ink and are kept outright.
-
-    Args:
-        off_band: Opened runs outside the staff band (window-sized, uint8).
-        labels, attached: from _label_attached on the first-pass glyph mask.
-        spacing: Staff-line spacing in px.
-        band_top, band_bottom: Staff rows in window coordinates.
-    """
-    count, run_labels, run_stats, _ = cv2.connectedComponentsWithStats(off_band, connectivity=8)
-    runs = np.zeros(off_band.shape, dtype=bool)
-    max_width = MASK_BRIDGE_MAX_WIDTH_FRAC * off_band.shape[1]
-    end_px = max(int(round(spacing * MASK_BRIDGE_END_SPACINGS)), 1)
-    hug_px = spacing * MASK_BRIDGE_HUG_BAND_SPACINGS
-    join = np.ones((2 * MASK_BRIDGE_JOIN_PX + 1,) * 2, np.uint8)
-    for i in range(1, count):
-        left = int(run_stats[i, cv2.CC_STAT_LEFT])
-        width = int(run_stats[i, cv2.CC_STAT_WIDTH])
-        run_top = int(run_stats[i, cv2.CC_STAT_TOP])
-        run_bottom = run_top + int(run_stats[i, cv2.CC_STAT_HEIGHT])
-        gap = max(band_top - run_bottom, run_top - band_bottom, 0)
-        rows = slice(max(run_top - MASK_BRIDGE_JOIN_PX, 0), run_bottom + MASK_BRIDGE_JOIN_PX)
-        cols = slice(left, left + width)
-        run = run_labels[rows, cols] == i
-        if gap <= hug_px:
-            runs[rows, cols] |= run
-            continue
-        if width > max_width or width <= 2 * end_px:
-            continue
-        reach = cv2.dilate(run.astype(np.uint8), join) > 0
-        touched = np.where(reach, labels[rows, cols], 0)
-        touched[~attached[touched]] = 0  # keep only staff-attached components
-        if touched[:, :end_px].any() and touched[:, width - end_px:].any():
-            runs[rows, cols] |= run
-    # Cover the rows the line-removal pad blanked around each accepted run.
-    return cv2.dilate(runs.astype(np.uint8),
-                      np.ones((2 * CROP_LINE_REMOVAL_PAD_PX + 1, 1), np.uint8)) > 0
-
-
-def _non_staff_ink_mask(image: np.ndarray, box: dict) -> tuple[int, int, np.ndarray]:
-    """Finds ink around one staff that is neither the staff nor attached to it (lyrics etc.).
-
-    "Attached" = a line-removed connected component (see _staff_glyph_components) whose rows
-    overlap the staff's line rows (within MASK_ATTACH_TOL_SPACINGS): noteheads with stems,
-    beams, clefs, accidentals, rests, barlines, ties and dynamics that touch the staff.
-    Staff lines are kept only inside the staff's own row band, so a neighbouring staff's lines
-    that fall inside the crop are blanked too. Thick off-band opened runs (beams) are kept as
-    glyph ink; thin ones are treated as lines unless they bridge two attached glyphs (a long
-    tie/slur, see _tie_bridge_runs). Unlike the extent scan, over-tall components
-    (barlines, brace) are kept whole: they are real ink of this staff and dropping them would
-    change the strip content, not just remove text.
-
-    Returns:
-        (win_top, x_start, remove): ``remove`` is a bool mask over page rows
-        [win_top, win_top + remove.shape[0]) and columns [x_start, x_start + remove.shape[1]).
-    """
-    x_start = max(int(box["x1"]), 0)
-    analysis = _staff_glyph_components(image, box, 0)
-    if analysis is None:
-        return 0, x_start, np.zeros((0, 0), dtype=bool)
-    win_top, ink, _, _, _, _, staff_lines, strokes = analysis
-    y1, y2 = int(box["y1"]), int(box["y2"])
-    height = max(y2 - y1, 1)
-
-    # The detector's own box is the staff band. Deriving it from detected line rows instead
-    # fails on tilted/curved staves, where the line-opening only finds fragments and the band
-    # collapses, which then strips notes (seen on the sheared page-2 Alto strip).
-    band_top, band_bottom = y1 - win_top, y2 - win_top
-    spacing = height / CROP_STAFF_SPACINGS
-    line_slack = int(round(spacing * MASK_LINE_BAND_SPACINGS))
-
-    # Only the opening's hits INSIDE the staff band are staff lines. A long beam or tie outside
-    # it also survives the line opening (it is longer than the kernel), and treating it as a
-    # line would delete it; it must stay glyph ink so it can attach to its stems.
-    in_band = np.zeros_like(ink, dtype=bool)
-    in_band[max(band_top - line_slack, 0):band_bottom + line_slack + 1] = True
-    line_pixels = (cv2.dilate(
-        staff_lines, np.ones((2 * CROP_LINE_REMOVAL_PAD_PX + 1, 1), np.uint8)) > 0) & in_band
-    # Off-band opened runs are either beams/ties (thick: keep) or a NEIGHBOUR's staff lines
-    # (thin: must stay removed, or barlines spanning both staves chain the neighbour's whole
-    # staff and its lyrics onto this one). Staff lines are <= 3 px on the camera photos.
-    off_band = staff_lines.copy()
-    off_band[in_band] = 0
-    beam_rows = max(MASK_BEAM_MIN_PX, int(round(spacing * MASK_BEAM_MIN_SPACINGS)))
-    beams = cv2.morphologyEx(off_band, cv2.MORPH_OPEN, np.ones((beam_rows, 1), np.uint8))
-    all_lines = cv2.dilate(
-        staff_lines, np.ones((2 * CROP_LINE_REMOVAL_PAD_PX + 1, 1), np.uint8)) > 0
-    glyphs = ((ink > 0) & ~all_lines) | (strokes > 0) | (beams > 0)
-    tol = int(round(spacing * MASK_ATTACH_TOL_SPACINGS))
-
-    count, labels, stats, attached = _label_attached(glyphs, band_top, band_bottom, tol)
-    bridges = _tie_bridge_runs(off_band, labels, attached, spacing, band_top, band_bottom)
-    if bridges.any():
-        # Re-label with the accepted ties/slurs restored so their end stubs and fringe pixels
-        # join into one component that is attached through its noteheads.
-        glyphs |= bridges & (ink > 0)
-        count, labels, stats, attached = _label_attached(glyphs, band_top, band_bottom, tol)
-
-    for i in np.nonzero(~attached)[0][1:]:
-        attached[i] = _looks_like_ledger_note(
-            labels == i, stats[i], band_top, band_bottom, spacing)
-
-    keep = attached[labels]
-    keep |= line_pixels  # the staff itself, including wobbly fringe pixels off the opened run
-    keep &= ink > 0
-
-    removed = (ink > 0) & ~keep
-    halo = np.ones((2 * MASK_HALO_PX + 1,) * 2, np.uint8)
-    remove = cv2.dilate(removed.astype(np.uint8), halo) > 0
-    remove &= ~(cv2.dilate(keep.astype(np.uint8), halo) > 0)
-    remove |= removed
-    return win_top, x_start, remove
-
-
 def _neighbor_limits(boxes: list, index: int, img_h: int) -> tuple[int, int]:
     """Returns the page rows halfway to the staves above and below boxes[index]."""
     box = boxes[index]
@@ -723,7 +515,7 @@ def _crop_and_resize(image: np.ndarray, box: dict, target_height: int,
                      strip_id: str = "",
                      adaptive_extent: bool = True,
                      limits: tuple[int, int] | None = None,
-                     mask_lyrics: bool = MASK_LYRICS_DEFAULT) -> np.ndarray:
+                     source: np.ndarray | None = None) -> np.ndarray:
     """Crops one staff to a full-width strip and resizes it to target_height.
 
     Args:
@@ -731,8 +523,8 @@ def _crop_and_resize(image: np.ndarray, box: dict, target_height: int,
         adaptive_extent: Grow the crop to the staff's attached content (see
             _content_extent). False restores the old fixed-padding crop.
         limits: Adjacent-staff midpoints bounding adaptive growth (see _content_extent).
-        mask_lyrics: Blank ink that is not the staff or attached to it (see
-            _non_staff_ink_mask). False reproduces the unmasked strips.
+        source: Optional native-resolution page in the same geometry as ``image``. The crop
+            rows/columns are found on ``image`` and mapped onto it by the size ratio.
     """
     img_h, img_w = image.shape[:2]
     x1, y1, x2, y2 = box["x1"], box["y1"], box["x2"], box["y2"]
@@ -744,22 +536,12 @@ def _crop_and_resize(image: np.ndarray, box: dict, target_height: int,
         y1 = max(0, y1 - pad)
         y2 = min(img_h, y2 + pad)
 
-    crop = image[y1:y2, max(0, x1):x2]
-
-    if mask_lyrics and crop.size != 0:
-        win_top, x_start, remove = _non_staff_ink_mask(image, box)
-        sub = remove[y1 - win_top:y2 - win_top, max(0, x1) - x_start:x2 - x_start]
-        # The analysis window is at most CROP_MAX_PAD from the box, the same bound as the crop,
-        # so ``sub`` always covers the crop; a mismatch means the bound was broken upstream.
-        if sub.shape != crop.shape[:2]:
-            raise ValueError(f"lyric mask {sub.shape} does not cover crop {crop.shape[:2]}")
-        crop = crop.copy()
-        crop[sub] = BACKGROUND_VALUE
-        # Debug, not info/warning: this fires once per strip (up to 80+/run) and BUG-015's
-        # residuals are still open, so a strip that looks wrong needs a per-strip pixel count
-        # to check without re-running the mask by hand.
-        logger.debug("strip_id=%s mask_lyrics removed=%d/%d px",
-                     strip_id, int(sub.sum()), int(sub.size))
+    x1 = max(0, x1)
+    if source is not None:
+        ky, kx = source.shape[0] / img_h, source.shape[1] / img_w
+        crop = source[int(round(y1 * ky)):int(round(y2 * ky)), int(round(x1 * kx)):int(round(x2 * kx))]
+    else:
+        crop = image[y1:y2, x1:x2]
 
     if crop.size == 0:
         return np.zeros((target_height, target_height, 3), dtype=np.uint8)
@@ -767,6 +549,8 @@ def _crop_and_resize(image: np.ndarray, box: dict, target_height: int,
     h, w = crop.shape[:2]
     new_w = int(w * (target_height / h))
     resized = cv2.resize(crop, (new_w, target_height), interpolation=cv2.INTER_AREA)
+    if resized.ndim == 2:
+        resized = cv2.cvtColor(resized, cv2.COLOR_GRAY2BGR)
     return resized
 
 

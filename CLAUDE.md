@@ -86,6 +86,7 @@ later stages import functions from earlier ones rather than duplicating logic.
    uneven spacing); `dewarp_to_staff_grid()` straightens each staff with a per-column vertical remap, only
    when drift ≥ `DEWARP_MIN_DRIFT_PX` (5 px) so clean screenshots stay bit-identical; tracked staff rows are
    restored after border/lyric blanking (which previously erased real staves on camera pages).
+   **Non-staff-ink mask + native strip source (2026-09-25, PIYA-121, same branch, BUG-015/BUG-016, committed, unmerged):** after dewarp, `non_staff_ink_mask()` erases ink that is neither the tracked staff nor connected (gap-bridged 0.2 spacing) to it - lyrics, titles, page-edge shadows - while keeping beams, ties, flags, rests and ledger-line notes. Detection/tracking stay at `DETECT_MAX_DIM` = 1600 px; the strip source is binarised once at native resolution (<= 4032 px) through the same perspective matrix and the same upsampled dewarp map, because binarising rests at 1600 px broke their ~1.6 px strokes. `training/run_stage12.py` regenerates strips, manifest, viz and 1:1 eyeball tiles; `training/step3_mask_audit.py` audits ties/beams/band ink (limits in its docstring and BUG-015).
 
 2. **`stage2_detection.py`** — runs a fine-tuned YOLOv8 model (`staff_detector_files/weights/best.pt`)
    to find staff-line bounding boxes on each preprocessed page, then:
@@ -102,10 +103,7 @@ later stages import functions from earlier ones rather than duplicating logic.
      divisible by 4, else YOLO's boxes stay and the divisible-by-4 `ValueError` still fires. On the 7
      Both Sides Now camera photos (tracker + YOLO) this gives 12/12/12/12/12/12/8 staves, all correct (was
      6–13 per page). Developed on those photos — not an independent eval; see BUG-013.
-   - **Lyric masking (2026-09-24, same branch, BUG-015):** `_crop_and_resize(mask_lyrics=True)` (default; toggle
-     via `detect_staff_regions(mask_lyrics=...)`) blanks ink that is neither the staff nor attached to it
-     (`_non_staff_ink_mask`). Known residuals: dynamics touching the staff, lyric stubs at crop edges, left-edge
-     label text ('S.'); Stage 3 effect unmeasured.
+   - **Non-staff-ink masking now lives in Stage 1 (PIYA-121, 2026-09-25; supersedes the earlier Stage 2 mask; BUG-015):** Stage 2 does NOT mask. Strips are cut from the Stage 1 native-resolution strip source (`PreprocessedPage.strip_source`, mapped through the same geometry and dewarp as the 1600 px detection page) with an INTER_AREA shrink to `STRIP_HEIGHT` (BUG-016). Known residuals: band-overlapping dust, handwriting, dynamics and left-edge label text survive by design; Stage 3 effect unmeasured.
    Also contains `train_yolov8()` / `evaluate_model()`, reused by `train_staff_detector.py`.
 
 3. **`stage3_transcription.py`** — the core recognition stage: `CRNN` (ResNet-style CNN backbone →

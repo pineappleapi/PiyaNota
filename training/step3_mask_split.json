@@ -1,0 +1,14 @@
+{
+  "recorded": "2026-09-25, before any mask/tie result on these pieces was computed or viewed",
+  "basis": "screened from 2-page thumbnails only (first two pages per piece); no metric had been run on the dataset",
+  "frozen": ["ama_namin", "gaano_ko_ikaw_kamahal", "salmo_150", "non_nobis_domine"],
+  "frozen_rationale": "spread of capture quality: one skewed/handwritten photocopy, one clean modern engraving, one dense noisy photocopy, one clean small-print serif engraving. Chosen by look, not by result.",
+  "tuning": ["ale_nasa_langit_na_ba_ako", "bituing_walang_ningning", "dormi_jesu", "folk_medley", "handog", "hesus_ng_aking_buhay", "honneur_a_toi", "livin_on_a_prayer", "panalangin_sa_pagiging_bukas_palad", "sanay_wala_nang_wakas"],
+  "seen_not_frozen": ["dont_stop_me_now (DSMN)", "Both Sides Now (BSN, separate raw folder)"],
+  "excluded": {
+    "flashlight": "system staves labelled Soloist/Soprano/Alto/Tenor - no Bass staff, not SATB",
+    "awit_ng_paghahangad": "5-staff systems (Baritone Solo + SATB) on page 1, varying staff counts per system",
+    "ang_puso_koy_nagpupuri": "SSAATTBBB divisi, 4 staves with two-voice divisi and 3-staff (S/A/B) systems on page 2",
+    "magdiwang_magpuri": "SATB divisi, page 2 has 3-staff (A/T/B) systems and mid-page changes of staff count"
+  }
+}

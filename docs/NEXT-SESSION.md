@@ -4,6 +4,16 @@ Handoff doc for continuing PiyaNota work in a fresh session. Read this first; it
 full detail rather than repeating it. Written 2026-09-14, rewritten 2026-09-16, rewritten 2026-09-19,
 rewritten 2026-09-24.
 
+## PIYA-121 update (2026-09-25) - read before the 2026-09-24 section below
+
+Superseding note: the Stage 2 lyric mask described below (`_non_staff_ink_mask`, `mask_lyrics=`) has been REPLACED. The mask is now `non_staff_ink_mask` in Stage 1 (after dewarp) and Stage 2 only crops; strips come from a native-resolution strip source (rest/thin-glyph deformation root cause: binarising at 1600 px, BUG-016). Tie recall was the priority.
+
+- Split by piece (`training/step3_mask_split.json`, recorded before results): frozen = ama_namin, gaano_ko_ikaw_kamahal, salmo_150, non_nobis_domine; tuning = 10 pieces; DSMN/BSN = 'seen', not frozen, not independent of tuning. 4 pieces excluded as not open-score SATB (reasons in the JSON).
+- Results (`python training/step3_mask_audit.py --mode report --out data/audit`): frozen ties 120/120, slurs 25/25; tuning ties 670/684, slurs 116/117; band ink removed 0 on all 108 pages; BSN 80 strips (12/12/12/12/12/12/8) and DSMN 60 strips, SATB order OK; all 140 strips viewed at 1:1.
+- Honest limits: frozen set is small (4 pieces, 23 pages); tie audit is over detector-found ties only; 14 tuning ties lost and 31 tuning beam flags not viewed; lyric residual still visible (DSMN 11/15 systems; ~3/32 sampled dataset strips legible); the old-vs-new tie comparison was dropped (unpaired candidates, slow); rest-specific before/after exists only for DSMN page 1, set-level numbers are band-wide (BUG-016).
+- No Stage 3/CRNN was run on any of this. BUG-001 stays open. Nothing merged or pushed.
+- Untracked `ground_truth/` and `rename_dataset/` pre-date this work and are not part of PIYA-121.
+
 ## Immediate next action (2026-09-24 update)
 
 **PIYA-106 Step 3 (fresh real-world test set) is actively in progress**, on branch
