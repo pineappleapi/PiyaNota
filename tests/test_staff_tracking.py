@@ -111,6 +111,37 @@ def test_mask_keeps_ledger_line_note() -> None:
     assert not _removed(page).any()
 
 
+def _draw_ledger_note(page: np.ndarray, ledger: int, below: bool = False, hollow: bool = True) -> None:
+    """Stemless note on the ``ledger``-th ledger line, with every ledger line up to it drawn."""
+    sign = 1 if below else -1
+    for k in range(1, ledger + 1):
+        y = CENTER + sign * (2 + k) * SPACING_PX
+        page[y - 1:y + 1, 388:412] = 0
+    y = CENTER + sign * (2 + ledger) * SPACING_PX
+    cv2.ellipse(page, (400, y), (9, 5), 0, 0, 360, 0, 2 if hollow else -1)
+
+
+def test_mask_keeps_high_and_low_ledger_notes() -> None:
+    """F1 (senior-reviewer 2036dd2): notes on the 2nd-4th ledger line and their lone lines survive."""
+    for ledger in (1, 2, 3, 4):
+        for below in (False, True):
+            for hollow in (True, False):
+                page = _synthetic_page(0.0)
+                _draw_ledger_note(page, ledger, below, hollow)
+                zone = np.zeros(page.shape, dtype=bool)
+                zone[:, 380:420] = True
+                zone[CENTER - 2 * SPACING_PX - 1:CENTER + 2 * SPACING_PX + 1] = False  # staff itself
+                assert not (_removed(page) & zone).any(), f"ledger={ledger} below={below} hollow={hollow}"
+
+
+def test_mask_still_removes_underscore_off_ledger_rows() -> None:
+    """A lyric extender that is not on a ledger row 1..4 spacings out stays erased."""
+    page = _synthetic_page(0.0)
+    y = CENTER + 2 * SPACING_PX + int(1.5 * SPACING_PX)
+    page[y - 1:y + 1, 388:412] = 0
+    assert _removed(page)[y - 1:y + 1, 388:412].all()
+
+
 def _draw_tie(page: np.ndarray) -> int:
     """Draws two noteheads joined by a long flat tie above the staff; returns the tie's y."""
     head_y = CENTER - SPACING_PX

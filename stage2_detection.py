@@ -57,7 +57,9 @@ def detect_staff_regions(
             are cut from it and shrunk to STRIP_HEIGHT with INTER_AREA, so thin glyphs
             (rests, flags, ties) are not lost to the 1600px detection binarization.
         manifest_path: If set, writes a JSON list of {strip_id, page, system,
-            voice, box, source} so a strip can be traced back to its page region.
+            voice, box, source, strip_source} so a strip can be traced back to its page
+            region. ``strip_source`` is "native" or "fallback" (cut from the 1600 px
+            detection page, where thin rests/ties can already be broken).
     """
     manifest: list[dict] = []
     output_path = Path(output_dir)
@@ -75,6 +77,10 @@ def detect_staff_regions(
     for page in preprocessed_images:
         image, page_index = page[0], page[1]
         strip_source = page[2] if len(page) > 2 else None
+        strip_origin = "native" if strip_source is not None else "fallback"
+        if strip_source is None:
+            logger.warning("[Stage 2] page %s: no native strip source, cutting strips from the "
+                           "detection-resolution page (thin glyphs may be degraded).", page_index)
         if len(image.shape) == 2:
             image_bgr = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
         else:
@@ -147,6 +153,7 @@ def detect_staff_regions(
                 manifest.append({
                     "strip_id": strip_id, "page": page_index, "system": sys_idx,
                     "voice": voice, "source": box.get("source", "yolo"),
+                    "strip_source": strip_origin,
                     "box": {k: int(box[k]) for k in ("x1", "y1", "x2", "y2")},
                 })
                 logger.info("strip_id=%s dims=%dx%d (wxh)", strip_id, strip.shape[1], strip.shape[0])

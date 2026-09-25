@@ -108,7 +108,7 @@ STAFF_EXT_MIN_CONTRAST   = 0.25   # line-position ink minus between-line ink, re
 STAFF_EXT_MAX_MISSES     = 3      # consecutive failed steps before giving up
 STAFF_EXT_SLOPE_POINTS   = 5      # trailing points used to re-estimate the local slope
 STAFF_PROTECT_MARGIN_SPACINGS = 1.25  # rows kept around a tracked staff (ledger lines, clef tails) when undoing over-blanking
-DEWARP_MIN_DRIFT_PX      = 5.0    # skip dewarp unless some staff drifts at least this much (already-straight input stays bit-identical)
+DEWARP_MIN_DRIFT_PX      = 5.0    # skip dewarp unless some staff drifts at least this much (the dewarp step is a no-op on already-straight input; later masking still edits the page)
 STAFF_LINES_PER_STAFF    = 5
 STAFF_GROUP_TOL_ABS_PX   = 1.8    # 5-line grouping: absolute floor on the gap-match tolerance (px)...
 STAFF_GROUP_TOL_REL      = 0.2    # ...or this fraction of the line gap, whichever is larger
@@ -154,6 +154,13 @@ LEDGER_MAX_WIDTH_SPACINGS = 3.5
 LEDGER_SIDE_MIN_SPACINGS = 0.25
 LEDGER_THIN_ROW_FRAC = 0.8
 LEDGER_MAX_LINE_SPACINGS = 0.3
+# Ledger-line chain: ledger line k sits k line-spacings beyond the staff's outer line. A note on
+# the 2nd+ ledger line fuses with its lines into one blob that fails the single-line shape test
+# above, and a lone ledger line below such a note fixes its pitch, so a thin ledger-length run in
+# ledger row k counts only if row k-1 (or the staff, for k=1) has an overlapping run.
+LEDGER_CHAIN_MAX_LINES = 4
+LEDGER_CHAIN_ROW_TOL_SPACINGS = 0.25  # x line spacing; tolerance on the k-spacing row position
+LEDGER_CHAIN_MIN_OVERLAP_FRAC = 0.5   # fraction of a run that must sit over the previous run
 # A staff the tracker missed has no band, so its ink would be deleted as "not attached". Any
 # unattached component this wide that contains several long horizontal runs is staff-like and kept.
 MASK_STAFFLIKE_MIN_WIDTH_FRAC = 0.15  # x page width
@@ -299,6 +306,57 @@ def _is_staff_like(comp: np.ndarray, page_width: int, spacing: float) -> bool:
     return groups >= MASK_STAFFLIKE_MIN_RUNS
 
 
+def _ledger_chain_labels(ink: np.ndarray, labels: np.ndarray, heights: np.ndarray,
+                         staves: list[StaffBand], spacing: float) -> np.ndarray:
+    """Labels of components that hold a valid chain of ledger-line runs above or below a staff.
+
+    A component qualifies as a lone thin line (a ledger line with no note on it) or when its
+    runs cover two or more ledger rows (a note fused with its lines). A lyric word whose
+    baseline happens to sit in one ledger row does neither, so it stays erasable.
+
+    Args:
+        ink: Bool ink mask of the page.
+        labels: Component labels of the gap-bridged ink.
+        heights: Ink-only bounding-box height per label.
+        staves: Tracked staves.
+        spacing: Median line spacing.
+
+    Returns:
+        Sorted unique component labels (0 never included).
+    """
+    height, width = ink.shape
+    half = (STAFF_LINES_PER_STAFF - 1) / 2.0
+    min_len = max(int(round(LEDGER_RUN_MIN_SPACINGS * spacing)), 3)
+    max_len = int(round(LEDGER_RUN_MAX_SPACINGS * spacing))
+    kernel = np.ones((1, min_len), np.uint8)
+    rows_hit: dict[int, set[tuple[int, int, int]]] = {}
+    thin_max = max(2, int(np.ceil(LEDGER_MAX_LINE_SPACINGS * spacing)))
+    for si, s in enumerate(staves):
+        tol = LEDGER_CHAIN_ROW_TOL_SPACINGS * s.spacing + s.slack
+        for sign in (-1, 1):
+            previous = [(0, width)]  # the staff itself spans the page
+            for k in range(1, LEDGER_CHAIN_MAX_LINES + 1):
+                centre = s.center + sign * (half + k) * s.spacing
+                lo, hi = max(0, int(np.floor(centre - tol))), min(height, int(np.ceil(centre + tol)) + 1)
+                if hi <= lo:
+                    break
+                runs = cv2.morphologyEx(ink[lo:hi].astype(np.uint8), cv2.MORPH_OPEN, kernel).astype(bool)
+                cols = runs.any(axis=0)
+                edges = np.flatnonzero(np.diff(np.concatenate(([0], cols.view(np.int8), [0]))))
+                valid: list[tuple[int, int]] = []
+                for x0, x1 in zip(edges[::2], edges[1::2]):
+                    overlap = max((min(x1, b) - max(x0, a) for a, b in previous), default=0)
+                    if x1 - x0 <= max_len and overlap >= LEDGER_CHAIN_MIN_OVERLAP_FRAC * (x1 - x0):
+                        valid.append((int(x0), int(x1)))
+                        for lab in np.unique(labels[lo:hi, x0:x1][runs[:, x0:x1]]):
+                            rows_hit.setdefault(int(lab), set()).add((si, sign, k))
+                if not valid:
+                    break
+                previous = valid
+    return np.array(sorted(lab for lab, hit in rows_hit.items()
+                           if lab > 0 and (len(hit) >= 2 or heights[lab] <= thin_max)), dtype=labels.dtype)
+
+
 def non_staff_ink_mask(binary: np.ndarray, staves: list[StaffBand]) -> np.ndarray:
     """Finds ink that is neither a tracked staff nor connected to one (lyrics, titles, dust).
 
@@ -306,8 +364,8 @@ def non_staff_ink_mask(binary: np.ndarray, staves: list[StaffBand]) -> np.ndarra
     MASK_LINK_RADIUS_SPACINGS, with nothing subtracted first: beams, ties, flags and rests stay
     joined to the stems/noteheads that are on the staff, so they cannot be mistaken for
     neighbouring lines or text. A component is kept if it has a pixel within
-    MASK_ATTACH_TOL_SPACINGS of any tracked staff's outer lines, or looks like a ledger-line
-    note or an untracked staff.
+    MASK_ATTACH_TOL_SPACINGS of any tracked staff's outer lines, holds a chain of ledger lines
+    leading away from a staff, or looks like a ledger-line note or an untracked staff.
 
     Args:
         binary: Page, ink = 0.
@@ -329,6 +387,12 @@ def non_staff_ink_mask(binary: np.ndarray, staves: list[StaffBand]) -> np.ndarra
     count, labels, stats, _ = cv2.connectedComponentsWithStats(linked, connectivity=8)
     keep = np.zeros(count, dtype=bool)
     keep[np.unique(labels[band_rows])] = True
+    ink_heights = np.zeros(count, dtype=np.int64)
+    for i in range(1, count):
+        rows = np.flatnonzero(ink[stats[i, cv2.CC_STAT_TOP]:stats[i, cv2.CC_STAT_TOP] + stats[i, cv2.CC_STAT_HEIGHT]]
+                              [:, stats[i, cv2.CC_STAT_LEFT]:stats[i, cv2.CC_STAT_LEFT] + stats[i, cv2.CC_STAT_WIDTH]].any(axis=1))
+        ink_heights[i] = (rows[-1] - rows[0] + 1) if rows.size else 0
+    keep[_ledger_chain_labels(ink, labels, ink_heights, staves, spacing)] = True
     for i in range(1, count):
         if keep[i]:
             continue
@@ -519,7 +583,7 @@ def preprocess_score_page(
     elif mask_non_staff_ink:
         logger.warning("no tracked staves on %s; non-staff mask skipped", img_path.name)
 
-    # Step 3.2: Blank lyrics (kept for the detection page: YOLO/tracker behaviour is unchanged;
+    # Step 3.2: Blank lyrics (kept for the detection page; YOLO/tracker now see the masked page, staff counts on the 6 screenshots were unchanged;
     # strips do not use this page's ink, they come from the strip source).
     binary = blank_lyrics_regions(binary)
 
