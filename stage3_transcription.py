@@ -865,10 +865,23 @@ def infer_pitch(
     voice:      str = "Soprano",
     page_index: int = 1,
     sys_idx:    int = 1,
+    confidences: Optional[list] = None,
 ) -> list:
     """
     Converts a CRNN symbol sequence into note events with MIDI pitch.
- 
+
+    confidences: optional per-token CRNN confidences, parallel to `symbols`
+    (same length, else ValueError). When given, every emitted note/rest event
+    carries a "confidence" float; when None (ground-truth tokens) events have
+    no "confidence" key at all, so Stage 4 can tell "no signal" from "0.0".
+    A note's confidence is the MIN over the tokens that determined it: its
+    own note token (duration + staff position are one token) and the inline
+    accidental and dot tokens that modified it. Min, not mean: one misread
+    constituent (say a phantom sharp) makes the whole pitch wrong however
+    confident the rest are, and averaging would dilute that. Key-signature
+    accidentals and the clef also shape pitch but apply to every note, so
+    they are deliberately not folded into per-note confidence.
+
     Pitch formula:  M = R_c + Δ(p) + K + A
       R_c   clef reference pitch at bottom line (voice-aware via get_clef_reference)
       Δ(p)  diatonic semitone offset for staff step p
@@ -933,6 +946,7 @@ def infer_pitch(
     in_chord               = False
     slur_active            = False
     slur_start_idx         = -1
+    slur_end_pending       = False
     pending_multirest_bars = 1
     events                 = []
     current_tick           = 0
@@ -985,14 +999,28 @@ def infer_pitch(
         print(f"[Stage 3] {voice} p{page_index}: mid-piece key change {desc} -> {alts}")
         return alts
  
+    if confidences is not None and len(confidences) != len(symbols):
+        raise ValueError(
+            f"confidences ({len(confidences)}) must be parallel to "
+            f"symbols ({len(symbols)})")
+    with_conf = confidences is not None
+    # Confidence of the most recent accidental token. Any accidental that
+    # ends up in pending_acc is necessarily the latest accidental seen (each
+    # one overwrites it), so tracking it here, once, covers every branch of
+    # the state machine that sets pending_acc.
+    last_acc_conf = 1.0
+
     # ── Main loop ─────────────────────────────────────────────────────────
-    for sym in symbols:
- 
+    for tok_idx, sym in enumerate(symbols):
+
+        tok_conf = float(confidences[tok_idx]) if with_conf else 1.0
         acc_type = sym.split("-")[0]
         is_sharp = sym.startswith("accidental.sharp")
         is_flat  = sym.startswith("accidental.flat")
         is_acc   = sym.startswith("accidental.")
- 
+        if is_acc:
+            last_acc_conf = tok_conf
+
         # ══════════════════════════════════════════════════════════════════
         # KEY-SIG STATE MACHINE
         # ══════════════════════════════════════════════════════════════════
@@ -1031,8 +1059,15 @@ def infer_pitch(
                 ks_stage        = "body"
                 # fall through to body processing below
  
+            elif sym.startswith("slur.end"):
+                # Header slur.end = tie arriving from the previous system;
+                # carry it to the first note instead of dropping it. No
+                # slur.start is invented: only "end" is recorded.
+                slur_end_pending = True
+                continue
+
             else:
-                continue    # barline / digit / slur before clef — skip
+                continue    # barline / digit / slur.start before clef — skip
  
         # ── "keysig" ──────────────────────────────────────────────────────
         elif ks_stage == "keysig":
@@ -1077,8 +1112,13 @@ def infer_pitch(
                     time_signature = f"{meter_digits[0]}/{meter_digits[1]}"
                 ks_stage        = "body"
                 # fall through to body processing below
+            elif sym.startswith("slur.end"):
+                # See "clef" stage: carry a header slur.end to the first note
+                # (cross-system tie arrival) rather than silently dropping it.
+                slur_end_pending = True
+                continue
             else:
-                continue    # barline / digit / slur in header — skip
+                continue    # barline / digit / slur.start in header — skip
  
         # ── "post_bar" ────────────────────────────────────────────────────
         elif ks_stage == "post_bar":
@@ -1165,8 +1205,20 @@ def infer_pitch(
         # ── Dot (augmentation) ────────────────────────────────────────────
         if sym.startswith("dot-"):
             if events:
-                events[-1]["duration_ticks"] = int(
-                    events[-1]["duration_ticks"] * 1.5)
+                old_ticks = events[-1]["duration_ticks"]
+                new_ticks = int(old_ticks * 1.5)
+                events[-1]["duration_ticks"] = new_ticks
+                # The cursor already advanced by old_ticks when the note/rest
+                # was emitted; without also advancing by the extra half, every
+                # later onset overlaps the dotted note. Only when this event
+                # is the one that moved the cursor: a chord tail (in_chord)
+                # never advanced it, so dotting the tail must not either.
+                if (not in_chord and
+                        events[-1]["tick_onset"] + old_ticks == current_tick):
+                    current_tick += new_ticks - old_ticks
+                if with_conf:
+                    events[-1]["confidence"] = min(
+                        events[-1]["confidence"], tok_conf)
             dot_pending = False
             continue
  
@@ -1191,8 +1243,11 @@ def infer_pitch(
                 "measure_index":  measure_index,
                 "time_signature": time_signature,
             })
+            if with_conf:
+                events[-1]["confidence"] = tok_conf
             current_tick += ticks
             in_chord      = False
+            slur_end_pending = False   # a tie cannot run into a rest
             continue
  
         # ── Note ──────────────────────────────────────────────────────────
@@ -1232,7 +1287,9 @@ def infer_pitch(
             # Accidental: natural cancels key sig for this note only
             cancel_key = False
             acc        = 0
+            note_conf  = tok_conf
             if pending_acc is not None:
+                note_conf = min(note_conf, last_acc_conf)
                 if pending_acc == 0:     # natural sign
                     cancel_key = True
                 else:
@@ -1273,10 +1330,19 @@ def infer_pitch(
                 "chord_id":       c_id,
                 "symbol":         sym,
                 "tick_onset":     current_tick,
-                "slur":           "middle" if slur_active else None,
+                "slur":           ("end" if slur_end_pending
+                                   else "middle" if slur_active else None),
                 "measure_index":  measure_index,
                 "time_signature": time_signature,
             })
+            if with_conf:
+                events[-1]["confidence"] = note_conf
+            if slur_end_pending:
+                # A tie chain (A~A~A) puts slur.end then slur.start on the
+                # middle note; the later "start" overwrites "slur", so the
+                # end mark is kept separately for Stage 4's tie inference.
+                events[-1]["slur_end"] = True
+            slur_end_pending = False
             if not in_chord:
                 current_tick += ticks
             continue
@@ -1308,6 +1374,8 @@ def infer_pitch(
                 "measure_index":  measure_index,
                 "time_signature": time_signature,
             })
+            if with_conf:
+                events[-1]["confidence"] = tok_conf
             current_tick += ticks
             # A multirest is engraved between exactly one pair of barlines
             # regardless of how many bars it spans (digit.N gives that count),
@@ -1340,9 +1408,14 @@ def infer_pitch(
             continue
  
         if sym.startswith("slur.end"):
-            slur_active = False
-            if events:
-                events[-1]["slur"] = "end"
+            # In Camera-PrIMuS token order slur.end sits BEFORE the note it
+            # ends on (start follows note 1, end precedes note 2; verified on
+            # all 676 slur pairs in the corpus, which are all semantic ties),
+            # so the "end" mark belongs on the next note, not events[-1] --
+            # marking events[-1] overwrote the "start" mark on note 1 and left
+            # Stage 4 with no start/end pair at all.
+            slur_active      = False
+            slur_end_pending = True
             continue
  
     return events
@@ -1653,8 +1726,12 @@ def process_strip(
 ) -> list:
 
     """Transcribes one strip and returns pitch-assigned events for Stage 4."""
-    symbols = transcribe_strip(strip, model, device, img_height, strip_id=strip_id)
-    events  = infer_pitch(symbols, voice=voice, page_index=page_index, sys_idx=sys_idx)
+    scored  = transcribe_strip(strip, model, device, img_height,
+                               return_confidence=True, strip_id=strip_id)
+    symbols = [s for s, _ in scored]
+    events  = infer_pitch(symbols, voice=voice, page_index=page_index,
+                          sys_idx=sys_idx,
+                          confidences=[c for _, c in scored])
 
     print(f"[Stage 3] {voice} p{page_index}: "
           f"{len(symbols)} symbols -> {len(events)} events")

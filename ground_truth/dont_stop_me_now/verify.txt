@@ -1,0 +1,4 @@
+page 1 sys 1 Soprano n001: C4 on a ledger line vs D4 (space below the staff) -- read as C4 from a 2x crop; re-zoom before trusting.
+page 1 sys 1 Tenor n012: G4~ is drawn as a curve running off the system end into page 1 sys 2's first tenor eighth; tie vs slur is inferred from same pitch.
+page 1 sys 1 Bass n001: upper F3 of the bar-1 whole-note chord carries no slur; only the lower F2 slurs to A2.
+Whole page 1: photos have local perspective tilt, so line-vs-space calls near the staff edge are the riskiest.

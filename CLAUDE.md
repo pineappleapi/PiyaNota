@@ -118,16 +118,50 @@ later stages import functions from earlier ones rather than duplicating logic.
    file per voice under `data/transcribed_symbols/`.
 
 4. **`stage4_reconstruction.py`** — merges Stage 3's per-strip events into one continuous sequence per
-   voice (sorted by `page_index`, then `tick_onset`), and resolves slurs: `_resolve_slurs()` extends
-   the first note of a slurred group to cover the full slur duration and marks the absorbed
-   middle/end notes so Stage 5 skips them without breaking tick alignment. Raises `ValueError` if any
-   of the four SATB voices came back empty — a hard requirement that all four parts were detected.
+   voice (sorted by `page_index`, `sys_idx`, then `tick_onset`), then:
+   - **Ties, not slurs:** only a true tie merges (an explicit `tie_to_next`, or a slur whose two ends
+     are adjacent same-pitch notes with no rest between, including across a system break); phrase
+     slurs over different pitches never change audio. In Camera-PrIMuS every `slur.*` token is a
+     tie, so the CRNN has never seen a phrase slur. Merged notes fold into the first (`tie_span`,
+     `tied_note_ids`); a tie with no continuation is flagged `tie_unresolved`.
+   - **Global ticks:** each system starts at `pickup + previous bars × bar_ticks` (bar length from the
+     time signature), and each event keeps only its offset inside its own bar, so one misread rhythm
+     stays in its bar and cannot shift the other voices. A short first bar on the first strip of the
+     first page may be a pickup; it is right-aligned so bar 1's downbeat lands on the same tick in every
+     voice. The pickup length is chosen by evidence scoring (`_decide_pickups`): candidates are "no
+     pickup", each voice's first-bar length and the length implied by each short final bar; votes come
+     from voices agreeing (full first bars vote for "no pickup"), final bars that complement the
+     first, matching rhythms, standard lengths and a small no-pickup prior. A structural pre-check
+     handles a lone real pickup (one voice has one extra short bar whose total minus that bar equals
+     the others' total, as in Don't Stop Me Now Tenor). A candidate is accepted only with score ≥ 2.0
+     and a lead ≥ 0.75; otherwise short first bars are placed as bar 1 with `pickup_suspect` listing the
+     top candidates. Deviant voices are still right-aligned (longer first bars keep their last L ticks)
+     and flagged `pickup_length_mismatch`. All scoring constants are hand-set priors, not fit to data.
+   - **Overflow never fails the conversion:** a bar over its length is repaired, not dropped. A run of
+     ≥3 same-duration slots (rests included) is scaled to fit — an exact 3-in-2 triplet gets 2/3
+     durations (`suspected_tuplet`), anything ambiguous is spread evenly (`bar_overflow_run_scaled`),
+     and everything after the run shifts left so the bar ends exactly on its length. With no scalable
+     run, the fallback is whole-bar scaling (off-grid, ≥0.75), clipping, or a confidence-based drop
+     (only when every note has a `confidence`); a total near a multiple of the bar is flagged
+     `suspected_missing_barline` and clipped. The beat is assumed to be a quarter (wrong for 6/8).
+   - **Flags, not silent repair:** `reconstruct_satb_with_report()` returns a report (`flags`,
+     `pickup_ticks`, `total_ticks`, `systems`) — e.g. `pickup_detected`, `bar_underfull`,
+     `bar_overflow_clipped`, `bar_count_mismatch`, `tie_unresolved`. Flags that need a human carry
+     `review_needed`.
+   Raises `ValueError` if any of the four SATB voices came back empty — a hard requirement that all
+   four parts were detected. Known gaps: mid-bar system breaks are not handled, and Stage 3 cannot
+   currently represent chords (its `chord_id` block never fires, and Camera-PrIMuS has no chord token),
+   so simultaneous notes in one voice (e.g. Bass divisi) arrive as sequential notes until the
+   vocabulary/retraining work lands.
 
 5. **`stage5_synthesis.py`** — converts each voice's event list into a single-track MIDI file (ticks
    converted to beats via `PPQ = 480`), then renders MIDI → WAV → MP3 through FluidSynth + a `.sf2`
    soundfont + pydub/ffmpeg. Falls back to returning the raw `.mid` path per voice if audio rendering
    dependencies/soundfont are missing. `run_full_pipeline()` here is the de facto single entry point
-   that chains Stages 1–5.
+   that chains Stages 1–5. `PPQ` must equal Stage 4's `TICKS_PER_QUARTER` (checked at import, raises
+   `RuntimeError`). All four voices are padded to the same length (through the last event end, not the
+   last bar end; a sustain-pedal-off event pins the end), identical (onset, pitch) notes collapse to the
+   longest, and same-pitch overlaps are clipped with a warning so no note-on is left without a note-off.
 
 ### Directory conventions
 
@@ -149,7 +183,17 @@ later stages import functions from earlier ones rather than duplicating logic.
 The dict `{"Soprano": [...], "Alto": [...], "Tenor": [...], "Bass": [...]}` is the shared interchange
 format from Stage 2 onward (strips → events → reconstructed events), always keyed by the constant
 voice names, not indices. Event dicts (Stage 3+) carry `type`, `pitch` (MIDI int or `None` for rests),
-`duration_ticks`, `voice`, `page_index`, `chord_id`, `symbol`, `tick_onset`, `slur`.
+`duration_ticks`, `voice`, `page_index`, `sys_idx`, `chord_id`, `symbol`, `tick_onset`, `slur`,
+`measure_index`, `time_signature`. `tick_onset`, `measure_index` and (in Stage 3 output) ticks are
+local to each system strip; Stage 4 rewrites `tick_onset` to a global tick and keeps the original as
+`local_tick_onset`, and adds `global_bar` (1-based, 0 = pickup, `None` = local-placement fallback),
+`tie_to_next`, `tie_span` and `tied_note_ids`. Stage 3 adds `confidence` (min over the note's note,
+accidental and dot tokens) only when run on CRNN output; it is absent on ground-truth events. It ranks
+likely misreads within a bar but is not a trust signal (BUG-011: confidently wrong). It is a frame-mean softmax, not a calibrated
+probability, and excludes the clef, key signature and omitted tokens; Stage 4 uses it only as an
+overflow tie-break, and every Stage 4 threshold/weight is a hand-set prior with no held-out validation. Hand-authored ground truth
+(`ground_truth/build_ground_truth.py`) additionally carries `note_id`, `written_pitch`, `chord_tail`
+and `source_image`.
 
 ## Role
 
@@ -165,6 +209,9 @@ stage scripts over frameworks; match that.
 - Before changing existing code, give a one-line risk assessment of what could break.
 - Quote acceptance criteria directly from the ticket file rather than assuming or paraphrasing them.
 - If a ticket's criteria are ambiguous or underspecified, flag it and ask — don't guess.
+- Hand-authored ground truth (e.g. `ground_truth/`) is diagnostic only: never present results measured
+  against it, or against the 6-screenshot set, as accuracy evidence. The `piyanota_dataset` photos are
+  TEST-only and never used for training, model selection or threshold tuning.
 
 ## Code style
 
