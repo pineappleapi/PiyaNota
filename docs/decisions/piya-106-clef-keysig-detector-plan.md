@@ -754,6 +754,11 @@ Determinism and seeds:
       start, never inside the loop) in `config.json`.
 - [ ] State in the metadata that the **local GTX 1650 run is the reference**. A later Kaggle T4 run is a
       different configuration, not a replication.
+      **Amended 2026-09-27 (review R3, see "2026-09-27 review of local training code"):** superseded. The
+      **local CPU run is the reference configuration** (CPU-only venv `D:\venvs\piyanota-cpu`, torch
+      2.6.0+cpu, `--device cpu`, thread count pinned by `--threads` and recorded in the checkpoint). The
+      GTX 1650 is judged unreliable; a local GPU or Kaggle T4 run is a different configuration, not a
+      replication. The checkpoint's `training_run.reference_note` now says this.
 - [ ] Do a second-seed run (`--seed 20260927`) after the first one is reviewed, and report both as a range.
 
 Checkpoint and resume (the driver-hang mitigation):

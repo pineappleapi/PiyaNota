@@ -20,10 +20,14 @@ Phases (``--phase``): ``prep`` (DS2 records + crops, synthetic renders, clean ev
 stress metrics, export, parity fixture), or ``all``. Calibrate and eval load the best-epoch state from
 ``last.pt``, so a hang there never costs training.
 
-Usage (from the repo root):
+Usage (from the repo root, inside the CPU-only venv D:\\venvs\\piyanota-cpu, see review R5):
     python training/train_clef_key.py --smoke --device cpu --phase all
-    python training/train_clef_key.py --seed 20260926 --device cuda --phase all
-    python training/train_clef_key.py --resume training/clef_key_artifacts/<run_id> --phase all
+    python training/train_clef_key.py --seed 20260926 --device cpu --phase all
+    python training/train_clef_key.py --resume training/clef_key_artifacts/<run_id> --device cpu --phase all
+
+``--device`` is required and nothing touches ``torch.cuda`` unless it is ``cuda`` (review R1, 2026-09-27):
+on this PC the NVIDIA driver can wedge, and any CUDA probe then hangs the process forever. The local
+CPU run is the reference configuration (review R3); ``--threads`` pins the CPU thread count (R2).
 """
 from __future__ import annotations
 
@@ -268,12 +272,31 @@ def json_default(o: Any) -> Any:
     raise TypeError(type(o))
 
 
-def seed_everything(seed: int) -> None:
-    """Seeds python, numpy and torch (CPU + all CUDA devices)."""
+def seed_everything(seed: int, device_type: str) -> None:
+    """Seeds python, numpy and torch; CUDA generators only on a CUDA run.
+
+    Why the device argument: ``torch.cuda.manual_seed_all`` is lazy today, but a CPU run must not
+    depend on that implementation detail while the driver can wedge (review R1).
+    """
     random.seed(seed)
     np.random.seed(seed % (2 ** 32))
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    if device_type == "cuda":
+        torch.cuda.manual_seed_all(seed)
+
+
+def configure_threads(n_threads: int) -> None:
+    """Pins torch's intra- and inter-op CPU thread counts (review R2).
+
+    Why: CPU float reductions are split across threads, so the thread count can change the last
+    bits of a sum and therefore the trained weights. It is recorded in the config hash and the
+    checkpoint, and a resume with a different count is refused. Must run before any torch op:
+    ``set_num_interop_threads`` raises once inter-op parallel work has started.
+    """
+    if n_threads < 1:
+        raise SystemExit(f"--threads must be >= 1, got {n_threads}")
+    torch.set_num_threads(n_threads)
+    torch.set_num_interop_threads(n_threads)
 
 
 def guard_paths(*paths: Path) -> None:
@@ -298,6 +321,7 @@ class RunConfig:
     n_synth_systems: int
     max_ds2_images: Optional[int]
     epochs: int
+    cpu_threads: int                 # torch intra/inter-op threads (R2); in __dict__, hence in config_hash
     batch_size: int = BATCH_SIZE
     eval_batch: int = EVAL_BATCH
     lr: float = LR
@@ -305,11 +329,11 @@ class RunConfig:
     num_workers: int = NUM_WORKERS
 
     @classmethod
-    def build(cls, seed: int, smoke: bool) -> "RunConfig":
+    def build(cls, seed: int, smoke: bool, cpu_threads: int) -> "RunConfig":
         return cls(seed=seed, smoke=smoke,
                    n_synth_systems=N_SYNTH_SYSTEMS_SMOKE if smoke else N_SYNTH_SYSTEMS_FULL,
                    max_ds2_images=MAX_DS2_IMAGES_SMOKE if smoke else None,
-                   epochs=EPOCHS_SMOKE if smoke else EPOCHS_FULL)
+                   epochs=EPOCHS_SMOKE if smoke else EPOCHS_FULL, cpu_threads=cpu_threads)
 
     def hash_payload(self) -> dict[str, Any]:
         """Config + every training/selection constant; a resumed run must match it exactly."""
@@ -387,13 +411,22 @@ def query_nvidia_smi() -> str:
 
 
 def setup_device(device_arg: str) -> tuple[torch.device, dict[str, Any]]:
-    """Picks the device, applies determinism switches and the GPU memory cap, and records the GPU."""
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    """Applies determinism switches and, on CUDA only, the GPU checks and memory cap.
+
+    Why every CUDA call sits behind ``device_arg == "cuda"`` (review R1): with a wedged NVIDIA
+    driver, ``torch.cuda.is_available()``, ``cudnn.version()`` (which loads the cuDNN library) and
+    friends can hang forever, so a CPU run must never reach them. ``torch.version.cuda`` is only a
+    compile-time string and is safe to record.
+    """
     torch.use_deterministic_algorithms(True, warn_only=True)
     cv2.setNumThreads(1)
-    info: dict[str, Any] = {"cublas_workspace_config": os.environ.get("CUBLAS_WORKSPACE_CONFIG")}
+    info: dict[str, Any] = {"cublas_workspace_config": os.environ.get("CUBLAS_WORKSPACE_CONFIG"),
+                            "torch_num_threads": torch.get_num_threads(),
+                            "torch_num_interop_threads": torch.get_num_interop_threads()}
+    cudnn_version: Optional[int] = None
     if device_arg == "cuda":
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
         smi = query_nvidia_smi()
         info["nvidia_smi"] = smi
         if not torch.cuda.is_available():
@@ -403,22 +436,33 @@ def setup_device(device_arg: str) -> tuple[torch.device, dict[str, Any]]:
         torch.cuda.set_per_process_memory_fraction(GPU_MEMORY_FRACTION, 0)
         info["gpu_name"] = torch.cuda.get_device_name(0)
         info["memory_fraction"] = GPU_MEMORY_FRACTION
+        cudnn_version = torch.backends.cudnn.version()
         logger.info("nvidia-smi: %s", smi.replace("\n", " | "))
-    else:
+    elif device_arg == "cpu":
         device = torch.device("cpu")
+        if torch.version.cuda is not None:
+            # Not refused (a healthy machine may use a CUDA wheel on CPU), but R5 says the reference
+            # run uses the +cpu wheel: on 2026-09-27 a CUDA wheel's CPU backward pass stalled on the
+            # wedged driver even with CUDA_VISIBLE_DEVICES="".
+            logger.warning("torch %s is a CUDA build; the reference CPU run uses the +cpu wheel (review R5)",
+                           torch.__version__)
+    else:
+        raise SystemExit(f"unknown --device {device_arg!r}")
     info.update({"device_type": device.type, "torch": torch.__version__, "cuda": torch.version.cuda,
-                 "cudnn": torch.backends.cudnn.version()})
-    logger.info("device %s | gpu %s | torch %s | cuda %s | cudnn %s", device.type, info.get("gpu_name", "-"),
-                torch.__version__, torch.version.cuda, torch.backends.cudnn.version())
+                 "cudnn": cudnn_version})
+    logger.info("device %s | gpu %s | torch %s | cuda %s | cudnn %s | threads %d intra / %d inter-op",
+                device.type, info.get("gpu_name", "-"), torch.__version__, torch.version.cuda, cudnn_version,
+                info["torch_num_threads"], info["torch_num_interop_threads"])
     return device, info
 
 
-def build_versions(device: torch.device, render: dict[str, str]) -> dict[str, Any]:
-    """Same keys as the notebook's VERSIONS (cell 7)."""
+def build_versions(device: torch.device, render: dict[str, str], dev_info: dict[str, Any]) -> dict[str, Any]:
+    """Same keys as the notebook's VERSIONS (cell 7); CUDA details come from setup_device (R1)."""
     return {"python": platform.python_version(), "torch": torch.__version__, "cuda": torch.version.cuda,
-            "cudnn": torch.backends.cudnn.version(), "opencv": cv2.__version__, "numpy": np.__version__,
+            "cudnn": dev_info["cudnn"], "opencv": cv2.__version__, "numpy": np.__version__,
             "verovio": render["verovio"], "resvg_py": render["resvg_py"],
-            "gpu": torch.cuda.get_device_name(0) if device.type == "cuda" else "cpu"}
+            "gpu": dev_info["gpu_name"] if device.type == "cuda" else "cpu",
+            "torch_num_threads": dev_info["torch_num_threads"]}
 
 
 # ==============================================================================================
@@ -1082,10 +1126,18 @@ def _build_many(fn: Callable[[int], np.ndarray], idx: np.ndarray, cache: Path, x
         return np.stack(list(ex.map(fn, [int(i) for i in idx], chunksize=64)))
 
 
-def load_data(cfg: RunConfig, ds2_dir: Path, cache_root: Path, render: dict[str, str], build: bool) -> Data:
-    """Loads (and, if build, creates) the cached prep outputs for this config."""
+def load_data(cfg: RunConfig, ds2_dir: Path, cache_root: Path, render: dict[str, str], build: bool,
+              precomputed_key: Optional[tuple[str, dict[str, Any]]] = None) -> Data:
+    """Loads (and, if build, creates) the cached prep outputs for this config.
+
+    Args:
+        precomputed_key: (key, payload) from compute_cache_key(), when main() already computed it for the
+            resume pre-check; saves hashing both DS2 JSONs (about 300 MB) a second time.
+    """
     ds2_train, ds2_test = ds2_dir / "deepscores_train.json", ds2_dir / "deepscores_test.json"
-    key, payload = compute_cache_key(cfg, ds2_train, ds2_test, render)
+    if precomputed_key is None:
+        precomputed_key = compute_cache_key(cfg, ds2_train, ds2_test, render)
+    key, payload = precomputed_key
     cache = cache_root / key[:16]
     cache.mkdir(parents=True, exist_ok=True)
     key_file = cache / "cache_key.json"
@@ -1298,10 +1350,45 @@ def write_previews(data: Data, cfg: RunConfig, run_dir: Path) -> None:
 # ==============================================================================================
 # Training (notebook cell 29) with atomic per-epoch checkpoints and resume
 # ==============================================================================================
+# CODE FREEZE (review R4, 2026-09-27): run_hashes() includes this script's own sha256 (SCRIPT_SHA256),
+# and resume, load_best_model() (calibrate / eval) and eval_clef_key_realval.py all refuse a run whose
+# recorded hash differs from the file on disk. ANY edit to this file after a run starts, even a comment
+# or an eval-only change, locks that run out of calibrate and eval. Freeze this file, clef_key_core.py and
+# training/eval_clef_key_realval.py (including any E1-E4 change) BEFORE the full run, and do not touch
+# them until the run has been calibrated, evaluated and reviewed.
 def run_hashes(cfg: RunConfig, data: Data) -> dict[str, str]:
     """Hashes a resumed run must match: config, code (script + core) and data (cache + split manifest)."""
     return {"config_hash": cfg.config_hash(), "script_sha256": SCRIPT_SHA256, "core_sha256": CORE_SHA256,
             "cache_key": data.cache_key, "split_manifest_sha256": data.split_manifest_sha256}
+
+
+def precheck_resume(cfg: RunConfig, run_dir: Path, device_type: str, cache_key: str) -> None:
+    """Refuses a resume before load_data, so a doomed resume never rebuilds the cache first.
+
+    Checks everything knowable without the cache contents: config (which includes the thread count),
+    script and core sha, the cache key, device type and thread count. The split-manifest hash needs the
+    loaded records and is still checked in train_phase(), which repeats all of these checks.
+    """
+    ckpt = load_checkpoint(run_dir / "last.pt")
+    now = {"config_hash": cfg.config_hash(), "script_sha256": SCRIPT_SHA256, "core_sha256": CORE_SHA256,
+           "cache_key": cache_key}
+    mismatched = {k: (ckpt["hashes"].get(k), v) for k, v in now.items() if ckpt["hashes"].get(k) != v}
+    if mismatched:
+        logger.error("REFUSING to resume (before loading data): hashes differ (checkpoint, now): %s", mismatched)
+        raise SystemExit(EXIT_REFUSED)
+    _check_resume_device_threads(ckpt, device_type, cfg.cpu_threads)
+
+
+def _check_resume_device_threads(ckpt: dict[str, Any], device_type: str, cpu_threads: int) -> None:
+    """Device type and CPU thread count must match the checkpoint (a GPU run never resumes on CPU; R2)."""
+    if ckpt["device_type"] != device_type:
+        logger.error("REFUSING to resume: checkpoint was trained on %s, this run is on %s",
+                     ckpt["device_type"], device_type)
+        raise SystemExit(EXIT_REFUSED)
+    if ckpt.get("cpu_threads") != cpu_threads:
+        logger.error("REFUSING to resume: checkpoint used %s CPU threads, this run uses %d (pass --threads %s)",
+                     ckpt.get("cpu_threads"), cpu_threads, ckpt.get("cpu_threads"))
+        raise SystemExit(EXIT_REFUSED)
 
 
 def _rng_states(device: torch.device, sampler_gen: torch.Generator, loader_gen: torch.Generator) -> dict[str, Any]:
@@ -1335,7 +1422,7 @@ def train_phase(cfg: RunConfig, data: Data, device: torch.device, run_dir: Path,
     """
     hashes = run_hashes(cfg, data)
     last_path = run_dir / "last.pt"
-    seed_everything(cfg.seed)
+    seed_everything(cfg.seed, device.type)
     model = ck.ClefKeyNet().to(device)
     train_ds = StaffStartDataset(data, data.train_idx, cfg.seed)
     sampler_gen = torch.Generator().manual_seed(cfg.seed)
@@ -1357,10 +1444,7 @@ def train_phase(cfg: RunConfig, data: Data, device: torch.device, run_dir: Path,
         if mismatched:
             logger.error("REFUSING to resume: hashes differ (checkpoint, now): %s", mismatched)
             raise SystemExit(EXIT_REFUSED)
-        if ckpt["device_type"] != device.type:
-            logger.error("REFUSING to resume: checkpoint was trained on %s, this run is on %s",
-                         ckpt["device_type"], device.type)
-            raise SystemExit(EXIT_REFUSED)
+        _check_resume_device_threads(ckpt, device.type, cfg.cpu_threads)
         model.load_state_dict(ckpt["model"])
         opt.load_state_dict(ckpt["optimizer"])
         sched.load_state_dict(ckpt["scheduler"])
@@ -1408,7 +1492,8 @@ def train_phase(cfg: RunConfig, data: Data, device: torch.device, run_dir: Path,
         state = {"epoch": epoch, "epochs": cfg.epochs, "model": model.state_dict(), "optimizer": opt.state_dict(),
                  "scheduler": sched.state_dict(), "history": history, "best": best,
                  "rng": _rng_states(device, sampler_gen, loader_gen), "hashes": hashes,
-                 "config": cfg.hash_payload(), "device_type": device.type, "device_name": device_name}
+                 "config": cfg.hash_payload(), "device_type": device.type, "device_name": device_name,
+                 "cpu_threads": cfg.cpu_threads}
         atomic_torch_save(state, run_dir / f"epoch_{epoch:03d}.pt")
         atomic_torch_save(state, last_path)
         atomic_write_text(run_dir / "clef_key_history.json", json.dumps(history, indent=1))
@@ -1440,7 +1525,7 @@ def load_best_model(cfg: RunConfig, data: Data, device: torch.device, run_dir: P
     model.load_state_dict(ckpt["best"]["state"])
     model.eval()
     info = {"best_epoch": ckpt["best"]["epoch"], "best_score": ckpt["best"]["score"], "history": ckpt["history"],
-            "device_type": ckpt["device_type"]}
+            "device_type": ckpt["device_type"], "cpu_threads": ckpt.get("cpu_threads")}
     return model, info
 
 
@@ -1718,16 +1803,20 @@ def eval_phase(cfg: RunConfig, data: Data, device: torch.device, run_dir: Path, 
         "smoke_test": cfg.smoke,
         "created_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
-    # ... plus the amendment's required disclosures (D.1: local run is the reference; A.6: pencil strokes).
+    # ... plus the amendment's required disclosures (D.1 as amended 2026-09-27 by review R3: the local CPU run
+    # is the reference; A.6: pencil strokes).
     checkpoint["augmentation"] = {"pencil_stroke": {
         "prob": PENCIL_PROB, "max_strokes": PENCIL_MAX_STROKES, "thickness_px_at_store": list(PENCIL_THICKNESS_PX),
         "grey": list(PENCIL_GREY), "disclosure": PENCIL_DISCLOSURE}}
     checkpoint["training_run"] = {
         "trainer": "training/train_clef_key.py", "script_sha256": SCRIPT_SHA256, "config_hash": cfg.config_hash(),
-        "cache_key": data.cache_key, "device_type": info["device_type"],
-        "reference_note": ("The local GTX 1650 run is the reference configuration; a later Kaggle T4 run is a "
-                           "different configuration, not a replication.") if info["device_type"] == "cuda"
-                          else "CPU run (not the reference configuration).",
+        "cache_key": data.cache_key, "device_type": info["device_type"], "cpu_threads": info["cpu_threads"],
+        "reference_note": (f"The local CPU run (torch {torch.__version__}, {info['cpu_threads']} threads) is the "
+                           "reference configuration (plan D.1 as amended 2026-09-27, review R3). A local GPU or "
+                           "Kaggle T4 run is a different configuration, not a replication.")
+                          if info["device_type"] == "cpu"
+                          else ("GPU run: NOT the reference configuration. The local GTX 1650 was judged unreliable "
+                                "on 2026-09-27 (review R3); the local CPU run is the reference."),
         "real_photo_set": "not read: the real-capture validation set is check-only (amendment A.4)",
         "render_versions": render}
     ckpt_path = run_dir / "clef_key_classifier.pt"
@@ -1763,7 +1852,13 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     p.add_argument("--cache", type=Path, default=DEFAULT_CACHE, help="cache root (subfolder per settings hash)")
     p.add_argument("--seed", type=int, default=DEFAULT_SEED)
     p.add_argument("--smoke", action="store_true", help="tiny run; weights are useless")
-    p.add_argument("--device", choices=("cpu", "cuda"), default="cuda" if torch.cuda.is_available() else "cpu")
+    # Required, never probed (review R1): torch.cuda.is_available() initialises the NVIDIA driver and hangs
+    # forever when the driver is wedged, even for a run that would have used the CPU.
+    p.add_argument("--device", choices=("cpu", "cuda"), required=True,
+                   help="cpu for the reference run (plan D.1 as amended 2026-09-27); nothing touches CUDA on cpu")
+    p.add_argument("--threads", type=int, default=os.cpu_count() or 1,
+                   help="torch intra/inter-op threads (default os.cpu_count()); part of the config hash, and "
+                        "a resume must use the same value (review R2)")
     p.add_argument("--resume", nargs="?", const=True, default=None, metavar="RUN_DIR",
                    help="resume training from RUN_DIR/last.pt (or from --out when no value is given)")
     p.add_argument("--phase", choices=("prep", "train", "calibrate", "eval", "all"), default="all")
@@ -1788,7 +1883,8 @@ def setup_logging(run_dir: Path) -> None:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
-    cfg = RunConfig.build(args.seed, args.smoke)
+    configure_threads(args.threads)  # first torch-related call: set_num_interop_threads must precede any op
+    cfg = RunConfig.build(args.seed, args.smoke, args.threads)
 
     resume = args.resume is not None
     if isinstance(args.resume, str):
@@ -1811,17 +1907,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         raise SystemExit(f"--resume: {run_dir / 'last.pt'} not found")
     run_dir.mkdir(parents=True, exist_ok=True)
     setup_logging(run_dir)
-    logger.info("=== train_clef_key.py phase=%s smoke=%s seed=%d device=%s run_dir=%s resume=%s argv=%s",
-                args.phase, cfg.smoke, cfg.seed, args.device, run_dir, resume, sys.argv[1:])
+    logger.info("=== train_clef_key.py phase=%s smoke=%s seed=%d device=%s threads=%d run_dir=%s resume=%s argv=%s",
+                args.phase, cfg.smoke, cfg.seed, args.device, cfg.cpu_threads, run_dir, resume, sys.argv[1:])
     logger.info("core sha256 %s | script sha256 %s | config hash %s", CORE_SHA256, SCRIPT_SHA256, cfg.config_hash())
 
     render = check_render_versions()
     device, dev_info = setup_device(args.device)
-    versions = build_versions(device, render)
+    versions = build_versions(device, render, dev_info)
     t_all = time.time()
     try:
         t0 = time.time()
-        data = load_data(cfg, args.ds2, args.cache, render, build=args.phase in ("prep", "all") or trains)
+        cache_key = compute_cache_key(cfg, args.ds2 / "deepscores_train.json", args.ds2 / "deepscores_test.json",
+                                      render)
+        if resume and trains:
+            precheck_resume(cfg, run_dir, device.type, cache_key[0])
+        data = load_data(cfg, args.ds2, args.cache, render, build=args.phase in ("prep", "all") or trains,
+                         precomputed_key=cache_key)
         log_data_table(data)
         timings = {"load_or_prep_s": round(time.time() - t0, 1)}
         logger.info("PHASE prep/load done in %.1fs", time.time() - t0)
