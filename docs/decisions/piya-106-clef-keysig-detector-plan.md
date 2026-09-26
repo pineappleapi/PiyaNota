@@ -840,3 +840,137 @@ Real-set check (a separate script, run once after the run is frozen and reviewed
 - Any earlier Flashlight numbers or ground truth (`data/eval_flashlight/`, partial, abandoned) are history only and must not be cited as test results.
 - The Honneur à Toi test report must disclose that Flashlight's engraving family was seen during validation.
 - Labels are stored separately in `data/val_clefkey/labels_flashlight.json`, so the frozen `labels.json` (Dormi + Livin', 188 staves, sha256 in `labels.sha256`) stays unchanged.
+
+## 2026-09-27 review of local training code (ml-cv-lead)
+
+Reviewed at commit 9cde6fa, against part (d), D.2 and the Flashlight note above:
+
+- `training/train_clef_key.py` (port of `training/piyanota-clef-keysig-kaggle.ipynb`)
+- `clef_key_core.py` (sha256 ad507cd1...)
+- `training/eval_clef_key_realval.py` (not yet run)
+
+No training was run. One CPU timing probe was attempted; see the GPU section.
+
+**Verdict: conditional GO for one full local CPU run, after fixes R1-R6. The local CPU run becomes the reference configuration.** This replaces two statements in D.1: that the local GTX 1650 run is the reference, and the 40-70 min time estimate.
+
+### Port faithfulness and leakage
+
+- **Port matches the notebook.** A function-by-function diff against the notebook shows only mechanical changes: type hints, the seed passed as an argument, and a `data` object instead of globals. The logic that matters is identical:
+  - the piece-level sha1 split (70/15/15, gonville font test-only)
+  - sampler weights
+  - the val_score rule for picking the best epoch
+  - per-class thresholds (max over val sources)
+  - the logic that sets `g8vb_reliable`
+- **Leakage guards are sound.**
+  - `guard_paths` (train_clef_key.py:279-287) refuses any path under piyanota_dataset.
+  - Only `--ds2` and generated synthetic data are read.
+  - Temperature and selective thresholds are fitted on `Data.VAL_SETS` only, that is, val_ds2 and val_synth (1477-1536).
+  - The real-validation photos are never touched by the training script.
+- **Solo labels.** The "Soloist" and "Solo" entries in `SYNTH_LABELS` come from the notebook and are already disclosed in section 5.
+- **Hash coupling (medium).** `run_hashes` (1301-1304) includes the training script's own sha256. `load_best_model` (1425-1444) and the eval both check it. Any edit to the script after training, even to eval-only code, blocks calibrate and eval for that run. All code must therefore be frozen before the run (R4).
+- **Resume (low).** Resume (1354-1372) correctly refuses on a hash or device-type mismatch. The only issue is that the check runs after `load_data`, so a refused resume first rebuilds the cache for nothing.
+- **Checkpoint names (cosmetic).** Files are named `epoch_NNN.pt`, not the spec's `ckpt_epoch_NN.pt`.
+
+### Required fixes before the run (ranked)
+
+- **R1 (high): make `--device` required, with no CUDA probe.** Today it defaults via `torch.cuda.is_available()` (train_clef_key.py:1766). That call initialises the NVIDIA driver even for a CPU run, and hangs when the driver is wedged.
+- **R2 (high): pin and record the CPU thread count.** `torch.set_num_threads` is neither set nor recorded, and CPU float reductions can depend on the thread count. Pin it (for example 6), write it into the config and the run hash, and assert it on resume.
+- **R3 (medium): update the reference wording.** The checkpoint `reference_note` (1728-1730) calls a CPU run "not the reference configuration". Change it, and amend the matching D.1 line.
+- **R4 (medium): freeze all three files before the run.** This follows from the hash coupling above, and includes any E1-E4 changes that touch `train_clef_key.py`.
+- **R5 (high, environment): reboot, and keep the NVIDIA driver out of the run.** Use a separate venv with the CPU-only wheel (`torch==2.6.0+cpu`), or disable the NVIDIA adapter in Device Manager for the whole run. On the cu124 wheel, a pure-CPU backward pass stalled while the driver was wedged, even with `CUDA_VISIBLE_DEVICES=""`.
+- **R6 (medium): redo the smoke checks.** Re-run S1 twice (outputs must be byte-identical) and S3 (resume) on the final code and environment. The earlier smoke passes used the cu124 wheel and pre-fix code.
+
+### Pencil-stroke augmentation (D.2.6)
+
+Acceptable as disclosed, with conditions.
+
+**What it does** (train_clef_key.py:184-195, 788-806, 813-814):
+
+- It runs first in the photometric chain, with p=0.3.
+- It draws 1-3 cubic Béziers, 1-3 px thick at 12 px per staff space (about 0.08-0.25 spaces), in grey 30-170.
+- Strokes are drawn on the stored crop (4 spaces left, 19 right, 7 above and below). The network sees only about 46% of that area, so the effective exposure is well under 0.3. Do not describe it as "30% of samples".
+
+**Conditions:**
+
+- (a) Freeze its parameters now. Never retune them after any real-set result is seen.
+- (b) The real-set report must restate that this augmentation was added after pencil marks were seen in real-validation photos. That is design-level exposure to the validation set, not a data leak.
+- (c) The stress sets also include pencil strokes (`_stress_one`, 911-913). Disclose that their numbers are not comparable to the notebook's.
+- (d) The Kaggle notebook has no pencil augmentation, so it no longer mirrors the local script.
+
+### Eval: bbox mapping and go-criteria
+
+**Bbox mapping** (eval_clef_key_realval.py:246-280, 344-376) is acceptable for the gate decision. Stage 1 does not need to expose its transform first.
+
+- The eval re-derives the downscale and perspective steps by calling the private `s1._correct_perspective`. It does not invert dewarp or rotation. Labels are matched to crops by vertical IoU ≥ 0.3.
+- This is acceptable because the crop geometry comes from Stage 1's own tracked bands, the same path as deployment. A mapping error can only attach a label to the wrong staff. That appears as an error, which adjudication (A.5.4) catches; it cannot produce a false pass.
+
+**Required before any scoring:**
+
+- **E1: residual check.** Today it only warns when the median residual exceeds 1 staff spacing. Replace the warning with:
+  - a per-staff exclusion, with the excluded count reported;
+  - a hard fail above a threshold fixed in advance.
+- **E2: rotation audit.** Audit results per page rotation angle. On rotated pages that are not dewarped, Stage 1 does not rotate the band rows, and deployment behaves the same way. Decide in advance whether those pages count, so geometry errors are neither blamed on the classifier nor hidden.
+- **E3: report both clef modes, plus coverage.**
+  - Report exact 4-class and G/G8vb-collapsed results side by side.
+  - Report coverage (n_sure / n_labelled) next to the verdict.
+  - Today the eval reports only the mode set by the checkpoint's `g8vb_reliable`. `collapse()` (493-494, 511) scores correctness at family level, but the sure/unsure decision still uses the 4-class max probability.
+  - That follows rule 1 of section 3.3 literally and costs coverage. Keep it, but show both modes, because D.2.7 and A.4 are ambiguous on this point.
+- **E4: coverage dry run.** Before the real scoring, run Stage 1/2 only, with a smoke checkpoint and no scoring of the real classifier.
+  - Why: Dormi pages that contain a 5-staff system currently become whole-page `pipeline_miss`. That lowers sure-n, and not at random.
+  - This shows whether n_sure ≥ 125 is reachable before the one-shot scoring is spent.
+
+**Checked and correct:**
+
+- The verdict is "not proven" when n_sure < 125 (472-487).
+- AUROC is gated at ≥ 10 wrong answers, and otherwise deferred to the stress sets (466-468).
+- Confident-wrong rate is cw / n_scored.
+- The page-cluster bootstrap (429-447) excludes pg10_b from the gate and scores it as a separate consistency block.
+- `load_frozen` checks the core sha.
+- With zero errors the bootstrap interval collapses to [1, 1]. In that case, rely on the Wilson bound.
+
+### GPU, reference configuration and CPU time
+
+**The GPU is unreliable. Agreed.** The evidence:
+
+- S2 CUDA epoch-2 losses of 3.9439, 3.9457 and 3.9432, despite deterministic flags
+- outputs of 2.1e+35
+- hangs on 2026-09-23 and 2026-09-26
+- today's probe
+
+**Today's probe:**
+
+- Setup: `CUDA_VISIBLE_DEVICES=""`, cu124 wheel, 6 threads on 6 physical / 12 logical cores, the real `ClefKeyNet` (1,382,195 params), batch 128.
+- The forward pass completed in 2.78 s (cold). The backward pass then stalled permanently.
+- An earlier probe called `torch.cuda.is_available()` and hung. That was the reviewer's mistake.
+- Two python processes (PIDs 22156 and 30260) could not be killed and will be cleared by the R5 reboot.
+- Likely cause: on the first backward pass, autograd queries the CUDA device count, which touches the wedged driver. This is why R5 is needed.
+
+**Local CPU is the reference.**
+
+- It is deterministic (the S1 rerun was byte-identical), and resume is proven (S3).
+- It is the same machine and code path the eval uses.
+- A Kaggle run cannot be the reference:
+  - the notebook has no pencil augmentation;
+  - its core sha differs (d1f10181...), so `load_frozen` refuses its checkpoint;
+  - a T4 is a different numeric configuration.
+- Kaggle is at most an optional cross-check. Its numbers are never reported as the result.
+
+**CPU time estimate:**
+
+- Compute per step: about 0.51 G MAC per sample forward, so about 390 GFLOP per forward+backward step at batch 128. A warm step takes about 3-5 s.
+- One epoch takes about 9-16 min:
+  - about 140-200 steps (18k training rows, up to 26k)
+  - about 1.5-3 min of serial augmentation (num_workers=0)
+  - about 0.5 min of validation
+- 24 epochs take about 3.6-6.5 h, or up to about 9 h at 26k rows. Add 10-20 min for prep and 5-10 min for calibrate and stress sets.
+- **Plan for 4-8 h, central estimate 5-6 h.** The backward pass was never actually timed, so treat this as ±50%.
+
+### Command (after R1-R6)
+
+```
+python training\train_clef_key.py --ds2 D:\PiyaNota\datasets\ds2_dense --seed 20260926 --device cpu --phase all
+```
+
+- To resume: `--resume <run_dir> --device cpu --phase all`.
+- The second seed (20260927) runs only after the first run's validation results have been reviewed.
+- The real-validation eval (with E1-E4 in place) runs exactly once, on the frozen, selected checkpoint.
