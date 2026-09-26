@@ -84,7 +84,7 @@ later stages import functions from earlier ones rather than duplicating logic.
    **Camera-photo rectification (2026-09-24, branch `piya106/two-seed-rerun-amendment`, committed, unmerged;
    BUG-013/BUG-001):** `track_staff_curves()` follows each 5-line staff as a curve (tolerates tilt, curl,
    uneven spacing); `dewarp_to_staff_grid()` straightens each staff with a per-column vertical remap, only
-   when drift ≥ `DEWARP_MIN_DRIFT_PX` (5 px) so clean screenshots stay bit-identical; tracked staff rows are
+   when drift ≥ `DEWARP_MIN_DRIFT_PX` (5 px) so the dewarp step itself is a no-op on clean screenshots (the page is still changed by the non-staff-ink mask, so output is NOT bit-identical to before 2026-09-25); tracked staff rows are
    restored after border/lyric blanking (which previously erased real staves on camera pages).
    **Non-staff-ink mask + native strip source (2026-09-25, PIYA-121, same branch, BUG-015/BUG-016, committed, unmerged):** after dewarp, `non_staff_ink_mask()` erases ink that is neither the tracked staff nor connected (gap-bridged 0.2 spacing) to it - lyrics, titles, page-edge shadows - while keeping beams, ties, flags, rests and ledger-line notes. Detection/tracking stay at `DETECT_MAX_DIM` = 1600 px; the strip source is binarised once at native resolution (<= 4032 px) through the same perspective matrix and the same upsampled dewarp map, because binarising rests at 1600 px broke their ~1.6 px strokes. `training/run_stage12.py` regenerates strips, manifest, viz and 1:1 eyeball tiles; `training/step3_mask_audit.py` audits ties/beams/band ink (limits in its docstring and BUG-015).
 
