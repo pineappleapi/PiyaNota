@@ -833,3 +833,10 @@ Real-set check (a separate script, run once after the run is frozen and reviewed
 7. The `g8vb_reliable` gate may now use the pooled real set, if it has **>= 30 real G8vb** (about 45 expected,
    about 67 with Flashlight). It uses the same thresholds (recall >= 0.95, G-to-G8vb <= 2%), and the evidence
    is reported per piece.
+
+### 2026-09-26 user decision: Flashlight retired as a test piece
+
+- The user approved: Flashlight (pg01-08) is **retired as a test piece** and added to the clef/key classifier **validation** set (check-only, never training), alongside Dormi Jesu and Livin' on a Prayer.
+- Any earlier Flashlight numbers or ground truth (`data/eval_flashlight/`, partial, abandoned) are history only and must not be cited as test results.
+- The Honneur à Toi test report must disclose that Flashlight's engraving family was seen during validation.
+- Labels are stored separately in `data/val_clefkey/labels_flashlight.json`, so the frozen `labels.json` (Dormi + Livin', 188 staves, sha256 in `labels.sha256`) stays unchanged.
