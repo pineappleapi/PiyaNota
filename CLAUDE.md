@@ -304,6 +304,8 @@ treat it as stale if either doc has moved on.
     `split="test"` hit a separate, unresolved `RuntimeError: Numpy is not available` when the test-split
     label cache had to be built fresh. There is currently no valid test-split number.
 
+**Checkpoint metadata, authoritative (2026-09-26, user decision: use the files' own metadata; sha256 matches data/eval_dsmn/checkpoint_hashes.txt):** the deployed `finetuned_font_seed{1,2}.pt` are from the 2026-09-23 two-seed run, not the 2026-09-19 run: seed1 epoch 2, `loo_font_ser` 0.0926, canary clean/distorted 0.0785/0.1311; seed2 epoch 2, `loo_font_ser` 0.0562, canary 0.0492/0.0865. Report as a range (0.0562-0.0926). Older 0.0523/0.0886 figures below refer to the 2026-09-19 run whose checkpoints were overwritten.
+
 ## Retraining plan for BUG-011 (real-world font domain gap)
 
 Decision recorded 2026-09-14 in `docs/decisions/piya-106-crnn-font-retraining-plan.md`

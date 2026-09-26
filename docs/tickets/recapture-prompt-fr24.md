@@ -16,6 +16,7 @@ Today the pipeline does not give the API anything to act on:
   `len(boxes) == 0 -> continue`).
 - A staff count not divisible by 4 raises a plain `ValueError` with the reason only in the message text.
 - A missing voice raises a plain `ValueError` in Stage 4.
+- A voice missing from only ONE system raises nothing and sets no flag (Stage 4; found in the 2026-09-26 DSMN eval).
 - `docs/tickets/module1-pipeline.md` already specifies `failure_reason = "no_staff_detected"` and
   `"incomplete_voice_sequence"` (with `page_index` / missing voice) but neither exists in code.
 
@@ -23,7 +24,8 @@ Today the pipeline does not give the API anything to act on:
 
 1. **Structured failures (Module 1).** Replace the bare errors with one exception type carrying
    `reason` (`no_staff_detected`, `unsupported_staff_layout`, `incomplete_voice_sequence`),
-   `page_index`, and detail (staff count, missing voice). A zero-box page must raise, not skip.
+   `page_index`, and detail (staff count, missing voice, and `sys_idx` when one system is short a voice).
+   Decided 2026-09-26 by the user: a voice missing from a single system also triggers the recapture prompt. A zero-box page must raise, not skip.
    Distinct reason codes so they can be triaged separately (PIYA-410).
 2. **Job state (Module 3).** Job goes to `failed` (or a `needs_recapture` state - decide with
    backend-lead) with that reason and the page id, so the client can show the prompt.
@@ -42,8 +44,9 @@ Today the pipeline does not give the API anything to act on:
 
 ## Acceptance criteria (draft - confirm before implementing)
 
-- [ ] Zero-box page, non-multiple-of-4 page and missing voice each surface a structured reason with
-      `page_index`; none is silent.
+- [ ] Zero-box page, non-multiple-of-4 page, a voice missing from the whole piece, and a voice missing from a
+      single system each surface a structured reason with `page_index` (and `sys_idx` for the single-system
+      case); none is silent.
 - [ ] The API returns that reason and page id to the client.
 - [ ] The recapture screen shows the four checklist items above.
 - [ ] After a retake, page order and `page_index` values of all other pages are unchanged and the
@@ -54,5 +57,5 @@ Today the pipeline does not give the API anything to act on:
 ## Open questions
 
 - Job state name and whether a partial (some pages good) job stays open while waiting for the retake.
-- Whether a voice missing from only one system (currently silent in Stage 4) should also prompt.
+- ~~Whether a voice missing from only one system should also prompt.~~ Yes (user, 2026-09-26).
 - Owner review: backend-lead (API/job state), frontend-lead (screen).

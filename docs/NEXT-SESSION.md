@@ -77,6 +77,8 @@ below) on this set once, reporting them as a range — do not average or cherry-
 
 ---
 
+**Checkpoint metadata, authoritative (2026-09-26, user decision: use the files' own metadata; sha256 matches data/eval_dsmn/checkpoint_hashes.txt):** the deployed `finetuned_font_seed{1,2}.pt` are from the 2026-09-23 two-seed run, not the 2026-09-19 run: seed1 epoch 2, `loo_font_ser` 0.0926, canary clean/distorted 0.0785/0.1311; seed2 epoch 2, `loo_font_ser` 0.0562, canary 0.0492/0.0865. Report as a range (0.0562-0.0926). Older 0.0523/0.0886 figures below refer to the 2026-09-19 run whose checkpoints were overwritten.
+
 ## Earlier context: PIYA-106 Step 2 (CRNN fine-tuning) status, as of 2026-09-19
 
 **The real two-seed `RUN_FINETUNING` run (under the cuDNN fix) is DONE.** Both checkpoints are valid
@@ -189,7 +191,7 @@ Full plan + amendments: `docs/decisions/piya-106-crnn-font-retraining-plan.md`
 - Don't use `crnn_weights/finetuned_font.pt`, either `finetuned_font_seed{1,2}.pt` from before the
   2026-09-17 cuDNN fix, or `crnn_weights/repro_check_seed1.pt` — all invalidated or diagnostic-only
   (see above). The post-fix `finetuned_font_seed1.pt` / `finetuned_font_seed2.pt` (from the completed
-  two-seed run) ARE valid and usable — but report them as a range (0.0523–0.0886 loo_font_ser), never
+  two-seed run) ARE valid and usable — but report them as a range (0.0562–0.0926 loo_font_ser, the files' own 2026-09-23 metadata), never
   cherry-pick seed=1's better number.
 - Don't treat "epoch-1-is-always-best" as settled — that was a read from 2/2 *isolated seed=1* repro
   runs, and the real seed=2 run's best epoch was 2. Checkpoint-selection luck, not a property of

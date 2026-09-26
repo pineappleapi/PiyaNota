@@ -5,6 +5,7 @@ this file is the durable record). Evaluation by ml-cv-lead, code review by senio
 
 ## Scope and limits (read first)
 
+- Capture (user, 2026-09-26): the test pieces are MuseScore-engraved scores, printed on paper and photographed with a phone.
 - Set: 5 "Don't Stop Me Now" (DSMN) phone photos, open-score SATB, 4/4, key of 1 flat. CPU only.
 - 24 strips annotated, p3s1 Tenor excluded, **23 scored (264 reference notes)**. Wide confidence intervals.
 - Ground truth is **single-annotator (an agent), frozen before any CRNN run**. One of four cross-checked strips
@@ -86,7 +87,8 @@ detector-found ties is not sufficient evidence; a paired old-vs-new comparison a
 
 - Wire Stage 4 flags plus a clef-unsure signal into `run_full_pipeline` / FR-14 before any merge (recommended).
 - Whether a voice missing from one system should raise as an FR-24 recapture (PIYA-127).
-- Checkpoint metadata mismatch, unresolved: seed 1 file says epoch 2 / 0.0926 vs the decision doc's epoch 1 / 0.0523;
+- **Resolved 2026-09-26:** the files are from the 2026-09-23 run and their metadata is authoritative (hashes match). Original note:
+  checkpoint metadata mismatch: seed 1 file says epoch 2 / 0.0926 vs the decision doc's epoch 1 / 0.0523;
   seed 2 file says epoch 2 / 0.0562 vs 0.0886. Which is authoritative must be settled before quoting either.
 - Second annotator for the DSMN ground truth.
 - Fix double dots and the dead code; tighten the tie test.

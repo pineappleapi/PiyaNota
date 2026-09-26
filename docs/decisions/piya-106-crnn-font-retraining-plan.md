@@ -351,6 +351,10 @@ cell 12/13) and log GPU model + torch/CUDA/cuDNN versions per run -- implemented
 follows this amendment. Step 3 (fresh real-world test set) remains the next action and needs new
 photos/screenshots from the user.
 
+### Amendment 2026-09-26 -- which checkpoints are deployed
+
+**Checkpoint metadata, authoritative (2026-09-26, user decision: use the files' own metadata; sha256 matches data/eval_dsmn/checkpoint_hashes.txt):** the deployed `finetuned_font_seed{1,2}.pt` are from the 2026-09-23 two-seed run, not the 2026-09-19 run: seed1 epoch 2, `loo_font_ser` 0.0926, canary clean/distorted 0.0785/0.1311; seed2 epoch 2, `loo_font_ser` 0.0562, canary 0.0492/0.0865. Report as a range (0.0562-0.0926). The 0.0523/0.0886 figures above refer to the 2026-09-19 run whose checkpoints were overwritten.
+
 ## Not yet decided / blocked
 
 - Whether the base Camera-PrIMuS training run needs to finish first, or whether fine-tuning can

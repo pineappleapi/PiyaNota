@@ -111,6 +111,7 @@ Ranking is by my estimate of contribution to the *observed real-photo failure*, 
   the DSMN eval also notes an unresolved checkpoint metadata mismatch (seed1 file says epoch 2 / 0.0926 vs doc
   epoch 1 / 0.0523; seed2 file 0.0562 vs 0.0886). Which run each "seed" file came from is unclear, so "seed 1 vs
   seed 2" comparisons on DSMN should be treated as "two checkpoints from this family", not as clean seeds.
+  **Resolved 2026-09-26:** the files are the 2026-09-23 run (see that amendment); the file metadata is authoritative.
 
 ### R6. Tokenization and decoding: engraver-dependent beam tokens, greedy CTC, no grammar, insertion bias (PLAUSIBLE)
 
