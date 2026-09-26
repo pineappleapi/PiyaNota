@@ -4,6 +4,13 @@ Handoff doc for continuing PiyaNota work in a fresh session. Read this first; it
 full detail rather than repeating it. Written 2026-09-14, rewritten 2026-09-16, rewritten 2026-09-19,
 rewritten 2026-09-24.
 
+## DSMN eval + Stage 3/4/5 review (2026-09-26) - newest, read first
+
+Full record: `docs/decisions/piya-106-dsmn-heldout-eval-2026-09-26.md`. Summary: Stage 1/2 ready for Stage 3 (with caveats);
+CRNN fails the SOW on DSMN (token SER 44.3-47.9% across the two seeds, pitch 10.6-11.4%, clef 2-3/23 correct), BUG-011 unfixed.
+Stage 3 dot/`slur.end` and Stage 5 hanging-note-on fixed (`1f237de`, `4021323`). Stage 3/4/5 rework not ready for main until Stage 4
+flags and a clef-unsure signal reach `run_full_pipeline`. PIYA-127 (FR-24 recapture, BUG-018) is drafted. Nothing merged or pushed.
+
 ## PIYA-121 update (2026-09-25) - read before the 2026-09-24 section below
 
 Superseding note: the Stage 2 lyric mask described below (`_non_staff_ink_mask`, `mask_lyrics=`) has been REPLACED. The mask is now `non_staff_ink_mask` in Stage 1 (after dewarp) and Stage 2 only crops; strips come from a native-resolution strip source (rest/thin-glyph deformation root cause: binarising at 1600 px, BUG-016). Tie recall was the priority.
