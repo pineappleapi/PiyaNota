@@ -368,3 +368,468 @@ The notebook's first markdown cell has the click-by-click version. In short:
   `TENOR_CLEF_REFERENCE`, `CLEF_FALLBACK`, `get_key_sig_alterations` and `infer_pitch`.
 - `D:\PiyaNota-training\stage1_preprocessing.py`: `_build_strip_source` and `keep_unmasked`.
 - `D:\PiyaNota-training\stage2_detection.py`: `VOICE_MAP`, and the strip tuples.
+
+
+## 2026-09-26 amendment: validation set, data sufficiency, mid-piece key changes, local training
+
+Author: ml-cv-lead (advisory). Status: **proposal; nothing trained, nothing implemented, nothing committed.**
+Everything below was written **before any classifier result exists**, so the criteria changes in A.5 are
+legitimate pre-registration amendments, not post-hoc tuning. Once a real run has been seen, none of them may
+be changed again.
+
+New inputs from the user (2026-09-26):
+- The real-capture validation set is the phone photos of **Dormi Jesu** (9 pages) and **Livin' on a Prayer**
+  (pg01-10 plus pg10_b), from `D:\PiyaNota\data\piyanota_dataset\realphoto_validation_set\`. The user explicitly
+  approved this exception to the "piyanota_dataset is test-only" rule for these two pieces. Labels (per staff
+  clef and key, including mid-staff changes) go in `data/val_clefkey/labels.json`.
+- Honneur a Toi pg01-03 replaces Flashlight as the fresh CRNN test piece. DSMN (23 scored strips from pg01-05)
+  remains the existing held-out test set.
+- Training moves from Kaggle to the local PC: GTX 1650 4 GB, torch 2.6.0+cu124, Python 3.13, 16 GB RAM
+  (measured), Windows 11. The GPU driver wedged once on 2026-09-23.
+
+What I looked at for this amendment: the preview JPEGs of Dormi pg01 and pg06, Livin' pg03 and pg09, and
+downscaled views of Flashlight pg02 and Honneur pg01. I did not open any crops or run any model on them. The
+staff counts below are **estimates from those pages**. The real counts from `labels.json` replace them.
+
+### A. Is the data enough? (question a)
+
+#### A.1 How many staff crops the validation set gives
+
+| Piece | Pages | Staves per page (seen) | Estimated staff starts | G (treble) | G8vb | F (bass) | Keys seen |
+|---|---|---|---|---|---|---|---|
+| Dormi Jesu | 9 | 9 (4-staff system + 5-staff system with a soprano obligato) | ~75-80 | ~40-45 | ~18 | ~18 | +2, -2 (with mid-staff changes both ways) |
+| Livin' on a Prayer | 10 (+ pg10_b) | 8-12 (2-3 systems of 4) | ~100-120 | ~50-60 | ~25-30 | ~25-30 | -1, -4 (mid-staff change at a double bar, with a time-signature change) |
+| **Total** | 19-20 | | **~175-200** | ~90-105 | **~43-48** | **~43-48** | about 4 distinct values out of 15 |
+
+- **pg10_b.** If it is a retake of pg10, it is the same staves photographed twice. Count only one of the two
+  toward n. If both are kept, they must always sit in the same fold, never one in "fit" and one in "check".
+- **"Other" clefs and F clefs on a Tenor staff: expect zero.** Every Tenor staff I saw is treble-8vb and every
+  Bass staff is bass clef. So the voice-mismatch path (plan section 3.3, rule 6) and the `other` class get
+  **no real validation at all** from this set.
+- **The class balance is better than feared for clefs, but it is still skewed in a way that matters.**
+  - G8vb is about a quarter of all staves (one Tenor per system), so there are about 45 real G8vb staves. That
+    clears the existing `>= 30 real G8vb` gate for `g8vb_reliable`, but only when both pieces are pooled.
+  - The real problem is diversity, not balance. There are 2 engravings, 1 phone, and each clef always sits on
+    the same voice.
+  - The key diversity is very poor: about 4 of the 15 key values. A 99% key accuracy on this set says
+    **nothing** about 5-7 sharps or flats. For those keys the only evidence stays DS2/synthetic.
+
+#### A.2 The arithmetic for the pre-registered gate
+
+The gate from section 4: accuracy-when-sure >= 99% with a Wilson 95% lower bound >= 97%, confident-wrong
+<= 1%, AUROC >= 0.90. The Wilson lower bound only depends on n and the number of errors:
+
+| Errors among the "sure" staves | Minimum sure staves for lower bound >= 97% | Observed accuracy at that n |
+|---|---|---|
+| 0 | 125 | 100% |
+| 1 | 185 | 99.46% |
+| 2 | 239 | 99.16% |
+| 3 | 290 | 98.97% |
+| 4 | 339 | 98.82% |
+
+At exactly 99% observed:
+
+| n sure | Wilson 95% interval | Passes lower bound >= 97%? |
+|---|---|---|
+| 100 | 94.6-99.8% | no |
+| 150 | 95.3-99.6% | no |
+| 200 | 96.4-99.7% | **no** |
+| 250 | 97.1-99.8% | just |
+| 300 | 97.1-99.7% | yes |
+
+**Correction to my own section 4.** It said "about 200 real staves ... is enough to tell 99% from 95%". That is
+true, but 200 is **not** enough to pass the 97% lower bound at 99% observed. That needs about 250-300 sure
+staves, or at least 125 with zero errors. Also, "sure" staves are a subset: any staff marked unsure drops out
+of n.
+
+Other points on the arithmetic:
+- **The confident-wrong rate** can be checked as a point estimate. It cannot be *proven* to be <= 1% at this
+  size. With 0 confident-wrong in 200, the 95% upper bound is 1.9%. Proving <= 1% with zero errors needs
+  about 380 staves.
+- **AUROC** measures how well confidence separates right answers from wrong ones. It needs wrong answers to
+  measure. If the model is as good as the gate demands, there will be about 2 wrong staves in 200, and an
+  AUROC from 2 negatives is noise. A good model therefore makes AUROC un-measurable on this set. See A.5 for
+  the amendment.
+- **Clustering.** Wilson assumes every staff is independent. They are not: errors cluster by piece (one
+  engraving) and by page (one photo). With 2 pieces, the honest statement is "reliable on these two
+  engravings as photographed". It is not "reliable on any engraving". The independent check of the latter is
+  the one-time Honneur/DSMN test at the end. Report a page-level cluster bootstrap interval next to Wilson.
+
+#### A.3 What this means in one line
+
+- About 190 staves from 2 pieces is **enough to catch a bad classifier**. At 90-95% real accuracy it will fail
+  clearly.
+- It is **borderline for proving** the 99% / lower-bound-97% gate. It can only pass with 0-1 errors.
+- It is **not usable for fitting thresholds and then checking them on the same staves**.
+
+#### A.4 The fit/check split from section 4 no longer works
+
+Section 4 said the real set may re-fit temperatures/thresholds on a 50/50 page split. With about 190 staves,
+each half has about 95. A 95-staff check half cannot reach the 97% lower bound even with zero errors (it
+needs 125). New rule:
+
+1. **The real set is check-only.** Temperatures, thresholds, epoch selection and `g8vb_reliable` stay fitted on
+   the DS2/synthetic val splits, exactly as the notebook does now. The real set is scored once, after the run
+   is frozen.
+2. **If that check fails on calibration** (for example confident-wrong > 1%, or the sure-accuracy is below
+   target), the fallback is leave-one-piece-out cross-fitting. Fit the temperature and threshold on N-1 real
+   pieces, score the held-out piece, rotate, and report the pooled out-of-fold results. This gives an honest
+   out-of-sample number using all staves. With only 2 pieces it is fragile, which is one more reason for B.3
+   (adding Flashlight as a third validation piece).
+3. The network weights are **never** trained on the real set.
+
+#### A.5 Pre-registered criteria amendments (made now, before any result)
+
+1. **AUROC gate.** It applies on the real set only if the real set has **>= 10 wrong** clef (resp. key) staves.
+   Otherwise report "AUROC not estimable (k wrong)", and the AUROC >= 0.90 requirement is checked on the DS2/
+   synthetic *stress* test sets, which have enough errors. Confident-wrong is then the primary real-data
+   uncertainty check.
+2. **Sizing target.** Pass requires the Wilson lower bound >= 97% on the pooled real check set. If the pooled
+   sure-n is < 125, the result is **"not proven"**, not "pass", however clean it looks.
+3. **Scope of what the gate licenses.** A pass licenses only:
+   - treble / treble-8vb / bass on S/A/T/B positions;
+   - the key values actually present in the real set.
+
+   F-on-Tenor, `other`, and keys whose |key| is not present in the real set stay DS2/synthetic-only evidence.
+   In the pipeline, the voice-mismatch rule (rule 6) keeps its `clef_unsure` flag whatever the classifier says.
+4. **Labels.**
+   - Every staff where model and label disagree is re-inspected from the image, and each outcome is logged in
+     `data/val_clefkey/adjudication.json` (label kept / label corrected, with the reason).
+   - At a 1% error budget, one mislabel is half the budget, so label quality matters as much as model quality.
+   - Labels are corrected only on unambiguous image evidence, never "because the model said so".
+5. **The inputs come from the deployment path.** Real-set crops must be produced by Stage 1
+   (`keep_unmasked=True`) + Stage 2 geometry + `staff_left_edge()` + `make_input()`. They must not be
+   hand-cropped. Staves that Stage 1/2 fails to give geometry for are reported as a separate coverage number
+   (`no_staff_geometry` rate), never silently dropped from the denominator.
+
+#### A.6 Is the training data sufficient?
+
+- **In count, yes, comfortably.**
+  - DS2 dense has about 18k staff boxes, most with an opening clef. About 70% go to train after the piece
+    re-split and after the gonville font is removed.
+  - The 3000 synthetic systems give about 8k training staves.
+  - For a 1.4M-parameter, 4-way/15-way classifier with heavy augmentation, about 18k staves is plenty.
+  - G8vb has about 420 DS2 training staves from about 37 pieces, plus about 2k synthetic ones.
+- **In domain, not proven, and more data of the same kind would not prove it.** The known gaps:
+  1. No printed-and-photographed images in training. The camera look is simulated only.
+  2. Neither validation engraving's font is in training. That is intended: the real set measures exactly this.
+  3. **Pencil markings.** Livin' pg09 has heavy pencil loops and scribbles crossing staff starts; Dormi has
+     circled dynamics. Choir scores are annotated by singers, so this is a deployment-domain fact. The current
+     augmentation has dust specks but no strokes. **Recommended before the run:** add a "pencil stroke"
+     augmentation: a few random thin, grey-to-dark curves (bezier or polyline) across the crop, applied to the
+     grey crop before binarisation. Disclosure: this idea came from looking at validation photos. It is
+     design-level exposure (like the Flashlight layout note in section 5 item 4), not a parameter fit. Record
+     it in the checkpoint metadata.
+  4. Staff starts that open with cancellation naturals before a new key. They occur in older engraving styles
+     when a key change coincides with a system break. DS2 marks these "ignore", and the synthetic set has none.
+     This is not needed for v1. If `labels.json` shows any, report them separately.
+- The MuseScore print-and-photograph set from section 4 is still the right way to cover F-on-Tenor, `other`,
+  and many keys, and to get past 300 real staves. It is no longer a blocker for a first check, but it **is**
+  the path to a proven pass if the two-piece check is "not proven".
+
+### B. DSMN and Flashlight for training or validation? (question b)
+
+#### B.1 DSMN: no, for any role (training, validation, thresholds or epoch selection)
+
+**Yes, using DSMN would contaminate the end-to-end test, even though the classifier is a separate model.**
+
+- DSMN pitch accuracy is 10.6-11.4% as-is and 86-88% with ground-truth clefs. The header (clef + key) is
+  **the** dominant term in the pitch number we report. A classifier that has seen DSMN's staff starts, or has
+  had its thresholds tuned on them, will get DSMN's headers right by memory, not by generalisation. The
+  reported DSMN pitch accuracy would then jump for a reason that does not transfer to a new score.
+- DSMN has one engraving, a couple of keys and four clef appearances repeated 60 times. That is exactly the
+  kind of set a 1.4M-parameter CNN memorises.
+- **DSMN pg06-12 are also out.** They are not among the scored strips (pg01-05), but they are the same piece,
+  the same engraving, the same key, and very likely the same photo session. Training on them teaches the
+  model the test's exact glyphs. Leakage happens at the piece level, not the page level. The plan already
+  splits DS2 by piece for exactly this reason.
+- DSMN pg01-05 are byte-identical to the test photos in `piyanota_dataset`, so there is not even a
+  near-duplicate argument there.
+- DSMN was also already used to develop Stage 1/2 (section 5 item 5). Adding the classifier on top would stack
+  a second, larger contamination on the same test set.
+
+#### B.2 Honneur a Toi: no, for any role
+
+It is the new fresh test piece. Its GT is being annotated, and it must stay untouched until the one-time final
+read.
+
+#### B.3 Flashlight: yes as validation, provided it is formally retired from testing; not as training
+
+- Since the user dropped Flashlight as a test piece, it may join the real **validation** set. Conditions:
+  1. **Write the retirement down**, in `docs/bug-tracker.md` or the PIYA-106 decision record: "Flashlight
+     pg01-08 retired from test on 2026-09-26, now classifier validation". Any Flashlight numbers already
+     produced under `data/eval_flashlight/` stay as historical diagnostics and are never again quoted as test
+     results.
+  2. **Disclose the style link to Honneur.** Both look like Finale-default engraving (Maestro-style glyphs),
+     and were probably photographed with the same phone. Validating on Flashlight therefore puts the Honneur
+     test's engraving family into threshold/selection exposure. This is acceptable and even desirable for
+     realism, but the Honneur report must say "engraving family seen in classifier validation (Flashlight)".
+  3. Flashlight's layout is Soloist / S / A / T with **no Bass staff**. It adds about 90 staves (about 70 G,
+     about 22 G8vb, **0 F**) and probably 1-2 key values.
+- **Why validation and not training:**
+  - As training data, about 90 staves next to about 18k would be swamped. They would only matter if heavily
+    up-weighted, which is how overfitting to one engraving happens.
+  - As validation they are worth much more. The pooled real set rises from about 190 to about 280 sure-able
+    staves, which is roughly where the 97% lower bound becomes reachable (A.2).
+  - It also becomes 3 pieces instead of 2, which makes leave-one-piece-out cross-fitting (A.4) meaningful.
+- The user decides whether to add it. If yes, it must be added to `labels.json` **before** the classifier is
+  first scored on the real set, not after a failed check.
+
+#### B.4 Test set after this amendment
+
+The DSMN pg01-05 scored strips plus Honneur pg01-03 are the only test data. Both Sides Now remains test-only
+for Stage 1/2 purposes as before.
+
+### C. Mid-piece key changes and clef changes (question c)
+
+#### C.1 What the plan and notebook do today
+
+- **The classifier only reads the staff start.** Its crop is 1 staff space left to 15 right of the first
+  staff-line column. It never sees anything later in the strip.
+- **The header on every new system is still covered.** Engraving convention reprints the current clef and key
+  at the start of every system. After a key change, the next system starts with the new key, so the header
+  classifier handles it automatically. The courtesy signature at the end of the previous system sits at the
+  right edge of that strip, which the classifier never sees.
+- **A mid-staff change inside a system is not seen by the classifier at all.**
+  - Plan section 3.2 leaves mid-strip key changes to the CRNN, marked `key_unsure` /
+    `mid_strip_key_change_unverified`.
+  - It ignores mid-strip CRNN clef tokens.
+  - Both example pieces have such changes:
+    - Dormi pg06, system 2: 2 flats to 2 sharps at a double bar, with cancellation naturals on at least the
+      lower staves; the piece also goes +2 to -2 earlier.
+    - Livin' pg09, system 2: 1 flat to 4 flats at a double bar, together with a 3/4 to 4/4 change.
+- **What `infer_pitch()` does today** (`stage3_transcription.py`, lines 1123-1182):
+  1. Every `barline` token moves the state machine to `post_bar`.
+  2. A sharp or flat right after it, at a valid key-signature position for the active clef, starts a
+     `mid_keysig` burst of same-type accidentals. The burst is committed by `_commit_mid()` as the new key.
+     A single accidental counts.
+  3. Three weaknesses:
+     - **Naturals are not understood.** A natural after a barline falls through to the body as an inline
+       accidental on the next note. So a cancellation ("naturals, then the new sharps") never commits the new
+       sharps: they become inline accidentals too. A change to C major, which is naturals only, is never
+       committed. For Dormi's -2 to +2 change, the rest of the strip keeps 2 flats.
+     - **False positives.** An ordinary inline sharp on the first note of a bar, at a key-signature position
+       (for example F#5 in treble), is committed as "key change to 1 sharp" for the rest of the strip. The
+       CRNN's body tokens are 44-48% wrong, so this will fire on noise. Once the classifier provides the
+       correct header, this path can overwrite a correct key with a wrong one. That is a regression risk that
+       does not exist while the header is wrong anyway.
+     - The key-signature position test depends on `active_clef`, which today is almost always the wrong
+       `clef.C-L3`.
+- **How much damage does a missed mid-staff change do?** It is bounded to the rest of that one strip per
+  voice, because the next system's header resets it. On Dormi pg06 system 2 that is about 40% of the notes in
+  4 strips. That is too much to leave silent, but it is not a whole-piece failure.
+
+#### C.2 Recommended v1 design (simple, no new model)
+
+Key idea: **every system reprints the key and clef, so comparing consecutive system headers tells us for free,
+from the image, whether a change happened inside a system and what the new value is.** Only the location
+inside the strip is unknown. The CRNN is used only to locate the change, never to decide whether one happened
+or what the new key is.
+
+Stage 3 becomes three passes. `infer_pitch` itself only applies decisions:
+
+1. **Pass 1 (per strip):** CRNN decode + classifier header (as in section 3). This is already batch work.
+2. **Pass 2 (per system, all 4 voices together):** the system key vote from section 3.4 gives `K[s]` for every
+   system `s`. Clefs are per voice: `C[v][s]`.
+3. **Pass 3 (per strip):** `infer_pitch(..., header, key_plan)`. `key_plan` is a list of
+   `(measure_index, key)` changes decided in pass 2. When a `key_plan` is given, the internal `mid_keysig`
+   commit is **disabled**. Post-barline sharp/flat/natural bursts are still consumed as key-signature glyphs
+   (so they are not applied to notes), but they no longer set the key.
+
+Key-change rules for system `s` (pass 2):
+
+| Case | Condition | Action | Flags |
+|---|---|---|---|
+| K1 | `K[s+1] == K[s]`, both confident | No change in system s. Any CRNN post-barline burst in s is treated as inline accidentals (today's `body` behaviour) | `mid_keysig_suppressed` (log only) |
+| K2 | `K[s+1] != K[s]`, both confident, and CRNN bursts are found after the same `measure_index` (+/-1) in >= 2 of the system's voices | Apply `K[s+1]` (the **classifier's** value, not the CRNN count) from that measure to the end of strip s, in all voices | `key_change_located` (informational); `key_unsure` + `key_change_count_disagrees` if the CRNN's burst count does not match `K[s+1]` |
+| K3 | `K[s+1] != K[s]`, but no agreeing burst | Assume the change is at the end of the system (the common "change at the system break" case, where the only glyph is the courtesy key at the right edge). Notes are unchanged | `key_unsure`, `key_change_location_unknown`, `review_needed` on system s, all voices |
+| K4 | Last system (no `s+1`), or either header unsure | Apply a CRNN burst only if >= 3 of 4 voices agree on the measure and the count; otherwise ignore it | `key_unsure`, `mid_strip_key_change_unverified` |
+
+Burst recognition (small `infer_pitch` change): after a barline, a run of **naturals** at key-signature
+positions, optionally followed by a same-type sharp/flat run, is one burst. So "naturals only" means key 0,
+and "naturals then sharps" means the new sharps. Naturals are no longer passed through to the next note.
+
+Known limitation, accepted: a change and a change back within one system (A to B to A) is invisible to the
+header comparison. It is rare in choral writing, and it is logged when the CRNN reports bursts that K1 then
+suppresses.
+
+Clef changes:
+- **Use the same header comparison, but never the CRNN for location.** The CRNN's clef tokens are the
+  confidently-wrong ones (BUG-011), so mid-strip `clef.*` tokens stay ignored (reason
+  `mid_strip_clef_token_ignored`).
+- If `C[v][s+1] != C[v][s]` with both confident, the new clef applies from system s+1, and system s gets
+  `clef_unsure`, `clef_change_location_unknown` and `review_needed` for that voice.
+- In SATB scope this realistically means a Tenor switching between treble-8vb and bass. It is rare, and it is
+  always flagged, never silently wrong for more than one strip.
+- Courtesy clefs at the end of a strip affect no notes.
+
+#### C.3 What v2 would add (only if C.2's flags turn out to be frequent)
+
+- A **barline probe**: the same classifier architecture, trained with an extra "clef: none" class and a
+  "no change" key class, on crops anchored at each image-detected barline.
+- Training data would be Verovio systems with mid-measure-list key changes, including cancellation naturals.
+- It would replace CRNN-based location in K2/K3.
+- Do not build it before v1's flag rates on the real set show it is needed.
+
+#### C.4 Evaluating C
+
+- `labels.json` should record, per staff, the start clef/key (the classifier target) **and** a list of
+  changes with the measure number and the new value.
+- There will only be about 3-6 system-level change events in Dormi + Livin'. That is **diagnostic only**:
+  report each event (detected yes/no, location right yes/no), with no percentages.
+- The C.2 rules are hand-set, like the Stage 4 priors, and have no statistical validation at this sample size.
+
+### D. Local training plan (question d)
+
+Recommendation: **convert the notebook to a terminal script, `training/train_clef_key.py`.** The reasons:
+- Windows multiprocessing uses spawn. Spawn needs picklable top-level functions in an importable module with
+  an `if __name__ == "__main__":` guard. Jupyter `__main__` functions do not qualify, which is why the
+  notebook falls back to 1 process on Windows. As a script, the crop-extraction phases can use 8 processes.
+- A terminal process with a log file survives a wedged kernel. A notebook's state does not.
+- Phase caching and resume are natural in a script.
+
+Keep the notebook in the repo as the Kaggle fallback, frozen, and note in its first cell that the script is now
+the reference.
+
+#### D.1 Spec checklist
+
+Structure and paths:
+- [ ] `clef_key_core.py` becomes a real file at the repo root (`D:\PiyaNota-training\clef_key_core.py`). The
+      script imports it. `CORE_SHA256` is the sha256 of that file's bytes, and there is no string copy of it
+      inside the script. Stage 3 later imports the same file.
+- [ ] CLI:
+      `python training\train_clef_key.py --ds2 D:\PiyaNota\datasets\ds2_dense --seed 20260926 [--smoke] [--resume RUN_DIR] [--phase prepare|train|eval|all]`.
+      There is no hard-coded `/kaggle` path. `INPUT_ROOT` / `find_one()` is replaced by `--ds2`, and the
+      script checks that `images\`, `deepscores_train.json` and `deepscores_test.json` all exist.
+- [ ] Run directory: `training\clef_key_artifacts\<run_id>\`, where
+      `run_id = f"{'smoke' if smoke else 'full'}_seed{seed}_{UTC timestamp}"`. Every JSON, NPZ, PNG and log goes
+      there: `clef_key_metrics.json`, `clef_key_splits.json`, `clef_key_history.json`,
+      `clef_key_parity_fixture.npz`, `preview_*.png`, `train.log` and `config.json`.
+- [ ] Weights are written to the run dir only (`clef_key_classifier.pt`). **The script does not write to
+      `music_symbol_detection\`.** The user copies the file there after review. Note: `.gitignore` has a blanket
+      `*.pt`, so the final file needs a force-add under LFS when it is approved. Per-epoch checkpoints stay
+      ignored.
+- [ ] Cache directory: `training\clef_key_cache\` (add it to `.gitignore`), keyed by a hash of: core sha256,
+      `STORE_*` constants, seed, `N_SYNTH_SYSTEMS`, verovio/resvg versions, and the sha256 of both DS2 JSONs.
+      On a key mismatch, rebuild; never silently reuse a stale cache.
+
+Phases, each cached and restartable:
+- [ ] `prepare-ds2`:
+      - Parse `deepscores_train.json`, then `deepscores_test.json`, **one at a time**, with `del d; gc.collect()`
+        in between.
+      - Write compact staff records (`ds2_records.json`) so the 226 MB JSON is parsed once per cache. Expected
+        peak RAM for the parse is about 2-3 GB, which fits in 16 GB.
+      - Extract crops with `ProcessPoolExecutor(max_workers=8)` into `ds2_raw.npy` (a uint8 memmap via
+        `np.lib.format.open_memmap`, about 1 GB).
+- [ ] `prepare-synth`:
+      - Run Verovio + resvg with 8 processes, one toolkit per process (the current `_toolkit()` global is
+        fine under spawn), into `synth_raw.npy` (about 0.7 GB).
+      - Assert `verovio.toolkit().getVersion()` starts with `6.3.0` and `resvg_py` is `0.5.0`. Both are
+        installed locally and match the pin.
+- [ ] `prepare-eval`: build the canonical eval inputs (float16) into `eval_inputs.npz`. Stress copies are built
+      at eval time, as now.
+- [ ] Load RAW with `np.load(mmap_mode="r")`. Do not use `np.concatenate` on two 1 GB arrays; index across the
+      two memmaps with an offset instead.
+
+Hardware settings:
+- [ ] DataLoader: `num_workers=0` (the default). The per-sample RNG `(SEED, epoch, i)` already makes the
+      augmentation independent of the worker. An optional `--workers N` may be added later, but only after a
+      check that the first 3 batches hash-equal the `num_workers=0` batches.
+- [ ] `BATCH_SIZE = 128`, fp32. The estimated training activation memory is about 1.5 GB at 128, which fits in
+      the roughly 3.3 GB usable on a display-attached 4 GB card.
+- [ ] **No AMP.** The GTX 1650 has no tensor cores, so fp16 gives little speed. The GPU is not the bottleneck
+      (CPU augmentation is), and AMP adds a numerics difference that would touch calibration.
+- [ ] Eval batch 256 (not 512), to leave headroom.
+- [ ] If an out-of-memory error happens at 128, do not silently drop to 64: stop and report. A batch change
+      changes the results and must be a recorded config change.
+- [ ] Call `torch.cuda.set_per_process_memory_fraction(0.85)`, so a leak fails as a Python OOM rather than
+      pushing the driver.
+
+Determinism and seeds:
+- [ ] Set `CUBLAS_WORKSPACE_CONFIG=:4096:8` at the very top of the script, **before** `import torch`.
+- [ ] Keep: `cudnn.deterministic=True`, `benchmark=False`, `use_deterministic_algorithms(True, warn_only=True)`
+      (log any warnings it emits into `train.log`), `cv2.setNumThreads(1)`, the per-sample RNG, and the
+      seeded `sampler_gen` / `loader_gen`.
+- [ ] Record `VERSIONS` plus `nvidia-smi --query-gpu=name,driver_version --format=csv` output (run once at
+      start, never inside the loop) in `config.json`.
+- [ ] State in the metadata that the **local GTX 1650 run is the reference**. A later Kaggle T4 run is a
+      different configuration, not a replication.
+- [ ] Do a second-seed run (`--seed 20260927`) after the first one is reviewed, and report both as a range.
+
+Checkpoint and resume (the driver-hang mitigation):
+- [ ] After every epoch, atomically write `last.pt`: write `last.pt.tmp`, then `os.replace`.
+- [ ] Also keep `ckpt_epoch_{e:02d}.pt`. These are small (about 6 MB each), so keep all of them.
+- [ ] The checkpoint holds:
+      - model, optimizer (AdamW) and scheduler (cosine) state;
+      - epoch, `history` and `best` (score, epoch, state);
+      - `sampler_gen.get_state()` and `loader_gen.get_state()`;
+      - `torch.get_rng_state()`, `torch.cuda.get_rng_state_all()`, and the numpy and python RNG states;
+      - the config hash, core sha256, split-manifest sha256 and cache key;
+      - the device name.
+- [ ] `--resume RUN_DIR` loads `last.pt`. It asserts that every hash and the device type match (a GPU run
+      never resumes on CPU or the reverse), restores all RNG/generator states, and continues at `epoch + 1`.
+      The `train.log` gets a `RESUMED at epoch N` line.
+- [ ] Flush `train.log` after every epoch line, with `print(..., flush=True)` or `logging` with a file
+      handler.
+- [ ] Temperatures, thresholds, eval and export run in a separate `--phase eval` that loads the `best` state.
+      A hang during eval therefore never costs training.
+
+Smoke tests, in this order, each must pass before the next:
+- [ ] S1: `--smoke` end-to-end on CPU (`CK_FORCE_CPU=1`), which exercises every phase.
+- [ ] S2: `--smoke` on GPU, twice. The two `clef_key_history.json` files must be **identical**, and the final
+      weights bitwise-equal (or `allclose(atol=0)` on the logits of the parity fixture).
+- [ ] S3: resume test on GPU. Run a 2-epoch smoke straight through. Then run a second smoke, kill it after
+      epoch 1 (or use a `--stop-after-epoch 1` flag), and resume it. The final weights and history must equal
+      the straight run. **This is the acceptance test for resume. Do not start the full run until it passes.**
+- [ ] S4: open `preview_inputs.png` and `preview_synthetic_systems.png` and check the crop geometry (staff
+      centred, clef not cut off), as in notebook Step 13.
+
+Full run and expected cost (estimates; the smoke run's per-phase timings replace them):
+
+| Phase | Estimate |
+|---|---|
+| prepare-ds2 | 5-10 min with 8 processes (about 1700 pages); about 30 min single-process |
+| prepare-synth | 5-10 min with 8 processes (3000 Verovio + resvg renders) |
+| Training | CPU-bound augmentation at about 3-6 ms per sample, about 18k samples per epoch, so about 1-2 min per epoch; 24 epochs is about 40-70 min |
+| Eval (+ stress copies) | about 5 min |
+| Peak RAM | about 3 GB during the JSON parse, about 2-3 GB during training (memmaps) |
+| Disk | about 2 GB of cache plus about 150 MB per run |
+
+Operating the run:
+- Close GPU-heavy apps (browser hardware acceleration, games) during the run.
+- Do not edit Windows TDR settings.
+- If `nvidia-smi` hangs again: restart the PC, then `--resume`.
+
+Real-set check (a separate script, run once after the run is frozen and reviewed):
+- [ ] `training/eval_clef_key_realval.py` runs Stage 1 (`keep_unmasked=True`) + Stage 2 geometry on the
+      Dormi and Livin' photos (and Flashlight, if the user approves B.3). It builds inputs with
+      `clef_key_core.make_input()`, compares them with `labels.json`, and writes
+      `training\clef_key_artifacts\<run_id>\realval_metrics.json`.
+- [ ] Report per piece and pooled: n, coverage (`no_staff_geometry` rate), clef/key accuracy-when-sure with
+      Wilson and a page-cluster bootstrap interval, confident-wrong count and rate, AUROC (or "not estimable,
+      k wrong"), the G8vb recall and G-to-G8vb rate, and the per-key-value table.
+- [ ] `train_clef_key.py` never reads anything under `piyanota_dataset`. The real-set script never writes
+      thresholds or temperatures back into the checkpoint. If the A.4 fallback is ever triggered, it writes a
+      **new** file named `..._realfit.pt`, with the fold results recorded in it.
+
+#### D.2 Changes to the plan and notebook because of A-C
+
+1. Section 4 table: the "real-capture validation" row is now Dormi + Livin' (+ Flashlight if approved),
+   check-only. The MuseScore print-and-photograph set becomes "needed to prove the gate if the two-piece result
+   is 'not proven', and to cover F-on-Tenor, `other` and keys with 5-7 accidentals".
+2. Section 4 sizing sentence: corrected by A.2 (about 250-300 sure staves, not about 200).
+3. Section 4 "split it 50/50 by page into fit/check": replaced by A.4 (check-only, with a leave-one-piece-out
+   fallback).
+4. Go criteria: amended by A.5 (AUROC applies only with >= 10 errors, "not proven" when n < 125, scope of the
+   license, label adjudication, deployment-path crops).
+5. Section 3.2 (mid-strip key changes): replaced by C.2 (the header-comparison `key_plan`; `mid_keysig`
+   disabled when a plan is given; naturals recognised in bursts). Section 3.2 (mid-strip clef tokens): kept as
+   ignored, plus the C.2 clef-change flag.
+6. Notebook/script:
+   - add the pencil-stroke augmentation (A.6, disclosed);
+   - convert to `train_clef_key.py` per D.1;
+   - leave everything else (crop spec, classes, splits, targets, selection rule) unchanged, so `CROP_SPEC_VERSION`
+     stays 1.
+7. The `g8vb_reliable` gate may now use the pooled real set, if it has **>= 30 real G8vb** (about 45 expected,
+   about 67 with Flashlight). It uses the same thresholds (recall >= 0.95, G-to-G8vb <= 2%), and the evidence
+   is reported per piece.
