@@ -1019,3 +1019,77 @@ Resume with `--resume <run_dir> --device cpu --threads 12 --phase all`. The thre
 3. The user gives the go for the seed 20260926 run; seed 20260927 runs only after review.
 4. Run the E4 dry run.
 5. Run the one-shot real-val eval on the frozen checkpoint.
+
+## 2026-09-27 Kaggle T4 run: determinism result and pre-registered cross-check (ml-cv-lead conditional GO)
+
+Written **before** any full-data run started, on either device. The tolerances below are pre-registered and must not be changed after results are seen.
+
+**Why:** the user wants the result quickly but reliably. A Kaggle T4 run takes about 1.5-3 h, compared with 6.5-9.5 h on the local CPU.
+
+**What changed from the earlier review:** the earlier objections to Kaggle were the missing pencil augmentation and a different core sha. Both are resolved, because the T4 now runs the exact committed code, verified by sha inside the kernel:
+
+| File | sha256 |
+|---|---|
+| `clef_key_core.py` | ad507cd1…a178532 |
+| `train_clef_key.py` (LF) | d4053d22…39439d |
+
+**Kaggle datasets (private):**
+- `piamac/piyanota-clefkey-code`
+- `piamac/piyanota-ds2-dense-clefkey`, holding the two DS2 dense JSONs and `images/`
+
+**T4 smoke determinism (2026-09-27):**
+- Kernel: `piamac/piyanota-clefkey-t4-determinism` v1, running on a Tesla T4.
+- Environment: torch 2.10.0+cu128, CUDA 12.8, cuDNN 91002, Python 3.12, 4 threads, verovio 6.3.0, resvg-py 0.5.0.
+- Two smoke runs gave byte-identical `last.pt`, `epoch_00{1,2}.pt`, history, calibration, parity fixture and splits.
+- The splits sha is c27daff5…, the same as the local CPU runs.
+- Losses: T4 4.1422 / 3.8906, local CPU smoke 4.1250 / 3.8905.
+- No "does not have a deterministic implementation" warning appears in either log.
+- Report: `D:\kaggle_staging\out_smoke_v1\determinism_report.json`.
+
+**What the smoke result does and does not show:** the T4 reproduces itself. It does not show that it matches the CPU; the cross-check below covers that.
+
+A second gap: `cache_key` hashes inputs, not pixels. cv2, numpy, PIL and Python differ between the two environments, so the cached crops may differ.
+
+### Verdict: conditional GO
+
+The T4 run is the training result, and the local CPU run (`--device cpu --threads 12`, torch 2.6.0+cpu) is the cross-check. This **supersedes the `reference_note` inside the frozen checkpoint**, which still names local CPU as the reference. The script is not edited, because that would break the run hashes.
+
+The one-shot real-val eval runs locally on CPU, on the T4 checkpoint (`map_location="cpu"`).
+
+### Conditions
+
+1. **Cache content check.** Hash the cached arrays (their content, not the key) in both environments and record whether they match.
+   - If they differ, a CPU-vs-T4 gap mixes data and numeric differences. That must be disclosed, but it does not block the run.
+2. **Pre-registered agreement tolerances, T4 vs CPU:**
+   - Aggregate clef and key accuracy per set (val_ds2, val_synth, the unseen-font test, stress sets): |Δ| ≤ 1.0 pp.
+   - clef_macro_recall: |Δ| ≤ 1.5 pp.
+   - Per-class recall where n ≥ 100: |Δ| ≤ 3 pp. Smaller classes are reported only.
+   - Per-sample argmax agreement on val and test: ≥ 98%.
+   - `g8vb_reliable` identical.
+   - Selective-threshold coverage on val: |Δ| ≤ 2 pp.
+   - Best epoch within ±3. Best epoch alone does not decide a failure.
+   - **On disagreement:** stop.
+     - Do not run the real-val eval, and do not pick the better run.
+     - Compare cache content first, then cross-evaluate both checkpoints on one device, and report both numbers.
+     - Real-val runs only on the checkpoint named in advance, which is **the T4 checkpoint**, so the one shot is never spent twice.
+3. **Order.**
+   - The real-val eval waits until the CPU cross-check has finished and passed.
+   - Seed 20260927 runs in the same pinned T4 environment.
+4. **Pinning.** Before training, the kernel asserts the following and aborts on any drift:
+   - torch 2.10.0+cu128, CUDA 12.8, cuDNN 91002
+   - GPU "Tesla T4"
+   - the cv2, numpy and PIL versions seen in the smoke kernel
+
+   It records `pip freeze`, the nvidia-smi driver, the kernel version, `CUBLAS_WORKSPACE_CONFIG`, the thread count and all run hashes. If the image changes, the smoke pair is redone.
+5. **Full-data determinism.**
+   - Two full-data `--stop-after-epoch 1` runs, with separate caches, must give a byte-identical `epoch_001.pt`.
+   - One of them is then resumed to completion, which also tests resume on the T4.
+   - After the run, a `train.log` hit on "deterministic" invalidates it, because `warn_only=True` only warns.
+6. **Threads.** Always pass `--threads 4` explicitly.
+7. **12 h session limit.**
+   - Use committed ("Save & Run All") versions only.
+   - Time epoch 1, then chunk with `--stop-after-epoch` so each session finishes under about 9 h.
+   - Between sessions, attach the previous output as a dataset, copy it into `/kaggle/working`, and hash `last.pt` on both sides of the copy.
+8. **Unchanged conditions.**
+   - No retuning after any real-set result is seen.
+   - The E1 thresholds (1.0 spacing, 25%) still need ml-cv-lead confirmation before the E4 dry run.
