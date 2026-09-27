@@ -844,7 +844,7 @@ Real-set check (a separate script, run once after the run is frozen and reviewed
 - The user approved: Flashlight (pg01-08) is **retired as a test piece** and added to the clef/key classifier **validation** set (check-only, never training), alongside Dormi Jesu and Livin' on a Prayer.
 - Any earlier Flashlight numbers or ground truth (`data/eval_flashlight/`, partial, abandoned) are history only and must not be cited as test results.
 - The Honneur à Toi test report must disclose that Flashlight's engraving family was seen during validation.
-- Labels are stored separately in `data/val_clefkey/labels_flashlight.json`, so the frozen `labels.json` (Dormi + Livin', 188 staves, sha256 in `labels.sha256`) stays unchanged.
+- Labels are stored separately in `data/val_clefkey/labels_flashlight.json`, so the frozen `labels.json` (Dormi + Livin', 188 staves, sha256 in `labels.sha256`) stays unchanged. *(Amended 2026-09-27: `labels.json` is now 184 staves after the 4 Dormi Solo staves were removed; see "2026-09-27 Solo staves removed from labels.json" below.)*
 
 ## 2026-09-27 review of local training code (ml-cv-lead)
 
@@ -1116,3 +1116,260 @@ Set from geometry and design only, before any dry-run or real-val output was see
   - a failed canonical page does block it.
 - The E4 dry run has **not** been run yet. It needs YOLO on CPU and is best run after the local CPU training run finishes.
 
+## 2026-09-27 Solo staves removed from labels.json (ml-cv-lead GO with conditions)
+
+**Change.** The 4 `voice == "Solo"` staves (the Dormi, Jesu soprano obligato) were removed from `data/val_clefkey/labels.json`: pg01 system 2 staff 1, pg02 s1 t1, pg06 s2 t1 and pg07 s1 t1. No other label changed. A schema `revision` note records the change inside the file.
+
+| | staves | sha256 |
+|---|---|---|
+| v1 (kept byte-identical as `labels_v1_with_solo.json` + `.sha256`) | 188 | `b70fa561a973fed1d30f17e1b13baeae73001322bec3f724cafdc59443e685da` |
+| v2 (`labels.json`, `labels.sha256` regenerated) | 184 (46 each S/A/T/B) | `aed50d7955828270c5362a007ee2b37e3491bd6c76bd6030052831aa9d531b01` |
+
+**Reason.** Solo and obligato lines are outside product scope (open-score SATB only). The change was requested by the user **before any classifier output on the real photos existed**. Only the E4 coverage dry run (`--coverage-dry-run`, which loads no classifier) had been seen. `eval_clef_key_realval.py` is unchanged, and its `load_labels()` accepts v2 (276 labels including Flashlight).
+
+**ml-cv-lead, 2026-09-27: GO with conditions.** This is a scope-rule application, not selective pruning. Conditions:
+
+1. **Record this before the comparison or the eval.** Done: this section, plus the amended line above. The sure-n ≥ 125 gate (A.5.2) is kept and not retuned.
+2. **Flashlight Solo, pending the user's decision.** ml-cv-lead recommends keeping the 23 Flashlight "Soloist" labels in `labels_flashlight.json` but taking them out of the gated metric:
+   - report them as a separate descriptive block, outside the pooled Wilson bound and sure-n;
+   - A.5.3 licenses only S/A/T/B positions;
+   - Stage 2's positional VOICE_MAP labels that staff "Soprano".
+
+   This lowers the pooled scored count from 222 to about 199. The user's choice must be written here before scoring; the eval code would then need a change reviewed before it runs.
+3. **Rerun only the E4 coverage dry run (no classifier)** on the final labels, and record whether 125 is still reachable. If it is not, the result is reported as "not proven" up front, and no data is added after seeing results. *Not done yet: the user asked not to rerun the dry run in this step.*
+4. **Do not mask the photos.** Masking changes validation inputs and breaks A.5.5 (deployment-path inputs). Dormi's 5-staff pages are reported as `pipeline_miss`: that is real product behaviour and a known coverage limit. *Status: met. The user dropped the masking ("leave it as is"). No photo was masked: pg02-09 were never written, and pg01 was restored as described below.*
+5. **Record the pg01 incident and freeze the images:**
+   - log the incident in `docs/bug-tracker.md` (BUG-020) and here;
+   - before the eval, write a sha256 manifest of every validation photo.
+6. **The T4-vs-CPU cross-check needs no re-freeze.** Labels don't feed into it.
+
+**pg01 incident (2026-09-27).**
+- **What happened:** the user asked to mask the Dormi solo staves in place, with no backup. A subagent attempting it truncated `realphoto_validation_set/dormi_jesu_pg01.jpg` to 0 bytes, and the user stopped it.
+- **Restore:** pg01 was restored from `D:/PiyaNota/data/piyanota_dataset/dormi_jesu_pg01.jpg` (sha256 `d8d83e0b3b4624338458f96c51b774f4a9b8d6b5a8be7163cc2fa127f0e8f3f3`, 4032x3024, EXIF orientation 6).
+- **Is it the original?** pg02-09 in that folder are byte-identical to the validation-set copies and have the same mtime, so the restored pg01 is almost certainly the original. It is **not proven** identical, because the E4 dry run recorded no image hashes.
+- **Overlap with test data:** the Dormi/Livin' use of `piyanota_dataset` photos as validation is the user-approved exception recorded above ("Real-photo validation set").
+
+## 2026-09-27 T4-vs-CPU cross-check result: FAILED, protocol stop (ml-cv-lead)
+
+**Runs compared (both seed 20260926).**
+- T4: `D:/kaggle_staging/out_full_v1/runs/A`, `last.pt` sha eb8a133e...
+- CPU: `training/clef_key_artifacts/full_seed20260926_20260927T054115Z`
+- Both have core sha ad507cd1... and split manifest sha 7616801b...
+
+Script and full output: `training/clef_key_artifacts/t4_vs_cpu_crosscheck_20260927.{py,txt}` (git-ignored, local only). All inference in the per-sample check ran on CPU. Its recomputed per-set clef accuracy matches both metrics JSONs exactly.
+
+**Condition 5 (determinism): passed.**
+- On the T4, the full-data `epoch_001.pt` from runs A and B are byte-identical (9831d6b5...).
+- There are no nondeterminism warnings, and no "deterministic" line in any `train.log`.
+
+**Condition 1 (cache content): differs; disclosed, does not block.**
+- The cache keys differ only in the verovio build string ("6.3.0-425dd7b" vs "6.3.0[undefined]").
+- Library versions differ: cv2 4.13 vs 5.0, numpy 2.0.2 vs 2.5.3.
+- Sample counts, labels and splits are identical.
+- Pixels: about 99.9% of crops differ slightly, on a mean of 2.8% of pixels (DS2) and 8.0% (synthetic).
+- Records: 32 DS2 and 184 synthetic records differ only in `x0_store`.
+
+**Condition 2 (tolerances): 5 FAILs.** Everything else passes.
+
+| Metric | T4 | CPU | abs(d) | Limit |
+|---|---|---|---|---|
+| val_ds2 key_coverage_sure | 0.9841 | 0.9627 | 2.14 pp | 2.0 |
+| val_synth key_coverage_sure | 0.9878 | 0.9513 | 3.65 pp | 2.0 |
+| test gonville clef_macro_recall | 0.9688 | 1.0000 | 3.12 pp | 1.5 |
+| stress gonville clef_acc | 0.9830 | 1.0000 | 1.70 pp | 1.0 |
+| stress gonville clef_macro_recall | 0.9062 | 1.0000 | 9.38 pp | 1.5 |
+
+- Per-sample argmax agreement is at least 98.96% on every val/test set, so it passes.
+- Every per-class recall with n >= 100 is within 3 pp.
+- `g8vb_reliable` is True for both.
+- Best epoch is 9 (T4) vs 19 (CPU). That is outside ±3, but best epoch is not decisive on its own.
+- The fitted key temperature and threshold differ: T4 2.216 / 0.765, CPU 2.932 / 0.955. The clef threshold is 0.3 for both.
+
+**Cross-evaluation on one device.** Both checkpoints were run with CPU inference on the CPU cache's inputs. Their agreement is almost the same as when each runs on its own inputs. The divergence is therefore in the trained weights (GPU vs CPU training path), not in the cache pixels.
+
+**Post-hoc context, verdict unchanged.** The Gonville failures all come from the "other" class (n=16), where T4 predicts F:
+
+| Set | T4 "other" correct (Wilson 95%) | CPU "other" correct (Wilson 95%) |
+|---|---|---|
+| test | 14/16 [0.64, 0.97] | 16/16 [0.81, 1.00] |
+| stress | 10/16 [0.39, 0.82] | 16/16 [0.81, 1.00] |
+
+- G8vb (n=6) is 6/6 for both runs.
+- Every weaker number on the T4 side is on an unseen font. That includes Gootville G recall, which is 2.81 pp worse on test and 2.61 pp on stress, just inside tolerance.
+
+**ml-cv-lead verdict: the protocol stops here.**
+- The real-val eval is not run.
+- Neither checkpoint may be picked for looking better.
+- No tolerance may be loosened.
+- The key-coverage fail is real: coverage is the calibrated abstain behaviour.
+- No small-n exemption may be added.
+
+**Recommended next step (user decision pending).** Write a dated, explicitly post-hoc amendment **before** running seed 20260927 on T4. It fixes this rule in advance:
+- compare T4 seed 20260926 vs T4 seed 20260927 on the 5 failed metrics plus the unseen-font per-class recalls;
+- the device gap counts as within seed noise only if the T4-vs-T4 gap is at least as large on each one;
+- the T4 seed-20260926 checkpoint stays the only real-val candidate.
+
+One extra seed is a single variance sample, which is weak evidence. Also add per-sample agreement on the stress sets.
+
+**The user decides:**
+- whether to accept a post-hoc amendment, or treat this as a failed reproduction and pay for more seeds;
+- whether the T4 checkpoint's weaker unseen-font numbers are acceptable for the real-val candidate.
+
+
+## 2026-09-27 User override: proceed to real-val without a second seed (post-hoc, explicit)
+
+Recorded before any real-photo result exists. This is a user decision made **after** seeing the cross-check result, not a pre-registered rule, and every report of the real-val numbers must say so.
+
+**Decisions (user, in conversation):**
+- **Gonville "other"-class failures (3 of 5 FAILs): accepted as not relevant.** Reason given: C clefs are not used in open-score SATB music (see scope: no C clefs; Tenor is treble, treble 8vb or bass). A T4 "other"-to-F confusion on an unseen font therefore does not affect the target music.
+- **Key-coverage FAILs (2 of 5): overridden, not explained.** No second T4 seed is run. The seed-noise amendment recommended above is not adopted.
+- **Stage 1 first.** The E4 coverage dry run (this worktree's Stage 1 + Stage 2 + mapping, no classifier) runs before the scored eval, to check that staves and clef/key regions are found on the photos.
+
+**What stays fixed:**
+- The real-val candidate is the T4 seed-20260926 checkpoint (`runs/A/clef_key_classifier.pt`), as pre-registered. The CPU checkpoint is not evaluated on real photos.
+- Temperatures, thresholds and `g8vb_reliable` are read from the checkpoint. No tolerance, threshold or gate is changed, and nothing is retuned after the real result.
+- The validation set is Dormi + Livin' + Flashlight with the current labels (184 + Flashlight staves).
+
+**Required caveat on every real-val report:** the T4 and CPU runs of the same seed disagreed on key coverage by 2.1-3.7 pp, and their fitted key thresholds differ (0.765 vs 0.955). The real-photo key **coverage** number may therefore not be stable across retraining. Key **accuracy** on sure predictions is not affected by this caveat.
+
+## 2026-09-27 Real-photo validation result: FAIL (ml-cv-lead confirmed)
+
+Run once, under the user override above. Nothing was retuned.
+- **Checkpoint:** T4 seed 20260926 runA, `clef_key_classifier.pt` sha e718d447..., copied to `training/clef_key_artifacts/t4_full_seed20260926_runA/`.
+- **Settings:** thresholds read from the checkpoint (clef T 1.013 / thr 0.3; key T 2.216 / thr 0.765; `g8vb_reliable` True).
+- **Pipeline:** this worktree's Stage 1, plus the YOLO staff detector from `D:/PiyaNota/staff_detector_files/weights/best.pt` (sha f55bb851...), which is not present in the worktree.
+- **Environment:** CPU venv.
+- **Output:** `realval_metrics.json` in the same folder.
+
+**Stage 1/2 dry run first** (`realval_coverage_dryrun_20260927T152859Z.json`). 264 labelled staves:
+
+| Outcome | Staves |
+|---|---|
+| Scored | 222 |
+| `pipeline_miss` | 33 |
+| `excluded_mapping` | 7 |
+| `no_staff_geometry` | 1 |
+| Label unsure | 1 |
+
+- Of the 33 `pipeline_miss`, 32 are on Dormi pg01/02/06/07: their 5-staff systems are not divisible by 4 at Stage 2.
+- No mapping hard failures.
+
+**Gate** (acc_when_sure >= 0.99, Wilson lower bound >= 0.97, confident_wrong <= 0.01, AUROC >= 0.90): **clef FAIL, key FAIL.** AUROC passes for both.
+
+| Head | Sure / scored | Acc when sure | 95% interval | Confident wrong |
+|---|---|---|---|---|
+| Clef exact (primary) | 220/222 | 0.955 | Wilson [0.918, 0.975]; page bootstrap [0.928, 0.978] | 10 (4.5%) |
+| Clef G/G8vb collapsed | 220/222 | 0.968 | | 7 |
+| Key | 202/222 (0.765 of labelled) | 0.960 | | 8 |
+
+Clef AUROC is 0.983.
+
+Per piece, collapsed-clef / key accuracy when sure:
+
+| Piece | n | Collapsed clef | Key |
+|---|---|---|---|
+| Dormi | 31 | 0.966 | 0.923 |
+| Flashlight | 92 | 0.957 | 0.944 |
+| Livin' | 99 | 0.980 | 0.988 |
+
+- Duplicate photo (Livin' pg10_b): 11/11 consistent.
+- Real G8vb staves: n = 58.
+
+**Errors.**
+- **Clef, 12:**
+  - Flashlight Solo: G->F x4, G->G8vb x1.
+  - Livin': Tenor G8vb->G x2, Tenor G8vb->F x1, Alto G->F x1.
+  - Dormi: Tenor G8vb->F, Tenor G8vb->other, Alto G->other.
+- **Key, 14:**
+  - Flashlight: Solo -1->0 x5 (all sure), Soprano -1->0 (unsure).
+  - Dormi: Bass -5->-7 x2, Tenor -5->-7, Tenor 2->0 (all unsure); Tenor -5->-1 and Alto -5->-3 (both sure).
+  - Livin': Alto -1->0 (sure), Bass -1->0 (unsure).
+- Flashlight pg02 and pg07 system 1 were checked from the image: the labels are correct (treble clef, 1 flat). The Solo staves are the top staff, beside a torn or folded page corner.
+- Full per-disagreement adjudication (A.5.4) is still to be logged.
+
+**ml-cv-lead review.**
+- **Verdict:** the FAIL is sound. Even the upper interval bounds are below 0.99, so this is not a sample-size artifact.
+- **Solo breakdown:** a Solo-excluded breakdown is post-hoc, because condition 2 was not written in before scoring. It may only sit beside the pooled headline, never replace it. It changes nothing: clef is about 0.964 and key about 0.98 without Solo, both still FAIL.
+- **Failure modes:**
+  - Correlated errors from page damage. The page bootstrap is the honest interval; Wilson is optimistic.
+  - Tenor G8vb/F confusions, even though `g8vb_reliable` is True on synthetic data.
+  - Dropped single flats and wrong counts on 5-flat keys.
+  - Calibration does not transfer: high AUROC, but about 4.5% confidently wrong. This is the BUG-002/BUG-011 failure class in a smaller form.
+- **Next step:**
+  - Do not tune on this set; it is spent.
+  - Do training-side error analysis: page damage, perspective, crop-edge accidentals, 5+ flat keys.
+  - Retrain with that coverage.
+  - Collect a fresh held-out real set with new pieces and re-register the gate.
+  - Meanwhile, Stage 3 treats clef/key output as advisory (`review_needed`).
+- **Claimable:** "preliminary, failed pre-registered gate". Not claimable: deployment-ready, a generalizable error rate, or a BUG-011 fix.
+
+**Required caveats on any report:**
+- The checkpoint was chosen after the cross-check failed (post-hoc override, no second seed).
+- The key-coverage figure is unstable across training runs.
+- The result is conditional on Stage 2 (33 missed, 7 excluded).
+- Dormi and Livin' can no longer serve as independent clef/key test data.
+- There are only 3 pieces, and errors are correlated by page.
+- Dormi pg01 was restored from the parent-folder copy after BUG-020. It is byte-identical to that copy, but not proven identical to the pre-incident file.
+
+## 2026-09-28 Amendment to section 3.3: voice-constrained clef fallback (user decision)
+
+Decided after the real-photo result (BUG-021), so this is explicitly post-hoc. The spent validation set may not be used to tune it.
+- **Code:** a pure function, `resolve_clef` in `clef_voice_rules.py`, with 31 standalone checks in `test_clef_voice_rules.py`.
+- **Not wired into Stage 3.** The user chose the rule-only option first.
+- **Nothing is fitted.** `clef_threshold` and `g8vb_reliable` come from the frozen checkpoint.
+
+**Rules (replace 3.3 rules 1, 4 and 6; rules 2, 3, 5 and 7 are unchanged):**
+- **Allowed clefs per voice (by staff position):**
+
+  | Voice | Allowed clefs |
+  |---|---|
+  | Soprano | G |
+  | Alto | G |
+  | Tenor | G, G8vb, F |
+  | Bass | F, G8vb |
+
+  - "other" (C clefs) is allowed for no voice.
+  - Bass G8vb came from the user's proposal (written after seeing the result, not derived from the error list). It is always flagged `bass_treble_8vb` + `review_needed`.
+- **Choice:** only the allowed clefs compete. The best one's **raw** probability (not renormalised) must reach `clef_threshold`.
+  - If it does and it is the classifier's own top class: `source="classifier"`.
+  - If it does but is not the top class: `classifier_voice_restricted`, flagged `clef_voice_mismatch` + `review_needed`. The allowed clef is used, not the detected one. This reverses the old rule 6.
+- **Framing (ml-cv-lead):** `clef_threshold` = 0.3 was calibrated as a top-1 "sure" cut. Reusing it on a non-top class has not been validated. At 0.3, against 0.25 uniform over 4 classes, **the voice effectively decides and the classifier only breaks ties.**
+- **Default** when no allowed clef reaches the threshold: Soprano G, Alto G, Tenor G8vb, Bass F. `source="voice_default"`, flagged `clef_unsure` + `review_needed`.
+- **Low voices (Tenor, Bass) pool G+G8vb.** Both are read 8vb, so they sound the same, and they are pooled whether or not `g8vb_reliable` is set. Without pooling, a Bass read as plain G fell to the F default (ml-cv-lead). Caveat: a pooled two-class sum passes a threshold calibrated on single-class maxima slightly more easily.
+- **Plain G on a Tenor line** is read 8vb (octave -12, informational flag). This is universal choral convention, per the choral-conductor review. An explicit G8vb is not doubled.
+- Keys are unchanged (section 3.4).
+
+**Diagnostic replay on the spent real-val output: post-hoc, NOT accuracy evidence.** The rule design was partly informed by these errors. "None made worse" is partly true by construction, because the rule only changes staves whose top class is disallowed.
+- On the 222 unique scored staves: raw exact-clef errors go from 12 to 2, counting G and G8vb as equal on low voices.
+- 31 staves get `review_needed`: 7 voice defaults, 1 restriction, 23 Flashlight Bass-position G8vb.
+- Still **silent** (wrong with no review flag):
+  1. **Tenor G8vb read confidently as F** (Dormi 1, Livin' 1): a whole-clef error, the BUG-002/011 confidently-wrong pattern. Unresolved.
+  2. **Non-SATB layout.** Flashlight is Solo/S/A/T. Its real Alto sits in the Tenor position, so the plain-G-on-Tenor rule plays all 23 of those staves an octave low. This layout is out of scope.
+
+**Required before wiring into Stage 3 (ml-cv-lead + choral-conductor reviews, 2026-09-28):**
+1. **One owner for the octave.** Stage 3 `get_clef_reference()` already maps `clef.G-L2` to E3 for Tenor.
+   - Adding `octave_shift` on top would put Tenor two octaves low.
+   - Bass G8vb does need the shift, because Stage 3 gives it plain treble.
+   - So either Stage 3 stops its voice-based transposition, or the rule emits a reference pitch instead of a token plus a shift.
+2. **Suppress Stage 3's CRNN clef tokens.** Otherwise they override the resolved clef (BUG-011: almost all `C-L3`).
+3. **Mid-strip clef changes.** A strip-wide -12 is wrong after a Tenor switches from G8vb to F mid-line.
+4. **Build `satb_layout_suspect`.** Also trigger it on "no F clef in the system plus a Bass-position G8vb". Positional voices depend on Stage 2's group-of-4 split (BUG-001).
+5. **Cheap musical validators, which flag and never auto-correct** (unisons and octave doublings are legitimate):
+   - **Key-signature glyph placement vs the chosen clef (theory fact).** The first sharp sits on the top line in treble and on line 4 in bass. This catches Tenor G8vb read as F, provided key-glyph positions are reliable.
+   - **Per-staff median range.** A Tenor read as F drops about 9 semitones, below tenor range.
+   - **Cross-staff ordering, S >= A >= T >= B medians.** Catches both the F misread and the Solo+SATB octave drop. Range alone misses the latter.
+6. **Measure only on the fresh held-out set of new pieces, with the gate re-registered first:**
+   - Run with and without the rule.
+   - Primary metric: the silent-wrong rate (a wrong clef or octave with no `review_needed`).
+   - Also report the `review_needed` rate and end-to-end pitch accuracy, broken down by layout.
+   - The set must include Tenor-in-F, Tenor-in-G8vb and at least one non-SATB layout.
+
+**Long-term (ml-cv-lead):** this is a rule patch on an uncalibrated model. It only holds while the open-score SATB layout assumption holds, and it does nothing for calibration.
+
+**User decisions, 2026-09-28 (after the reviews):**
+- **Octave rule confirmed.** Plain treble on a Tenor line sounds 8vb. Plain treble and treble-8vb are equivalent on Tenor and Bass.
+- **Single owner for the octave: the clef rule.** When the rule is wired in, Stage 3 stops its own voice-based Tenor transposition (`TENOR_CLEF_REFERENCE` / `get_clef_reference()` voice lookup), and the rule's `octave_shift` is applied instead. The two are never applied together.
+  - The Stage 3 code changes in the same change that wires the rule. Until then, Stage 3's Tenor rule stays, because Tenor audio still runs on CRNN clef tokens.
+- **The CRNN's raw clef token must not override the rule's output** once wired (required item 2 above).
+- **No claim of improvement until tested on fresh photos,** not the 222 spent staves.
+- BUG-022 (Tenor G8vb read as F, silent) and BUG-023 (non-SATB layout octave) are logged as known limitations. They do not block the rule.

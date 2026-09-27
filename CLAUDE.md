@@ -294,6 +294,13 @@ treat it as stale if either doc has moved on.
     not a floor — true real-world accuracy is unmeasured and likely lower. See BUG-011 in
     `docs/bug-tracker.md` for full detail and ml-cv-lead's review.
 
+- **Clef/key classifier (ClefKeyNet), real-photo validation (2026-09-27, one-shot, FAIL; BUG-021):**
+  the T4 seed-20260926 checkpoint, run on 222 real staves (Dormi, Livin', Flashlight), is right 95.5% of the time on clefs
+  and 96.0% on keys when "sure", with 4.5% of clefs confidently wrong. The gate needs 99% / Wilson LB 97% / at most 1%
+  confident-wrong. The checkpoint was used under a post-hoc user override after the T4-vs-CPU
+  reproducibility cross-check failed 5 tolerances. The validation set is now spent for tuning. The classifier is not
+  wired into Stage 3. Detail: `docs/decisions/piya-106-clef-keysig-detector-plan.md` (last sections).
+
 - **DS2 Dense (DeepScoresV2) — YOLOv8 staff detector (Stage 2):** one number on record, and it is
   compromised — do not present it as a clean result.
   - Interim PIYA-105 eval logged 2026-09-10: mAP50 0.9766, mAP50-95 0.8654, precision 0.954,
