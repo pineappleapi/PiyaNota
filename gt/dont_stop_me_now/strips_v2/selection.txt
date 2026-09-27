@@ -1,0 +1,7 @@
+HAND-MADE / PROVISIONAL / single annotator (agent) / not verified by a musician
+Selection fixed BEFORE any CRNN (seed1/seed2/baseline) output was produced or viewed.
+Timestamp: 2026-09-25T21:40:03+08:00
+Systems: page1 sys1, page1 sys2, page3 sys1, page3 sys2, page5 sys1, page5 sys2  (x4 voices = 24 strips, 3 pages)
+Rationale: first two systems of pages 1, 3, 5 (the instruction's suggested pattern); not chosen by readability or model output.
+Exclusion rule: a strip that is unreadable is excluded and counted in REPORT.md, not silently dropped.
+2026-09-25T21:55:46.419431+08:00

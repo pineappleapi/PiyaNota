@@ -51,3 +51,6 @@ training/clef_key_artifacts/
 # Stage 5 audio: soundfonts are large third-party binaries, installed locally (see README/CLAUDE.md)
 soundfont/
 *.sf2
+
+# Hand-annotation viewing crops under gt/ (hundreds of MB of PNGs, regenerable from the photos); GT sources and labels stay tracked.
+gt/**/crops/

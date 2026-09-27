@@ -29,7 +29,7 @@ sys.path.insert(0, str(REPO_ROOT))
 import stage4_reconstruction as s4  # noqa: E402
 import stage5_synthesis as s5  # noqa: E402
 
-GT_DIR = Path(__file__).resolve().parent / "dont_stop_me_now"
+GT_DIR = Path(__file__).resolve().parent.parent / "gt" / "dont_stop_me_now" / "events_v1"
 VOICES = ["Soprano", "Alto", "Tenor", "Bass"]
 WHOLE = 1920
 HALF, QUARTER, EIGHTH = 960, 480, 240

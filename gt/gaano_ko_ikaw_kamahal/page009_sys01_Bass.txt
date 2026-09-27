@@ -1,0 +1,16 @@
+# HAND-MADE / PROVISIONAL / single annotator (agent) / not verified by a musician
+# agnostic:
+clef.F-L4 accidental.flat-L2 note.half-L3 accidental.natural-S2 note.half-S2 barline-L1 accidental.natural-L2 note.whole-L2 barline-L1 note.half-S4 note.half-L3 barline-L1 note.half-S2 note.half-L5 barline-L1 rest.whole-L4 barline-L1 <OOV> accidental.flat-L5 note.quarter-L5 note.quarter-S4 barline-L1 note.whole-L4 barline-L1
+# events (kind pitch_sounding dur measure):
+note 50 960 0 
+note 48 960 0 
+note 47 1920 1 
+note 55 960 2 
+note 50 960 2 
+note 48 960 3 
+note 57 960 3 
+rest R 1920 4 
+oov R 960 5 
+note 56 480 5 
+note 55 480 5 
+note 53 1920 6 

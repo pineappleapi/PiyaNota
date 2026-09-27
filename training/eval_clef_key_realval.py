@@ -103,7 +103,7 @@ logger = logging.getLogger("eval_clef_key_realval")
 # ---------------------------------------------------------------------------------------------
 # Inputs
 # ---------------------------------------------------------------------------------------------
-LABEL_DIR = REPO_ROOT / "data" / "val_clefkey"
+LABEL_DIR = REPO_ROOT / "gt" / "clef_key_labels"
 LABEL_FILES: tuple[tuple[str, str], ...] = (("labels.json", "labels.sha256"),
                                             ("labels_flashlight.json", "labels_flashlight.sha256"))
 DEFAULT_YOLO = REPO_ROOT / "staff_detector_files" / "weights" / "best.pt"
@@ -1049,7 +1049,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     "rotated_not_dewarped_policy": ROTATED_UNDEWARPED_POLICY},
         "report": report, "pages": pages, "staves": staff_rows(results),
         "adjudication": "every model/label disagreement must be re-inspected from the image and logged in "
-                        "data/val_clefkey/adjudication.json (A.5.4); this script does not write it",
+                        "gt/clef_key_labels/adjudication.json (A.5.4); this script does not write it",
     }
     tmp_out = out_path.with_name(out_path.name + ".tmp")
     tmp_out.write_text(json.dumps(out, indent=1, default=json_default), encoding="utf-8")

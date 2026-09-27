@@ -1,0 +1,11 @@
+,quarter note,eighth note,whole note,half note,dotted half note,quarter rest,dotted quarter note,half rest,whole rest,450-tick note,dotted eighth note,dotted quarter rest,dotted sixteenth note,dotted whole note,double-dotted half note,eighth rest,sixteenth note,missed
+quarter note,42,4,0,0,0,0,0,0,0,0,1,0,0,1,0,0,1,27
+eighth note,0,58,0,0,0,0,0,0,0,0,1,0,0,0,0,0,2,13
+whole note,0,0,26,0,0,0,0,0,0,0,0,0,1,0,0,0,0,16
+half note,0,0,0,24,0,0,0,0,0,0,0,0,0,0,0,0,0,12
+dotted half note,0,1,0,0,22,0,0,0,0,0,1,0,0,0,0,0,0,5
+quarter rest,0,0,0,0,0,20,0,0,0,0,0,1,0,0,0,0,0,6
+dotted quarter note,0,0,0,0,0,0,9,0,1,0,1,0,0,0,0,0,0,6
+half rest,0,0,0,0,0,1,0,4,2,0,0,0,0,0,0,0,0,6
+whole rest,0,1,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,1
+extra,2,13,4,0,0,0,0,1,9,1,2,0,0,0,1,1,2,0

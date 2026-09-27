@@ -1,0 +1,55 @@
+# HAND-MADE / PROVISIONAL / single annotator (agent) / not verified by a musician
+# Piece: Non Nobis Domine (Ily Matthew Maniano 2014), pages 1-4 (piyanota_dataset/non_nobis_domine_pg01-04.jpg; phone photos of a printed score). DIAGNOSTIC ONLY, not accuracy evidence.
+# Written before any CRNN / ClefKeyNet / Stage 3 run on these photos (Stage 1 mask audit only, which has no pitch output).
+# Notation: clef:G|G8|F key:1b time:4/4 (printed as common-time C) | (barline) ; notes <dur>[.]:<[^_=]?><Pitch><oct>[~][?]  dur in w h q e s ; rests r<dur>[.]
+# Key 1b (Bb) is implied by the key signature and NOT written on notes; ^ _ = are written only where an accidental is printed on the note.
+# [ ... ] = beam group. ~ = tie to next note (same pitch). ~> tie leaves system, <~ tie arrives from previous system.
+# <OOV:chord d:P1+P2> = two-note chord / divisi in one voice (CRNN cannot represent chords); duration d kept so bars still sum.
+# <OOV:desc> = other unrepresentable symbols. ? = uncertain symbol.
+# Tenor clef is treble-8vb (clef:G8, printed as a G clef with an 8 below); Tenor pitches are WRITTEN (treble); sounding = written-12.
+# Dynamics, hairpins, tempo text, lyrics and lyric extender lines are not transcribed.
+# #slurs N = count of phrase slurs (arcs between different pitches), not in the token reference
+p1s1 Soprano: clef:G key:1b time:4/4 | rh q:C4 q:F4 | q.:A4 e:G4 [ e:A4 e:B4 ] q:G4~ | w:G4 | rh q:F4 q:C5 | q.:C5 e:B4 [ e:C5 e:D5 ] q:B4~ | w:B4 | #slurs 4
+p1s1 Alto: clef:G key:1b time:4/4 | rh q:C4 q:F4 | h.:F4 q:F4~ | w:F4 | rh h:F4 | h.:F4 q:F4~ | w:F4 | #slurs 1
+p1s1 Tenor: clef:G8 key:1b time:4/4 | rh h:C5 | q.:C5 e:B4 [ e:C5 e:D5 ] q:B4~ | w:B4 | rh q:F5 q:E5 | q.:D5 e:C5 [ e:D5 e:E5 ] q:D5~ | w:D5 | #slurs 3
+p1s1 Bass: clef:F key:1b time:4/4 | rh q:C4 q:B3 | w:F3 | h.:F3 q:F3 | w:F3 | w:F3~ | h.:F3 q:F3 | #slurs 1
+p1s2 Soprano: clef:G key:1b | rq q:F4 <OOV:chord q F5+C5> <OOV:chord q E5+C5> | <OOV:chord q. D5+B4> <OOV:chord e C5+B4> <OOV:chord h D5+B4> | [ e:C5 e:C5 ] h.:C5 | [ e:B4 e:B4 ] h.:B4 | [ e:C5 e:C5 ] h.:C5 | rq h:F4 <OOV:chord q F4+G4> | #slurs 2
+p1s2 Alto: clef:G key:1b | rq h.:F4 | h:F4 h:F4 | [ <OOV:chord e E4+G4> <OOV:chord e E4+G4> ] <OOV:chord h. E4+G4> | [ <OOV:chord e F4+A4> <OOV:chord e F4+A4> ] <OOV:chord h. F4+A4> | [ <OOV:chord e F4+G4?> <OOV:chord e F4+G4?> ] <OOV:chord h. F4+G4?> | rq q:F4 q:E4 q:C4 | #slurs 1
+p1s2 Tenor: clef:G8 key:1b | rq q:F4 <OOV:chord q F5+C5> <OOV:chord q E5+C5> | <OOV:chord q. D5+B4> <OOV:chord e C5+B4> <OOV:chord h D5+B4> | [ e:C5 e:C5 ] h.:C5 | [ e:C5 e:C5 ] h.:C5 | [ e:C5 e:C5 ] h.:C5 | w:A4 | #slurs 2
+p1s2 Bass: clef:F key:1b | w:F3 | w:F3 | [ e:F3 e:F3 ] h.:F3 | [ e:D3 e:D3 ] h.:D3 | [ e:E3 e:E3 ] h.:E3 | h:D3 h:C3 | #slurs 0
+p2s1 Soprano: clef:G key:1b | <OOV:chord h F4+G4> <OOV:chord h F4+G4> | rq q:C4 q:D4 q:F4 | w:F4~ | h.:F4 rq | rw | rw | q:F4 q.:G4 [ e:F4 e:G4 e:C5~>? ] | #slurs 2
+p2s1 Alto: clef:G key:1b | q:D4 h.:D4 | rq h:C4 q:C4 | w:C4~ | h.:C4 rq | rw | q:C4 q.:D4 [ e:C4 e:D4 e:F4 ] | w:F4 | #slurs 1
+p2s1 Tenor: clef:G8 key:1b | q:A4 h.:A4 | rq q:C5 q:B4 q:G4 | h.:G4 q:A4~ | h.:A4 rq | q:F4 q.:G4 [ e:F4 e:G4 e:B4 ] | w:A4 | h.:B4 q:B4 | #slurs 2
+p2s1 Bass: clef:F key:1b | h:=B2 h:B2 | h.:C3 q:C3 | <OOV:chord w C3+F2 tied> | <OOV:chord w C3+F2 tied> | <OOV:chord w C3+F2> | <OOV:chord w C3+F2 lower tied> | <OOV:chord h. D3+F2> <OOV:divisi q E3 over held F2> | #slurs 1
+p2s2 Soprano: clef:G key:1b | w:C5?<~ | h.:C5 q:D5 | w:E5 | [ e:D5 e:E5 e:E5 e:F5 ] [ e:D5 e:E5 e:E5 e:F5 ] | [ e:E5 e:F5 e:F5 e:G5 ] [ e:E5 e:F5 e:F5 <OOV:chord e G5+E5> ] | #slurs 8
+p2s2 Alto: clef:G key:1b | <OOV:chord q F4+G4> <OOV:chord q F4+G4> <OOV:chord h F4+G4> | q:F4 q.:G4 [ e:F4 e:G4 e:C5 ] | w:C5 | w:A4 | <OOV:chord w C5+G4> | #slurs 1
+p2s2 Tenor: clef:G8 key:1b | w:C5 | h:D5 h:E5 | <OOV:two-voice w upper:E5w lower:G4q,B4q.,A4e,B4e,C5e> | <OOV:two-voice w upper:D5e,E5e,E5e,F5e,D5e,E5e,E5e,F5e lower:D5w> | <OOV:two-voice w upper:E5e,F5e,F5e,G5e,E5e,F5e,F5e,G5e lower:D5q,D5q,B4h> | #slurs 9
+p2s2 Bass: clef:F key:1b | <OOV:two-voice w upper:F3q,G3q.,F3e,G3e,C4e lower:A2w> | <OOV:chord w C4+B2> | <OOV:chord w G3+C3> | <OOV:chord w A3+D3> | <OOV:two-voice w lower:E3w upper:E3h,E3h> | #slurs 1
+p3s1 Soprano: clef:G key:1b | <OOV:chord q. F5+A5> e:F5 h:F5~ | w:F5 | <OOV:chord q. E5+A5> e:E5 h:E5~ | h:E5 q:F5 <OOV:chord q F5+G5> | <OOV:chord q. F5+A5> e:F5 h:F5~ | w:F5 | #slurs 0
+p3s1 Alto: clef:G key:1b | q.:C5 <OOV:chord e C5+A4> <OOV:chord h C5+A4 tied> | <OOV:chord w C5+A4> | q.:C5 <OOV:chord e C5+G4> <OOV:chord h C5+G4 tied> | <OOV:chord w C5+G4> | q.:C5 <OOV:chord e C5+A4> <OOV:chord h C5+A4 tied> | <OOV:chord w C5+A4> | #slurs 0
+p3s1 Tenor: clef:G8 key:1b | <OOV:chord q. F5+C5> e:C5 h:C5 | <OOV:chord q. D5+B4> <OOV:chord e D5+B4> <OOV:chord q D5+B4> <OOV:chord q E5+C5> | <OOV:chord q. E5+C5> <OOV:chord e E5+C5> <OOV:chord h E5+C5> | <OOV:two-voice w upper:C5q.,C5e,D5q,E5q lower:C5q.,C5e,C5h> | <OOV:chord q. F5+C5> e:C5 h:C5 | <OOV:chord q. F5+D5> <OOV:chord e F5+D5> <OOV:chord h F5+D5> | #slurs 1
+p3s1 Bass: clef:F key:1b | q.:F3 <OOV:chord e A3+F3> <OOV:chord h A3+F3> | <OOV:two-voice w upper:F3q.,F3e,F3q,G3q lower:B2q.,B2e,B2h> | <OOV:chord q. G3+A2> <OOV:chord e G3+A2> <OOV:chord h G3+A2> | <OOV:chord q. A3+D3> <OOV:chord e A3+D3> h:D3 | q.:F3 <OOV:chord e A3+F3> <OOV:chord h A3+F3> | <OOV:chord q. C4+B3> <OOV:chord e C4+B3> <OOV:chord h C4+B3> | #slurs 1
+p3s2 Soprano: clef:G key:1b | <OOV:chord h. E5+C5> q:C5 | w:_B4 | rq h:C5 q:G4 | w:F4 | rq h:B4 q:A4 | w:G4 | #slurs 0
+p3s2 Alto: clef:G key:1b | h.:A4 <OOV:chord q G4+E4> | <OOV:chord w A4+F4> | rq <OOV:chord h G4+E4> q:E4 | w:E4 | rq <OOV:chord h F4+D4> q:F4 | w:F4 | #slurs 0
+p3s2 Tenor: clef:G8 key:1b | <OOV:chord h E5+C5> <OOV:chord h B4+G4> | <OOV:chord w D5+B4> | <OOV:chord h B4+G4> <OOV:chord h E5+C5> | <OOV:chord w C5+A4> | h:B4 h:C5 | w:C5 | #slurs 0
+p3s2 Bass: clef:F key:1b | h:A3 <OOV:chord h E3+A2> | <OOV:chord w F3+B2> | <OOV:chord h E3+A2> <OOV:chord h G3+C3> | w:D3 | <OOV:chord h F3+G2> <OOV:chord h G3+A2> | <OOV:chord w F3+B2> | #slurs 0
+# p3s3 bar 40 ("* sung as spoken", stemless heads, fermata on the last): unmetered, recorded as a zero-duration OOV
+# item so the bar builds with 0 ticks; its pitches are approximate and must not be scored.
+p3s3 Soprano: clef:G key:1b | rq q:E4 q:A4 <OOV:chord q G5+E5> | <OOV:two-voice w upper:F5w-tied lower:E5h,D5h-tied> | <OOV:chord h. F5+D5 tied-in fermata> rq | <OOV:spoken-unmetered F4,E4,D4,D4 fermata> | #slurs 2
+p3s3 Alto: clef:G key:1b | rq q:C4 q:E4 <OOV:chord q C5+A4> | <OOV:chord w B4+F4 tied> | <OOV:chord h. B4+F4 tied-in fermata> rq | <OOV:spoken-unmetered D4+B3,C4+A3,B3+G3?,A3+B3? fermata> | #slurs 1
+p3s3 Tenor: clef:G8 key:1b | h.:G4 q:C5 | <OOV:two-voice w upper:C5h,D5h lower:C5w-tied> | <OOV:chord h. E5+C5 tied-in fermata> rq | <OOV:spoken-unmetered C5+A4,B4+G4,A4+F4,F4+G4? fermata> | #slurs 0
+p3s3 Bass: clef:F key:1b | <OOV:chord h. E3+A2> <OOV:chord q G3+C3> | <OOV:two-voice w upper:G3h,F3h-tied lower:B2w-tied> | <OOV:chord h. F3+B2 tied-in fermata> rq | <OOV:spoken-unmetered G3,F3,_E3,C3? fermata> | #slurs 1
+# Page 4 (bars 41-53) has FIVE staves per system: a "Soprano Solo" staff on top, then the choir S, A, T (treble-8vb), B.
+# The solo staff (and the "*optional" solo ossia between the systems, bars 51-53) is not an SATB voice: recorded as
+# EXCLUDED. Stage 2 assumes exactly 4 staves per system, so this page breaks its layout assumption (a known limitation).
+# Not transcribed: tenuto marks, dynamics, hairpins, "poco rall.", lyrics.
+p4s1 SopranoSolo: <EXCLUDED solo staff, not an SATB voice: bars 41-46 rests then eighth-note "non nobis" figures>
+p4s1 Soprano: clef:G key:1b | rh q:C4 q:F4 | q.:A4 e:G4 [ e:A4 e:B4 ] q:G4~ | w:G4 | rh q:F4 q:C5 | q.:C5 e:B4 [ e:C5 e:D5 ] q:B4~ | w:B4 | #slurs 4
+p4s1 Alto: clef:G key:1b | rh q:C4 q:F4 | h.:F4 q:F4~ | w:F4 | rh h:F4 | h.:F4 q:F4~ | w:F4 | #slurs 1
+p4s1 Tenor: clef:G8 key:1b | rh h:C5 | q.:C5 e:B4 [ e:C5 e:D5 ] q:B4~ | w:B4 | rh q:F5 q:E5 | q.:D5 e:C5 [ e:D5 e:E5 ] q:D5~ | w:D5 | #slurs 3
+p4s1 Bass: clef:F key:1b | <OOV:chord w C3+F2> | <OOV:chord w C3+F2> | <OOV:chord w C3+F2> | <OOV:chord w F3+B2> | <OOV:chord w F3+B2> | <OOV:chord w F3+B2> | #slurs 0
+p4s2 SopranoSolo: <EXCLUDED solo staff, not an SATB voice: bars 47-53 incl. fermatas and the "*optional" ossia above it>
+p4s2 Soprano: clef:G key:1b | rq h:B4 q:A4 | w:D4 | h:G4 h:C5 | w:F4 | rq q:C4 q:D4 q:B4 | <OOV:chord w C5+A4 tied> | <OOV:chord w C5+A4 tied-in> | #slurs 1
+p4s2 Alto: clef:G key:1b | rq h:F4 q:E4 | w:C4 | h:C4 h:F4 | w:D4 | rq h:C4 <OOV:chord q F4+C4> | <OOV:chord w G4+F4 tied> | <OOV:chord w G4+F4 tied-in> | #slurs 0
+p4s2 Tenor: clef:G8 key:1b | rq h:D5 q:C5 | w:B4 | h:=B4 h:E5 | w:C5 | rq q:C5 q:B4 q:G4 | h.:G4 q:A4~ | w:A4 | #slurs 1
+p4s2 Bass: clef:F key:1b | <OOV:chord h F3+G2> <OOV:chord h G3+A2> | <OOV:chord w F3+G2> | <OOV:chord h E3+A2> <OOV:chord h A3+D3> | <OOV:chord w F3+B2> | h.:C3 q:C3 | <OOV:chord w C3+F2 tied> | <OOV:chord w C3+F2 tied-in> | #slurs 0
