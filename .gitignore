@@ -48,3 +48,6 @@ staff_detector_files/weights/
 # Clef/key classifier local training (PIYA-106): cached crops and run artifacts
 training/clef_key_cache/
 training/clef_key_artifacts/
+# Stage 5 audio: soundfonts are large third-party binaries, installed locally (see README/CLAUDE.md)
+soundfont/
+*.sf2
