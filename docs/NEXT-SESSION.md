@@ -6,7 +6,8 @@ rewritten 2026-09-24, top section added 2026-09-28.
 
 ## Fresh-photo pipeline eval: Stage 3 with and without the clef/key classifier (2026-09-28) - newest, read first
 
-Branch `piya106/groundtruth-eval` (worktree `D:\PiyaNota-training`, no remote, nothing merged or pushed).
+Branch `piya106/groundtruth-eval` (worktree `D:\PiyaNota-training`, no remote, nothing merged or pushed). Commits:
+`561e89e` (eval, scripts, scores, gt/) and `1e4f0e3` (docs, `rename_dataset/`, `output/audio_test/`).
 Full record:
 - `data/eval_fresh/REPORT.md`: interpretation, limits, and abstract text reviewed by ml-cv-lead.
 - `data/eval_fresh/REPORT_tables.md`: all numbers, per symbol and by voice. Confusion matrices are under `runs/scores/`.
