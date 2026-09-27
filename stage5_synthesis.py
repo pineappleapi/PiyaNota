@@ -6,17 +6,22 @@ one per voice (Soprano, Alto, Tenor, Bass).
 Dependencies:
     pip install midiutil pydub
     Also requires ffmpeg installed on the system for MP3 export.
-    For piano soundfont rendering: pip install midi2audio
+    For piano soundfont rendering: a system fluidsynth on PATH (called directly)
     Download a piano soundfont (.sf2) e.g. GeneralUser GS or FluidR3.
 """
 
 import os
+import shutil
+import subprocess
 import sys
 import warnings
 from pathlib import Path
 from midiutil import MIDIFile
 
 from stage4_reconstruction import TICKS_PER_QUARTER
+
+# FluidSynth output sample rate (midi2audio's former default).
+RENDER_SAMPLE_RATE = 44100
 
 # ── MIDI constants ────────────────────────────────────────────────────────────
 PPQ          = 480          # pulses per quarter note (ticks per beat)
@@ -207,14 +212,13 @@ def _render_to_mp3(
 
     Requires:
         - FluidSynth installed (fluidsynth command available)
-        - pydub installed (pip install pydub)
+        - pydub installed (pip install pydub; on Python 3.13+ also audioop-lts)
         - ffmpeg installed for MP3 export
         - A valid .sf2 soundfont file
 
     Returns True on success, False on failure.
     """
     try:
-        from midi2audio import FluidSynth
         from pydub import AudioSegment
 
         sf_path = Path(soundfont_path)
@@ -223,9 +227,21 @@ def _render_to_mp3(
                   f"Download a piano .sf2 and set --soundfont.")
             return False
 
-        # MIDI → WAV via FluidSynth
-        fs = FluidSynth(sound_font=str(sf_path))
-        fs.midi_to_audio(str(midi_path), str(wav_path))
+        fluidsynth = shutil.which("fluidsynth")
+        if fluidsynth is None:
+            print("  [Stage 5] WARNING: fluidsynth not found on PATH.")
+            return False
+
+        # MIDI → WAV via FluidSynth. Options must come before the soundfont and MIDI file:
+        # FluidSynth 2.x ignores options placed after them (midi2audio's order), which left no WAV.
+        subprocess.run(
+            [fluidsynth, "-ni", "-F", str(wav_path), "-r", str(RENDER_SAMPLE_RATE),
+             str(sf_path), str(midi_path)],
+            check=True, capture_output=True, text=True,
+        )
+        if not wav_path.exists():
+            print(f"  [Stage 5] Rendering error: fluidsynth wrote no WAV at {wav_path}")
+            return False
 
         # WAV → MP3 via pydub + ffmpeg
         audio = AudioSegment.from_wav(str(wav_path))
@@ -238,7 +254,10 @@ def _render_to_mp3(
 
     except ImportError as e:
         print(f"  [Stage 5] Missing dependency: {e}. "
-              f"Install with: pip install midi2audio pydub")
+              f"Install with: pip install pydub")
+        return False
+    except subprocess.CalledProcessError as e:
+        print(f"  [Stage 5] fluidsynth failed ({e.returncode}): {e.stderr.strip()}")
         return False
     except Exception as e:
         print(f"  [Stage 5] Rendering error: {e}")
