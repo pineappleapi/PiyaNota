@@ -299,7 +299,19 @@ treat it as stale if either doc has moved on.
   and 96.0% on keys when "sure", with 4.5% of clefs confidently wrong. The gate needs 99% / Wilson LB 97% / at most 1%
   confident-wrong. The checkpoint was used under a post-hoc user override after the T4-vs-CPU
   reproducibility cross-check failed 5 tolerances. The validation set is now spent for tuning. The classifier is not
-  wired into Stage 3. Detail: `docs/decisions/piya-106-clef-keysig-detector-plan.md` (last sections).
+  wired into Stage 3; as of 2026-09-28 it is used only through the eval wrapper `stage3_clefkey.py`. Detail: `docs/decisions/piya-106-clef-keysig-detector-plan.md` (last sections).
+
+- **Fresh-photo pipeline eval, Stage 3 with/without ClefKeyNet (2026-09-28, pre-registered;
+  `data/eval_fresh/REPORT.md`):**
+  - **Non Nobis Domine** is the only user-verified GT and the only gated piece (36 staves, 275 notes).
+    End-to-end pitch accuracy is 8.0-10.2% as-is and 64.0% with the classifier, or 86% on the 28 strips
+    Stage 2 found. Gate: PASS.
+  - Rhythm stays at 64%, and token SER falls only from 58% to 50-51%. All of the gain comes from the clef/key
+    header; note reading is the main source of error.
+  - Agent-made, diagnostic-only GT: Honneur 73-76%, Gaano 83%, Handog 54% (78% on found strips).
+  - All four pieces use voice-default clefs, so a voice-default rule would match the classifier on clefs.
+  - `stage3_clefkey.py` is an eval wrapper; the classifier is still not wired into `stage3_transcription.py`.
+  - New bugs: BUG-024, BUG-025, BUG-026.
 
 - **DS2 Dense (DeepScoresV2) — YOLOv8 staff detector (Stage 2):** one number on record, and it is
   compromised — do not present it as a clean result.

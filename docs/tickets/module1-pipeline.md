@@ -258,6 +258,12 @@ domain, not decoding). AC5's staff-position + chord tagging is likewise produced
 not `chord_group_id` as written here — left as-is per the user; note it's also read by
 `stage4_reconstruction.py` (chord counting/reporting), so a future rename must update both files.
 
+**Fresh-photo eval note (2026-09-28):** `data/eval_fresh/REPORT.md` is the first measurement against a
+user-verified Filipino-dataset GT: Non Nobis Domine, 36 strips.
+- Token SER is 58.3-58.5% as-is and 50.2-50.8% with the clef/key classifier (fine-tuned seed range). Both are far
+  above AC1's 15%, so AC1 is not met.
+- The remaining error is note and rhythm reading (the BUG-011 domain gap), not the clef/key header.
+
 **AC1 decision (2026-09-10):** No hand-annotated Filipino SATB test set exists yet to measure the
 15% SER target against directly. User decision: accept the Camera-PrIMuS-derived SER comparison
 (`compare_omr_baselines.py`) as an interim proxy metric for AC1 while a subset of the Filipino SATB

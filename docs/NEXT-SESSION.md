@@ -2,9 +2,80 @@
 
 Handoff doc for continuing PiyaNota work in a fresh session. Read this first; it links out to the
 full detail rather than repeating it. Written 2026-09-14, rewritten 2026-09-16, rewritten 2026-09-19,
-rewritten 2026-09-24.
+rewritten 2026-09-24, top section added 2026-09-28.
 
-## Clef/key classifier - local CPU training ready (2026-09-27) - newest, read first
+## Fresh-photo pipeline eval: Stage 3 with and without the clef/key classifier (2026-09-28) - newest, read first
+
+Branch `piya106/groundtruth-eval` (worktree `D:\PiyaNota-training`, no remote, nothing merged or pushed).
+Full record:
+- `data/eval_fresh/REPORT.md`: interpretation, limits, and abstract text reviewed by ml-cv-lead.
+- `data/eval_fresh/REPORT_tables.md`: all numbers, per symbol and by voice. Confusion matrices are under `runs/scores/`.
+- `data/eval_fresh/PREREG.md`: the pre-registration and Amendment 1.
+
+Re-run from the repo root in the CPU venv (deterministic): `python data/eval_fresh/run_eval.py`, then
+`score_eval.py`, then `make_tables.py`.
+
+**What it tested:** the training-tree Stage 1/2/3 on real phone photos from `D:\PiyaNota\data\piyanota_dataset\`.
+Stage 3 ran in two versions:
+- **(a) as-is:** the CRNN reads the clef and key.
+- **(b) `stage3_clefkey.py`:** the ClefKeyNet clef and key replace the CRNN header. `resolve_clef` is the single
+  octave owner, and each system's key comes from a confident-majority vote.
+
+Both fine-tuned CRNN seeds are reported as a range, with the original CRNN as a reference row. Pitch accuracy,
+end-to-end:
+
+| Piece (GT status) | Strips found | (a) as-is | (b) + classifier | Oracle clef/key |
+|---|---|---|---|---|
+| Non Nobis Domine (user-verified, **gated: PASS**) | 28/36 | 8.0-10.2% | **64.0%** (86% on found strips) | 64.0% |
+| Honneur a Toi (agent GT; mask-tuning piece) | 28/28 | 10.9-15.4% | 73.3-75.9% | 76.7-78.5% |
+| Gaano Ko Ikaw Kamahal (agent GT, unchecked) | 72/72 | 19.9-24.5% | 82.7-82.8% | 82.7-82.8% |
+| Handog (agent GT, unchecked, weakest; mask-tuning piece) | 40/52 | 9.5-9.8% | 54.1-54.6% (78% on found strips; Bass 15-26%) | same as (b) |
+
+- **Only Non Nobis is evidence.** Its GT was verified by the user, and it is the only gated piece (gate PASS for
+  both seeds). Honneur, Gaano and Handog use agent-made GT; Gaano and Handog were never checked, at the user's
+  request. Their numbers are diagnostic only and never pooled. Honneur and Handog are in the Stage 1 mask TUNING
+  split, so none of their numbers are fully held out.
+- **All of the gain comes from the clef/key header.** Note and rhythm tokens are unchanged. Token SER is still
+  33-50%, and rhythm is 64% end-to-end on Non Nobis. Every piece uses only standard voice clefs, so a
+  voice-default rule would score the same on clefs. One mid-piece key change (Gaano) was read correctly.
+- **Honneur fails its reference gate on review load (39%)** because of BUG-025: the ClefKeyNet crop lands wrong
+  under a page-edge shadow.
+- **Stage 2 loses whole pages** that contain a non-4-staff system: Non Nobis p4 (solo staff) and 9 of 14 Handog
+  pages (divisi). Logged as BUG-026.
+- New bugs:
+  - BUG-024: Stage 3 stacks an explicit accidental on top of the key alteration.
+  - BUG-025: the clef/key crop is misplaced under page-edge shadow.
+  - BUG-026: Stage 2 drops whole pages.
+- **The Non Nobis, Honneur, Gaano and Handog photos are now used.** They are TEST-only anyway, so any fix for
+  BUG-024/025/026 must be developed on other pieces.
+
+**Ground truth moved to `gt/`** (see `gt/README.md`):
+- `gt/non_nobis_domine/` (user-verified)
+- `gt/honneur_a_toi/`
+- `gt/gaano_ko_ikaw_kamahal/`
+- `gt/handog/`
+- `gt/dont_stop_me_now/`
+- `gt/clef_key_labels/` (was `data/val_clefkey/`; SPENT)
+- `gt/both_sides_now/`
+- the annotation viewers, in `gt/tools/`
+
+Crops are gitignored and can be regenerated.
+
+**Suggested next actions (the user has not chosen yet):**
+1. Wire the classifier into the real `stage3_transcription.py` path (the plan doc's "Required before wiring"
+   items 1-5; `stage3_clefkey.py` is an eval-only wrapper), then re-test on fresh photos of new pieces.
+2. BUG-024: a small fix in `infer_pitch` (an explicit accidental should set the absolute alteration).
+3. BUG-025: fix the crop x0 under shadow, developed on non-test pages.
+4. BUG-026: make Stage 2 reject only the non-4-staff systems, not the whole page.
+5. If the Gaano/Handog numbers should count as more than diagnostic, the user checks their GT.
+6. Note reading (SER 33-50%) is now the main source of error. That is the CRNN font/photo domain gap (BUG-011).
+
+## Clef/key classifier - local CPU training ready (2026-09-27)
+
+> **Superseded (2026-09-28):** the steps below are done. The T4 checkpoint was used under a user override, the
+> real-val eval FAILED (BUG-021), and the Dormi/Livin'/Flashlight set is SPENT. Labels now live in
+> `gt/clef_key_labels/`, and the Honneur GT is in `gt/honneur_a_toi/`. See the 2026-09-28 section above and the
+> plan doc.
 
 Branch `piya106/groundtruth-eval` (worktree `D:\PiyaNota-training`, no remote, nothing merged). Full record: `docs/decisions/piya-106-clef-keysig-detector-plan.md`, sections "2026-09-26 amendment", "2026-09-27 review of local training code" and "2026-09-27 status after the R1-R6 / E1-E4 fixes".
 

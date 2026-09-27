@@ -1373,3 +1373,33 @@ Decided after the real-photo result (BUG-021), so this is explicitly post-hoc. T
 - **The CRNN's raw clef token must not override the rule's output** once wired (required item 2 above).
 - **No claim of improvement until tested on fresh photos,** not the 222 spent staves.
 - BUG-022 (Tenor G8vb read as F, silent) and BUG-023 (non-SATB layout octave) are logged as known limitations. They do not block the rule.
+
+## 2026-09-28 Fresh-photo pipeline eval (pre-registered; ml-cv-lead reviewed, OK-with-changes)
+
+The condition "no claim until tested on fresh photos" (above) was tested with a Stage 3 wrapper,
+`stage3_clefkey.py`. It is eval-only and not wired into `stage3_transcription.py`.
+- The wrapper implements "Required before wiring" items 1 and 2: `resolve_clef` is the single octave owner, and
+  the CRNN header clef/key tokens are suppressed.
+- Items 3-5 are not built: mid-strip clef changes, `satb_layout_suspect`, and the musical validators.
+
+Full record: `data/eval_fresh/REPORT.md` and `PREREG.md`. End-to-end pitch accuracy, both fine-tuned CRNN seeds:
+
+| Piece (GT status) | Strips found | (a) as-is | (b) + classifier | Oracle clef/key |
+|---|---|---|---|---|
+| Non Nobis Domine (user-verified, **gated: PASS**) | 28/36 | 8.0-10.2% | **64.0%** (86% on found strips) | 64.0% |
+| Honneur a Toi (agent GT; mask-tuning piece) | 28/28 | 10.9-15.4% | 73.3-75.9% | 76.7-78.5% |
+| Gaano Ko Ikaw Kamahal (agent GT, unchecked) | 72/72 | 19.9-24.5% | 82.7-82.8% | 82.7-82.8% |
+| Handog (agent GT, unchecked, weakest; mask-tuning piece) | 40/52 | 9.5-9.8% | 54.1-54.6% (78% on found strips; Bass 15-26%) | same as (b) |
+
+- **Non Nobis gate: PASS for both seeds.** All four criteria held: silent-wrong for (b) <= (a), no double-octave
+  errors, a gain of at least 20 points, and a review rate of at most 25%.
+- **Clef and key accuracy:** 100% on every found staff of Non Nobis, Gaano and Handog. On Honneur they were 96.4%
+  and 85.7%, because of BUG-025 (the crop x0 lands wrong under a page-edge shadow).
+- **Limits:**
+  - All four pieces use voice-default clefs, so clef reading beyond the default is untested.
+  - Item 6's required Tenor-in-F and non-SATB layouts were not in the set, so the BUG-022/023 guards are not
+    validated.
+  - Only one mid-piece key change was tested (Gaano; read correctly).
+  - All photos come from one photographer.
+- These photos are now used, so the next fresh test must use new pieces.
+
