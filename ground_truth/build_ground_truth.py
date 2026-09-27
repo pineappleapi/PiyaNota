@@ -8,7 +8,7 @@ Authoring syntax (one line per page/system/voice)::
   voices that start on a full bar. This mirrors Stage 3, where ``measure_index`` starts at 0
   per strip and increments on every barline token.
 * Tokens are whitespace-separated: ``PITCH/DUR`` or ``r/DUR``. ``DUR`` is w h q e s t x
-  (whole..64th), with a trailing ``.`` for dotted. ``PITCH`` is letter + optional
+  (whole..64th), with a trailing ``.`` for dotted (``..`` double-dotted). ``PITCH`` is letter + optional
   ``b``/``#``/``n`` + octave, e.g. ``C4``, ``Bb3``, ``Bn4``. Un-marked letters get the key
   signature applied (KEY_FLATS), like Stage 3's key-signature state machine.
 * Chords: ``F3+F2/w`` (shared tick_onset; shared chord_id, per-strip counter like Stage 3).
@@ -72,12 +72,16 @@ def agnostic_position(p: dict[str, Any], clef: str) -> str:
 
 
 def parse_duration(text: str) -> int:
-    """Ticks for ``q``, ``e.`` etc. (dot = x1.5 with int truncation, as Stage 3)."""
+    """Ticks for ``q``, ``e.``, ``q..`` etc.: n dots give base * (2 - 1/2**n), floored (PIYA-109 AC3).
+
+    Written independently of Stage 3's ``_dotted_ticks`` (not imported) so a Stage 3 dot bug shows up
+    as a ground-truth mismatch instead of being copied into the ground truth.
+    """
     key = text.rstrip(".")
     if key not in DUR_TICKS:
         raise ValueError(f"bad duration {text!r}")
-    ticks = DUR_TICKS[key]
-    return int(ticks * 1.5) if text.endswith(".") else ticks
+    n_dots = len(text) - len(key)
+    return DUR_TICKS[key] * (2 ** (n_dots + 1) - 1) // 2 ** n_dots
 
 
 def build_strip(piece: str, page: int, sys_idx: int, voice: str, body: str) -> list[dict[str, Any]]:

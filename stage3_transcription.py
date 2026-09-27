@@ -63,7 +63,7 @@ Changes vs original stage3_transcription.py
           "mid_keysig"  accumulate mid-piece key-sig bursts
       • All CLEF_REFERENCE direct lookups replaced with get_clef_reference()
         so Tenor octave transposition is applied everywhere consistently.
-      • dot_pending logic unified (was inconsistently reset in original).
+      • Augmentation dots: n dots give base * (2 - 1/2**n) (PIYA-109 AC3), see _dotted_ticks().
       • NOTE_DURATION_TICKS extended with "sixty_fourth" entry.
 """
  
@@ -767,6 +767,18 @@ NOTE_DURATION_TICKS = {
 }
  
 REST_DURATION_TICKS = NOTE_DURATION_TICKS
+
+
+def _dotted_ticks(base_ticks: int, n_dots: int) -> int:
+    """Duration of a note/rest with ``n_dots`` augmentation dots (PIYA-109 AC3).
+
+    Each dot adds half of what the previous one added, not half of the running total: one dot is
+    1.5x, two dots 1.75x, three 1.875x. Multiplying the running total by 1.5 per dot gave 2.25x for a
+    double dot. Floored to whole ticks like the old ``int(x * 1.5)``; at PPQ 480 every value down to a
+    double-dotted thirty-second is exact, the first inexact one is a double-dotted sixty-fourth
+    (52.5 -> 52).
+    """
+    return base_ticks * (2 ** (n_dots + 1) - 1) // 2 ** n_dots
  
  
 # ── Key signature position tables ─────────────────────────────────────────────
@@ -941,7 +953,11 @@ def infer_pitch(
     reference_pitch = get_clef_reference(active_clef, voice)
  
     pending_acc            = None
-    dot_pending            = False
+    # Dots stack on the event they follow; its undotted length is kept so a second dot adds a quarter
+    # of it rather than half of the already-dotted length.
+    dot_target: Optional[dict] = None
+    dot_base               = 0
+    dot_count              = 0
     chord_id               = 0
     in_chord               = False
     slur_active            = False
@@ -1204,9 +1220,16 @@ def infer_pitch(
  
         # ── Dot (augmentation) ────────────────────────────────────────────
         if sym.startswith("dot-"):
-            if events:
+            # A dot never follows a multi-measure rest in engraving; stretching one would shift every
+            # later bar of this voice, so a (misread) dot there is dropped.
+            if events and not events[-1]["symbol"].startswith("multirest"):
+                if events[-1] is not dot_target:
+                    dot_target = events[-1]
+                    dot_base   = dot_target["duration_ticks"]
+                    dot_count  = 0
+                dot_count += 1
                 old_ticks = events[-1]["duration_ticks"]
-                new_ticks = int(old_ticks * 1.5)
+                new_ticks = _dotted_ticks(dot_base, dot_count)
                 events[-1]["duration_ticks"] = new_ticks
                 # The cursor already advanced by old_ticks when the note/rest
                 # was emitted; without also advancing by the extra half, every
@@ -1219,16 +1242,12 @@ def infer_pitch(
                 if with_conf:
                     events[-1]["confidence"] = min(
                         events[-1]["confidence"], tok_conf)
-            dot_pending = False
             continue
  
         # ── Rest ──────────────────────────────────────────────────────────
         if sym.startswith("rest."):
             dur_name = sym.split(".")[1].split("-")[0]
             ticks    = REST_DURATION_TICKS.get(dur_name, 480)
-            if dot_pending:
-                ticks       = int(ticks * 1.5)
-                dot_pending = False
             events.append({
                 "type":           "rest",
                 "pitch":          None,
@@ -1303,9 +1322,6 @@ def infer_pitch(
                 reference_pitch + delta + key_acc + acc))
  
             ticks = NOTE_DURATION_TICKS.get(dur_name, 480)
-            if dot_pending:
-                ticks       = int(ticks * 1.5)
-                dot_pending = False
  
             # Chord detection — consecutive notes sharing the same tick onset
             if (events
