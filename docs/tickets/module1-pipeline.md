@@ -274,6 +274,14 @@ below — it runs the real CRNN decode path (not ground-truth tokens) end to end
 proxy this project has to "does symbol transcription plus pitch inference actually work together,"
 which token-level SER alone can't answer.
 
+**Clef/key classifier status (2026-09-27):** this is a flag-only side model for the BUG-011 clef collapse. The plan and decisions are in `docs/decisions/piya-106-clef-keysig-detector-plan.md`.
+
+- Local training code is ready and reviewed: ml-cv-lead gave a conditional GO, and fixes R1-R6 / E1-E4 are applied in `850f880`.
+- The CPU-only venv is the reference configuration, because the GPU is unreliable (BUG-019).
+- No full training run has started, and no accuracy number exists yet.
+- Validation is Dormi Jesu, Livin' on a Prayer and Flashlight, check-only. DSMN and Honneur a Toi stay test-only.
+- Stage 3 integration (including the `key_plan` for mid-piece key changes) has not started.
+
 ---
 
 ### PIYA-107 — Pitch Inference (Clef-Aware Diatonic Mapping)

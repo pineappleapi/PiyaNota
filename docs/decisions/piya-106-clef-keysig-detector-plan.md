@@ -947,7 +947,7 @@ Acceptable as disclosed, with conditions.
 - Setup: `CUDA_VISIBLE_DEVICES=""`, cu124 wheel, 6 threads on 6 physical / 12 logical cores, the real `ClefKeyNet` (1,382,195 params), batch 128.
 - The forward pass completed in 2.78 s (cold). The backward pass then stalled permanently.
 - An earlier probe called `torch.cuda.is_available()` and hung. That was the reviewer's mistake.
-- Two python processes (PIDs 22156 and 30260) could not be killed and will be cleared by the R5 reboot.
+- Two python processes (PIDs 22156 and 30260) could not be killed and will be cleared by the R5 reboot. **Correction 2026-09-27:** they are still alive, together with PID 17784 (about 4.8 GB between them), plus two hung `nvidia-smi.exe` (7744, 14108); the PC reported critically low memory. The reboot is required before the full run.
 - Likely cause: on the first backward pass, autograd queries the CUDA device count, which touches the wedged driver. This is why R5 is needed.
 
 **Local CPU is the reference.**
@@ -979,3 +979,43 @@ python training\train_clef_key.py --ds2 D:\PiyaNota\datasets\ds2_dense --seed 20
 - To resume: `--resume <run_dir> --device cpu --phase all`.
 - The second seed (20260927) runs only after the first run's validation results have been reviewed.
 - The real-validation eval (with E1-E4 in place) runs exactly once, on the frozen, selected checkpoint.
+
+## 2026-09-27 status after the R1-R6 / E1-E4 fixes
+
+Committed as `850f880`. No full training run has started; the real-photo eval has never been run.
+
+**Done:**
+
+- **R1:** `--device {cpu,cuda}` is required. On cpu, no code path touches `torch.cuda` (seeding, RNG state, memory fraction, cudnn, device name are all behind `device == "cuda"`).
+- **R2:** `--threads` (default `os.cpu_count()`) sets intra- and inter-op threads. The count is in `config_hash` and the checkpoint, and resume is refused on a device or thread mismatch.
+- **R3:** `reference_note` and the D.1 amendment above name the local CPU venv run as the reference.
+- **R4:** a code-freeze comment sits above `run_hashes`. The script sha is part of the run hashes, so any edit after the full run starts breaks resume.
+- **Low-severity item:** `precheck_resume()` checks the hashes, device and threads against `last.pt` before `load_data`.
+- **R5:** CPU-only venv `D:\venvs\piyanota-cpu`: Python 3.13, torch 2.6.0+cpu (`torch.version.cuda` None), torchvision 0.21.0+cpu, ultralytics 8.4.144 (`nvidia-ml-py` removed). Constraints are in `D:\venvs\piyanota-cpu-constraints.txt`.
+- **R6 (venv, `--device cpu --threads 12`):**
+  - S1 run twice: `last.pt`, `epoch_00{1,2}.pt`, history, calibration, parity fixture and splits are byte-identical. The exported classifier and metrics differ only by `created_utc`.
+  - S3 (1 epoch, then resume): tensors, RNG states and values are identical to a straight 2-epoch run. `last.pt` / `epoch_002.pt` differ only in pickle bytes, because the resumed history strings are not interned. This is a serialization difference, not a training one.
+  - Resume with `--threads 6` was refused before `load_data` (exit 5).
+  - The older system-Python smoke run (cu124 wheel on CPU) matches losses to 4 decimals but not bitwise. That confirms the venv build is the reference.
+- **E1:** a staff whose residual is over `RESIDUAL_EXCLUDE_SPACINGS = 1.0` becomes `excluded_mapping` and stays in the denominators. A hard fail is raised at `MAX_EXCLUDED_MAPPING_FRACTION = 0.25` per page or pooled, before any inference. **Both thresholds were chosen by the implementing agent. ml-cv-lead must confirm them before the E4 dry run.**
+- **E2:** per-rotation buckets are parsed from Stage 1's `[Dewarp]` / `[Stage 1]` log lines (the eval hard-errors if these are missing or inconsistent). The pre-registered policy is `ROTATED_UNDEWARPED_POLICY = "include_in_gate_and_report_separately"`.
+- **E3:** the `clef_exact`, `clef_collapsed`, `clef_family` and primary `clef` heads are all reported and gated, each with coverage.
+- **E4:** `--coverage-dry-run` (Stage 1/2 + mapping only, no checkpoint) exists and is syntax-checked. It has not been run; it needs YOLO and the reboot.
+
+**Measured CPU time (supersedes the estimate above):** a forward+backward+AdamW step at batch 128 takes about 5.5 s at 12 threads (forward 2.1 s, backward 3.4 s); at 6 threads it takes 6.0-8.0 s. 24 epochs take about 6-6.5 h at 18k rows or about 8.5-9 h at 26k rows. **Plan for 6.5-9.5 h including prep and calibration.** The three hung processes above may have slowed this measurement.
+
+**Full-run command (after the reboot and the user's go):**
+
+```
+D:\venvs\piyanota-cpu\Scripts\python training\train_clef_key.py --ds2 D:\PiyaNota\datasets\ds2_dense --seed 20260926 --device cpu --threads 12 --phase all
+```
+
+Resume with `--resume <run_dir> --device cpu --threads 12 --phase all`. The thread count must match.
+
+**Open:**
+
+1. Reboot. This clears the hung processes and the driver (BUG-019).
+2. ml-cv-lead confirms the E1 thresholds.
+3. The user gives the go for the seed 20260926 run; seed 20260927 runs only after review.
+4. Run the E4 dry run.
+5. Run the one-shot real-val eval on the frozen checkpoint.

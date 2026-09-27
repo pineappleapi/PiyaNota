@@ -4,7 +4,32 @@ Handoff doc for continuing PiyaNota work in a fresh session. Read this first; it
 full detail rather than repeating it. Written 2026-09-14, rewritten 2026-09-16, rewritten 2026-09-19,
 rewritten 2026-09-24.
 
-## DSMN eval + Stage 3/4/5 review (2026-09-26) - newest, read first
+## Clef/key classifier - local CPU training ready (2026-09-27) - newest, read first
+
+Branch `piya106/groundtruth-eval` (worktree `D:\PiyaNota-training`, no remote, nothing merged). Full record: `docs/decisions/piya-106-clef-keysig-detector-plan.md`, sections "2026-09-26 amendment", "2026-09-27 review of local training code" and "2026-09-27 status after the R1-R6 / E1-E4 fixes".
+
+**Data roles:**
+
+- **Validation only (check-only, never tuning):** Dormi Jesu, Livin' on a Prayer and Flashlight (Flashlight is retired from test). Labels are in `data/val_clefkey/` (gitignored, sha-frozen).
+- **Test only:** DSMN and Honneur a Toi.
+- **Ground truth:** DSMN GT has 60 strips, re-frozen at sha 72edc5ca.... Honneur GT has 28 strips, sha 80219bdc...; `data/eval_honneur/gt/build_gt.py` is the generalised converter.
+
+**Training code:** `training/train_clef_key.py` and `training/eval_clef_key_realval.py`, with ml-cv-lead's R1-R6 / E1-E4 applied (`850f880`). The CPU-only venv `D:\venvs\piyanota-cpu` is the reference configuration. Smoke tests: S1 byte-identical x2, S3 resume identical in content.
+
+**The GPU is not usable (BUG-019).** Do not run CUDA torch or `nvidia-smi` until the PC is rebooted and the driver is reinstalled.
+
+**Next actions, in order:**
+
+1. The user reboots.
+2. ml-cv-lead confirms the E1 thresholds (1.0 spacing, 25%).
+3. The user gives the go for the full CPU run, about 6.5-9.5 h. The command is in the plan doc.
+4. Run the E4 coverage dry run.
+5. Review, then run the second seed.
+6. Run the one-shot real-val eval.
+
+**Awaiting the user's choice of pipeline change:** the Stage 3 double-dot fix (suggested first; Honneur scoring needs it), FR-14 Stage 4 report wiring, or PIYA-127 handling of 5-staff (obbligato) systems.
+
+## DSMN eval + Stage 3/4/5 review (2026-09-26)
 
 Full record: `docs/decisions/piya-106-dsmn-heldout-eval-2026-09-26.md`. Summary: Stage 1/2 ready for Stage 3 (with caveats);
 CRNN fails the SOW on DSMN (token SER 44.3-47.9% across the two seeds, pitch 10.6-11.4%, clef 2-3/23 correct), BUG-011 unfixed.
