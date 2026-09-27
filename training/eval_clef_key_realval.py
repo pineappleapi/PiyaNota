@@ -29,10 +29,12 @@ Review fixes (plan, "2026-09-27 review of local training code", E1-E4):
 
 * **E1, mapping residual.** Each label's mapped centre is compared with the nearest tracked staff.
   A residual above ``RESIDUAL_EXCLUDE_SPACINGS`` makes that staff ``excluded_mapping`` (counted and
-  reported, kept in the coverage denominators). If more than ``MAX_EXCLUDED_MAPPING_FRACTION`` of the
-  eligible staves on any page, or pooled, are excluded, the page map itself is untrustworthy: the
-  scoring run stops before any classifier inference and writes nothing, so the one-shot check is not
-  spent. Both constants were fixed before any result.
+  reported, kept in the coverage denominators). A label whose crop band is not the staff it maps to is
+  excluded too (``identity_mismatch``). If more than ``MAX_EXCLUDED_MAPPING_FRACTION`` of the eligible
+  staves on any page (and at least ``MIN_EXCLUDED_FOR_PAGE_FAIL`` of them), or pooled, are excluded, the
+  page map itself is untrustworthy: the scoring run stops before any classifier inference and writes
+  nothing, so the one-shot check is not spent. A duplicate photo failing its page rule only drops its
+  consistency block. All values were amended/confirmed by ml-cv-lead before any result.
 * **E2, rotation audit.** Stage 1's dewarp decision and h/v angles are read from its own log lines
   (Stage 1 does not return them and must not be modified); the applied grid rotation is re-derived
   with Stage 1's own ``grid_correction_deg``. Results are reported per rotation bucket and for the
@@ -126,14 +128,21 @@ UPRIGHT_SIZE_WH = (3024, 4032)
 MIN_MATCH_IOU = 0.3          # vertical IoU; staves are ~8+ spacings apart, dewarp shifts are < 1 staff
 BAND_MAX_OFFSET_SPACINGS = 1.0  # plan 3.1: nearest tracked band within 1 spacing of the box centre
 STAFF_HALF_HEIGHT_SPACINGS = 2.0  # outer lines = centre -/+ 2 spacings
-# E1. Same tolerance as BAND_MAX_OFFSET_SPACINGS: a label further than one spacing from every tracked
-# staff cannot be tied to the band its crop would come from, so scoring it would test the map, not the
-# classifier.
-RESIDUAL_EXCLUDE_SPACINGS = 1.0
+# E1 (ml-cv-lead, 2026-09-27, set from geometry before any dry-run or real-val output). The residual
+# sums errors unrelated to staff identity: hand-drawn bbox envelopes (~1 spacing), clef asymmetry of the
+# envelope and dewarp's mean-height target vs the envelope midpoint on curled pages. 2.0 still keeps the
+# label centre inside the matched staff's own line span (+/- STAFF_HALF_HEIGHT_SPACINGS); identity only
+# becomes ambiguous near half the 8+ spacing staff pitch. BAND_MAX_OFFSET_SPACINGS stays 1.0: it compares
+# two pipeline geometries, not a hand-drawn envelope.
+RESIDUAL_EXCLUDE_SPACINGS = 2.0
 # E1 hard fail. Up to a quarter of a page's staves can be off for local reasons (a curled corner, a
 # staff the tracker lost). Above that the page-level map itself is wrong, and exclusion would be
 # hiding a systematic mapping failure rather than a local one. Applied per page and pooled.
 MAX_EXCLUDED_MAPPING_FRACTION = 0.25
+# Per page the fraction alone would let one exclusion fail a page with 1-3 eligible staves; two badly
+# mapped staves on one page do mean the page map is broken. The pooled rule has no minimum.
+MIN_EXCLUDED_FOR_PAGE_FAIL = 2
+# All E1 values are frozen before E4: a hard fail is fixed in the mapping code, never by these constants.
 
 # E2. Stage 1 log lines (stage1_preprocessing.preprocess_score_page); the only place Stage 1 exposes
 # its dewarp decision and v_angle. A missing or duplicated line is a hard error, never a guess.
@@ -504,6 +513,7 @@ def run_page(photo: Path, labels: list[StaffLabel], yolo: Path, work: Path,
         res = abs(s.center - c) / s.spacing
         residuals.append(res)
         r.extra["mapping_residual_spacings"] = float(res)
+        r.extra["label_staff_center"] = float(s.center)
         r.extra["mapping_excluded"] = bool(res > RESIDUAL_EXCLUDE_SPACINGS)
     page_diag["label_to_staff_residual_spacings_median"] = float(np.median(residuals)) if residuals else None
     page_diag["label_to_staff_residual_spacings_max"] = float(np.max(residuals)) if residuals else None
@@ -544,6 +554,13 @@ def run_page(photo: Path, labels: list[StaffLabel], yolo: Path, work: Path,
         if band is None or abs(band.center - centre) > BAND_MAX_OFFSET_SPACINGS * band.spacing:
             r.status, r.reason = "no_staff_geometry", "no tracked band within 1 spacing of the box"
             continue
+        # E1 identity: the crop must come from the same tracked staff the label maps to, otherwise the
+        # classifier would be scored on a neighbour's clef/key. Counts toward the hard fail.
+        if r.extra.get("label_staff_center") is not None and band.center != r.extra["label_staff_center"]:
+            n_excluded += 1
+            r.extra["mapping_excluded"] = True
+            r.status, r.reason = "excluded_mapping", "identity_mismatch: crop band is not the label's staff"
+            continue
         top = band.center - STAFF_HALF_HEIGHT_SPACINGS * band.spacing
         bottom = band.center + STAFF_HALF_HEIGHT_SPACINGS * band.spacing
         sx = unmasked.shape[1] / det_w
@@ -564,7 +581,12 @@ def run_page(photo: Path, labels: list[StaffLabel], yolo: Path, work: Path,
     page_diag["excluded_mapping"] = n_excluded
     frac = n_excluded / len(todo) if todo else 0.0
     page_diag["excluded_mapping_fraction"] = frac
-    page_diag["mapping_hard_fail"] = frac > MAX_EXCLUDED_MAPPING_FRACTION
+    page_diag["mapping_hard_fail"] = (n_excluded >= MIN_EXCLUDED_FOR_PAGE_FAIL
+                                      and frac > MAX_EXCLUDED_MAPPING_FRACTION)
+    logger.info("%s: E1 residuals (spacings) %s; excluded %d/%d; page hard fail %s", photo.name,
+                [None if r.extra.get("mapping_residual_spacings") is None
+                 else round(r.extra["mapping_residual_spacings"], 2) for r in todo],
+                n_excluded, len(todo), page_diag["mapping_hard_fail"])
     if page_diag["mapping_hard_fail"]:
         logger.error("%s: %d/%d staves excluded for mapping residual (> %.0f%%): page map is wrong",
                      photo.name, n_excluded, len(todo), 100 * MAX_EXCLUDED_MAPPING_FRACTION)
@@ -572,14 +594,23 @@ def run_page(photo: Path, labels: list[StaffLabel], yolo: Path, work: Path,
 
 
 def mapping_hard_failures(results: list[StaffResult], pages: list[dict[str, Any]]) -> list[str]:
-    """E1 hard-fail reasons (empty list = OK), per page and pooled over unique sure-labelled staves."""
+    """E1 hard-fail reasons (empty list = OK), per page and pooled over unique sure-labelled staves.
+
+    A duplicate photo failing its page rule does not block the run: it only drops its consistency block
+    (see ``failed_duplicate_pages``).
+    """
     fails = [f"{d['page_file']}: {d['excluded_mapping']}/{d['n_eligible']} excluded"
-             for d in pages if d.get("mapping_hard_fail")]
+             for d in pages if d.get("mapping_hard_fail") and not is_duplicate_photo(d["page_file"])]
     unique = [r for r in results if not r.label.duplicate_photo and r.status != "label_unsure"]
     n_ex = sum(r.status == "excluded_mapping" for r in unique)
     if unique and n_ex / len(unique) > MAX_EXCLUDED_MAPPING_FRACTION:
         fails.append(f"pooled: {n_ex}/{len(unique)} unique staves excluded")
     return fails
+
+
+def failed_duplicate_pages(pages: list[dict[str, Any]]) -> list[str]:
+    """Duplicate photos whose page map failed E1; their staves are dropped from the consistency block."""
+    return [d["page_file"] for d in pages if d.get("mapping_hard_fail") and is_duplicate_photo(d["page_file"])]
 
 
 # =============================================================================================
@@ -942,7 +973,10 @@ def main_dry_run(args: argparse.Namespace) -> int:
     out_path = DRYRUN_DIR / f"{DRYRUN_PREFIX}{stamp}.json"
     labels, image_dir, label_hashes = load_labels()
     results, pages, _ = run_pages(args.image_dir or Path(image_dir), labels, args.yolo)
+    dropped = failed_duplicate_pages(pages)
+    results = [r for r in results if r.label.page_file not in dropped]
     report = coverage_dry_run_report(results, pages)
+    report["dropped_duplicate_pages"] = dropped
     out = {"created_utc": stamp, "mode": "coverage_dry_run (E4): Stage 1/2 + mapping only, no classifier",
            "label_sha256": label_hashes, "yolo": str(args.yolo),
            "yolo_sha256": sha256_bytes(args.yolo.read_bytes()),
@@ -980,9 +1014,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # does not spend the one-shot check.
     fails = mapping_hard_failures(results, pages)
     if fails:
-        raise SystemExit("E1 mapping hard fail (> {:.0%} of staves beyond {} spacings); nothing scored or "
-                         "written:\n  {}".format(MAX_EXCLUDED_MAPPING_FRACTION, RESIDUAL_EXCLUDE_SPACINGS,
-                                                 "\n  ".join(fails)))
+        raise SystemExit("E1 mapping hard fail (> {:.0%} of staves beyond {} spacings or identity mismatch); "
+                         "nothing scored or written:\n  {}".format(MAX_EXCLUDED_MAPPING_FRACTION,
+                                                                   RESIDUAL_EXCLUDE_SPACINGS, "\n  ".join(fails)))
+    dropped_duplicates = failed_duplicate_pages(pages)
+    results = [r for r in results if r.label.page_file not in dropped_duplicates]
 
     sids = [r.label.sid for r in results if r.status == "scored"]
     lookup = {r.label.sid: r for r in results}
@@ -1007,7 +1043,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     "gate_set": "unique staves (duplicate photos scored separately)",
                     "matching": "Stage 2 box <-> label bbox by vertical IoU in the native page frame",
                     "mapping_exclusion": {"residual_exclude_spacings": RESIDUAL_EXCLUDE_SPACINGS,
-                                          "max_excluded_fraction": MAX_EXCLUDED_MAPPING_FRACTION},
+                                          "max_excluded_fraction": MAX_EXCLUDED_MAPPING_FRACTION,
+                                          "min_excluded_for_page_fail": MIN_EXCLUDED_FOR_PAGE_FAIL,
+                                          "dropped_duplicate_pages": dropped_duplicates},
                     "rotated_not_dewarped_policy": ROTATED_UNDEWARPED_POLICY},
         "report": report, "pages": pages, "staves": staff_rows(results),
         "adjudication": "every model/label disagreement must be re-inspected from the image and logged in "

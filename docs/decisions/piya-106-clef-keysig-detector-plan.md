@@ -1093,3 +1093,26 @@ The one-shot real-val eval runs locally on CPU, on the T4 checkpoint (`map_locat
 8. **Unchanged conditions.**
    - No retuning after any real-set result is seen.
    - The E1 thresholds (1.0 spacing, 25%) still need ml-cv-lead confirmation before the E4 dry run.
+
+## 2026-09-27 E1 thresholds confirmed by ml-cv-lead (before E4)
+
+Set from geometry and design only, before any dry-run or real-val output was seen. ml-cv-lead's wording:
+
+> ml-cv-lead, 2026-09-27, E1 thresholds, set from geometry and design only, before any dry-run or real-val output was seen: RESIDUAL_EXCLUDE_SPACINGS amended 1.0 -> 2.0, because bbox-envelope error, clef asymmetry and the dewarp mean-height target are not modelled, and 2.0 keeps the label centre inside the matched staff's line span. MAX_EXCLUDED_MAPPING_FRACTION = 0.25 confirmed; the per-page hard fail also needs at least 2 excluded staves; pooled rule unchanged; a pg10_b failure drops only its consistency block. MIN_MATCH_IOU = 0.3 confirmed. Added: a label-to-crop band identity check that counts toward exclusion. These values are frozen before E4. A hard fail is fixed in the mapping code, never by changing the thresholds.
+
+**Implemented in `training/eval_clef_key_realval.py`:**
+
+- `RESIDUAL_EXCLUDE_SPACINGS = 2.0`. `BAND_MAX_OFFSET_SPACINGS` stays 1.0, because it compares two pipeline geometries, not a hand-drawn box.
+- `MIN_EXCLUDED_FOR_PAGE_FAIL = 2`. A page fails only when `n_excluded >= 2` and the excluded fraction is over 0.25. The pooled rule is unchanged.
+- **Identity check:** if the tracked staff nearest the label is not the band the crop comes from, the staff becomes `excluded_mapping` with reason `identity_mismatch`, and it counts toward the hard fail.
+- **Duplicate photo:** `failed_duplicate_pages()`. When a duplicate photo fails its page rule, its staves are dropped from the consistency block; this does not block the run. Both the dry run and the scoring output record `dropped_duplicate_pages`.
+- **Logging:** the E4 dry run logs each staff's residual and each page's exclusion count and hard-fail status. The dry-run JSON already holds each staff's residual (`staves[].mapping_residual_spacings`).
+
+**Verification:**
+
+- The script compiles.
+- A synthetic check of `mapping_hard_failures()` and `failed_duplicate_pages()` passed:
+  - a failed duplicate page is dropped and does not block the run;
+  - a failed canonical page does block it.
+- The E4 dry run has **not** been run yet. It needs YOLO on CPU and is best run after the local CPU training run finishes.
+
