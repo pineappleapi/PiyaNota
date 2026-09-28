@@ -1,6 +1,10 @@
 # Preliminary results: camera-captured vs digital input (2026-09-28, v2)
 
-**v2 test set: Non Nobis Domine pp.1-3 + Gaano Ko Ikaw Kamahal pp.1-9.** Each page has a digital PDF render
+> **Reclassified 2026-09-28 (user decision):** this set and the other eval_prelim pieces (Honneur, Handog, DSMN)
+> are now **development data**. Stage 3 rules were designed on them afterwards (BUG-024), so no number here is
+> held-out accuracy evidence.
+
+**v2 test set (now dev data, see above): Non Nobis Domine pp.1-3 + Gaano Ko Ikaw Kamahal pp.1-9.** Each page has a digital PDF render
 (300 dpi) and a phone photo of the printed copy, with author-verified GT. Both pieces are FROZEN in the Stage 1
 mask split (`training/step3_mask_split.json`), so no pipeline threshold was tuned on them. 25 SATB systems,
 100 staves, 1008 GT notes per condition.

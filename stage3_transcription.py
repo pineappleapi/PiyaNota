@@ -80,7 +80,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 import json
 
 logger = logging.getLogger(__name__)
@@ -610,6 +610,21 @@ BLANK_IDX  = 0
 VOCAB_SIZE = len(VOCAB)
 SYM_TO_IDX = {s: i for i, s in enumerate(VOCAB)}
 IDX_TO_SYM = {i: s for i, s in enumerate(VOCAB)}
+
+# Accidental classes whose per-frame probability is kept as evidence for
+# infer_pitch (see _accidental_evidence). Peaks below the floor carry no
+# usable signal and only bloat the per-token dicts.
+ACCIDENTAL_SYMBOLS = [s for s in VOCAB if s.startswith("accidental.")]
+ACCIDENTAL_INDICES = [SYM_TO_IDX[s] for s in ACCIDENTAL_SYMBOLS]
+ACCIDENTAL_EVIDENCE_FLOOR = 0.01
+# infer_pitch applies an accidental the greedy decode lost (or put one staff
+# step off) when its evidence at the note's own position reaches this peak
+# probability. The near threshold applies instead when a decoded, unanchored
+# accidental of the same type sits one step from the note, the CRNN's usual
+# off-by-one misplacement. Both were chosen on development data (eval_prelim
+# pieces and Camera-PrIMuS), not on held-out data.
+ACCIDENTAL_EVIDENCE_THRESHOLD = 0.5
+ACCIDENTAL_EVIDENCE_NEAR_THRESHOLD = 0.5
  
  
 # ── Pitch tables ──────────────────────────────────────────────────────────────
@@ -868,13 +883,47 @@ def _accidental_is_anchored(symbols: list, idx: int) -> bool:
 
     Engraving puts an accidental directly left of its notehead on the same line/space, so an accidental
     whose next note is elsewhere is a CRNN phantom. Diagnostic only, not accuracy evidence: on the
-    eval_prelim camera runs (version b, 2026-09-28; pieces already spent as test data, rule designed
+    eval_prelim camera runs (version b, 2026-09-28; development data by user decision, rule designed
     on them) only 26-36% of predicted inline sharps were real and this rule alone moved SOW pitch
     +0.9 to +1.3 pp. Cost: an accidental the CRNN places one step off its note is dropped (seen on
     distorted Camera-PrIMuS).
     """
     pos = _position_suffix(symbols[idx])
     return pos is not None and _next_note_position(symbols, idx) == pos
+
+
+def _position_step(pos: Optional[str]) -> Optional[int]:
+    """Diatonic step of a position suffix (L1 = 0, S1 = 1, L2 = 2), or None if unparsable."""
+    if not pos or pos[0] not in "LS":
+        return None
+    try:
+        n = int(pos[1:])
+    except ValueError:
+        return None
+    return (n - 1) * 2 + (pos[0] == "S")
+
+
+def _evidence_accidental(
+    evidence_window:        Dict[str, float],
+    pos:                    str,
+    step:                   int,
+    unanchored_accidentals: List[Tuple[str, int]],
+) -> Optional[Tuple[int, float]]:
+    """(alteration, evidence) for the strongest accidental at ``pos`` that clears its threshold, else None.
+
+    The threshold drops to ACCIDENTAL_EVIDENCE_NEAR_THRESHOLD for an accidental type that the greedy
+    decode did emit, unanchored, one step from this note: the glyph is there and only its position is
+    in doubt.
+    """
+    near_types = {t for t, s in unanchored_accidentals if abs(s - step) == 1}
+    best: Optional[Tuple[int, float]] = None
+    for acc_type in ("accidental.sharp", "accidental.flat", "accidental.natural"):
+        peak = evidence_window.get(f"{acc_type}-{pos}", 0.0)
+        threshold = (ACCIDENTAL_EVIDENCE_NEAR_THRESHOLD if acc_type in near_types
+                     else ACCIDENTAL_EVIDENCE_THRESHOLD)
+        if peak >= threshold and (best is None or peak > best[1]):
+            best = (ACCIDENTAL_OFFSET.get(acc_type, 0), peak)
+    return best
 
 
 def _is_mid_key_change(burst: list, symbols: list, burst_end: int, acc_type: str, active_clef: str) -> bool:
@@ -948,9 +997,20 @@ def infer_pitch(
     page_index: int = 1,
     sys_idx:    int = 1,
     confidences: Optional[list] = None,
+    accidental_evidence: Optional[List[Dict[str, float]]] = None,
 ) -> list:
     """
     Converts a CRNN symbol sequence into note events with MIDI pitch.
+
+    accidental_evidence: optional per-token accidental probabilities from
+    _accidental_evidence, parallel to `symbols`. When given, a note with no
+    anchored accidental and no tie carry takes the accidental whose evidence
+    at its own staff position reaches ACCIDENTAL_EVIDENCE_THRESHOLD (or the
+    near threshold, see there), gathered over the tokens since the previous
+    note, rest or barline. This recovers a natural the greedy decode dropped,
+    which bar memory would otherwise overrule with the earlier accidental,
+    and an accidental decoded one step off its note. None (ground-truth
+    tokens, existing callers) leaves the behaviour unchanged.
 
     confidences: optional per-token CRNN confidences, parallel to `symbols`
     (same length, else ValueError). When given, every emitted note/rest event
@@ -1095,6 +1155,13 @@ def infer_pitch(
             f"confidences ({len(confidences)}) must be parallel to "
             f"symbols ({len(symbols)})")
     with_conf = confidences is not None
+    if accidental_evidence is not None and len(accidental_evidence) != len(symbols):
+        raise ValueError(
+            f"accidental_evidence ({len(accidental_evidence)}) must be "
+            f"parallel to symbols ({len(symbols)})")
+    # Evidence and decoded-but-unanchored accidentals (type, step) since the last note/rest/barline.
+    evidence_window: Dict[str, float] = {}
+    unanchored_accidentals: List[Tuple[str, int]] = []
 
     # ── Main loop ─────────────────────────────────────────────────────────
     for tok_idx, sym in enumerate(symbols):
@@ -1260,6 +1327,10 @@ def infer_pitch(
  
         if ks_stage != "body":
             continue
+        if accidental_evidence is not None:
+            for acc_sym, peak in accidental_evidence[tok_idx].items():
+                if peak > evidence_window.get(acc_sym, 0.0):
+                    evidence_window[acc_sym] = peak
  
         # ── Clef change mid-piece ─────────────────────────────────────────
         if sym.startswith("clef."):
@@ -1273,6 +1344,10 @@ def infer_pitch(
             if _accidental_is_anchored(symbols, tok_idx):
                 pending_acc      = ACCIDENTAL_OFFSET.get(acc_type, 0)
                 pending_acc_conf = tok_conf
+            else:
+                acc_step = _position_step(_position_suffix(sym))
+                if acc_step is not None:
+                    unanchored_accidentals.append((acc_type, acc_step))
             continue
  
         # ── Dot (augmentation) ────────────────────────────────────────────
@@ -1303,6 +1378,8 @@ def infer_pitch(
  
         # ── Rest ──────────────────────────────────────────────────────────
         if sym.startswith("rest."):
+            evidence_window = {}
+            unanchored_accidentals = []
             dur_name = sym.split(".")[1].split("-")[0]
             ticks    = REST_DURATION_TICKS.get(dur_name, 480)
             events.append({
@@ -1369,12 +1446,18 @@ def infer_pitch(
                 # Not stored in measure_alterations: a tie carries the accidental into the next bar for the
                 # tied note only, later notes on that step fall back to the key.
                 alteration, alt_conf = last_note_alteration, last_note_alt_conf
+            elif (rescued := _evidence_accidental(evidence_window, pos_str, step,
+                                                  unanchored_accidentals)) is not None:
+                alteration, alt_conf = rescued
+                measure_alterations[step] = rescued
             elif step in measure_alterations:
                 alteration, alt_conf = measure_alterations[step]
             else:
                 alteration = key_alterations.get(_pitch_class_at_step(step, bottom_letter), 0)
             note_conf = min(tok_conf, alt_conf)
             pending_acc = None
+            evidence_window = {}
+            unanchored_accidentals = []
             last_note_step, last_note_alteration, last_note_alt_conf = step, alteration, alt_conf
 
             midi_pitch  = max(0, min(127,
@@ -1426,6 +1509,8 @@ def infer_pitch(
         if sym.startswith("barline"):
             pending_acc = None      # stale inline accidental — discard
             measure_alterations = {}
+            evidence_window = {}
+            unanchored_accidentals = []
             in_chord    = False
             ks_stage    = "post_bar"
             measure_index += 1
@@ -1626,8 +1711,97 @@ def _greedy_ctc_decode_with_confidence(
         decoded.append(idx)
         confidences.append(sum(group_probs) / len(group_probs))
     return decoded, confidences
- 
- 
+
+
+def _accidental_evidence(
+    log_probs: torch.Tensor,
+    floor:     float = ACCIDENTAL_EVIDENCE_FLOOR,
+) -> List[Dict[str, float]]:
+    """
+    Per decoded token, the peak softmax probability of each accidental class.
+
+    Greedy decoding throws away an accidental whose frames lose the argmax to
+    blank or to the neighbouring note, and it cannot say that an accidental
+    decoded one staff step off its note was a near tie between two positions.
+    Both leave probability mass behind. The window for token k runs from the
+    frame after token k-1 ends to the last frame of token k, so it covers
+    the blank gap in front of the token, where a lost accidental would sit.
+
+    Args:
+        log_probs: (T, vocab_size) log-softmax output from the CRNN.
+        floor:     Classes below this peak are left out to keep the lists small.
+
+    Returns:
+        A list parallel to ``_greedy_ctc_decode_with_confidence``'s decoded
+        indices: ``{accidental symbol: peak probability}`` for each token.
+    """
+    probs = log_probs.exp()
+    acc_probs = probs[:, ACCIDENTAL_INDICES]
+    indices = probs.argmax(dim=1).tolist()
+
+    evidence: List[Dict[str, float]] = []
+    window_start = 0
+    frame = 0
+    for idx, group in itertools.groupby(indices):
+        length = sum(1 for _ in group)
+        frame += length
+        if idx == BLANK_IDX:
+            continue
+        peaks = acc_probs[window_start:frame].max(dim=0).values.tolist()
+        evidence.append({ACCIDENTAL_SYMBOLS[j]: p for j, p in enumerate(peaks) if p >= floor})
+        window_start = frame
+    return evidence
+
+
+def _strip_log_probs(
+    image:      np.ndarray,
+    model:      CRNN,
+    device:     torch.device,
+    img_height: int = 64,
+    strip_id:   str = "",
+) -> torch.Tensor:
+    """Preprocesses one strip exactly as in training and returns the (T, V) log-probs."""
+    if len(image.shape) == 3:
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    h, w = image.shape
+    new_w = max(1, int(w * img_height / h))
+    image = cv2.resize(image, (new_w, img_height), interpolation=cv2.INTER_AREA)
+
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.5], std=[0.5]),
+    ])
+    tensor = transform(image).unsqueeze(0).to(device)
+    logger.info("transcribe_strip strip_id=%s input_tensor_shape=%s", strip_id, tuple(tensor.shape))
+
+    with torch.no_grad():
+        log_probs = model(tensor)           # (T, 1, V)
+    return log_probs.squeeze(1)             # (T, V)
+
+
+def transcribe_strip_with_evidence(
+    image:      np.ndarray,
+    model:      CRNN,
+    device:     torch.device,
+    img_height: int = 64,
+    strip_id:   str = "",
+) -> Tuple[List[Tuple[str, float]], List[Dict[str, float]]]:
+    """
+    Same decode as ``transcribe_strip(..., return_confidence=True)``, plus the
+    per-token accidental evidence that ``infer_pitch(accidental_evidence=...)``
+    uses to recover dropped or misplaced accidentals.
+
+    Returns:
+        ((symbol, confidence) pairs, evidence list parallel to them).
+    """
+    log_probs = _strip_log_probs(image, model, device, img_height, strip_id)
+    indices, confidences = _greedy_ctc_decode_with_confidence(log_probs)
+    tokens = [(IDX_TO_SYM.get(i, "<unk>"), c) for i, c in zip(indices, confidences)]
+    logger.info("transcribe_strip strip_id=%s raw_tokens=%s", strip_id, [t for t, _ in tokens])
+    return tokens, _accidental_evidence(log_probs)
+
+
 def transcribe_strip(
     image:             np.ndarray,
     model:             CRNN,
@@ -1661,23 +1835,7 @@ def transcribe_strip(
         List[Tuple[str, float]] (symbol, confidence) pairs if
         return_confidence=True.
     """
-    if len(image.shape) == 3:
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-    h, w = image.shape
-    new_w = max(1, int(w * img_height / h))
-    image = cv2.resize(image, (new_w, img_height), interpolation=cv2.INTER_AREA)
-
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5], std=[0.5]),
-    ])
-    tensor = transform(image).unsqueeze(0).to(device)
-    logger.info("transcribe_strip strip_id=%s input_tensor_shape=%s", strip_id, tuple(tensor.shape))
-
-    with torch.no_grad():
-        log_probs = model(tensor)           # (T, 1, V)
-    log_probs = log_probs.squeeze(1)        # (T, V)
+    log_probs = _strip_log_probs(image, model, device, img_height, strip_id)
 
     if return_confidence:
         indices, confidences = _greedy_ctc_decode_with_confidence(log_probs)
