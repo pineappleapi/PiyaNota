@@ -144,10 +144,25 @@ fermata when at least 3 voices have one directly followed by a note.
 
   - Pitch drops 1-3 pp.
   - Strip length is not a lever: the CRNN reads locally, and chunk seams add errors.
-- **E4, speck filter** (whiten ink components ≤ A px at CRNN scale before decoding, A in {0, 2, 4, 6, 9}, plus the
-  E1b rule): see results below.
+- **E4, speck filter: small gain, not adopted yet.**
+  - Method: whiten 8-connected ink components of at most A px at CRNN input scale, then decode greedy, applying
+    the E1b rule.
 
-<!-- E4 results are filled in when the run finishes -->
+    | A (px) | Camera SER | Digital SER |
+    |---|---|---|
+    | 0 | 25.88-27.60% | 15.31-15.60% |
+    | 2 | 25.42-26.79% | 15.31-15.65% |
+    | 4 | 25.32-26.71% | 15.56-15.70% |
+    | 6 | 26.19-27.24% | 15.16-15.51% |
+    | 9 | 27.78-28.78% | 17.23-17.48% |
+
+  - Pitch is unchanged within ±0.3 pp.
+  - Camera gains 0.5-0.9 pp at A = 2-4. Digital is neutral, and A = 9 hurts both, because it erases dots and
+    thin glyph parts.
+  - The threshold was picked on dev, so the gain is optimistic. Specks explain only a small part of the camera
+    dot and rhythm errors. Per ml-cv-lead, the stroke and binarisation ablations come next.
+  - A = 3 in Stage 1/2 is a candidate once those ablations are in. Phase 1 augmentation should add specks
+    either way.
 
 ## 5. The plan
 

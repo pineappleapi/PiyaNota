@@ -20,7 +20,7 @@ On eval_prelim (dev data, diagnostic only):
 
 **No-training experiments:**
 - NO-GO: two-seed ensemble, chunked decoding, conservative meter rule.
-- Speck filter: see the plan doc.
+- Speck filter: camera -0.5 to -0.9 pp at 2-4 px, digital neutral; candidate, not adopted.
 
 **Next:**
 1. Phase 1 data engine: music→agnostic converter gated at ≥99% vs CPM gold; Verovio SATB renders cut by our own
