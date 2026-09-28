@@ -1,0 +1,65 @@
+[prelim-base] camera non_nobis_domine p1: 8 strips
+[prelim-base] camera non_nobis_domine p2: PIPELINE FAILURE ValueError: [Stage 2] page 2: unsupported_staff_layout — detected 9 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] camera non_nobis_domine p3: PIPELINE FAILURE ValueError: [Stage 2] page 3: unsupported_staff_layout — detected 13 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] camera non_nobis_domine p4: PIPELINE FAILURE ValueError: [Stage 2] page 4: unsupported_staff_layout — detected 9 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] camera honneur_a_toi p1: PIPELINE FAILURE ValueError: [Stage 2] page 1: unsupported_staff_layout — detected 7 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] camera honneur_a_toi p2: PIPELINE FAILURE ValueError: [Stage 2] page 2: unsupported_staff_layout — detected 10 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+_blank_border_if_no_staff: staff-band detection unreliable, falling back to literal-staffline-only border protection (re-introduces the BUG-012 failure mode if a real staff sits in the border zone on this image).
+[prelim-base] camera honneur_a_toi p3: PIPELINE FAILURE ValueError: [Stage 2] page 3: unsupported_staff_layout — detected 10 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] camera gaano_ko_ikaw_kamahal p1: PIPELINE FAILURE ValueError: [Stage 2] page 1: unsupported_staff_layout — detected 7 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] camera gaano_ko_ikaw_kamahal p2: 8 strips
+[prelim-base] camera gaano_ko_ikaw_kamahal p3: 8 strips
+[prelim-base] camera gaano_ko_ikaw_kamahal p4: 8 strips
+[prelim-base] camera gaano_ko_ikaw_kamahal p5: 12 strips
+[prelim-base] camera gaano_ko_ikaw_kamahal p6: PIPELINE FAILURE ValueError: [Stage 2] page 6: unsupported_staff_layout — detected 9 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] camera gaano_ko_ikaw_kamahal p7: PIPELINE FAILURE ValueError: [Stage 2] page 7: unsupported_staff_layout — detected 9 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] camera gaano_ko_ikaw_kamahal p8: 8 strips
+[prelim-base] camera gaano_ko_ikaw_kamahal p9: 4 strips
+[prelim-base] camera handog p1: PIPELINE FAILURE ValueError: [Stage 2] page 1: unsupported_staff_layout — detected 9 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] camera handog p2: PIPELINE FAILURE ValueError: [Stage 2] page 2: unsupported_staff_layout — detected 9 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] camera handog p3: PIPELINE FAILURE ValueError: [Stage 2] page 3: unsupported_staff_layout — detected 11 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] camera handog p4: 12 strips
+[prelim-base] camera handog p5: PIPELINE FAILURE ValueError: [Stage 2] page 5: unsupported_staff_layout — detected 5 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] camera handog p6: 8 strips
+[prelim-base] camera handog p7: 8 strips
+[prelim-base] camera handog p8: PIPELINE FAILURE ValueError: [Stage 2] page 8: unsupported_staff_layout — detected 6 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] camera handog p9: PIPELINE FAILURE ValueError: [Stage 2] page 9: unsupported_staff_layout — detected 7 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] camera handog p10: PIPELINE FAILURE ValueError: [Stage 2] page 10: unsupported_staff_layout — detected 13 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+_blank_border_if_no_staff: staff-band detection unreliable, falling back to literal-staffline-only border protection (re-introduces the BUG-012 failure mode if a real staff sits in the border zone on this image).
+[prelim-base] camera handog p11: PIPELINE FAILURE ValueError: [Stage 2] page 11: unsupported_staff_layout — detected 10 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] camera handog p12: PIPELINE FAILURE ValueError: [Stage 2] page 12: unsupported_staff_layout — detected 10 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+_blank_border_if_no_staff: staff-band detection unreliable, falling back to literal-staffline-only border protection (re-introduces the BUG-012 failure mode if a real staff sits in the border zone on this image).
+[prelim-base] camera handog p13: 8 strips
+_blank_border_if_no_staff: staff-band detection unreliable, falling back to literal-staffline-only border protection (re-introduces the BUG-012 failure mode if a real staff sits in the border zone on this image).
+[prelim-base] camera handog p14: PIPELINE FAILURE ValueError: [Stage 2] page 14: unsupported_staff_layout — detected 9 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] camera dont_stop_me_now p1: PIPELINE FAILURE ValueError: [Stage 2] page 1: unsupported_staff_layout — detected 13 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] camera dont_stop_me_now p2: 12 strips
+[prelim-base] camera dont_stop_me_now p3: 12 strips
+[prelim-base] camera dont_stop_me_now p4: PIPELINE FAILURE ValueError: [Stage 2] page 4: unsupported_staff_layout — detected 10 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] camera dont_stop_me_now p5: 12 strips
+[prelim-base] digital non_nobis_domine p1: PIPELINE FAILURE ValueError: [Stage 2] page 1: unsupported_staff_layout — detected 9 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] digital non_nobis_domine p2: 8 strips
+[prelim-base] digital non_nobis_domine p3: 12 strips
+[prelim-base] digital non_nobis_domine p4: PIPELINE FAILURE ValueError: [Stage 2] page 4: unsupported_staff_layout — detected 11 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] digital dont_stop_me_now p1: PIPELINE FAILURE ValueError: [Stage 2] page 1: unsupported_staff_layout — detected 11 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] digital dont_stop_me_now p2: 12 strips
+[prelim-base] digital dont_stop_me_now p3: 8 strips
+[prelim-base] digital dont_stop_me_now p4: PIPELINE FAILURE ValueError: [Stage 2] page 4: unsupported_staff_layout — detected 10 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] digital dont_stop_me_now p5: 12 strips
+[prelim-base] camera both_sides_now p1: PIPELINE FAILURE ValueError: [Stage 2] page 1: unsupported_staff_layout — detected 13 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] camera both_sides_now p2: PIPELINE FAILURE ValueError: [Stage 2] page 2: unsupported_staff_layout — detected 10 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] camera both_sides_now p3: PIPELINE FAILURE ValueError: [Stage 2] page 3: unsupported_staff_layout — detected 13 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+_blank_border_if_no_staff: staff-band detection unreliable, falling back to literal-staffline-only border protection (re-introduces the BUG-012 failure mode if a real staff sits in the border zone on this image).
+[prelim-base] camera both_sides_now p4: 12 strips
+[prelim-base] camera both_sides_now p6: PIPELINE FAILURE ValueError: [Stage 2] page 6: unsupported_staff_layout — detected 9 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] camera both_sides_now p7: PIPELINE FAILURE ValueError: [Stage 2] page 7: unsupported_staff_layout — detected 10 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] camera both_sides_now p8: PIPELINE FAILURE ValueError: [Stage 2] page 8: unsupported_staff_layout — detected 6 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] digital both_sides_now p1: 12 strips
+[prelim-base] digital both_sides_now p2: 12 strips
+[prelim-base] digital both_sides_now p3: 12 strips
+[prelim-base] digital both_sides_now p4: 12 strips
+[prelim-base] digital both_sides_now p5: 12 strips
+[prelim-base] digital both_sides_now p6: 12 strips
+[prelim-base] digital both_sides_now p7: 12 strips
+[prelim-base] digital both_sides_now p8: PIPELINE FAILURE ValueError: [Stage 2] page 8: unsupported_staff_layout — detected 10 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] digital both_sides_now p9: PIPELINE FAILURE ValueError: [Stage 2] page 9: unsupported_staff_layout — detected 9 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).

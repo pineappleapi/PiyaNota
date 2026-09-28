@@ -6,13 +6,22 @@ one per voice (Soprano, Alto, Tenor, Bass).
 Dependencies:
     pip install midiutil pydub
     Also requires ffmpeg installed on the system for MP3 export.
-    For piano soundfont rendering: pip install midi2audio
+    For piano soundfont rendering: a system fluidsynth on PATH (called directly)
     Download a piano soundfont (.sf2) e.g. GeneralUser GS or FluidR3.
 """
 
 import os
+import shutil
+import subprocess
+import sys
+import warnings
 from pathlib import Path
 from midiutil import MIDIFile
+
+from stage4_reconstruction import TICKS_PER_QUARTER
+
+# FluidSynth output sample rate (midi2audio's former default).
+RENDER_SAMPLE_RATE = 44100
 
 # ── MIDI constants ────────────────────────────────────────────────────────────
 PPQ          = 480          # pulses per quarter note (ticks per beat)
@@ -20,6 +29,13 @@ DEFAULT_BPM  = 90           # default tempo if not detected
 MIDI_CHANNEL = 0            # piano channel
 MIDI_VOLUME  = 100          # note velocity (0–127)
 PIANO_PROGRAM = 0           # General MIDI program 0 = Acoustic Grand Piano
+SUSTAIN_PEDAL_CC = 64       # controller used only as an end-of-piece length pin
+
+# Stage 4 places events in ticks of TICKS_PER_QUARTER; onset_beats = tick / PPQ
+# is only correct while both use the same resolution.
+if PPQ != TICKS_PER_QUARTER:
+    raise RuntimeError(
+        f"Stage 5 PPQ ({PPQ}) != Stage 4 TICKS_PER_QUARTER ({TICKS_PER_QUARTER})")
 
 # Voice → MIDI track index
 VOICE_TRACK = {
@@ -59,53 +75,23 @@ def synthesize_satb(
     print(f"\n[Stage 5] Synthesizing SATB audio at {bpm} BPM...")
 
     output_files = {}
+    total_ticks = _piece_end_tick(satb_sequences)
 
     for voice in VOICES:
         events = satb_sequences.get(voice, [])
         if not events:
-            print(f"  [Stage 5] WARNING: No events for {voice}, skipping.")
+            # Loud on purpose: the caller gets fewer than four tracks, which
+            # downstream playback would otherwise treat as a valid result.
+            msg = (f"[Stage 5] No events for {voice}: NO audio file will be "
+                   f"produced for this voice ({len(output_files)} of "
+                   f"{len(VOICES)} so far).")
+            print(f"  {msg.replace('[Stage 5]', '[Stage 5] WARNING:', 1)}",
+                  file=sys.stderr)
+            warnings.warn(msg, RuntimeWarning, stacklevel=2)
             continue
 
         # ── Build single-track MIDI per voice ─────────────────────────────
-        midi     = MIDIFile(1, ticks_per_quarternote=PPQ)
-        track    = 0
-        midi.addTempo(track, 0, bpm)
-        midi.addProgramChange(track, MIDI_CHANNEL, 0, PIANO_PROGRAM)
-
-        current_tick = 0
-
-        # Group events by tick_onset to handle chords correctly
-        from collections import defaultdict
-        tick_map = defaultdict(list)
-        for ev in events:
-            tick_map[ev["tick_onset"]].append(ev)
-
-        for tick_onset in sorted(tick_map.keys()):
-            tick_events = tick_map[tick_onset]
-
-            for ev in tick_events:
-                if ev["type"] == "rest" or ev["pitch"] is None:
-                    # Rests just advance time — no MIDI event needed
-                    continue
-
-                pitch    = ev["pitch"]
-                duration = ev["duration_ticks"]
-
-                if duration <= 0:
-                    continue
-
-                # midiutil uses beats, not ticks — convert
-                onset_beats    = tick_onset / PPQ
-                duration_beats = duration   / PPQ
-
-                midi.addNote(
-                    track    = track,
-                    channel  = MIDI_CHANNEL,
-                    pitch    = pitch,
-                    time     = onset_beats,
-                    duration = duration_beats,
-                    volume   = MIDI_VOLUME,
-                )
+        midi = build_voice_midi(events, bpm, total_ticks)
 
         # ── Save MIDI file ─────────────────────────────────────────────────
         midi_path = output_path / f"{voice.lower()}.mid"
@@ -132,6 +118,87 @@ def synthesize_satb(
     return output_files
 
 
+# ── MIDI construction ─────────────────────────────────────────────────────────
+
+def _piece_end_tick(satb_sequences: dict) -> int:
+    """Latest event end (onset + duration, rests included) over all voices."""
+    return max(
+        (e["tick_onset"] + e["duration_ticks"]
+         for voice in VOICES for e in satb_sequences.get(voice, [])),
+        default=0)
+
+
+def voice_notes(events: list) -> list:
+    """
+    Audible notes of one voice as (onset_beats, duration_beats, pitch).
+
+    tick_onset is Stage 4's global tick (PPQ per quarter), so beats are a
+    plain division -- rests need no output, their time is the gap between
+    onsets. Kept separate from MIDIFile construction so tests can assert on
+    it without parsing MIDI bytes.
+    Identical (onset, pitch) notes collapse to one (the longest), so a
+    duplicated chord note never sounds twice at double velocity.
+    """
+    longest: dict = {}
+    for e in events:
+        if (e["type"] != "note" or e["pitch"] is None
+                or e["duration_ticks"] <= 0):
+            continue
+        key = (e["tick_onset"], e["pitch"])
+        longest[key] = max(longest.get(key, 0), e["duration_ticks"])
+    # Same-pitch overlap within one voice: the earlier note is clipped to the
+    # next same-pitch onset. Left overlapping, a MIDI writer/synth can pair
+    # note-offs with the wrong note-on and leave a note hanging (observed:
+    # 44 note-ons vs 43 note-offs). A monophonic voice never needs two
+    # sounding copies of one pitch, so clipping loses nothing audible.
+    by_pitch: dict = {}
+    for (tick, pitch), dur in sorted(longest.items()):
+        by_pitch.setdefault(pitch, []).append([tick, dur])
+    clipped = 0
+    for runs in by_pitch.values():
+        for cur, nxt in zip(runs, runs[1:]):
+            if cur[0] + cur[1] > nxt[0]:
+                cur[1] = nxt[0] - cur[0]      # nxt onset > cur onset: dict keys are unique
+                clipped += 1
+    if clipped:
+        warnings.warn(
+            f"[Stage 5] {clipped} same-pitch overlapping note(s) clipped to "
+            "the next same-pitch onset (upstream tick/duration inconsistency)",
+            RuntimeWarning, stacklevel=2)
+    return sorted((tick / PPQ, dur / PPQ, pitch)
+                  for pitch, runs in by_pitch.items() for tick, dur in runs)
+
+
+def build_voice_midi(events: list, bpm: int, total_ticks: int) -> MIDIFile:
+    """
+    Single-track MIDI for one voice, padded to `total_ticks`.
+
+    midiutil ends a track at its last event, so a voice that rests while
+    others still sing (or ends earlier) would otherwise be shorter and drift
+    out of sync when the four files are played together. A harmless
+    sustain-pedal-off controller event at `total_ticks` pins every voice's
+    track to the same length. Note: callers pass _piece_end_tick(), which is
+    the end of the LAST EVENT over all voices, not the last full bar's end, so
+    the padding can stop short of a bar line when the final bar is underfull.
+    """
+    midi = MIDIFile(1, ticks_per_quarternote=PPQ)
+    track = 0
+    midi.addTempo(track, 0, bpm)
+    midi.addProgramChange(track, MIDI_CHANNEL, 0, PIANO_PROGRAM)
+    for onset_beats, duration_beats, pitch in voice_notes(events):
+        midi.addNote(
+            track    = track,
+            channel  = MIDI_CHANNEL,
+            pitch    = pitch,
+            time     = onset_beats,
+            duration = duration_beats,
+            volume   = MIDI_VOLUME,
+        )
+    midi.addControllerEvent(track, MIDI_CHANNEL, total_ticks / PPQ,
+                            SUSTAIN_PEDAL_CC, 0)
+    return midi
+
+
 # ── Audio rendering ───────────────────────────────────────────────────────────
 
 def _render_to_mp3(
@@ -145,14 +212,13 @@ def _render_to_mp3(
 
     Requires:
         - FluidSynth installed (fluidsynth command available)
-        - pydub installed (pip install pydub)
+        - pydub installed (pip install pydub; on Python 3.13+ also audioop-lts)
         - ffmpeg installed for MP3 export
         - A valid .sf2 soundfont file
 
     Returns True on success, False on failure.
     """
     try:
-        from midi2audio import FluidSynth
         from pydub import AudioSegment
 
         sf_path = Path(soundfont_path)
@@ -161,9 +227,21 @@ def _render_to_mp3(
                   f"Download a piano .sf2 and set --soundfont.")
             return False
 
-        # MIDI → WAV via FluidSynth
-        fs = FluidSynth(sound_font=str(sf_path))
-        fs.midi_to_audio(str(midi_path), str(wav_path))
+        fluidsynth = shutil.which("fluidsynth")
+        if fluidsynth is None:
+            print("  [Stage 5] WARNING: fluidsynth not found on PATH.")
+            return False
+
+        # MIDI → WAV via FluidSynth. Options must come before the soundfont and MIDI file:
+        # FluidSynth 2.x ignores options placed after them (midi2audio's order), which left no WAV.
+        subprocess.run(
+            [fluidsynth, "-ni", "-F", str(wav_path), "-r", str(RENDER_SAMPLE_RATE),
+             str(sf_path), str(midi_path)],
+            check=True, capture_output=True, text=True,
+        )
+        if not wav_path.exists():
+            print(f"  [Stage 5] Rendering error: fluidsynth wrote no WAV at {wav_path}")
+            return False
 
         # WAV → MP3 via pydub + ffmpeg
         audio = AudioSegment.from_wav(str(wav_path))
@@ -176,7 +254,10 @@ def _render_to_mp3(
 
     except ImportError as e:
         print(f"  [Stage 5] Missing dependency: {e}. "
-              f"Install with: pip install midi2audio pydub")
+              f"Install with: pip install pydub")
+        return False
+    except subprocess.CalledProcessError as e:
+        print(f"  [Stage 5] fluidsynth failed ({e.returncode}): {e.stderr.strip()}")
         return False
     except Exception as e:
         print(f"  [Stage 5] Rendering error: {e}")

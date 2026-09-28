@@ -1,0 +1,24 @@
+{
+ "started": "2026-09-28 03:41:07",
+ "torch": "2.6.0+cu124",
+ "hashes": {
+  "stage1_preprocessing.py": "831f2883ccffa30931b283f2576416bf6f264a4cd0bf29907712577880d8d11e",
+  "stage2_detection.py": "26c1c5857acbc64ab33ce79af8e1c1685968d86ebbd4a1f6a592a0f7491025b2",
+  "stage3_transcription.py": "e12b0a621bfedf10af15fcf9ed250a798ca54eabda3aba9cf8ee576918da7459",
+  "stage3_clefkey.py": "87927e463548f0ba5738b468be0711180e460a8aa1a09eca789d11d4528ca402",
+  "clef_key_core.py": "ad507cd1a5d549a13105d2a1b60dcbcbf9dab89c2639fac769fb074a9a178532",
+  "clef_voice_rules.py": "c9752eb7a1470f60b60f0cb57ca3c2041cc00bb01804be79a2840841f4935d07"
+ },
+ "crnn": {
+  "seed1": "1192a0d03718a47d2d11acb1590b7f1c4b41fb76f1ee2ab31246551a438e7fa9",
+  "seed2": "70e39bf52ef4d49488547c83d00d6ba24b8152a8632aa3f6169ad29b29431696",
+  "baseline": "b1c9803cebb2ce83c6c132dd70c5219bb64989659fc46a7003d357f03596d47e"
+ },
+ "yolo": "f55bb85176876d8af6eb5d02b56e22f65193e6bbc244f2e33f59ea6234018213",
+ "clef_key_ckpt": "e718d4479b1310369b64cfaf9a8f1ff433179543ffa9d1810b24c683de13fe10",
+ "clef_key_thresholds": {
+  "clef": 0.3,
+  "key": 0.7650000000000003,
+  "g8vb_reliable": true
+ }
+}

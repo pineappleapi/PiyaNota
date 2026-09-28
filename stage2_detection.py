@@ -3,6 +3,7 @@ PiyaNota - Stage 2: Staff Region Detection (YOLOv8)
 Detects and extracts individual staff strips from preprocessed score pages.
 """
 
+import json
 import logging
 
 import cv2
@@ -11,6 +12,8 @@ from pathlib import Path
 
 # Ultralytics YOLOv8 — install with: pip install ultralytics
 from ultralytics import YOLO
+
+from stage1_preprocessing import StaffCurve, track_staff_curves
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +24,19 @@ VOICE_MAP = {1: "Soprano", 2: "Alto", 3: "Tenor", 4: "Bass"}
 # Detection thresholds
 CONF_THRESHOLD = 0.4   # minimum confidence to keep a detection
 NMS_THRESHOLD  = 0.3   # IoU threshold for Non-Maximum Suppression
-STRIP_HEIGHT   = 250    # fixed height for CRNN-CTC input (px) — overridden below (BUG-011
-                        # review flagged this duplicate definition as a silent-flip risk if
-                        # the file is reordered; the line-250 reassignment is the one that
-                        # actually takes effect since Python resolves the global at call time)
+STRIP_HEIGHT   = 64     # fixed height for CRNN-CTC input (px); must equal Stage 3's img_height
+
+
+# Classical-prior reconciliation (BUG-001). YOLO alone returns 10/12 staves on
+# some camera photos; an independent line-tracking count validates and repairs it.
+BINARY_THRESHOLD = 127          # preprocessed pages are already binary; any mid value works
+MATCH_MAX_CENTER_SPACINGS = 2.5  # YOLO box center may sit this many line-spacings off a curve and still "agree"
+# Half-height of a classical box. 2.1 spacings (box ~4.2) matches YOLO's typical box height on
+# these photos (~3.8-4.5): crop padding scales with box height, so a taller box would shrink
+# the staff to ~36% of the strip vs ~50% for YOLO boxes and change the CRNN's glyph scale.
+CLASSICAL_BOX_HALF_SPACINGS = 2.1
+MAX_BOXES_PER_PAGE = 16          # Rule 2 cap (4 systems x 4 voices)
+STAFFS_PER_SYSTEM = 4
 
 
 def detect_staff_regions(
@@ -34,7 +46,22 @@ def detect_staff_regions(
     save_strips: bool = True,
     save_viz: bool = False,          # ← new flag
     viz_dir: str = "data/detection_viz",
+    manifest_path: str | None = None,
 ) -> dict:
+    """Detects staves per page and crops one fixed-height strip per staff.
+
+    Args:
+        preprocessed_images: Stage 1 output: (page, page_index) or
+            (page, page_index, strip_source) tuples. Boxes are found on ``page``; when a native-
+            resolution ``strip_source`` (same geometry, already lyric-masked) is given, strips
+            are cut from it and shrunk to STRIP_HEIGHT with INTER_AREA, so thin glyphs
+            (rests, flags, ties) are not lost to the 1600px detection binarization.
+        manifest_path: If set, writes a JSON list of {strip_id, page, system,
+            voice, box, source, strip_source} so a strip can be traced back to its page
+            region. ``strip_source`` is "native" or "fallback" (cut from the 1600 px
+            detection page, where thin rests/ties can already be broken).
+    """
+    manifest: list[dict] = []
     output_path = Path(output_dir)
     if save_strips:
         output_path.mkdir(parents=True, exist_ok=True)
@@ -47,7 +74,13 @@ def detect_staff_regions(
 
     voice_sequences = {"Soprano": [], "Alto": [], "Tenor": [], "Bass": []}
 
-    for image, page_index in preprocessed_images:
+    for page in preprocessed_images:
+        image, page_index = page[0], page[1]
+        strip_source = page[2] if len(page) > 2 else None
+        strip_origin = "native" if strip_source is not None else "fallback"
+        if strip_source is None:
+            logger.warning("[Stage 2] page %s: no native strip source, cutting strips from the "
+                           "detection-resolution page (thin glyphs may be degraded).", page_index)
         if len(image.shape) == 2:
             image_bgr = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
         else:
@@ -73,6 +106,9 @@ def detect_staff_regions(
 
         # Rule 3.5: remove duplicate detections on the same staff
         boxes = _remove_duplicates(boxes, min_cy_gap=30)
+
+        # Rule 3.55: cross-check against the classical staff tracker (BUG-001).
+        boxes = _reconcile_with_classical(boxes, image_bgr, page_index)
 
         # Rule 3.6: staff-count validation — open-score enforcement (PIYA-105 #4)
         if len(boxes) != 0 and len(boxes) % 4 != 0:
@@ -104,20 +140,97 @@ def detect_staff_regions(
 
         systems = [boxes[i:i+4] for i in range(0, len(boxes), 4)]
 
+        box_index = {id(b): i for i, b in enumerate(boxes)}
         for sys_idx, system in enumerate(systems, start=1):
             for v_idx, box in enumerate(system, start=1):
                 voice = VOICE_MAP.get(v_idx, f"Voice_{v_idx}")
                 strip_id = f"page{page_index:03d}_sys{sys_idx:02d}_{voice}_vidx{v_idx}"
-                strip = _crop_and_resize(image_bgr, box, STRIP_HEIGHT, strip_id=strip_id)
+                strip = _crop_and_resize(
+                    image_bgr, box, STRIP_HEIGHT, strip_id=strip_id,
+                    limits=_neighbor_limits(boxes, box_index[id(box)], img_h),
+                    source=strip_source)
                 voice_sequences[voice].append((strip, page_index, sys_idx, voice, v_idx))
+                manifest.append({
+                    "strip_id": strip_id, "page": page_index, "system": sys_idx,
+                    "voice": voice, "source": box.get("source", "yolo"),
+                    "strip_source": strip_origin,
+                    "box": {k: int(box[k]) for k in ("x1", "y1", "x2", "y2")},
+                })
                 logger.info("strip_id=%s dims=%dx%d (wxh)", strip_id, strip.shape[1], strip.shape[0])
 
                 if save_strips:
                     fname = output_path / f"{strip_id}.png"
                     cv2.imwrite(str(fname), strip)
 
+    if manifest_path is not None:
+        Path(manifest_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(manifest_path).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     _report(voice_sequences)
     return voice_sequences
+
+def _classical_boxes(image_bgr: np.ndarray) -> tuple[list[dict], list[StaffCurve]]:
+    """Finds staves by line tracking and returns one full-width box per staff.
+
+    Why classical: it has no training distribution, so it cannot share YOLO's
+    font/domain gap, and it gives an independent staff count on tilted pages.
+
+    Args:
+        image_bgr: Preprocessed page (Stage 1 output).
+
+    Returns:
+        (boxes sorted top-to-bottom, matching curves).
+    """
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+    _, binary = cv2.threshold(gray, BINARY_THRESHOLD, 255, cv2.THRESH_BINARY)
+    curves = track_staff_curves(binary)
+    img_h, img_w = binary.shape
+    boxes: list[dict] = []
+    for c in curves:
+        spacing = float(np.median(c.spacing_at(np.linspace(c.x_min, c.x_max, 32))))
+        half = CLASSICAL_BOX_HALF_SPACINGS * spacing
+        cy = c.mean_center
+        boxes.append({
+            "x1": 0, "x2": img_w,
+            "y1": max(0, int(round(cy - half))), "y2": min(img_h, int(round(cy + half))),
+            "cy": cy, "conf": 1.0, "source": "classical", "spacing": spacing,
+        })
+    return boxes, curves
+
+
+def _reconcile_with_classical(boxes: list, image_bgr: np.ndarray, page_index: int) -> list:
+    """Keeps YOLO's boxes when the classical tracker agrees; otherwise repairs them.
+
+    Agreement means the same count and every YOLO center within
+    MATCH_MAX_CENTER_SPACINGS of its curve, so clean pages keep YOLO's exact
+    output (no regression). On disagreement the classical boxes replace YOLO's
+    (fills missed staves, drops spurious/duplicate ones) but only if they form a
+    valid open-score layout; otherwise YOLO's result is returned and the caller's
+    divisible-by-4 validation still applies (PIYA-105 #4).
+    """
+    classical, _ = _classical_boxes(image_bgr)
+    n_c, n_y = len(classical), len(boxes)
+    if n_c == 0 or n_c > MAX_BOXES_PER_PAGE:
+        return boxes
+    if n_c == n_y and all(
+        abs(y["cy"] - c["cy"]) <= MATCH_MAX_CENTER_SPACINGS * c["spacing"]
+        for y, c in zip(boxes, classical)
+    ):
+        return boxes
+    if n_c % STAFFS_PER_SYSTEM != 0:
+        logger.warning(
+            "page=%d yolo=%d classical=%d source=yolo reason=classical_count_not_divisible_by_%d",
+            page_index, n_y, n_c, STAFFS_PER_SYSTEM)
+        print(f"[Stage 2] page {page_index}: classical count {n_c} not divisible by "
+              f"{STAFFS_PER_SYSTEM}; keeping YOLO's {n_y}.")
+        return boxes
+    # Loud on purpose: the tracker has no confidence output and was tuned on 7 photos, so any
+    # override must be traceable to a page (strip manifests carry source="classical").
+    logger.warning("page=%d yolo=%d classical=%d source=classical (tracker overrides YOLO)",
+                   page_index, n_y, n_c)
+    print(f"[Stage 2] page {page_index}: YOLO found {n_y}, line tracker found {n_c} "
+          f"-> using line-tracked staves.")
+    return classical
+
 
 def _remove_duplicates(boxes: list, min_cy_gap: int = 30) -> list:
     """
@@ -147,7 +260,8 @@ def _draw_and_save_viz(image_bgr, boxes, page_index, output_path,
     for sys_idx, system in enumerate(systems, start=1):
         for v_idx, box in enumerate(system, start=1):
             voice = VOICE_MAP.get(v_idx, f"Voice_{v_idx}")
-            label = f"S{sys_idx} {voice} ({box['conf']:.2f})"
+            src = box.get("source", "yolo")
+            label = f"S{sys_idx} {voice} ({src} {box['conf']:.2f})"
             cv2.rectangle(canvas, (box["x1"], box["y1"]),
                           (box["x2"], box["y2"]), box_color, box_thickness)
             (tw, th), baseline = cv2.getTextSize(
@@ -256,8 +370,6 @@ def _extract_boxes(results) -> list:
     return boxes
 
 
-STRIP_HEIGHT = 64   # ← match Stage 3 img_height directly
-
 # ── BUG-011 / fix/bug002-label-bleed: left-margin (voice-label) blanking ─────
 # Two independent blanking techniques were tried and reverted here -- see
 # docs/bug-tracker.md BUG-011 and the fix/bug002-label-bleed branch history.
@@ -274,17 +386,169 @@ STRIP_HEIGHT = 64   # ← match Stage 3 img_height directly
 # opposite -- removing it made the model worse, not better).
 
 
+# Content-adaptive strip extent. A fixed pad (0.5 x box height) matches CameraPrIMuS's
+# ~50% staff/height ratio on average, but clips the treble clef, ledger-line notes and
+# long stems on real photos. CameraPrIMuS crops follow the content extent, so we keep the
+# fixed pad as the MINIMUM and grow outward to whatever is physically attached to the staff.
+CROP_MIN_PAD = 0.5          # x box height, per side; the previous fixed padding
+CROP_MAX_PAD = 1.5          # x box height, per side; bounds growth into neighbouring staves
+CROP_X_SKIP_FRAC = 0.10     # ignore the left brace/bracket/voice label when scanning
+CROP_LINE_KERNEL_HEIGHTS = 2.0  # x box height; horizontal opening this long removes staff lines
+CROP_MIN_COMPONENT_PX = 6   # ignore specks so dust does not extend the crop
+CROP_MAX_COMPONENT_HEIGHTS = 2.5  # x box height; taller than any real glyph (a treble clef
+                                  # is ~2x) so it is a brace/bracket/barline spanning staves
+CROP_EDGE_MARGIN_PX = 2     # breathing room beyond the outermost attached ink
+CROP_LINE_REMOVAL_PAD_PX = 1    # extra rows removed above/below each staff line
+CROP_STROKE_MIN_SPACINGS = 1.0  # vertical run (x line spacing) that counts as a stem/clef
+                                # stroke rather than a staff line crossing it
+CROP_STAFF_SPACINGS = 4.0   # a box spans 4 line spacings (5 lines)
+CROP_SLIVER_MAX_WIDTH_PX = 4    # narrower than this AND taller than the staff = bracket sliver
+CROP_SLIVER_MIN_HEIGHTS = 1.25  # x box height
+
+# Lyric/text masking moved to Stage 1 (stage1_preprocessing.non_staff_ink_mask): it runs once
+# on the straightened page, and Stage 2 cuts strips from the already-masked pages.
+
+
+def _staff_glyph_components(
+    image: np.ndarray, box: dict, x_skip: int = 0
+) -> tuple[int, np.ndarray, np.ndarray, np.ndarray, int, np.ndarray, np.ndarray, np.ndarray] | None:
+    """Splits the ink around one staff into staff lines and connected glyph components.
+
+    Shared by the crop-extent scan and the lyric mask so both agree on what is "attached".
+
+    Returns:
+        None if the analysis window is empty, else
+        (win_top, ink, line_mask, labels, count, stats, staff_lines, strokes):
+        ``ink``/``line_mask``/``staff_lines``/``strokes`` are 0/1
+        masks over rows [win_top, ...) and columns [box.x1 + x_skip, box.x2); ``labels``/
+        ``count``/``stats`` come from connectedComponentsWithStats on the line-removed glyph
+        mask (staff lines removed, vertical strokes restored).
+    """
+    img_h, img_w = image.shape[:2]
+    gray = image if image.ndim == 2 else cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    x1 = max(int(box["x1"]), 0) + x_skip
+    x2 = min(int(box["x2"]), img_w)
+    y1, y2 = int(box["y1"]), int(box["y2"])
+    height = max(y2 - y1, 1)
+    max_pad = int(height * CROP_MAX_PAD)
+
+    win_top, win_bottom = max(0, y1 - max_pad), min(img_h, y2 + max_pad)
+    ink = (gray[win_top:win_bottom, x1:x2] < BINARY_THRESHOLD).astype(np.uint8)
+    if ink.size == 0:
+        return None
+
+    kernel = cv2.getStructuringElement(
+        cv2.MORPH_RECT, (max(int(height * CROP_LINE_KERNEL_HEIGHTS), 3), 1))
+    staff_lines = cv2.morphologyEx(ink, cv2.MORPH_OPEN, kernel)
+    line_mask = cv2.dilate(
+        staff_lines, np.ones((2 * CROP_LINE_REMOVAL_PAD_PX + 1, 1), np.uint8))
+    # Removing a staff line also cuts every stem and the clef where they cross it. Vertically
+    # long strokes are restored so their parts above/below the staff stay connected to the
+    # staff, without a blind bridge that would also glue nearby dynamics/lyrics on.
+    stroke_rows = max(int(height / CROP_STAFF_SPACINGS * CROP_STROKE_MIN_SPACINGS), 3)
+    strokes = cv2.morphologyEx(
+        ink, cv2.MORPH_OPEN, np.ones((stroke_rows, 1), np.uint8))
+    glyphs = (ink & (1 - line_mask)) | strokes
+
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(glyphs, connectivity=8)
+    return win_top, ink, line_mask, labels, count, stats, staff_lines, strokes
+
+
+def _content_extent(image: np.ndarray, box: dict,
+                    limits: tuple[int, int] | None = None) -> tuple[int, int]:
+    """Returns (y1, y2) of the strip crop, grown to include ink attached to the staff.
+
+    Why: notes, stems, slurs and the clef routinely extend past a fixed margin. Staff
+    lines are removed first because they touch every notehead and would otherwise chain
+    the whole page into one component; what remains is noteheads, stems, clef, accidentals
+    and slurs. Only components overlapping the staff's own rows count, so lyrics and
+    dynamics (separate glyphs) and neighbouring staves do not stretch the crop. The result
+    stays within [CROP_MIN_PAD, CROP_MAX_PAD] of the box.
+
+    Args:
+        limits: (upper, lower) page rows, normally the midpoints to the adjacent staves.
+            Growth beyond the minimum pad stops there: barlines that span two staves are
+            "attached" glyphs and would otherwise drag the next staff into the crop.
+    """
+    img_h = image.shape[0]
+    x_skip = int((box["x2"] - box["x1"]) * CROP_X_SKIP_FRAC)
+    y1, y2 = int(box["y1"]), int(box["y2"])
+    height = max(y2 - y1, 1)
+    min_pad, max_pad = int(height * CROP_MIN_PAD), int(height * CROP_MAX_PAD)
+
+    analysis = _staff_glyph_components(image, box, x_skip)
+    if analysis is None:
+        return max(0, y1 - min_pad), min(img_h, y2 + min_pad)
+    win_top, _, _, _, count, stats, _, _ = analysis
+
+    box_top, box_bottom = y1 - win_top, y2 - win_top
+    top, bottom = y1, y2
+    for i in range(1, count):
+        comp_top = stats[i, cv2.CC_STAT_TOP]
+        comp_bottom = comp_top + stats[i, cv2.CC_STAT_HEIGHT]
+        if stats[i, cv2.CC_STAT_AREA] < CROP_MIN_COMPONENT_PX:
+            continue
+        comp_h = stats[i, cv2.CC_STAT_HEIGHT]
+        if comp_h > height * CROP_MAX_COMPONENT_HEIGHTS:
+            continue  # system brace/bracket spanning staves, not this staff's own content
+        if (stats[i, cv2.CC_STAT_WIDTH] <= CROP_SLIVER_MAX_WIDTH_PX
+                and comp_h > height * CROP_SLIVER_MIN_HEIGHTS):
+            continue  # slanted bracket sliver; real stems are shorter than the staff+
+        if comp_bottom < box_top or comp_top > box_bottom:
+            continue  # does not touch this staff's rows
+        top = min(top, win_top + comp_top)
+        bottom = max(bottom, win_top + comp_bottom)
+
+    top = min(y1 - min_pad, top - CROP_EDGE_MARGIN_PX)
+    bottom = max(y2 + min_pad, bottom + CROP_EDGE_MARGIN_PX)
+    top, bottom = max(y1 - max_pad, top), min(y2 + max_pad, bottom)
+    if limits is not None:
+        # Never shrink below the old fixed pad, even on tightly spaced staves.
+        top = max(top, min(limits[0], y1 - min_pad))
+        bottom = min(bottom, max(limits[1], y2 + min_pad))
+    return max(0, top), min(img_h, bottom)
+
+
+def _neighbor_limits(boxes: list, index: int, img_h: int) -> tuple[int, int]:
+    """Returns the page rows halfway to the staves above and below boxes[index]."""
+    box = boxes[index]
+    upper = (boxes[index - 1]["y2"] + box["y1"]) // 2 if index > 0 else 0
+    lower = (box["y2"] + boxes[index + 1]["y1"]) // 2 if index + 1 < len(boxes) else img_h
+    return int(upper), int(lower)
+
+
 def _crop_and_resize(image: np.ndarray, box: dict, target_height: int,
-                     padding: float = 0.5,                # ← 30% not 150%
-                     strip_id: str = "") -> np.ndarray:
+                     padding: float = CROP_MIN_PAD,
+                     strip_id: str = "",
+                     adaptive_extent: bool = True,
+                     limits: tuple[int, int] | None = None,
+                     source: np.ndarray | None = None) -> np.ndarray:
+    """Crops one staff to a full-width strip and resizes it to target_height.
+
+    Args:
+        padding: Minimum per-side padding as a fraction of box height.
+        adaptive_extent: Grow the crop to the staff's attached content (see
+            _content_extent). False restores the old fixed-padding crop.
+        limits: Adjacent-staff midpoints bounding adaptive growth (see _content_extent).
+        source: Optional native-resolution page in the same geometry as ``image``. The crop
+            rows/columns are found on ``image`` and mapped onto it by the size ratio.
+    """
     img_h, img_w = image.shape[:2]
     x1, y1, x2, y2 = box["x1"], box["y1"], box["x2"], box["y2"]
 
-    pad = int((y2 - y1) * padding)
-    y1 = max(0, y1 - pad)
-    y2 = min(img_h, y2 + pad)
+    if adaptive_extent:
+        y1, y2 = _content_extent(image, box, limits)
+    else:
+        pad = int((y2 - y1) * padding)
+        y1 = max(0, y1 - pad)
+        y2 = min(img_h, y2 + pad)
 
-    crop = image[y1:y2, max(0, x1):x2]
+    x1 = max(0, x1)
+    if source is not None:
+        ky, kx = source.shape[0] / img_h, source.shape[1] / img_w
+        crop = source[int(round(y1 * ky)):int(round(y2 * ky)), int(round(x1 * kx)):int(round(x2 * kx))]
+    else:
+        crop = image[y1:y2, x1:x2]
 
     if crop.size == 0:
         return np.zeros((target_height, target_height, 3), dtype=np.uint8)
@@ -292,6 +556,8 @@ def _crop_and_resize(image: np.ndarray, box: dict, target_height: int,
     h, w = crop.shape[:2]
     new_w = int(w * (target_height / h))
     resized = cv2.resize(crop, (new_w, target_height), interpolation=cv2.INTER_AREA)
+    if resized.ndim == 2:
+        resized = cv2.cvtColor(resized, cv2.COLOR_GRAY2BGR)
     return resized
 
 

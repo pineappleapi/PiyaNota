@@ -81,6 +81,12 @@ later stages import functions from earlier ones rather than duplicating logic.
    group to strip lyric text before detection — active in `preprocess_score_image` (this doc
    previously said it was disabled/commented out; verified 2026-09-09 that it has actually been
    active all along, unrelated to the in-progress illumination-normalization/border-blanking rework).
+   **Camera-photo rectification (2026-09-24, branch `piya106/two-seed-rerun-amendment`, committed, unmerged;
+   BUG-013/BUG-001):** `track_staff_curves()` follows each 5-line staff as a curve (tolerates tilt, curl,
+   uneven spacing); `dewarp_to_staff_grid()` straightens each staff with a per-column vertical remap, only
+   when drift ≥ `DEWARP_MIN_DRIFT_PX` (5 px) so the dewarp step itself is a no-op on clean screenshots (the page is still changed by the non-staff-ink mask, so output is NOT bit-identical to before 2026-09-25); tracked staff rows are
+   restored after border/lyric blanking (which previously erased real staves on camera pages).
+   **Non-staff-ink mask + native strip source (2026-09-25, PIYA-121, same branch, BUG-015/BUG-016, committed, unmerged):** after dewarp, `non_staff_ink_mask()` erases ink that is neither the tracked staff nor connected (gap-bridged 0.2 spacing) to it - lyrics, titles, page-edge shadows - while keeping beams, ties, flags, rests and ledger-line notes. Detection/tracking stay at `DETECT_MAX_DIM` = 1600 px; the strip source is binarised once at native resolution (<= 4032 px) through the same perspective matrix and the same upsampled dewarp map, because binarising rests at 1600 px broke their ~1.6 px strokes. `training/run_stage12.py` regenerates strips, manifest, viz and 1:1 eyeball tiles; `training/step3_mask_audit.py` audits ties/beams/band ink (limits in its docstring and BUG-015).
 
 2. **`stage2_detection.py`** — runs a fine-tuned YOLOv8 model (`staff_detector_files/weights/best.pt`)
    to find staff-line bounding boxes on each preprocessed page, then:
@@ -92,6 +98,12 @@ later stages import functions from earlier ones rather than duplicating logic.
      layout with no missing/extra staves per system**
    - crops + resizes each staff into a fixed-height strip (`STRIP_HEIGHT = 64`, matching Stage 3's
      CRNN input height) for the CRNN
+   - `_reconcile_with_classical()` cross-checks YOLO against Stage 1's tracked staves: same count and
+     centres → YOLO boxes kept unchanged; otherwise tracked staves are used **only if** their count is
+     divisible by 4, else YOLO's boxes stay and the divisible-by-4 `ValueError` still fires. On the 7
+     Both Sides Now camera photos (tracker + YOLO) this gives 12/12/12/12/12/12/8 staves, all correct (was
+     6–13 per page). Developed on those photos — not an independent eval; see BUG-013.
+   - **Non-staff-ink masking now lives in Stage 1 (PIYA-121, 2026-09-25; supersedes the earlier Stage 2 mask; BUG-015):** Stage 2 does NOT mask. Strips are cut from the Stage 1 native-resolution strip source (`PreprocessedPage.strip_source`, mapped through the same geometry and dewarp as the 1600 px detection page) with an INTER_AREA shrink to `STRIP_HEIGHT` (BUG-016). Known residuals: band-overlapping dust, handwriting, dynamics and left-edge label text survive by design; Stage 3 effect unmeasured.
    Also contains `train_yolov8()` / `evaluate_model()`, reused by `train_staff_detector.py`.
 
 3. **`stage3_transcription.py`** — the core recognition stage: `CRNN` (ResNet-style CNN backbone →
@@ -106,16 +118,50 @@ later stages import functions from earlier ones rather than duplicating logic.
    file per voice under `data/transcribed_symbols/`.
 
 4. **`stage4_reconstruction.py`** — merges Stage 3's per-strip events into one continuous sequence per
-   voice (sorted by `page_index`, then `tick_onset`), and resolves slurs: `_resolve_slurs()` extends
-   the first note of a slurred group to cover the full slur duration and marks the absorbed
-   middle/end notes so Stage 5 skips them without breaking tick alignment. Raises `ValueError` if any
-   of the four SATB voices came back empty — a hard requirement that all four parts were detected.
+   voice (sorted by `page_index`, `sys_idx`, then `tick_onset`), then:
+   - **Ties, not slurs:** only a true tie merges (an explicit `tie_to_next`, or a slur whose two ends
+     are adjacent same-pitch notes with no rest between, including across a system break); phrase
+     slurs over different pitches never change audio. In Camera-PrIMuS every `slur.*` token is a
+     tie, so the CRNN has never seen a phrase slur. Merged notes fold into the first (`tie_span`,
+     `tied_note_ids`); a tie with no continuation is flagged `tie_unresolved`.
+   - **Global ticks:** each system starts at `pickup + previous bars × bar_ticks` (bar length from the
+     time signature), and each event keeps only its offset inside its own bar, so one misread rhythm
+     stays in its bar and cannot shift the other voices. A short first bar on the first strip of the
+     first page may be a pickup; it is right-aligned so bar 1's downbeat lands on the same tick in every
+     voice. The pickup length is chosen by evidence scoring (`_decide_pickups`): candidates are "no
+     pickup", each voice's first-bar length and the length implied by each short final bar; votes come
+     from voices agreeing (full first bars vote for "no pickup"), final bars that complement the
+     first, matching rhythms, standard lengths and a small no-pickup prior. A structural pre-check
+     handles a lone real pickup (one voice has one extra short bar whose total minus that bar equals
+     the others' total, as in Don't Stop Me Now Tenor). A candidate is accepted only with score ≥ 2.0
+     and a lead ≥ 0.75; otherwise short first bars are placed as bar 1 with `pickup_suspect` listing the
+     top candidates. Deviant voices are still right-aligned (longer first bars keep their last L ticks)
+     and flagged `pickup_length_mismatch`. All scoring constants are hand-set priors, not fit to data.
+   - **Overflow never fails the conversion:** a bar over its length is repaired, not dropped. A run of
+     ≥3 same-duration slots (rests included) is scaled to fit — an exact 3-in-2 triplet gets 2/3
+     durations (`suspected_tuplet`), anything ambiguous is spread evenly (`bar_overflow_run_scaled`),
+     and everything after the run shifts left so the bar ends exactly on its length. With no scalable
+     run, the fallback is whole-bar scaling (off-grid, ≥0.75), clipping, or a confidence-based drop
+     (only when every note has a `confidence`); a total near a multiple of the bar is flagged
+     `suspected_missing_barline` and clipped. The beat is assumed to be a quarter (wrong for 6/8).
+   - **Flags, not silent repair:** `reconstruct_satb_with_report()` returns a report (`flags`,
+     `pickup_ticks`, `total_ticks`, `systems`) — e.g. `pickup_detected`, `bar_underfull`,
+     `bar_overflow_clipped`, `bar_count_mismatch`, `tie_unresolved`. Flags that need a human carry
+     `review_needed`.
+   Raises `ValueError` if any of the four SATB voices came back empty — a hard requirement that all
+   four parts were detected. Known gaps: mid-bar system breaks are not handled, and Stage 3 cannot
+   currently represent chords (its `chord_id` block never fires, and Camera-PrIMuS has no chord token),
+   so simultaneous notes in one voice (e.g. Bass divisi) arrive as sequential notes until the
+   vocabulary/retraining work lands.
 
 5. **`stage5_synthesis.py`** — converts each voice's event list into a single-track MIDI file (ticks
    converted to beats via `PPQ = 480`), then renders MIDI → WAV → MP3 through FluidSynth + a `.sf2`
    soundfont + pydub/ffmpeg. Falls back to returning the raw `.mid` path per voice if audio rendering
    dependencies/soundfont are missing. `run_full_pipeline()` here is the de facto single entry point
-   that chains Stages 1–5.
+   that chains Stages 1–5. `PPQ` must equal Stage 4's `TICKS_PER_QUARTER` (checked at import, raises
+   `RuntimeError`). All four voices are padded to the same length (through the last event end, not the
+   last bar end; a sustain-pedal-off event pins the end), identical (onset, pitch) notes collapse to the
+   longest, and same-pitch overlaps are clipped with a warning so no note-on is left without a note-off.
 
 ### Directory conventions
 
@@ -137,7 +183,18 @@ later stages import functions from earlier ones rather than duplicating logic.
 The dict `{"Soprano": [...], "Alto": [...], "Tenor": [...], "Bass": [...]}` is the shared interchange
 format from Stage 2 onward (strips → events → reconstructed events), always keyed by the constant
 voice names, not indices. Event dicts (Stage 3+) carry `type`, `pitch` (MIDI int or `None` for rests),
-`duration_ticks`, `voice`, `page_index`, `chord_id`, `symbol`, `tick_onset`, `slur`.
+`duration_ticks`, `voice`, `page_index`, `sys_idx`, `chord_id`, `symbol`, `tick_onset`, `slur`,
+`measure_index`, `time_signature`. `tick_onset`, `measure_index` and (in Stage 3 output) ticks are
+local to each system strip; Stage 4 rewrites `tick_onset` to a global tick and keeps the original as
+`local_tick_onset`, and adds `global_bar` (1-based, 0 = pickup, `None` = local-placement fallback),
+`tie_to_next`, `tie_span` and `tied_note_ids`. Stage 3 adds `confidence` (min over the note's note,
+accidental and dot tokens) only when run on CRNN output; it is absent on ground-truth events. It ranks
+likely misreads within a bar but is not a trust signal (BUG-011: confidently wrong). It is a frame-mean softmax, not a calibrated
+probability, and excludes the clef, key signature and omitted tokens; Stage 4 uses it only as an
+overflow tie-break, and every Stage 4 threshold/weight is a hand-set prior with no held-out validation. A note preceded (in the same bar) by an inline accidental that
+failed position anchoring carries `unanchored_accidental_dropped` (the dropped token; BUG-033). Hand-authored ground truth
+(`ground_truth/build_ground_truth.py`) additionally carries `note_id`, `written_pitch`, `chord_tail`
+and `source_image`.
 
 ## Role
 
@@ -153,6 +210,9 @@ stage scripts over frameworks; match that.
 - Before changing existing code, give a one-line risk assessment of what could break.
 - Quote acceptance criteria directly from the ticket file rather than assuming or paraphrasing them.
 - If a ticket's criteria are ambiguous or underspecified, flag it and ask — don't guess.
+- Hand-authored ground truth (e.g. `ground_truth/`) is diagnostic only: never present results measured
+  against it, or against the 6-screenshot set, as accuracy evidence. The `piyanota_dataset` photos are
+  TEST-only and never used for training, model selection or threshold tuning.
 
 ## Code style
 
@@ -235,6 +295,25 @@ treat it as stale if either doc has moved on.
     not a floor — true real-world accuracy is unmeasured and likely lower. See BUG-011 in
     `docs/bug-tracker.md` for full detail and ml-cv-lead's review.
 
+- **Clef/key classifier (ClefKeyNet), real-photo validation (2026-09-27, one-shot, FAIL; BUG-021):**
+  the T4 seed-20260926 checkpoint, run on 222 real staves (Dormi, Livin', Flashlight), is right 95.5% of the time on clefs
+  and 96.0% on keys when "sure", with 4.5% of clefs confidently wrong. The gate needs 99% / Wilson LB 97% / at most 1%
+  confident-wrong. The checkpoint was used under a post-hoc user override after the T4-vs-CPU
+  reproducibility cross-check failed 5 tolerances. The validation set is now spent for tuning. The classifier is not
+  wired into Stage 3; as of 2026-09-28 it is used only through the eval wrapper `stage3_clefkey.py`. Detail: `docs/decisions/piya-106-clef-keysig-detector-plan.md` (last sections).
+
+- **Fresh-photo pipeline eval, Stage 3 with/without ClefKeyNet (2026-09-28, pre-registered;
+  `data/eval_fresh/REPORT.md`):**
+  - **Non Nobis Domine** is the only user-verified GT and the only gated piece (36 staves, 275 notes).
+    End-to-end pitch accuracy is 8.0-10.2% as-is and 64.0% with the classifier, or 86% on the 28 strips
+    Stage 2 found. Gate: PASS.
+  - Rhythm stays at 64%, and token SER falls only from 58% to 50-51%. All of the gain comes from the clef/key
+    header; note reading is the main source of error.
+  - Agent-made, diagnostic-only GT: Honneur 73-76%, Gaano 83%, Handog 54% (78% on found strips).
+  - All four pieces use voice-default clefs, so a voice-default rule would match the classifier on clefs.
+  - `stage3_clefkey.py` is an eval wrapper; the classifier is still not wired into `stage3_transcription.py`.
+  - New bugs: BUG-024, BUG-025, BUG-026.
+
 - **DS2 Dense (DeepScoresV2) — YOLOv8 staff detector (Stage 2):** one number on record, and it is
   compromised — do not present it as a clean result.
   - Interim PIYA-105 eval logged 2026-09-10: mAP50 0.9766, mAP50-95 0.8654, precision 0.954,
@@ -244,6 +323,8 @@ treat it as stale if either doc has moved on.
     `dataset.yaml`, despite the function's docstring claiming a test-split eval. A follow-up run with
     `split="test"` hit a separate, unresolved `RuntimeError: Numpy is not available` when the test-split
     label cache had to be built fresh. There is currently no valid test-split number.
+
+**Checkpoint metadata, authoritative (2026-09-26, user decision: use the files' own metadata; sha256 matches data/eval_dsmn/checkpoint_hashes.txt):** the deployed `finetuned_font_seed{1,2}.pt` are from the 2026-09-23 two-seed run, not the 2026-09-19 run: seed1 epoch 2, `loo_font_ser` 0.0926, canary clean/distorted 0.0785/0.1311; seed2 epoch 2, `loo_font_ser` 0.0562, canary 0.0492/0.0865. Report as a range (0.0562-0.0926). Older 0.0523/0.0886 figures below refer to the 2026-09-19 run whose checkpoints were overwritten.
 
 ## Retraining plan for BUG-011 (real-world font domain gap)
 

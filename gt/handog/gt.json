@@ -1,0 +1,9110 @@
+[
+ {
+  "strip_id": "page001_sys01_Soprano",
+  "page": 1,
+  "sys": 1,
+  "voice": "Soprano",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "rest.quarter-L3",
+   "dot-S3",
+   "note.quarter-L2",
+   "dot-S2",
+   "slur.start-L2",
+   "slur.end-L2",
+   "note.quarter-L2",
+   "slur.start-L2",
+   "barline-L1",
+   "slur.end-L2",
+   "note.whole-L2",
+   "barline-L1",
+   "rest.quarter-L3",
+   "dot-S3",
+   "note.quarter-S3",
+   "dot-S3",
+   "slur.start-S3",
+   "slur.end-S3",
+   "note.quarter-S3",
+   "<TIEX>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "rest",
+    "dur": 720,
+    "measure": 0
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 67,
+    "dur": 720,
+    "measure": 0,
+    "tie": "in",
+    "name": "G4",
+    "d": "q.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 67,
+    "dur": 480,
+    "measure": 0,
+    "tie": "in",
+    "name": "G4",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 67,
+    "dur": 1920,
+    "measure": 1,
+    "tie": null,
+    "name": "G4",
+    "d": "w",
+    "arrive": false
+   },
+   {
+    "kind": "rest",
+    "dur": 720,
+    "measure": 2
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 72,
+    "dur": 720,
+    "measure": 2,
+    "tie": "in",
+    "name": "C5",
+    "d": "q.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 72,
+    "dur": 480,
+    "measure": 2,
+    "tie": "out",
+    "name": "C5",
+    "d": "q",
+    "arrive": false
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 0,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page001_sys01_Alto",
+  "page": 1,
+  "sys": 1,
+  "voice": "Alto",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "rest.quarter-L3",
+   "dot-S3",
+   "note.quarter-L1",
+   "dot-S1",
+   "slur.start-L1",
+   "slur.end-L1",
+   "note.quarter-L1",
+   "slur.start-L1",
+   "barline-L1",
+   "slur.end-L1",
+   "note.whole-L1",
+   "barline-L1",
+   "rest.quarter-L3",
+   "dot-S3",
+   "accidental.flat-L2",
+   "note.quarter-L2",
+   "dot-S2",
+   "slur.start-L2",
+   "slur.end-L2",
+   "note.quarter-L2",
+   "<TIEX>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "rest",
+    "dur": 720,
+    "measure": 0
+   },
+   {
+    "kind": "note",
+    "pitch_written": 63,
+    "pitch": 63,
+    "dur": 720,
+    "measure": 0,
+    "tie": "in",
+    "name": "E4",
+    "d": "q.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 63,
+    "pitch": 63,
+    "dur": 480,
+    "measure": 0,
+    "tie": "in",
+    "name": "E4",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 63,
+    "pitch": 63,
+    "dur": 1920,
+    "measure": 1,
+    "tie": null,
+    "name": "E4",
+    "d": "w",
+    "arrive": false
+   },
+   {
+    "kind": "rest",
+    "dur": 720,
+    "measure": 2
+   },
+   {
+    "kind": "note",
+    "pitch_written": 66,
+    "pitch": 66,
+    "dur": 720,
+    "measure": 2,
+    "tie": "in",
+    "name": "G4",
+    "d": "q.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 66,
+    "pitch": 66,
+    "dur": 480,
+    "measure": 2,
+    "tie": "out",
+    "name": "G4",
+    "d": "q",
+    "arrive": false
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 0,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page001_sys01_Tenor",
+  "page": 1,
+  "sys": 1,
+  "voice": "Tenor",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "rest.quarter-L3",
+   "dot-S3",
+   "note.quarter-L3",
+   "dot-S3",
+   "slur.start-L3",
+   "slur.end-L3",
+   "note.quarter-L3",
+   "slur.start-L3",
+   "barline-L1",
+   "slur.end-L3",
+   "note.whole-L3",
+   "barline-L1",
+   "rest.quarter-L3",
+   "dot-S3",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "rest",
+    "dur": 720,
+    "measure": 0
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 720,
+    "measure": 0,
+    "tie": "in",
+    "name": "B4",
+    "d": "q.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 480,
+    "measure": 0,
+    "tie": "in",
+    "name": "B4",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 1920,
+    "measure": 1,
+    "tie": null,
+    "name": "B4",
+    "d": "w",
+    "arrive": false
+   },
+   {
+    "kind": "rest",
+    "dur": 720,
+    "measure": 2
+   },
+   {
+    "kind": "oov",
+    "dur": 720,
+    "measure": 2,
+    "desc": "<OOV:chord q. B4+_D5>"
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 2,
+    "desc": "<OOV:chord q B4+D5>"
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 2,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page001_sys01_Bass",
+  "page": 1,
+  "sys": 1,
+  "voice": "Bass",
+  "agnostic": [
+   "clef.F-L4",
+   "accidental.flat-L2",
+   "accidental.flat-S3",
+   "accidental.flat-S1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 24,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page001_sys02_Soprano",
+  "page": 1,
+  "sys": 2,
+  "voice": "Soprano",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "note.whole-S3",
+   "barline-L1",
+   "rest.quarter-L3",
+   "dot-S3",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 72,
+    "dur": 1920,
+    "measure": 0,
+    "tie": null,
+    "name": "C5",
+    "d": "w",
+    "arrive": false
+   },
+   {
+    "kind": "rest",
+    "dur": 720,
+    "measure": 1
+   },
+   {
+    "kind": "oov",
+    "dur": 720,
+    "measure": 1,
+    "desc": "<OOV:chord q. E4+G4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 1,
+    "desc": "<OOV:chord q E4+G4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 1920,
+    "measure": 2,
+    "desc": "<OOV:chord w E4+G4?>"
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 3,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page001_sys02_Alto",
+  "page": 1,
+  "sys": 2,
+  "voice": "Alto",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "accidental.flat-L2",
+   "note.whole-L2",
+   "barline-L1",
+   "rest.quarter-L3",
+   "dot-S3",
+   "note.quarter-S0",
+   "dot-S0",
+   "slur.start-S0",
+   "slur.end-S0",
+   "note.quarter-S0",
+   "slur.start-S0",
+   "barline-L1",
+   "slur.end-S0",
+   "note.whole-S0",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "note",
+    "pitch_written": 66,
+    "pitch": 66,
+    "dur": 1920,
+    "measure": 0,
+    "tie": null,
+    "name": "G4",
+    "d": "w",
+    "arrive": false
+   },
+   {
+    "kind": "rest",
+    "dur": 720,
+    "measure": 1
+   },
+   {
+    "kind": "note",
+    "pitch_written": 62,
+    "pitch": 62,
+    "dur": 720,
+    "measure": 1,
+    "tie": "in",
+    "name": "D4",
+    "d": "q.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 62,
+    "pitch": 62,
+    "dur": 480,
+    "measure": 1,
+    "tie": "in",
+    "name": "D4",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 62,
+    "pitch": 62,
+    "dur": 1920,
+    "measure": 2,
+    "tie": null,
+    "name": "D4",
+    "d": "w",
+    "arrive": false
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 0,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page001_sys02_Tenor",
+  "page": 1,
+  "sys": 2,
+  "voice": "Tenor",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "<OOV>",
+   "barline-L1",
+   "note.beamedRight1-L3",
+   "note.beamedLeft1-L3",
+   "note.beamedRight1-L3",
+   "note.beamedLeft1-S3",
+   "note.half-L3",
+   "barline-L1",
+   "note.beamedRight1-L3",
+   "note.beamedBoth2-L3",
+   "note.beamedLeft2-L3",
+   "slur.start-L3",
+   "slur.end-L3",
+   "note.beamedRight2-L3",
+   "note.beamedBoth2-S3",
+   "note.beamedLeft1-L4",
+   "slur.start-L4",
+   "slur.end-L4",
+   "note.beamedRight1-L4",
+   "note.beamedLeft1-S3",
+   "note.beamedRight1-L3",
+   "note.beamedLeft1-S2",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "oov",
+    "dur": 1920,
+    "measure": 0,
+    "desc": "<OOV:chord w _D5+F5?>"
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 60,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "C5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 960,
+    "measure": 1,
+    "tie": null,
+    "name": "B4",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 120,
+    "measure": 2,
+    "tie": null,
+    "name": "B4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 120,
+    "measure": 2,
+    "tie": "in",
+    "name": "B4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 120,
+    "measure": 2,
+    "tie": null,
+    "name": "B4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 60,
+    "dur": 120,
+    "measure": 2,
+    "tie": null,
+    "name": "C5",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 74,
+    "pitch": 62,
+    "dur": 240,
+    "measure": 2,
+    "tie": "in",
+    "name": "D5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 74,
+    "pitch": 62,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "D5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 60,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "C5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 68,
+    "pitch": 56,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "A4",
+    "d": "e",
+    "arrive": false
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 1,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page001_sys02_Bass",
+  "page": 1,
+  "sys": 2,
+  "voice": "Bass",
+  "agnostic": [
+   "clef.F-L4",
+   "accidental.flat-L2",
+   "accidental.flat-S3",
+   "accidental.flat-S1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 24,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page002_sys01_Soprano",
+  "page": 2,
+  "sys": 1,
+  "voice": "Soprano",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "rest.quarter-L3",
+   "dot-S3",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "barline-L1",
+   "rest.quarter-L3",
+   "dot-S3",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "rest",
+    "dur": 720,
+    "measure": 0
+   },
+   {
+    "kind": "oov",
+    "dur": 720,
+    "measure": 0,
+    "desc": "<OOV:chord q. _G4+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 0,
+    "desc": "<OOV:chord q _G4+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 1920,
+    "measure": 1,
+    "desc": "<OOV:chord w G4+C5?>"
+   },
+   {
+    "kind": "rest",
+    "dur": 720,
+    "measure": 2
+   },
+   {
+    "kind": "oov",
+    "dur": 720,
+    "measure": 2,
+    "desc": "<OOV:chord q. =E4+G4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 2,
+    "desc": "<OOV:chord q E4+G4?>"
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 5,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page002_sys01_Alto",
+  "page": 2,
+  "sys": 1,
+  "voice": "Alto",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "rest.quarter-L3",
+   "dot-S3",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "barline-L1",
+   "rest.quarter-L3",
+   "dot-S3",
+   "accidental.natural-S0",
+   "note.quarter-S0",
+   "dot-S0",
+   "slur.start-S0",
+   "slur.end-S0",
+   "note.quarter-S0",
+   "<TIEX>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "rest",
+    "dur": 720,
+    "measure": 0
+   },
+   {
+    "kind": "oov",
+    "dur": 720,
+    "measure": 0,
+    "desc": "<OOV:chord q. _C4+E4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 0,
+    "desc": "<OOV:chord q C4+E4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 1920,
+    "measure": 1,
+    "desc": "<OOV:chord w C4+E4?>"
+   },
+   {
+    "kind": "rest",
+    "dur": 720,
+    "measure": 2
+   },
+   {
+    "kind": "note",
+    "pitch_written": 62,
+    "pitch": 62,
+    "dur": 720,
+    "measure": 2,
+    "tie": "in",
+    "name": "D4",
+    "d": "q.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 62,
+    "pitch": 62,
+    "dur": 480,
+    "measure": 2,
+    "tie": "out",
+    "name": "D4",
+    "d": "q",
+    "arrive": false
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 3,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page002_sys01_Tenor",
+  "page": 2,
+  "sys": 1,
+  "voice": "Tenor",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "note.beamedRight1-L2",
+   "note.beamedLeft1-S1",
+   "slur.start-S1",
+   "slur.end-S1",
+   "note.beamedRight1-S1",
+   "note.beamedBoth2-L2",
+   "note.beamedLeft2-S2",
+   "note.half-L3",
+   "slur.start-L3",
+   "barline-L1",
+   "slur.end-L3",
+   "note.half-L3",
+   "rest.half-L3",
+   "barline-L1",
+   "note.beamedRight1-L3",
+   "note.beamedLeft1-L3",
+   "note.beamedRight1-L3",
+   "note.beamedLeft1-S3",
+   "note.half-L3",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 55,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "G4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 53,
+    "dur": 240,
+    "measure": 0,
+    "tie": "in",
+    "name": "F4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 53,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "F4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 55,
+    "dur": 120,
+    "measure": 0,
+    "tie": null,
+    "name": "G4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 68,
+    "pitch": 56,
+    "dur": 120,
+    "measure": 0,
+    "tie": null,
+    "name": "A4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 960,
+    "measure": 0,
+    "tie": "in",
+    "name": "B4",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 960,
+    "measure": 1,
+    "tie": null,
+    "name": "B4",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "rest",
+    "dur": 960,
+    "measure": 1
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 60,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "C5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 960,
+    "measure": 2,
+    "tie": null,
+    "name": "B4",
+    "d": "h",
+    "arrive": false
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 0,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page002_sys01_Bass",
+  "page": 2,
+  "sys": 1,
+  "voice": "Bass",
+  "agnostic": [
+   "clef.F-L4",
+   "accidental.flat-L2",
+   "accidental.flat-S3",
+   "accidental.flat-S1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 24,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page002_sys02_Soprano",
+  "page": 2,
+  "sys": 2,
+  "voice": "Soprano",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "<OOV>",
+   "barline-L1",
+   "rest.quarter-L3",
+   "dot-S3",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "oov",
+    "dur": 1920,
+    "measure": 0,
+    "desc": "<OOV:chord w E4+G4?>"
+   },
+   {
+    "kind": "rest",
+    "dur": 720,
+    "measure": 1
+   },
+   {
+    "kind": "oov",
+    "dur": 720,
+    "measure": 1,
+    "desc": "<OOV:chord q. _G4+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 1,
+    "desc": "<OOV:chord q _G4+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 1920,
+    "measure": 2,
+    "desc": "<OOV:chord w G4+C5?>"
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 4,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page002_sys02_Alto",
+  "page": 2,
+  "sys": 2,
+  "voice": "Alto",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "note.whole-S0",
+   "barline-L1",
+   "rest.quarter-L3",
+   "dot-S3",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "note",
+    "pitch_written": 62,
+    "pitch": 62,
+    "dur": 1920,
+    "measure": 0,
+    "tie": null,
+    "name": "D4",
+    "d": "w",
+    "arrive": false
+   },
+   {
+    "kind": "rest",
+    "dur": 720,
+    "measure": 1
+   },
+   {
+    "kind": "oov",
+    "dur": 720,
+    "measure": 1,
+    "desc": "<OOV:chord q. _C4+E4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 1,
+    "desc": "<OOV:chord q C4+E4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 1920,
+    "measure": 2,
+    "desc": "<OOV:chord w C4+E4?>"
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 3,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page002_sys02_Tenor",
+  "page": 2,
+  "sys": 2,
+  "voice": "Tenor",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "note.beamedRight1-L3",
+   "note.beamedLeft1-L3",
+   "note.beamedRight1-L3",
+   "note.beamedBoth2-S3",
+   "note.beamedLeft2-L4",
+   "slur.start-L4",
+   "slur.end-L4",
+   "note.beamedRight1-L4",
+   "note.beamedLeft1-S3",
+   "note.beamedRight1-L3",
+   "note.beamedLeft1-S2",
+   "barline-L1",
+   "note.beamedRight1-L2",
+   "note.beamedLeft1-S1",
+   "slur.start-S1",
+   "slur.end-S1",
+   "note.beamedRight1-S1",
+   "note.beamedBoth2-L2",
+   "note.beamedLeft2-S2",
+   "note.half-L3",
+   "slur.start-L3",
+   "barline-L1",
+   "slur.end-L3",
+   "note.half-L3",
+   "note.beamedRight1-S3",
+   "note.beamedLeft1-L3",
+   "note.beamedRight1-S2",
+   "dot-S2",
+   "note.beamedLeft2-L2",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 60,
+    "dur": 120,
+    "measure": 0,
+    "tie": null,
+    "name": "C5",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 74,
+    "pitch": 62,
+    "dur": 120,
+    "measure": 0,
+    "tie": "in",
+    "name": "D5",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 74,
+    "pitch": 62,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "D5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 60,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "C5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 68,
+    "pitch": 56,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "A4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 55,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "G4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 53,
+    "dur": 240,
+    "measure": 1,
+    "tie": "in",
+    "name": "F4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 53,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "F4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 55,
+    "dur": 120,
+    "measure": 1,
+    "tie": null,
+    "name": "G4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 68,
+    "pitch": 56,
+    "dur": 120,
+    "measure": 1,
+    "tie": null,
+    "name": "A4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 960,
+    "measure": 1,
+    "tie": "in",
+    "name": "B4",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 960,
+    "measure": 2,
+    "tie": null,
+    "name": "B4",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 60,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "C5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 68,
+    "pitch": 56,
+    "dur": 360,
+    "measure": 2,
+    "tie": null,
+    "name": "A4",
+    "d": "e.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 55,
+    "dur": 120,
+    "measure": 2,
+    "tie": null,
+    "name": "G4",
+    "d": "s",
+    "arrive": false
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 0,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page002_sys02_Bass",
+  "page": 2,
+  "sys": 2,
+  "voice": "Bass",
+  "agnostic": [
+   "clef.F-L4",
+   "accidental.flat-L2",
+   "accidental.flat-S3",
+   "accidental.flat-S1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 24,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page003_sys01_Soprano",
+  "page": 3,
+  "sys": 1,
+  "voice": "Soprano",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "oov",
+    "dur": 1920,
+    "measure": 0,
+    "desc": "<OOV:chord w C4+=E4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 1920,
+    "measure": 1,
+    "desc": "<OOV:chord w C4+E4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 1920,
+    "measure": 2,
+    "desc": "<OOV:chord w C4+E4?>"
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 3,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page003_sys01_Alto",
+  "page": 3,
+  "sys": 1,
+  "voice": "Alto",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "oov",
+    "dur": 1920,
+    "measure": 0,
+    "desc": "<OOV:chord w B3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 1920,
+    "measure": 1,
+    "desc": "<OOV:chord w B3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 1920,
+    "measure": 2,
+    "desc": "<OOV:chord w A3+C4?>"
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 3,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page003_sys01_Tenor",
+  "page": 3,
+  "sys": 1,
+  "voice": "Tenor",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "note.quarter-S3",
+   "slur.start-S3",
+   "slur.end-S3",
+   "note.beamedRight2-S3",
+   "note.beamedBoth2-L3",
+   "note.beamedBoth2-S2",
+   "note.beamedLeft2-L2",
+   "note.beamedRight1-S3",
+   "note.beamedLeft1-L3",
+   "note.beamedRight1-S2",
+   "note.beamedLeft1-L3",
+   "barline-L1",
+   "note.beamedRight1-S3",
+   "note.beamedLeft1-L4",
+   "note.beamedRight1-S3",
+   "note.beamedBoth2-L4",
+   "note.beamedLeft2-L4",
+   "note.beamedRight1-S2",
+   "note.beamedLeft1-L2",
+   "note.beamedRight1-S1",
+   "note.beamedLeft1-S2",
+   "barline-L1",
+   "note.whole-L2",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 60,
+    "dur": 480,
+    "measure": 0,
+    "tie": "in",
+    "name": "C5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 60,
+    "dur": 120,
+    "measure": 0,
+    "tie": null,
+    "name": "C5",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 120,
+    "measure": 0,
+    "tie": null,
+    "name": "B4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 68,
+    "pitch": 56,
+    "dur": 120,
+    "measure": 0,
+    "tie": null,
+    "name": "A4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 55,
+    "dur": 120,
+    "measure": 0,
+    "tie": null,
+    "name": "G4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 60,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "C5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 68,
+    "pitch": 56,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "A4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 58,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 60,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "C5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 74,
+    "pitch": 62,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "D5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 60,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "C5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 74,
+    "pitch": 62,
+    "dur": 120,
+    "measure": 1,
+    "tie": null,
+    "name": "D5",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 74,
+    "pitch": 62,
+    "dur": 120,
+    "measure": 1,
+    "tie": null,
+    "name": "D5",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 68,
+    "pitch": 56,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "A4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 55,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "G4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 53,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "F4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 68,
+    "pitch": 56,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "A4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 55,
+    "dur": 1920,
+    "measure": 2,
+    "tie": null,
+    "name": "G4",
+    "d": "w",
+    "arrive": false
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 1,
+  "n_oov": 0,
+  "n_phrase_slurs": 1
+ },
+ {
+  "strip_id": "page003_sys01_Bass",
+  "page": 3,
+  "sys": 1,
+  "voice": "Bass",
+  "agnostic": [
+   "clef.F-L4",
+   "accidental.flat-L2",
+   "accidental.flat-S3",
+   "accidental.flat-S1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e A2+E3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e A2+E3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e A2+E3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e A2+E3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e A2+E3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e A2+E3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e A2+E3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e A2+E3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e A2+E3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e A2+E3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e A2+E3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e A2+E3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e A2+E3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e A2+E3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e A2+E3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e A2+E3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e C3+G3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e C3+G3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e C3+G3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e C3+G3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e C3+G3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e C3+G3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e C3+G3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e C3+G3>"
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 24,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page003_sys02_Staff1",
+  "page": 3,
+  "sys": 2,
+  "voice": "Staff1",
+  "excluded": "<EXCLUDED divisi system: 5 staves (unsupported layout for Stage 2's 4-staves-per-system assumption)>\n"
+ },
+ {
+  "strip_id": "page003_sys02_Staff2",
+  "page": 3,
+  "sys": 2,
+  "voice": "Staff2",
+  "excluded": "<EXCLUDED divisi system: 5 staves>\n"
+ },
+ {
+  "strip_id": "page003_sys02_Staff3",
+  "page": 3,
+  "sys": 2,
+  "voice": "Staff3",
+  "excluded": "<EXCLUDED divisi system: 5 staves>\n"
+ },
+ {
+  "strip_id": "page003_sys02_Staff4",
+  "page": 3,
+  "sys": 2,
+  "voice": "Staff4",
+  "excluded": "<EXCLUDED divisi system: 5 staves>\n"
+ },
+ {
+  "strip_id": "page003_sys02_Staff5",
+  "page": 3,
+  "sys": 2,
+  "voice": "Staff5",
+  "excluded": "<EXCLUDED divisi system: 5 staves>\n"
+ },
+ {
+  "strip_id": "page004_sys01_Staff1",
+  "page": 4,
+  "sys": 1,
+  "voice": "Staff1",
+  "excluded": "<EXCLUDED divisi system: 5 staves>\n"
+ },
+ {
+  "strip_id": "page004_sys01_Staff2",
+  "page": 4,
+  "sys": 1,
+  "voice": "Staff2",
+  "excluded": "<EXCLUDED divisi system: 5 staves>\n"
+ },
+ {
+  "strip_id": "page004_sys01_Staff3",
+  "page": 4,
+  "sys": 1,
+  "voice": "Staff3",
+  "excluded": "<EXCLUDED divisi system: 5 staves>\n"
+ },
+ {
+  "strip_id": "page004_sys01_Staff4",
+  "page": 4,
+  "sys": 1,
+  "voice": "Staff4",
+  "excluded": "<EXCLUDED divisi system: 5 staves>\n"
+ },
+ {
+  "strip_id": "page004_sys01_Staff5",
+  "page": 4,
+  "sys": 1,
+  "voice": "Staff5",
+  "excluded": "<EXCLUDED divisi system: 5 staves>\n"
+ },
+ {
+  "strip_id": "page004_sys02_Staff1",
+  "page": 4,
+  "sys": 2,
+  "voice": "Staff1",
+  "excluded": "<EXCLUDED divisi system: 5 staves>\n"
+ },
+ {
+  "strip_id": "page004_sys02_Staff2",
+  "page": 4,
+  "sys": 2,
+  "voice": "Staff2",
+  "excluded": "<EXCLUDED divisi system: 5 staves>\n"
+ },
+ {
+  "strip_id": "page004_sys02_Staff3",
+  "page": 4,
+  "sys": 2,
+  "voice": "Staff3",
+  "excluded": "<EXCLUDED divisi system: 5 staves>\n"
+ },
+ {
+  "strip_id": "page004_sys02_Staff4",
+  "page": 4,
+  "sys": 2,
+  "voice": "Staff4",
+  "excluded": "<EXCLUDED divisi system: 5 staves>\n"
+ },
+ {
+  "strip_id": "page004_sys02_Staff5",
+  "page": 4,
+  "sys": 2,
+  "voice": "Staff5",
+  "excluded": "<EXCLUDED divisi system: 5 staves>\n"
+ },
+ {
+  "strip_id": "page005_sys01_Staff1",
+  "page": 5,
+  "sys": 1,
+  "voice": "Staff1",
+  "excluded": "<EXCLUDED divisi system: 5 staves>\n"
+ },
+ {
+  "strip_id": "page005_sys01_Staff2",
+  "page": 5,
+  "sys": 1,
+  "voice": "Staff2",
+  "excluded": "<EXCLUDED divisi system: 5 staves>\n"
+ },
+ {
+  "strip_id": "page005_sys01_Staff3",
+  "page": 5,
+  "sys": 1,
+  "voice": "Staff3",
+  "excluded": "<EXCLUDED divisi system: 5 staves>\n"
+ },
+ {
+  "strip_id": "page005_sys01_Staff4",
+  "page": 5,
+  "sys": 1,
+  "voice": "Staff4",
+  "excluded": "<EXCLUDED divisi system: 5 staves>\n"
+ },
+ {
+  "strip_id": "page005_sys01_Staff5",
+  "page": 5,
+  "sys": 1,
+  "voice": "Staff5",
+  "excluded": "<EXCLUDED divisi system: 5 staves>\n"
+ },
+ {
+  "strip_id": "page006_sys01_Staff1",
+  "page": 6,
+  "sys": 1,
+  "voice": "Staff1",
+  "excluded": "<EXCLUDED divisi system: 7 staves>\n"
+ },
+ {
+  "strip_id": "page006_sys01_Staff2",
+  "page": 6,
+  "sys": 1,
+  "voice": "Staff2",
+  "excluded": "<EXCLUDED divisi system: 7 staves>\n"
+ },
+ {
+  "strip_id": "page006_sys01_Staff3",
+  "page": 6,
+  "sys": 1,
+  "voice": "Staff3",
+  "excluded": "<EXCLUDED divisi system: 7 staves>\n"
+ },
+ {
+  "strip_id": "page006_sys01_Staff4",
+  "page": 6,
+  "sys": 1,
+  "voice": "Staff4",
+  "excluded": "<EXCLUDED divisi system: 7 staves>\n"
+ },
+ {
+  "strip_id": "page006_sys01_Staff5",
+  "page": 6,
+  "sys": 1,
+  "voice": "Staff5",
+  "excluded": "<EXCLUDED divisi system: 7 staves>\n"
+ },
+ {
+  "strip_id": "page006_sys01_Staff6",
+  "page": 6,
+  "sys": 1,
+  "voice": "Staff6",
+  "excluded": "<EXCLUDED divisi system: 7 staves>\n"
+ },
+ {
+  "strip_id": "page006_sys01_Staff7",
+  "page": 6,
+  "sys": 1,
+  "voice": "Staff7",
+  "excluded": "<EXCLUDED divisi system: 7 staves>\n"
+ },
+ {
+  "strip_id": "page007_sys01_Staff1",
+  "page": 7,
+  "sys": 1,
+  "voice": "Staff1",
+  "excluded": "<EXCLUDED divisi system: 7 staves>\n"
+ },
+ {
+  "strip_id": "page007_sys01_Staff2",
+  "page": 7,
+  "sys": 1,
+  "voice": "Staff2",
+  "excluded": "<EXCLUDED divisi system: 7 staves>\n"
+ },
+ {
+  "strip_id": "page007_sys01_Staff3",
+  "page": 7,
+  "sys": 1,
+  "voice": "Staff3",
+  "excluded": "<EXCLUDED divisi system: 7 staves>\n"
+ },
+ {
+  "strip_id": "page007_sys01_Staff4",
+  "page": 7,
+  "sys": 1,
+  "voice": "Staff4",
+  "excluded": "<EXCLUDED divisi system: 7 staves>\n"
+ },
+ {
+  "strip_id": "page007_sys01_Staff5",
+  "page": 7,
+  "sys": 1,
+  "voice": "Staff5",
+  "excluded": "<EXCLUDED divisi system: 7 staves>\n"
+ },
+ {
+  "strip_id": "page007_sys01_Staff6",
+  "page": 7,
+  "sys": 1,
+  "voice": "Staff6",
+  "excluded": "<EXCLUDED divisi system: 7 staves>\n"
+ },
+ {
+  "strip_id": "page007_sys01_Staff7",
+  "page": 7,
+  "sys": 1,
+  "voice": "Staff7",
+  "excluded": "<EXCLUDED divisi system: 7 staves>\n"
+ },
+ {
+  "strip_id": "page008_sys01_Staff1",
+  "page": 8,
+  "sys": 1,
+  "voice": "Staff1",
+  "excluded": "<EXCLUDED divisi system: 6 staves>\n"
+ },
+ {
+  "strip_id": "page008_sys01_Staff2",
+  "page": 8,
+  "sys": 1,
+  "voice": "Staff2",
+  "excluded": "<EXCLUDED divisi system: 6 staves>\n"
+ },
+ {
+  "strip_id": "page008_sys01_Staff3",
+  "page": 8,
+  "sys": 1,
+  "voice": "Staff3",
+  "excluded": "<EXCLUDED divisi system: 6 staves>\n"
+ },
+ {
+  "strip_id": "page008_sys01_Staff4",
+  "page": 8,
+  "sys": 1,
+  "voice": "Staff4",
+  "excluded": "<EXCLUDED divisi system: 6 staves>\n"
+ },
+ {
+  "strip_id": "page008_sys01_Staff5",
+  "page": 8,
+  "sys": 1,
+  "voice": "Staff5",
+  "excluded": "<EXCLUDED divisi system: 6 staves>\n"
+ },
+ {
+  "strip_id": "page008_sys01_Staff6",
+  "page": 8,
+  "sys": 1,
+  "voice": "Staff6",
+  "excluded": "<EXCLUDED divisi system: 6 staves>\n"
+ },
+ {
+  "strip_id": "page009_sys01_Staff1",
+  "page": 9,
+  "sys": 1,
+  "voice": "Staff1",
+  "excluded": "<EXCLUDED divisi system: 6 staves>\n"
+ },
+ {
+  "strip_id": "page009_sys01_Staff2",
+  "page": 9,
+  "sys": 1,
+  "voice": "Staff2",
+  "excluded": "<EXCLUDED divisi system: 6 staves>\n"
+ },
+ {
+  "strip_id": "page009_sys01_Staff3",
+  "page": 9,
+  "sys": 1,
+  "voice": "Staff3",
+  "excluded": "<EXCLUDED divisi system: 6 staves>\n"
+ },
+ {
+  "strip_id": "page009_sys01_Staff4",
+  "page": 9,
+  "sys": 1,
+  "voice": "Staff4",
+  "excluded": "<EXCLUDED divisi system: 6 staves>\n"
+ },
+ {
+  "strip_id": "page009_sys01_Staff5",
+  "page": 9,
+  "sys": 1,
+  "voice": "Staff5",
+  "excluded": "<EXCLUDED divisi system: 6 staves>\n"
+ },
+ {
+  "strip_id": "page009_sys01_Staff6",
+  "page": 9,
+  "sys": 1,
+  "voice": "Staff6",
+  "excluded": "<EXCLUDED divisi system: 6 staves>\n"
+ },
+ {
+  "strip_id": "page010_sys01_Staff1",
+  "page": 10,
+  "sys": 1,
+  "voice": "Staff1",
+  "excluded": "<EXCLUDED divisi system: 6 staves>\n"
+ },
+ {
+  "strip_id": "page010_sys01_Staff2",
+  "page": 10,
+  "sys": 1,
+  "voice": "Staff2",
+  "excluded": "<EXCLUDED divisi system: 6 staves>\n"
+ },
+ {
+  "strip_id": "page010_sys01_Staff3",
+  "page": 10,
+  "sys": 1,
+  "voice": "Staff3",
+  "excluded": "<EXCLUDED divisi system: 6 staves>\n"
+ },
+ {
+  "strip_id": "page010_sys01_Staff4",
+  "page": 10,
+  "sys": 1,
+  "voice": "Staff4",
+  "excluded": "<EXCLUDED divisi system: 6 staves>\n"
+ },
+ {
+  "strip_id": "page010_sys01_Staff5",
+  "page": 10,
+  "sys": 1,
+  "voice": "Staff5",
+  "excluded": "<EXCLUDED divisi system: 6 staves>\n"
+ },
+ {
+  "strip_id": "page010_sys01_Staff6",
+  "page": 10,
+  "sys": 1,
+  "voice": "Staff6",
+  "excluded": "<EXCLUDED divisi system: 6 staves>\n"
+ },
+ {
+  "strip_id": "page010_sys02_Soprano",
+  "page": 10,
+  "sys": 2,
+  "voice": "Soprano",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "note.beamedRight1-L3",
+   "note.beamedBoth2-L3",
+   "note.beamedLeft2-L3",
+   "slur.start-L3",
+   "slur.end-L3",
+   "note.beamedRight2-L3",
+   "note.beamedBoth2-S3",
+   "note.beamedLeft1-L4",
+   "slur.start-L4",
+   "slur.end-L4",
+   "note.beamedRight1-L4",
+   "note.beamedLeft1-S3",
+   "note.beamedRight1-L3",
+   "note.beamedLeft1-S2",
+   "barline-L1",
+   "note.beamedRight1-L2",
+   "note.beamedLeft1-S1",
+   "slur.start-S1",
+   "slur.end-S1",
+   "note.beamedRight1-S1",
+   "note.beamedBoth2-L2",
+   "note.beamedLeft2-S2",
+   "note.half-L3",
+   "slur.start-L3",
+   "barline-L1",
+   "slur.end-L3",
+   "note.half-L3",
+   "rest.half-L3",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 120,
+    "measure": 0,
+    "tie": null,
+    "name": "B4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 120,
+    "measure": 0,
+    "tie": "in",
+    "name": "B4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 120,
+    "measure": 0,
+    "tie": null,
+    "name": "B4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 72,
+    "dur": 120,
+    "measure": 0,
+    "tie": null,
+    "name": "C5",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 74,
+    "pitch": 74,
+    "dur": 240,
+    "measure": 0,
+    "tie": "in",
+    "name": "D5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 74,
+    "pitch": 74,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "D5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 72,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "C5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 68,
+    "pitch": 68,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "A4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 67,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "G4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 65,
+    "dur": 240,
+    "measure": 1,
+    "tie": "in",
+    "name": "F4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 65,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "F4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 67,
+    "dur": 120,
+    "measure": 1,
+    "tie": null,
+    "name": "G4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 68,
+    "pitch": 68,
+    "dur": 120,
+    "measure": 1,
+    "tie": null,
+    "name": "A4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 960,
+    "measure": 1,
+    "tie": "in",
+    "name": "B4",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 960,
+    "measure": 2,
+    "tie": null,
+    "name": "B4",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "rest",
+    "dur": 960,
+    "measure": 2
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 2,
+  "n_oov": 0,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page010_sys02_Alto",
+  "page": 10,
+  "sys": 2,
+  "voice": "Alto",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "note.beamedRight1-L2",
+   "note.beamedBoth2-S1",
+   "note.beamedLeft2-L1",
+   "slur.start-L1",
+   "slur.end-L1",
+   "note.beamedRight2-L1",
+   "note.beamedBoth2-S0",
+   "note.beamedLeft1-L0",
+   "slur.start-L0",
+   "slur.end-L0",
+   "note.beamedRight1-L0",
+   "note.beamedLeft1-S0",
+   "note.beamedRight1-L1",
+   "note.beamedLeft1-L1",
+   "barline-L1",
+   "note.beamedRight1-S1",
+   "note.beamedLeft1-S1",
+   "slur.start-S1",
+   "slur.end-S1",
+   "note.beamedRight1-S1",
+   "note.beamedBoth2-S1",
+   "note.beamedLeft2-S1",
+   "note.half-S-1",
+   "slur.start-S-1",
+   "barline-L1",
+   "slur.end-S-1",
+   "note.half-S-1",
+   "rest.half-L3",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 67,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "G4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 65,
+    "dur": 120,
+    "measure": 0,
+    "tie": null,
+    "name": "F4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 63,
+    "pitch": 63,
+    "dur": 120,
+    "measure": 0,
+    "tie": "in",
+    "name": "E4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 63,
+    "pitch": 63,
+    "dur": 120,
+    "measure": 0,
+    "tie": null,
+    "name": "E4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 62,
+    "pitch": 62,
+    "dur": 120,
+    "measure": 0,
+    "tie": null,
+    "name": "D4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 60,
+    "pitch": 60,
+    "dur": 240,
+    "measure": 0,
+    "tie": "in",
+    "name": "C4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 60,
+    "pitch": 60,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "C4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 62,
+    "pitch": 62,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "D4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 63,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "E4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 63,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "E4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 65,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "F4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 65,
+    "dur": 240,
+    "measure": 1,
+    "tie": "in",
+    "name": "F4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 65,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "F4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 65,
+    "dur": 120,
+    "measure": 1,
+    "tie": null,
+    "name": "F4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 65,
+    "dur": 120,
+    "measure": 1,
+    "tie": null,
+    "name": "F4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 58,
+    "pitch": 58,
+    "dur": 960,
+    "measure": 1,
+    "tie": "in",
+    "name": "B3",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 58,
+    "pitch": 58,
+    "dur": 960,
+    "measure": 2,
+    "tie": null,
+    "name": "B3",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "rest",
+    "dur": 960,
+    "measure": 2
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 5,
+  "n_oov": 0,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page010_sys02_Tenor",
+  "page": 10,
+  "sys": 2,
+  "voice": "Tenor",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "<OOV>",
+   "note.quarter-L4",
+   "dot-S4",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "note.quarter-S4",
+   "dot-S4",
+   "slur.start-S4",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "slur.end-S4",
+   "note.quarter-L4",
+   "dot-S4",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "oov",
+    "dur": 720,
+    "measure": 0,
+    "desc": "<OOV:chord q. B4+E5>"
+   },
+   {
+    "kind": "note",
+    "pitch_written": 74,
+    "pitch": 62,
+    "dur": 720,
+    "measure": 0,
+    "tie": null,
+    "name": "D5",
+    "d": "q.",
+    "arrive": false
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 0,
+    "desc": "<OOV:chord q =B4+E5>"
+   },
+   {
+    "kind": "oov",
+    "dur": 720,
+    "measure": 1,
+    "desc": "<OOV:chord q. B4+D5?>"
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 720,
+    "measure": 1,
+    "tie": "in",
+    "name": "E5",
+    "d": "q.",
+    "arrive": false
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 1,
+    "desc": "<OOV:chord q D5+E5>"
+   },
+   {
+    "kind": "oov",
+    "dur": 720,
+    "measure": 2,
+    "desc": "<OOV:chord q. B4+E5>"
+   },
+   {
+    "kind": "note",
+    "pitch_written": 74,
+    "pitch": 62,
+    "dur": 720,
+    "measure": 2,
+    "tie": null,
+    "name": "D5",
+    "d": "q.",
+    "arrive": false
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 2,
+    "desc": "<OOV:chord q =B4+E5>"
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 6,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page010_sys02_Bass",
+  "page": 10,
+  "sys": 2,
+  "voice": "Bass",
+  "agnostic": [
+   "clef.F-L4",
+   "accidental.flat-L2",
+   "accidental.flat-S3",
+   "accidental.flat-S1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 24,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page011_sys01_Soprano",
+  "page": 11,
+  "sys": 1,
+  "voice": "Soprano",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "note.beamedRight1-L3",
+   "note.beamedLeft1-L3",
+   "note.beamedRight1-L3",
+   "note.beamedLeft1-S3",
+   "note.half-L3",
+   "barline-L1",
+   "note.beamedRight2-L3",
+   "note.beamedBoth2-L3",
+   "note.beamedLeft1-L3",
+   "slur.start-L3",
+   "slur.end-L3",
+   "note.beamedRight1-L3",
+   "note.beamedLeft1-S3",
+   "note.beamedRight1-L4",
+   "note.beamedLeft1-S3",
+   "note.beamedRight1-L3",
+   "note.beamedLeft1-S2",
+   "barline-L1",
+   "note.beamedRight1-L2",
+   "note.beamedLeft1-S1",
+   "note.beamedRight1-L2",
+   "dot-S2",
+   "note.beamedLeft2-S2",
+   "note.half-L3",
+   "<TIEX>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 72,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "C5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 960,
+    "measure": 0,
+    "tie": null,
+    "name": "B4",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 120,
+    "measure": 1,
+    "tie": null,
+    "name": "B4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 120,
+    "measure": 1,
+    "tie": null,
+    "name": "B4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 240,
+    "measure": 1,
+    "tie": "in",
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 72,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "C5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 74,
+    "pitch": 74,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "D5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 72,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "C5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 68,
+    "pitch": 68,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "A4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 67,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "G4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 65,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "F4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 67,
+    "dur": 360,
+    "measure": 2,
+    "tie": null,
+    "name": "G4",
+    "d": "e.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 68,
+    "pitch": 68,
+    "dur": 120,
+    "measure": 2,
+    "tie": null,
+    "name": "A4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 960,
+    "measure": 2,
+    "tie": "out",
+    "name": "B4",
+    "d": "h",
+    "arrive": false
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 0,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page011_sys01_Alto",
+  "page": 11,
+  "sys": 1,
+  "voice": "Alto",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "note.beamedRight1-S0",
+   "note.beamedLeft1-S0",
+   "note.beamedRight1-S0",
+   "note.beamedLeft1-L1",
+   "note.half-S1",
+   "barline-L1",
+   "note.beamedRight2-L2",
+   "note.beamedBoth2-S1",
+   "note.beamedLeft1-L1",
+   "slur.start-L1",
+   "slur.end-L1",
+   "note.beamedRight1-L1",
+   "note.beamedLeft1-S0",
+   "note.beamedRight1-L0",
+   "note.beamedLeft1-S0",
+   "note.beamedRight1-L1",
+   "note.beamedLeft1-L1",
+   "barline-L1",
+   "note.beamedRight1-S1",
+   "note.beamedLeft1-S1",
+   "note.beamedRight1-S1",
+   "dot-S1",
+   "note.beamedLeft2-S1",
+   "note.half-S-1",
+   "<TIEX>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "note",
+    "pitch_written": 62,
+    "pitch": 62,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "D4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 62,
+    "pitch": 62,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "D4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 62,
+    "pitch": 62,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "D4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 63,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "E4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 65,
+    "dur": 960,
+    "measure": 0,
+    "tie": null,
+    "name": "F4",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 67,
+    "dur": 120,
+    "measure": 1,
+    "tie": null,
+    "name": "G4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 65,
+    "dur": 120,
+    "measure": 1,
+    "tie": null,
+    "name": "F4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 63,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 1,
+    "tie": "in",
+    "name": "E4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 63,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "E4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 62,
+    "pitch": 62,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "D4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 60,
+    "pitch": 60,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "C4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 62,
+    "pitch": 62,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "D4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 63,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "E4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 63,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "E4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 65,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "F4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 65,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "F4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 65,
+    "dur": 360,
+    "measure": 2,
+    "tie": null,
+    "name": "F4",
+    "d": "e.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 65,
+    "dur": 120,
+    "measure": 2,
+    "tie": null,
+    "name": "F4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 58,
+    "pitch": 58,
+    "dur": 960,
+    "measure": 2,
+    "tie": "out",
+    "name": "B3",
+    "d": "h",
+    "arrive": false
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 1,
+  "n_oov": 0,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page011_sys01_Tenor",
+  "page": 11,
+  "sys": 1,
+  "voice": "Tenor",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "<OOV>",
+   "note.quarter-S3",
+   "dot-S3",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "note.quarter-S3",
+   "dot-S3",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "note.quarter-S3",
+   "dot-S3",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "oov",
+    "dur": 720,
+    "measure": 0,
+    "desc": "<OOV:chord q. B4+D5?>"
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 60,
+    "dur": 720,
+    "measure": 0,
+    "tie": null,
+    "name": "C5",
+    "d": "q.",
+    "arrive": false
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 0,
+    "desc": "<OOV:chord q B4+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 720,
+    "measure": 1,
+    "desc": "<OOV:chord q. B4+C5?>"
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 60,
+    "dur": 720,
+    "measure": 1,
+    "tie": null,
+    "name": "C5",
+    "d": "q.",
+    "arrive": false
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 1,
+    "desc": "<OOV:chord q =A4+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 720,
+    "measure": 2,
+    "desc": "<OOV:chord q. B4+D5?>"
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 60,
+    "dur": 720,
+    "measure": 2,
+    "tie": null,
+    "name": "C5",
+    "d": "q.",
+    "arrive": false
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 2,
+    "desc": "<OOV:chord q B4+C5?>"
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 3,
+  "n_oov": 6,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page011_sys01_Bass",
+  "page": 11,
+  "sys": 1,
+  "voice": "Bass",
+  "agnostic": [
+   "clef.F-L4",
+   "accidental.flat-L2",
+   "accidental.flat-S3",
+   "accidental.flat-S1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E3+B3>"
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 24,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page011_sys02_Soprano",
+  "page": 11,
+  "sys": 2,
+  "voice": "Soprano",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "<TIEX>",
+   "note.half-L3",
+   "note.beamedRight1-S3",
+   "note.beamedLeft1-L3",
+   "note.beamedRight1-S2",
+   "note.beamedLeft1-L2",
+   "barline-L1",
+   "note.beamedRight1-S3",
+   "note.beamedLeft1-L3",
+   "note.beamedRight1-S2",
+   "dot-S2",
+   "note.beamedLeft2-L2",
+   "note.beamedRight1-S3",
+   "dot-S3",
+   "note.beamedLeft2-L3",
+   "note.beamedRight1-S2",
+   "note.beamedLeft1-L3",
+   "barline-L1",
+   "note.beamedRight2-S3",
+   "note.beamedBoth2-L4",
+   "note.beamedLeft1-S3",
+   "slur.start-S3",
+   "slur.end-S3",
+   "note.beamedRight1-S3",
+   "note.beamedLeft1-L3",
+   "note.beamedRight1-S2",
+   "dot-S2",
+   "note.beamedLeft2-L2",
+   "note.beamedRight2-S1",
+   "note.beamedLeft1-S2",
+   "dot-S2",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 960,
+    "measure": 0,
+    "tie": "arr",
+    "name": "B4",
+    "d": "h",
+    "arrive": true
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 72,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "C5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 68,
+    "pitch": 68,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "A4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 67,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "G4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 72,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "C5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 68,
+    "pitch": 68,
+    "dur": 360,
+    "measure": 1,
+    "tie": null,
+    "name": "A4",
+    "d": "e.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 67,
+    "dur": 120,
+    "measure": 1,
+    "tie": null,
+    "name": "G4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 72,
+    "dur": 360,
+    "measure": 1,
+    "tie": null,
+    "name": "C5",
+    "d": "e.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 120,
+    "measure": 1,
+    "tie": null,
+    "name": "B4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 68,
+    "pitch": 68,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "A4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 72,
+    "dur": 120,
+    "measure": 2,
+    "tie": null,
+    "name": "C5",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 74,
+    "pitch": 74,
+    "dur": 120,
+    "measure": 2,
+    "tie": null,
+    "name": "D5",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 72,
+    "dur": 240,
+    "measure": 2,
+    "tie": "in",
+    "name": "C5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 72,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "C5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "B4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 68,
+    "pitch": 68,
+    "dur": 360,
+    "measure": 2,
+    "tie": null,
+    "name": "A4",
+    "d": "e.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 67,
+    "dur": 120,
+    "measure": 2,
+    "tie": null,
+    "name": "G4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 65,
+    "dur": 120,
+    "measure": 2,
+    "tie": null,
+    "name": "F4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 68,
+    "pitch": 68,
+    "dur": 360,
+    "measure": 2,
+    "tie": null,
+    "name": "A4",
+    "d": "e.",
+    "arrive": false
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 0,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page011_sys02_Alto",
+  "page": 11,
+  "sys": 2,
+  "voice": "Alto",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "<TIEX>",
+   "note.half-S-1",
+   "note.beamedRight1-L0",
+   "note.beamedLeft1-L2",
+   "note.beamedRight1-S1",
+   "note.beamedLeft1-L1",
+   "barline-L1",
+   "note.beamedRight1-L0",
+   "note.beamedLeft1-L0",
+   "note.beamedRight1-L0",
+   "dot-S0",
+   "note.beamedLeft2-S0",
+   "note.beamedRight1-L1",
+   "dot-S1",
+   "note.beamedLeft2-L1",
+   "note.beamedRight1-L1",
+   "note.beamedLeft1-L1",
+   "barline-L1",
+   "note.beamedRight2-S1",
+   "note.beamedBoth2-S1",
+   "note.beamedLeft1-S1",
+   "slur.start-S1",
+   "slur.end-S1",
+   "note.beamedRight1-S1",
+   "note.beamedLeft1-S1",
+   "note.beamedRight1-L2",
+   "dot-S2",
+   "note.beamedLeft2-L2",
+   "note.beamedRight2-S1",
+   "note.beamedLeft1-L1",
+   "dot-S1",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "note",
+    "pitch_written": 58,
+    "pitch": 58,
+    "dur": 960,
+    "measure": 0,
+    "tie": "arr",
+    "name": "B3",
+    "d": "h",
+    "arrive": true
+   },
+   {
+    "kind": "note",
+    "pitch_written": 60,
+    "pitch": 60,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "C4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 67,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "G4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 65,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "F4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 63,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "E4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 60,
+    "pitch": 60,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "C4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 60,
+    "pitch": 60,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "C4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 60,
+    "pitch": 60,
+    "dur": 360,
+    "measure": 1,
+    "tie": null,
+    "name": "C4",
+    "d": "e.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 62,
+    "pitch": 62,
+    "dur": 120,
+    "measure": 1,
+    "tie": null,
+    "name": "D4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 63,
+    "pitch": 63,
+    "dur": 360,
+    "measure": 1,
+    "tie": null,
+    "name": "E4",
+    "d": "e.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 63,
+    "pitch": 63,
+    "dur": 120,
+    "measure": 1,
+    "tie": null,
+    "name": "E4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 63,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "E4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 63,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "E4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 65,
+    "dur": 120,
+    "measure": 2,
+    "tie": null,
+    "name": "F4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 65,
+    "dur": 120,
+    "measure": 2,
+    "tie": null,
+    "name": "F4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 65,
+    "dur": 240,
+    "measure": 2,
+    "tie": "in",
+    "name": "F4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 65,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "F4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 65,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "F4",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 67,
+    "dur": 360,
+    "measure": 2,
+    "tie": null,
+    "name": "G4",
+    "d": "e.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 67,
+    "dur": 120,
+    "measure": 2,
+    "tie": null,
+    "name": "G4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 65,
+    "dur": 120,
+    "measure": 2,
+    "tie": null,
+    "name": "F4",
+    "d": "s",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 63,
+    "pitch": 63,
+    "dur": 360,
+    "measure": 2,
+    "tie": null,
+    "name": "E4",
+    "d": "e.",
+    "arrive": false
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 3,
+  "n_oov": 0,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page011_sys02_Tenor",
+  "page": 11,
+  "sys": 2,
+  "voice": "Tenor",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "<OOV>",
+   "note.quarter-L4",
+   "dot-S4",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "oov",
+    "dur": 720,
+    "measure": 0,
+    "desc": "<OOV:chord q. B4?+E5>"
+   },
+   {
+    "kind": "note",
+    "pitch_written": 74,
+    "pitch": 62,
+    "dur": 720,
+    "measure": 0,
+    "tie": null,
+    "name": "D5",
+    "d": "q.",
+    "arrive": false
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 0,
+    "desc": "<OOV:chord q =B4+E5>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e G4?+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e G4?+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e G4?+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e G4?+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e G4?+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e G4?+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e G4?+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e G4?+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e A4?+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e A4?+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e A4?+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e A4?+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e A4?+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e A4?+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e A4?+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e A4?+C5?>"
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 1,
+  "n_oov": 18,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page011_sys02_Bass",
+  "page": 11,
+  "sys": 2,
+  "voice": "Bass",
+  "agnostic": [
+   "clef.F-L4",
+   "accidental.flat-L2",
+   "accidental.flat-S3",
+   "accidental.flat-S1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e A2+E3?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e A2+E3?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e A2+E3?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e A2+E3?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e A2+E3?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e A2+E3?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e A2+E3?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e A2+E3?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e B2+F3?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e B2+F3?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e B2+F3?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e B2+F3?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e B2+F3?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e B2+F3?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e B2+F3?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e B2+F3?>"
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 24,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page012_sys01_Staff1",
+  "page": 12,
+  "sys": 1,
+  "voice": "Staff1",
+  "excluded": "<EXCLUDED divisi system: 5 staves>\n"
+ },
+ {
+  "strip_id": "page012_sys01_Staff2",
+  "page": 12,
+  "sys": 1,
+  "voice": "Staff2",
+  "excluded": "<EXCLUDED divisi system: 5 staves>\n"
+ },
+ {
+  "strip_id": "page012_sys01_Staff3",
+  "page": 12,
+  "sys": 1,
+  "voice": "Staff3",
+  "excluded": "<EXCLUDED divisi system: 5 staves>\n"
+ },
+ {
+  "strip_id": "page012_sys01_Staff4",
+  "page": 12,
+  "sys": 1,
+  "voice": "Staff4",
+  "excluded": "<EXCLUDED divisi system: 5 staves>\n"
+ },
+ {
+  "strip_id": "page012_sys01_Staff5",
+  "page": 12,
+  "sys": 1,
+  "voice": "Staff5",
+  "excluded": "<EXCLUDED divisi system: 5 staves>\n"
+ },
+ {
+  "strip_id": "page012_sys02_Soprano",
+  "page": 12,
+  "sys": 2,
+  "voice": "Soprano",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "note.half-S3",
+   "note.quarter-S5",
+   "note.quarter-L5",
+   "barline-L1",
+   "note.quarter-S4",
+   "note.quarter-L4",
+   "note.quarter-S4",
+   "dot-S4",
+   "note.eighth-L5",
+   "barline-L1",
+   "note.half-L3",
+   "note.quarter-L5",
+   "note.quarter-S4",
+   "barline-L1",
+   "note.quarter-L4",
+   "note.quarter-S3",
+   "note.quarter-L4",
+   "note.quarter-S4",
+   "barline-L1",
+   "note.half-S3",
+   "note.quarter-S5",
+   "dot-S5",
+   "note.eighth-L5",
+   "barline-L1",
+   "note.quarter-S4",
+   "note.half-L4",
+   "note.beamedRight1-S4",
+   "note.beamedLeft1-L5",
+   "barline-L1",
+   "note.half-L3",
+   "note.quarter-L5",
+   "dot-S5",
+   "note.eighth-S4",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 72,
+    "dur": 960,
+    "measure": 0,
+    "tie": null,
+    "name": "C5",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 79,
+    "pitch": 79,
+    "dur": 480,
+    "measure": 0,
+    "tie": null,
+    "name": "G5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 77,
+    "pitch": 77,
+    "dur": 480,
+    "measure": 0,
+    "tie": null,
+    "name": "F5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 75,
+    "dur": 480,
+    "measure": 1,
+    "tie": null,
+    "name": "E5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 74,
+    "pitch": 74,
+    "dur": 480,
+    "measure": 1,
+    "tie": null,
+    "name": "D5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 75,
+    "dur": 720,
+    "measure": 1,
+    "tie": null,
+    "name": "E5",
+    "d": "q.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 77,
+    "pitch": 77,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "F5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 960,
+    "measure": 2,
+    "tie": null,
+    "name": "B4",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 77,
+    "pitch": 77,
+    "dur": 480,
+    "measure": 2,
+    "tie": null,
+    "name": "F5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 75,
+    "dur": 480,
+    "measure": 2,
+    "tie": null,
+    "name": "E5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 74,
+    "pitch": 74,
+    "dur": 480,
+    "measure": 3,
+    "tie": null,
+    "name": "D5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 72,
+    "dur": 480,
+    "measure": 3,
+    "tie": null,
+    "name": "C5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 74,
+    "pitch": 74,
+    "dur": 480,
+    "measure": 3,
+    "tie": null,
+    "name": "D5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 75,
+    "dur": 480,
+    "measure": 3,
+    "tie": null,
+    "name": "E5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 72,
+    "dur": 960,
+    "measure": 4,
+    "tie": null,
+    "name": "C5",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 79,
+    "pitch": 79,
+    "dur": 720,
+    "measure": 4,
+    "tie": null,
+    "name": "G5",
+    "d": "q.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 77,
+    "pitch": 77,
+    "dur": 240,
+    "measure": 4,
+    "tie": null,
+    "name": "F5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 75,
+    "dur": 480,
+    "measure": 5,
+    "tie": null,
+    "name": "E5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 74,
+    "pitch": 74,
+    "dur": 960,
+    "measure": 5,
+    "tie": null,
+    "name": "D5",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 75,
+    "dur": 240,
+    "measure": 5,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 77,
+    "pitch": 77,
+    "dur": 240,
+    "measure": 5,
+    "tie": null,
+    "name": "F5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 960,
+    "measure": 6,
+    "tie": null,
+    "name": "B4",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 77,
+    "pitch": 77,
+    "dur": 720,
+    "measure": 6,
+    "tie": null,
+    "name": "F5",
+    "d": "q.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 75,
+    "dur": 240,
+    "measure": 6,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   }
+  ],
+  "n_bars": 7,
+  "n_uncertain": 2,
+  "n_oov": 0,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page012_sys02_Alto",
+  "page": 12,
+  "sys": 2,
+  "voice": "Alto",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "note.quarter-L2",
+   "note.quarter-L2",
+   "note.quarter-S2",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "oov",
+    "dur": 960,
+    "measure": 0,
+    "desc": "<OOV:chord h G4+A4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 0,
+    "desc": "<OOV:chord q A4+C5>"
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 0,
+    "desc": "<OOV:chord q A4+C5>"
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 1,
+    "desc": "<OOV:chord q A4+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 1,
+    "desc": "<OOV:chord q G4+B4>"
+   },
+   {
+    "kind": "oov",
+    "dur": 720,
+    "measure": 1,
+    "desc": "<OOV:chord q. G4+A4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e F4+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 960,
+    "measure": 2,
+    "desc": "<OOV:chord h F4+B4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 2,
+    "desc": "<OOV:chord q G4+B4>"
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 2,
+    "desc": "<OOV:chord q G4+B4>"
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 3,
+    "desc": "<OOV:chord q G4+B4>"
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 67,
+    "dur": 480,
+    "measure": 3,
+    "tie": null,
+    "name": "G4",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 67,
+    "dur": 480,
+    "measure": 3,
+    "tie": null,
+    "name": "G4",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 68,
+    "pitch": 68,
+    "dur": 480,
+    "measure": 3,
+    "tie": null,
+    "name": "A4",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "oov",
+    "dur": 960,
+    "measure": 4,
+    "desc": "<OOV:chord h G4+B4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 720,
+    "measure": 4,
+    "desc": "<OOV:chord q. A4+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 4,
+    "desc": "<OOV:chord e A4+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 5,
+    "desc": "<OOV:chord q A4+B4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 960,
+    "measure": 5,
+    "desc": "<OOV:chord h A4+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 5,
+    "desc": "<OOV:chord e A4+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 5,
+    "desc": "<OOV:chord e A4+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 960,
+    "measure": 6,
+    "desc": "<OOV:chord h G4+B4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 720,
+    "measure": 6,
+    "desc": "<OOV:chord q. G4+B4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 6,
+    "desc": "<OOV:chord e G4+A4?>"
+   }
+  ],
+  "n_bars": 7,
+  "n_uncertain": 0,
+  "n_oov": 21,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page012_sys02_Tenor",
+  "page": 12,
+  "sys": 2,
+  "voice": "Tenor",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "note.half-S4",
+   "note.quarter-S5",
+   "note.quarter-S5",
+   "barline-L1",
+   "note.quarter-S5",
+   "note.quarter-L5",
+   "note.quarter-S4",
+   "dot-S4",
+   "note.eighth-S3",
+   "barline-L1",
+   "note.half-L4",
+   "note.quarter-L5",
+   "note.quarter-S4",
+   "barline-L1",
+   "note.quarter-L5",
+   "note.quarter-S4",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "note.half-S4",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "note.quarter-L5",
+   "note.half-L5",
+   "note.beamedRight1-S4",
+   "note.beamedLeft1-S4",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 960,
+    "measure": 0,
+    "tie": null,
+    "name": "E5",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 79,
+    "pitch": 67,
+    "dur": 480,
+    "measure": 0,
+    "tie": null,
+    "name": "G5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 79,
+    "pitch": 67,
+    "dur": 480,
+    "measure": 0,
+    "tie": null,
+    "name": "G5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 79,
+    "pitch": 67,
+    "dur": 480,
+    "measure": 1,
+    "tie": null,
+    "name": "G5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 77,
+    "pitch": 65,
+    "dur": 480,
+    "measure": 1,
+    "tie": null,
+    "name": "F5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 720,
+    "measure": 1,
+    "tie": null,
+    "name": "E5",
+    "d": "q.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 60,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "C5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 74,
+    "pitch": 62,
+    "dur": 960,
+    "measure": 2,
+    "tie": null,
+    "name": "D5",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 77,
+    "pitch": 65,
+    "dur": 480,
+    "measure": 2,
+    "tie": null,
+    "name": "F5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 480,
+    "measure": 2,
+    "tie": null,
+    "name": "E5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 77,
+    "pitch": 65,
+    "dur": 480,
+    "measure": 3,
+    "tie": null,
+    "name": "F5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 480,
+    "measure": 3,
+    "tie": null,
+    "name": "E5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 3,
+    "desc": "<OOV:chord q D5+E5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 3,
+    "desc": "<OOV:chord q E5+F5?>"
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 960,
+    "measure": 4,
+    "tie": null,
+    "name": "E5",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "oov",
+    "dur": 720,
+    "measure": 4,
+    "desc": "<OOV:chord q. E5+G5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 4,
+    "desc": "<OOV:chord e E5+G5?>"
+   },
+   {
+    "kind": "note",
+    "pitch_written": 77,
+    "pitch": 65,
+    "dur": 480,
+    "measure": 5,
+    "tie": null,
+    "name": "F5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 77,
+    "pitch": 65,
+    "dur": 960,
+    "measure": 5,
+    "tie": null,
+    "name": "F5",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 5,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 5,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "oov",
+    "dur": 960,
+    "measure": 6,
+    "desc": "<OOV:chord h E5+G5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 720,
+    "measure": 6,
+    "desc": "<OOV:chord q. E5+G5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 6,
+    "desc": "<OOV:chord e E5+G5?>"
+   }
+  ],
+  "n_bars": 7,
+  "n_uncertain": 1,
+  "n_oov": 7,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page012_sys02_Bass",
+  "page": 12,
+  "sys": 2,
+  "voice": "Bass",
+  "agnostic": [
+   "clef.F-L4",
+   "accidental.flat-L2",
+   "accidental.flat-S3",
+   "accidental.flat-S1",
+   "note.half-L5",
+   "note.quarter-L6",
+   "note.quarter-L6",
+   "barline-L1",
+   "note.quarter-L6",
+   "note.quarter-S5",
+   "note.quarter-L5",
+   "dot-S5",
+   "note.eighth-L5",
+   "barline-L1",
+   "note.half-S4",
+   "note.quarter-S4",
+   "note.quarter-L6",
+   "barline-L1",
+   "note.quarter-L6",
+   "note.quarter-L6",
+   "note.quarter-S5",
+   "note.quarter-S5",
+   "barline-L1",
+   "note.half-L5",
+   "note.quarter-L5",
+   "dot-S5",
+   "note.eighth-L5",
+   "barline-L1",
+   "note.quarter-S5",
+   "note.half-S5",
+   "note.beamedRight1-L5",
+   "note.beamedLeft1-L5",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "note",
+    "pitch_written": 56,
+    "pitch": 56,
+    "dur": 960,
+    "measure": 0,
+    "tie": null,
+    "name": "A3",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 60,
+    "pitch": 60,
+    "dur": 480,
+    "measure": 0,
+    "tie": null,
+    "name": "C4",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 60,
+    "pitch": 60,
+    "dur": 480,
+    "measure": 0,
+    "tie": null,
+    "name": "C4",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 60,
+    "pitch": 60,
+    "dur": 480,
+    "measure": 1,
+    "tie": null,
+    "name": "C4",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 58,
+    "pitch": 58,
+    "dur": 480,
+    "measure": 1,
+    "tie": null,
+    "name": "B3",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 56,
+    "pitch": 56,
+    "dur": 720,
+    "measure": 1,
+    "tie": null,
+    "name": "A3",
+    "d": "q.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 56,
+    "pitch": 56,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "A3",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 55,
+    "pitch": 55,
+    "dur": 960,
+    "measure": 2,
+    "tie": null,
+    "name": "G3",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 55,
+    "pitch": 55,
+    "dur": 480,
+    "measure": 2,
+    "tie": null,
+    "name": "G3",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 60,
+    "pitch": 60,
+    "dur": 480,
+    "measure": 2,
+    "tie": null,
+    "name": "C4",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 60,
+    "pitch": 60,
+    "dur": 480,
+    "measure": 3,
+    "tie": null,
+    "name": "C4",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 60,
+    "pitch": 60,
+    "dur": 480,
+    "measure": 3,
+    "tie": null,
+    "name": "C4",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 58,
+    "pitch": 58,
+    "dur": 480,
+    "measure": 3,
+    "tie": null,
+    "name": "B3",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 58,
+    "pitch": 58,
+    "dur": 480,
+    "measure": 3,
+    "tie": null,
+    "name": "B3",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 56,
+    "pitch": 56,
+    "dur": 960,
+    "measure": 4,
+    "tie": null,
+    "name": "A3",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 56,
+    "pitch": 56,
+    "dur": 720,
+    "measure": 4,
+    "tie": null,
+    "name": "A3",
+    "d": "q.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 56,
+    "pitch": 56,
+    "dur": 240,
+    "measure": 4,
+    "tie": null,
+    "name": "A3",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 58,
+    "pitch": 58,
+    "dur": 480,
+    "measure": 5,
+    "tie": null,
+    "name": "B3",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 58,
+    "pitch": 58,
+    "dur": 960,
+    "measure": 5,
+    "tie": null,
+    "name": "B3",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 56,
+    "pitch": 56,
+    "dur": 240,
+    "measure": 5,
+    "tie": null,
+    "name": "A3",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 56,
+    "pitch": 56,
+    "dur": 240,
+    "measure": 5,
+    "tie": null,
+    "name": "A3",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "oov",
+    "dur": 960,
+    "measure": 6,
+    "desc": "<OOV:chord h A3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 720,
+    "measure": 6,
+    "desc": "<OOV:chord q. G3+B3?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 6,
+    "desc": "<OOV:chord e G3+B3?>"
+   }
+  ],
+  "n_bars": 7,
+  "n_uncertain": 3,
+  "n_oov": 3,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page013_sys01_Soprano",
+  "page": 13,
+  "sys": 1,
+  "voice": "Soprano",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "note.quarter-L4",
+   "note.half-S4",
+   "dot-S4",
+   "barline-L1",
+   "note.half-S4",
+   "note.half-S3",
+   "barline-L1",
+   "note.quarter-S4",
+   "dot-S4",
+   "note.eighth-L5",
+   "note.half-S4",
+   "barline-L1",
+   "note.quarter-L4",
+   "note.quarter-L3",
+   "note.quarter-L4",
+   "note.quarter-L5",
+   "barline-L1",
+   "note.half-L5",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "rest.eighth-L3",
+   "note.quarter-L6",
+   "note.quarter-S5",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "note",
+    "pitch_written": 74,
+    "pitch": 74,
+    "dur": 480,
+    "measure": 0,
+    "tie": null,
+    "name": "D5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 75,
+    "dur": 1440,
+    "measure": 0,
+    "tie": null,
+    "name": "E5",
+    "d": "h.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 75,
+    "dur": 960,
+    "measure": 1,
+    "tie": null,
+    "name": "E5",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 72,
+    "dur": 960,
+    "measure": 1,
+    "tie": null,
+    "name": "C5",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 75,
+    "dur": 720,
+    "measure": 2,
+    "tie": null,
+    "name": "E5",
+    "d": "q.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 77,
+    "pitch": 77,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "F5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 75,
+    "dur": 960,
+    "measure": 2,
+    "tie": null,
+    "name": "E5",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 74,
+    "pitch": 74,
+    "dur": 480,
+    "measure": 3,
+    "tie": null,
+    "name": "D5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 480,
+    "measure": 3,
+    "tie": null,
+    "name": "B4",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 74,
+    "pitch": 74,
+    "dur": 480,
+    "measure": 3,
+    "tie": null,
+    "name": "D5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 77,
+    "pitch": 77,
+    "dur": 480,
+    "measure": 3,
+    "tie": null,
+    "name": "F5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 77,
+    "pitch": 77,
+    "dur": 960,
+    "measure": 4,
+    "tie": null,
+    "name": "F5",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "oov",
+    "dur": 960,
+    "measure": 4,
+    "desc": "<OOV:chord h G5+B5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 720,
+    "measure": 5,
+    "desc": "<OOV:chord q. G5+B5?>"
+   },
+   {
+    "kind": "rest",
+    "dur": 240,
+    "measure": 5
+   },
+   {
+    "kind": "note",
+    "pitch_written": 80,
+    "pitch": 80,
+    "dur": 480,
+    "measure": 5,
+    "tie": null,
+    "name": "A5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 79,
+    "pitch": 79,
+    "dur": 480,
+    "measure": 5,
+    "tie": null,
+    "name": "G5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "oov",
+    "dur": 960,
+    "measure": 6,
+    "desc": "<OOV:chord h F5+G5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 960,
+    "measure": 6,
+    "desc": "<OOV:chord h E5+F5?>"
+   }
+  ],
+  "n_bars": 7,
+  "n_uncertain": 3,
+  "n_oov": 4,
+  "n_phrase_slurs": 1
+ },
+ {
+  "strip_id": "page013_sys01_Alto",
+  "page": 13,
+  "sys": 1,
+  "voice": "Alto",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "note.half-S3",
+   "note.half-L3",
+   "barline-L1",
+   "note.half-S2",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "rest.eighth-L3",
+   "note.quarter-S2",
+   "note.quarter-L2",
+   "barline-L1",
+   "note.half-L2",
+   "note.half-L2",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 0,
+    "desc": "<OOV:chord q F4+C5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 1440,
+    "measure": 0,
+    "desc": "<OOV:chord h. G4+D5?>"
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 72,
+    "dur": 960,
+    "measure": 1,
+    "tie": null,
+    "name": "C5",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 960,
+    "measure": 1,
+    "tie": null,
+    "name": "B4",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 68,
+    "pitch": 68,
+    "dur": 960,
+    "measure": 2,
+    "tie": null,
+    "name": "A4",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "oov",
+    "dur": 960,
+    "measure": 2,
+    "desc": "<OOV:chord h F4+B4>"
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 3,
+    "desc": "<OOV:chord q F4+A4>"
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 3,
+    "desc": "<OOV:chord q F4+A4>"
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 3,
+    "desc": "<OOV:chord q F4+A4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 3,
+    "desc": "<OOV:chord q B4+D5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 960,
+    "measure": 4,
+    "desc": "<OOV:chord h B4+D5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 960,
+    "measure": 4,
+    "desc": "<OOV:chord h B4+D5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 720,
+    "measure": 5,
+    "desc": "<OOV:chord q. A4+B4?>"
+   },
+   {
+    "kind": "rest",
+    "dur": 240,
+    "measure": 5
+   },
+   {
+    "kind": "note",
+    "pitch_written": 68,
+    "pitch": 68,
+    "dur": 480,
+    "measure": 5,
+    "tie": null,
+    "name": "A4",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 67,
+    "dur": 480,
+    "measure": 5,
+    "tie": null,
+    "name": "G4",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 67,
+    "dur": 960,
+    "measure": 6,
+    "tie": null,
+    "name": "G4",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 67,
+    "dur": 960,
+    "measure": 6,
+    "tie": null,
+    "name": "G4",
+    "d": "h",
+    "arrive": false
+   }
+  ],
+  "n_bars": 7,
+  "n_uncertain": 1,
+  "n_oov": 10,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page013_sys01_Tenor",
+  "page": 13,
+  "sys": 1,
+  "voice": "Tenor",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "note.quarter-S4",
+   "note.half-L5",
+   "dot-S5",
+   "barline-L1",
+   "note.half-S4",
+   "note.half-S4",
+   "barline-L1",
+   "note.half-S3",
+   "note.half-S3",
+   "barline-L1",
+   "note.quarter-L4",
+   "note.quarter-L4",
+   "note.quarter-L4",
+   "note.quarter-L4",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "rest.eighth-L3",
+   "note.quarter-L6",
+   "note.quarter-S5",
+   "barline-L1",
+   "accidental.flat-L4",
+   "note.half-L4",
+   "note.half-S4",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 480,
+    "measure": 0,
+    "tie": null,
+    "name": "E5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 77,
+    "pitch": 65,
+    "dur": 1440,
+    "measure": 0,
+    "tie": null,
+    "name": "F5",
+    "d": "h.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 960,
+    "measure": 1,
+    "tie": null,
+    "name": "E5",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 960,
+    "measure": 1,
+    "tie": null,
+    "name": "E5",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 60,
+    "dur": 960,
+    "measure": 2,
+    "tie": null,
+    "name": "C5",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 72,
+    "pitch": 60,
+    "dur": 960,
+    "measure": 2,
+    "tie": null,
+    "name": "C5",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 74,
+    "pitch": 62,
+    "dur": 480,
+    "measure": 3,
+    "tie": null,
+    "name": "D5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 74,
+    "pitch": 62,
+    "dur": 480,
+    "measure": 3,
+    "tie": null,
+    "name": "D5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 74,
+    "pitch": 62,
+    "dur": 480,
+    "measure": 3,
+    "tie": null,
+    "name": "D5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 74,
+    "pitch": 62,
+    "dur": 480,
+    "measure": 3,
+    "tie": null,
+    "name": "D5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "oov",
+    "dur": 960,
+    "measure": 4,
+    "desc": "<OOV:chord h B4+D5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 960,
+    "measure": 4,
+    "desc": "<OOV:chord h B4+D5?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 720,
+    "measure": 5,
+    "desc": "<OOV:chord q. =B4+D5?>"
+   },
+   {
+    "kind": "rest",
+    "dur": 240,
+    "measure": 5
+   },
+   {
+    "kind": "note",
+    "pitch_written": 80,
+    "pitch": 68,
+    "dur": 480,
+    "measure": 5,
+    "tie": null,
+    "name": "A5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 79,
+    "pitch": 67,
+    "dur": 480,
+    "measure": 5,
+    "tie": null,
+    "name": "G5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 73,
+    "pitch": 61,
+    "dur": 960,
+    "measure": 6,
+    "tie": null,
+    "name": "D5",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 960,
+    "measure": 6,
+    "tie": null,
+    "name": "E5",
+    "d": "h",
+    "arrive": false
+   }
+  ],
+  "n_bars": 7,
+  "n_uncertain": 2,
+  "n_oov": 3,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page013_sys01_Bass",
+  "page": 13,
+  "sys": 1,
+  "voice": "Bass",
+  "agnostic": [
+   "clef.F-L4",
+   "accidental.flat-L2",
+   "accidental.flat-S3",
+   "accidental.flat-S1",
+   "note.quarter-L6",
+   "note.half-S5",
+   "dot-S5",
+   "barline-L1",
+   "note.half-L5",
+   "note.half-L5",
+   "barline-L1",
+   "note.half-L4",
+   "note.half-L4",
+   "barline-L1",
+   "note.quarter-S5",
+   "note.quarter-S5",
+   "note.quarter-L5",
+   "note.quarter-L5",
+   "barline-L1",
+   "note.half-S4",
+   "note.half-S4",
+   "slur.start-S4",
+   "barline-L1",
+   "slur.end-S4",
+   "note.quarter-S4",
+   "dot-S4",
+   "rest.eighth-L3",
+   "note.quarter-L5",
+   "note.quarter-S4",
+   "barline-L1",
+   "note.half-L6",
+   "note.half-S6",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "note",
+    "pitch_written": 60,
+    "pitch": 60,
+    "dur": 480,
+    "measure": 0,
+    "tie": null,
+    "name": "C4",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 58,
+    "pitch": 58,
+    "dur": 1440,
+    "measure": 0,
+    "tie": null,
+    "name": "B3",
+    "d": "h.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 56,
+    "pitch": 56,
+    "dur": 960,
+    "measure": 1,
+    "tie": null,
+    "name": "A3",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 56,
+    "pitch": 56,
+    "dur": 960,
+    "measure": 1,
+    "tie": null,
+    "name": "A3",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 53,
+    "pitch": 53,
+    "dur": 960,
+    "measure": 2,
+    "tie": null,
+    "name": "F3",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 53,
+    "pitch": 53,
+    "dur": 960,
+    "measure": 2,
+    "tie": null,
+    "name": "F3",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 58,
+    "pitch": 58,
+    "dur": 480,
+    "measure": 3,
+    "tie": null,
+    "name": "B3",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 58,
+    "pitch": 58,
+    "dur": 480,
+    "measure": 3,
+    "tie": null,
+    "name": "B3",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 56,
+    "pitch": 56,
+    "dur": 480,
+    "measure": 3,
+    "tie": null,
+    "name": "A3",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 56,
+    "pitch": 56,
+    "dur": 480,
+    "measure": 3,
+    "tie": null,
+    "name": "A3",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 55,
+    "pitch": 55,
+    "dur": 960,
+    "measure": 4,
+    "tie": null,
+    "name": "G3",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 55,
+    "pitch": 55,
+    "dur": 960,
+    "measure": 4,
+    "tie": "in",
+    "name": "G3",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 55,
+    "pitch": 55,
+    "dur": 720,
+    "measure": 5,
+    "tie": null,
+    "name": "G3",
+    "d": "q.",
+    "arrive": false
+   },
+   {
+    "kind": "rest",
+    "dur": 240,
+    "measure": 5
+   },
+   {
+    "kind": "note",
+    "pitch_written": 56,
+    "pitch": 56,
+    "dur": 480,
+    "measure": 5,
+    "tie": null,
+    "name": "A3",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 55,
+    "pitch": 55,
+    "dur": 480,
+    "measure": 5,
+    "tie": null,
+    "name": "G3",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 60,
+    "pitch": 60,
+    "dur": 960,
+    "measure": 6,
+    "tie": null,
+    "name": "C4",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 62,
+    "pitch": 62,
+    "dur": 960,
+    "measure": 6,
+    "tie": null,
+    "name": "D4",
+    "d": "h",
+    "arrive": false
+   }
+  ],
+  "n_bars": 7,
+  "n_uncertain": 2,
+  "n_oov": 0,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page013_sys02_Soprano",
+  "page": 13,
+  "sys": 2,
+  "voice": "Soprano",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "note.quarter-S4",
+   "dot-S4",
+   "note.eighth-L5",
+   "note.half-L5",
+   "slur.start-L5",
+   "barline-L1",
+   "slur.end-L5",
+   "note.quarter-L5",
+   "rest.quarter-L3",
+   "note.quarter-S4",
+   "note.quarter-L5",
+   "barline-L1",
+   "note.whole-L5",
+   "slur.start-L5",
+   "barline-L1",
+   "slur.end-L5",
+   "note.whole-L5",
+   "<TIEX>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 75,
+    "dur": 720,
+    "measure": 0,
+    "tie": null,
+    "name": "E5",
+    "d": "q.",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 77,
+    "pitch": 77,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "F5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 77,
+    "pitch": 77,
+    "dur": 960,
+    "measure": 0,
+    "tie": "in",
+    "name": "F5",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 77,
+    "pitch": 77,
+    "dur": 480,
+    "measure": 1,
+    "tie": null,
+    "name": "F5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "rest",
+    "dur": 480,
+    "measure": 1
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 75,
+    "dur": 480,
+    "measure": 1,
+    "tie": null,
+    "name": "E5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 77,
+    "pitch": 77,
+    "dur": 480,
+    "measure": 1,
+    "tie": null,
+    "name": "F5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 77,
+    "pitch": 77,
+    "dur": 1920,
+    "measure": 2,
+    "tie": "in",
+    "name": "F5",
+    "d": "w",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 77,
+    "pitch": 77,
+    "dur": 1920,
+    "measure": 3,
+    "tie": "out",
+    "name": "F5",
+    "d": "w",
+    "arrive": false
+   }
+  ],
+  "n_bars": 4,
+  "n_uncertain": 0,
+  "n_oov": 0,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page013_sys02_Alto",
+  "page": 13,
+  "sys": 2,
+  "voice": "Alto",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "note.half-S1",
+   "accidental.natural-L3",
+   "note.half-L3",
+   "slur.start-L3",
+   "barline-L1",
+   "slur.end-L3",
+   "note.quarter-L3",
+   "rest.quarter-L3",
+   "note.quarter-L2",
+   "note.quarter-L2",
+   "barline-L1",
+   "accidental.flat-L3",
+   "note.whole-L3",
+   "slur.start-L3",
+   "barline-L1",
+   "slur.end-L3",
+   "note.whole-L3",
+   "<TIEX>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "note",
+    "pitch_written": 65,
+    "pitch": 65,
+    "dur": 960,
+    "measure": 0,
+    "tie": null,
+    "name": "F4",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 71,
+    "pitch": 71,
+    "dur": 960,
+    "measure": 0,
+    "tie": "in",
+    "name": "B4",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 71,
+    "pitch": 71,
+    "dur": 480,
+    "measure": 1,
+    "tie": null,
+    "name": "B4",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "rest",
+    "dur": 480,
+    "measure": 1
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 67,
+    "dur": 480,
+    "measure": 1,
+    "tie": null,
+    "name": "G4",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 67,
+    "dur": 480,
+    "measure": 1,
+    "tie": null,
+    "name": "G4",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 1920,
+    "measure": 2,
+    "tie": "in",
+    "name": "B4",
+    "d": "w",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 1920,
+    "measure": 3,
+    "tie": "out",
+    "name": "B4",
+    "d": "w",
+    "arrive": false
+   }
+  ],
+  "n_bars": 4,
+  "n_uncertain": 1,
+  "n_oov": 0,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page013_sys02_Tenor",
+  "page": 13,
+  "sys": 2,
+  "voice": "Tenor",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "note.half-S5",
+   "note.half-L5",
+   "slur.start-L5",
+   "barline-L1",
+   "slur.end-L5",
+   "note.quarter-L5",
+   "rest.quarter-L3",
+   "note.quarter-S4",
+   "note.quarter-S4",
+   "barline-L1",
+   "<OOV>",
+   "note.beamedBoth1-S4",
+   "note.beamedLeft1-S4",
+   "note.beamedRight1-S4",
+   "note.beamedBoth1-S4",
+   "note.beamedLeft1-S4",
+   "note.beamedRight1-S4",
+   "note.beamedLeft1-S4",
+   "barline-L1",
+   "<OOV>",
+   "note.beamedBoth1-S4",
+   "note.beamedLeft1-S4",
+   "note.beamedRight1-S4",
+   "note.beamedBoth1-S4",
+   "note.beamedLeft1-S4",
+   "note.beamedRight1-S4",
+   "note.beamedLeft1-S4",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "note",
+    "pitch_written": 79,
+    "pitch": 67,
+    "dur": 960,
+    "measure": 0,
+    "tie": null,
+    "name": "G5",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 77,
+    "pitch": 65,
+    "dur": 960,
+    "measure": 0,
+    "tie": "in",
+    "name": "F5",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 77,
+    "pitch": 65,
+    "dur": 480,
+    "measure": 1,
+    "tie": null,
+    "name": "F5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "rest",
+    "dur": 480,
+    "measure": 1
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 480,
+    "measure": 1,
+    "tie": null,
+    "name": "E5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 480,
+    "measure": 1,
+    "tie": null,
+    "name": "E5",
+    "d": "q",
+    "arrive": false
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e E5+_G5?>"
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 2,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 3,
+    "desc": "<OOV:chord e E5+G5?>"
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 3,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 3,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 3,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 3,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 3,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 3,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 3,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   }
+  ],
+  "n_bars": 4,
+  "n_uncertain": 0,
+  "n_oov": 2,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page013_sys02_Bass",
+  "page": 13,
+  "sys": 2,
+  "voice": "Bass",
+  "agnostic": [
+   "clef.F-L4",
+   "accidental.flat-L2",
+   "accidental.flat-S3",
+   "accidental.flat-S1",
+   "note.half-L6",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "rest.quarter-L3",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "note",
+    "pitch_written": 60,
+    "pitch": 60,
+    "dur": 960,
+    "measure": 0,
+    "tie": null,
+    "name": "C4",
+    "d": "h",
+    "arrive": false
+   },
+   {
+    "kind": "oov",
+    "dur": 960,
+    "measure": 0,
+    "desc": "<OOV:chord h C4+D4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 480,
+    "measure": 1,
+    "desc": "<OOV:chord q C4+D4?>"
+   },
+   {
+    "kind": "rest",
+    "dur": 480,
+    "measure": 1
+   },
+   {
+    "kind": "oov",
+    "dur": 960,
+    "measure": 1,
+    "desc": "<OOV:chord h A3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e B3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e B3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e B3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e B3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e B3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e B3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e B3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 2,
+    "desc": "<OOV:chord e B3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 3,
+    "desc": "<OOV:chord e B3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 3,
+    "desc": "<OOV:chord e B3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 3,
+    "desc": "<OOV:chord e B3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 3,
+    "desc": "<OOV:chord e B3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 3,
+    "desc": "<OOV:chord e B3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 3,
+    "desc": "<OOV:chord e B3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 3,
+    "desc": "<OOV:chord e B3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 3,
+    "desc": "<OOV:chord e B3+C4?>"
+   }
+  ],
+  "n_bars": 4,
+  "n_uncertain": 0,
+  "n_oov": 19,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page014_sys01_Soprano",
+  "page": 14,
+  "sys": 1,
+  "voice": "Soprano",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "<TIEX>",
+   "note.whole-L5",
+   "slur.start-L5",
+   "barline-L1",
+   "slur.end-L5",
+   "note.whole-L5",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "note",
+    "pitch_written": 77,
+    "pitch": 77,
+    "dur": 1920,
+    "measure": 0,
+    "tie": "in",
+    "name": "F5",
+    "d": "w",
+    "arrive": true
+   },
+   {
+    "kind": "note",
+    "pitch_written": 77,
+    "pitch": 77,
+    "dur": 1920,
+    "measure": 1,
+    "tie": null,
+    "name": "F5",
+    "d": "w",
+    "arrive": false
+   }
+  ],
+  "n_bars": 2,
+  "n_uncertain": 0,
+  "n_oov": 0,
+  "n_phrase_slurs": 1
+ },
+ {
+  "strip_id": "page014_sys01_Alto",
+  "page": 14,
+  "sys": 1,
+  "voice": "Alto",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "<TIEX>",
+   "note.whole-L3",
+   "slur.start-L3",
+   "barline-L1",
+   "slur.end-L3",
+   "note.whole-L3",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 1920,
+    "measure": 0,
+    "tie": "in",
+    "name": "B4",
+    "d": "w",
+    "arrive": true
+   },
+   {
+    "kind": "note",
+    "pitch_written": 70,
+    "pitch": 70,
+    "dur": 1920,
+    "measure": 1,
+    "tie": null,
+    "name": "B4",
+    "d": "w",
+    "arrive": false
+   }
+  ],
+  "n_bars": 2,
+  "n_uncertain": 0,
+  "n_oov": 0,
+  "n_phrase_slurs": 1
+ },
+ {
+  "strip_id": "page014_sys01_Tenor",
+  "page": 14,
+  "sys": 1,
+  "voice": "Tenor",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "<OOV>",
+   "note.beamedBoth1-S4",
+   "note.beamedLeft1-S4",
+   "note.beamedRight1-S4",
+   "note.beamedBoth1-S4",
+   "note.beamedLeft1-S4",
+   "note.beamedRight1-S4",
+   "note.beamedLeft1-S4",
+   "barline-L1",
+   "<OOV>",
+   "note.beamedBoth1-S4",
+   "note.beamedLeft1-S4",
+   "note.beamedRight1-S4",
+   "note.beamedBoth1-S4",
+   "note.beamedLeft1-S4",
+   "note.beamedRight1-S4",
+   "note.beamedLeft1-S4",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E5+_G5?>"
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E5+G5?>"
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   }
+  ],
+  "n_bars": 2,
+  "n_uncertain": 0,
+  "n_oov": 2,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page014_sys01_Bass",
+  "page": 14,
+  "sys": 1,
+  "voice": "Bass",
+  "agnostic": [
+   "clef.F-L4",
+   "accidental.flat-L2",
+   "accidental.flat-S3",
+   "accidental.flat-S1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e _A3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e A3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e A3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e A3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e A3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e A3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e A3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e A3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e _A3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e A3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e A3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e A3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e A3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e A3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e A3+C4?>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e A3+C4?>"
+   }
+  ],
+  "n_bars": 2,
+  "n_uncertain": 0,
+  "n_oov": 16,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page014_sys02_Soprano",
+  "page": 14,
+  "sys": 2,
+  "voice": "Soprano",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "note.whole-S4",
+   "barline-L1",
+   "note.whole-S4",
+   "barline-L1",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 75,
+    "dur": 1920,
+    "measure": 0,
+    "tie": null,
+    "name": "E5",
+    "d": "w",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 75,
+    "dur": 1920,
+    "measure": 1,
+    "tie": null,
+    "name": "E5",
+    "d": "w",
+    "arrive": false
+   },
+   {
+    "kind": "oov",
+    "dur": 1920,
+    "measure": 2,
+    "desc": "<OOV:chord w E5+B5?>"
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 1,
+  "n_phrase_slurs": 1
+ },
+ {
+  "strip_id": "page014_sys02_Alto",
+  "page": 14,
+  "sys": 2,
+  "voice": "Alto",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "note.whole-L2",
+   "barline-L1",
+   "note.whole-L2",
+   "barline-L1",
+   "note.whole-L2",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 67,
+    "dur": 1920,
+    "measure": 0,
+    "tie": null,
+    "name": "G4",
+    "d": "w",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 67,
+    "dur": 1920,
+    "measure": 1,
+    "tie": null,
+    "name": "G4",
+    "d": "w",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 67,
+    "pitch": 67,
+    "dur": 1920,
+    "measure": 2,
+    "tie": null,
+    "name": "G4",
+    "d": "w",
+    "arrive": false
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 0,
+  "n_phrase_slurs": 1
+ },
+ {
+  "strip_id": "page014_sys02_Tenor",
+  "page": 14,
+  "sys": 2,
+  "voice": "Tenor",
+  "agnostic": [
+   "clef.G-L2",
+   "accidental.flat-L3",
+   "accidental.flat-S4",
+   "accidental.flat-S2",
+   "<OOV>",
+   "note.beamedBoth1-S4",
+   "note.beamedLeft1-S4",
+   "note.beamedRight1-S4",
+   "note.beamedBoth1-S4",
+   "note.beamedLeft1-S4",
+   "note.beamedRight1-S4",
+   "note.beamedLeft1-S4",
+   "barline-L1",
+   "<OOV>",
+   "note.beamedBoth1-S4",
+   "note.beamedLeft1-S4",
+   "note.beamedRight1-S4",
+   "note.beamedBoth1-S4",
+   "note.beamedLeft1-S4",
+   "note.beamedRight1-S4",
+   "note.beamedLeft1-S4",
+   "barline-L1",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e E5+F5?>"
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 0,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e E5+F5?>"
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "note",
+    "pitch_written": 75,
+    "pitch": 63,
+    "dur": 240,
+    "measure": 1,
+    "tie": null,
+    "name": "E5",
+    "d": "e",
+    "arrive": false
+   },
+   {
+    "kind": "oov",
+    "dur": 1920,
+    "measure": 2,
+    "desc": "<OOV:chord w E5+F5?>"
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 3,
+  "n_phrase_slurs": 0
+ },
+ {
+  "strip_id": "page014_sys02_Bass",
+  "page": 14,
+  "sys": 2,
+  "voice": "Bass",
+  "agnostic": [
+   "clef.F-L4",
+   "accidental.flat-L2",
+   "accidental.flat-S3",
+   "accidental.flat-S1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "<OOV>",
+   "barline-L1",
+   "<OOV>",
+   "barline-L1"
+  ],
+  "events": [
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e G3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e G3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e G3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e G3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e G3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e G3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e G3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 0,
+    "desc": "<OOV:chord e G3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e G3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e G3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e G3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e G3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e G3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e G3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e G3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 240,
+    "measure": 1,
+    "desc": "<OOV:chord e G3+B3>"
+   },
+   {
+    "kind": "oov",
+    "dur": 1920,
+    "measure": 2,
+    "desc": "<OOV:chord w E3+B3?>"
+   }
+  ],
+  "n_bars": 3,
+  "n_uncertain": 0,
+  "n_oov": 17,
+  "n_phrase_slurs": 0
+ }
+]

@@ -298,6 +298,63 @@ than the 48 BUG-011 diagnostic strips) — in parallel with, at the user's discr
 DataLoader seeding fix noted above. Both are needed before Step 2 can be called fully closed and before
 Step 4 evaluation begins.
 
+### Amendment 2026-09-23 -- second real two-seed `RUN_FINETUNING` run; "reproducible under the cuDNN fix" falsified
+
+A fresh two-seed run (same tracked notebook, `RUN_FINETUNING=True`, cuDNN determinism fix present,
+Step 1 data read from the persisted `piamac/cpm-font-augmented2` dataset, lr=3e-5) did **not** reproduce
+the 2026-09-19 numbers. Both checkpoints were verified on disk and their metadata matches the logs:
+`finetuned_font_seed1.pt` (epoch 2, `loo_font_ser` 0.0926) and `finetuned_font_seed2.pt` (epoch 2,
+`loo_font_ser` 0.0562). Hardware/torch/cuDNN versions for this run were **not logged**.
+
+| Run | seed=1 best (epoch) | seed=2 best (epoch) |
+|---|---|---|
+| 2026-09-19 repro runs (isolated) | 0.0561 (1), 0.0523 (1) | -- |
+| 2026-09-19 real two-seed run | 0.0523 (1) | 0.0886 (2) |
+| 2026-09-23 real two-seed run | 0.0926 (2) | 0.0562 (2) |
+
+Per-epoch, 2026-09-23: seed=1 `loo_font_ser` 0.1145 / 0.0926 / 0.1815 with the canary clean hard cap
+(0.1502) **breached at epoch 3** (0.1730), stopped there; seed=2 0.0877 / 0.0562 / 0.0880 / 0.1055 /
+0.1182, stopped by patience after epoch 5. Seed=1 epoch 1 took 968s vs ~500s for every other epoch
+(possible different GPU node or cold cache -- unconfirmed).
+
+**ml-cv-lead review (5th round) -- verdict: sound with caveats.**
+1. Seed=1 epoch-1 best moved 0.0523 -> 0.1145 with identical seed and code (>2x). Two plausible
+   causes, not separable from the logs: (a) different Kaggle GPU / cuDNN / driver stack --
+   `cudnn.deterministic=True` only guarantees determinism within one hardware+software stack; (b) the
+   still-unseeded `finetune_train_loader` shuffle. The earlier 4-digit agreement between two runs was
+   likely a shared hardware path or coincidence. The 7% / 26-29% same-seed noise floor was measured on
+   one stack and does not carry over. **The claim "reproducible under the cuDNN fix" is withdrawn.**
+2. **Report every run as a range** -- best `loo_font_ser` spans 0.052 to 0.093 across all runs (1.8x).
+   Do not average, and do not call either seed "better": the seed ranking flipped between the two real
+   runs, so seed identity carries no information; run-level variance dominates.
+3. Best-at-epoch-1/2-then-decline or oscillation now appears in 4 of 5 runs and every run ends worse
+   than its best: a property of constant `lr=3e-5` on this data, not a seed effect. It does **not**
+   favour `1e-5` (still no replication behind it). Warmup + cosine decay (`T_max` = 3-4 epochs, keep
+   early stopping) is a reasonable single-variable ablation -- run it as a separately labelled
+   experiment after the DataLoader seeding fix, not folded into Step 2's closure. The canary hard cap
+   is actively load-bearing (seed=1 breached at epoch 3 here; seed=2 reached ~89% of it on 2026-09-19).
+4. **Step 3 may start now; Step 2 stays open.** Carry both seed checkpoints of the current run into
+   Step 4 and evaluate them separately, never averaged (the 2026-09-19 checkpoints, if still held, may
+   be evaluated as well, also separately).
+
+**Corrections / caveats.** The 2026-09-19 amendment above states seed=1's own epoch-2 value as 0.0782;
+that figure was not verified against a saved log in this review -- treat it as unverified. The
+Leland-held-out `loo_font_ser` is used for per-epoch best-selection, so its best value is optimistically
+biased and is not an unbiased estimate; it is also a single held-out font (n=1), a weak proxy for
+unseen real fonts. `font_val_ser` has a confirmed stem-overlap leak and must not be cited. Step 4 must
+also re-measure CameraPrIMuS clean/distorted numbers to check for forgetting (the canary is a proxy,
+not a replacement). None of this speaks to confidence calibration (step 7), and none of it is evidence
+about whether the BUG-011 real-screenshot fix works.
+
+**Follow-ups (before any further fine-tuning):** seed the `finetune_train_loader` shuffle (notebook
+cell 12/13) and log GPU model + torch/CUDA/cuDNN versions per run -- implemented in the commit that
+follows this amendment. Step 3 (fresh real-world test set) remains the next action and needs new
+photos/screenshots from the user.
+
+### Amendment 2026-09-26 -- which checkpoints are deployed
+
+**Checkpoint metadata, authoritative (2026-09-26, user decision: use the files' own metadata; sha256 matches data/eval_dsmn/checkpoint_hashes.txt):** the deployed `finetuned_font_seed{1,2}.pt` are from the 2026-09-23 two-seed run, not the 2026-09-19 run: seed1 epoch 2, `loo_font_ser` 0.0926, canary clean/distorted 0.0785/0.1311; seed2 epoch 2, `loo_font_ser` 0.0562, canary 0.0492/0.0865. Report as a range (0.0562-0.0926). The 0.0523/0.0886 figures above refer to the 2026-09-19 run whose checkpoints were overwritten.
+
 ## Not yet decided / blocked
 
 - Whether the base Camera-PrIMuS training run needs to finish first, or whether fine-tuning can

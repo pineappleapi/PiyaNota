@@ -258,6 +258,12 @@ domain, not decoding). AC5's staff-position + chord tagging is likewise produced
 not `chord_group_id` as written here — left as-is per the user; note it's also read by
 `stage4_reconstruction.py` (chord counting/reporting), so a future rename must update both files.
 
+**Fresh-photo eval note (2026-09-28):** `data/eval_fresh/REPORT.md` is the first measurement against a
+user-verified Filipino-dataset GT: Non Nobis Domine, 36 strips.
+- Token SER is 58.3-58.5% as-is and 50.2-50.8% with the clef/key classifier (fine-tuned seed range). Both are far
+  above AC1's 15%, so AC1 is not met.
+- The remaining error is note and rhythm reading (the BUG-011 domain gap), not the clef/key header.
+
 **AC1 decision (2026-09-10):** No hand-annotated Filipino SATB test set exists yet to measure the
 15% SER target against directly. User decision: accept the Camera-PrIMuS-derived SER comparison
 (`compare_omr_baselines.py`) as an interim proxy metric for AC1 while a subset of the Filipino SATB
@@ -273,6 +279,14 @@ date. Revisit once that run completes; not pursuing a partial/parallel fine-tune
 below — it runs the real CRNN decode path (not ground-truth tokens) end to end and is the closest
 proxy this project has to "does symbol transcription plus pitch inference actually work together,"
 which token-level SER alone can't answer.
+
+**Clef/key classifier status (2026-09-27):** this is a flag-only side model for the BUG-011 clef collapse. The plan and decisions are in `docs/decisions/piya-106-clef-keysig-detector-plan.md`.
+
+- Local training code is ready and reviewed: ml-cv-lead gave a conditional GO, and fixes R1-R6 / E1-E4 are applied in `850f880`.
+- The CPU-only venv is the reference configuration, because the GPU is unreliable (BUG-019).
+- No full training run has started, and no accuracy number exists yet.
+- Validation is Dormi Jesu, Livin' on a Prayer and Flashlight, check-only. DSMN and Honneur a Toi stay test-only.
+- Stage 3 integration (including the `key_plan` for mid-piece key changes) has not started.
 
 ---
 
@@ -525,3 +539,38 @@ upgraded from reasoned to empirically verified: `compare_omr_baselines.py` never
 48-strip verification against the Finding-fixed code: identical 2/48 result, confirming no
 regression from the review-driven refactor. Ready for user merge approval — no code changes remain
 outstanding.
+
+### PIYA-126 — Chord / Divisi Support in Symbol Transcription (deferred; number provisional)
+**Trigger:** Divisi (two notes on one staff at the same time) is common in the target SATB scores, and
+both divisi notes must sound in the same voice track. Stage 3 cannot represent simultaneous notes:
+Camera-PrIMuS is monophonic with no chord token, and Stage 3's `chord_id` block never fires.
+**Sequencing:** Do NOT start until PIYA-106 fine-tuning Steps 2–7 are closed (font fix and chord fix
+must not be confounded). Full design and 11-step plan: `docs/decisions/piya-106-chord-vocabulary-plan.md`.
+
+**Interim scope (now):** the pipeline is monophonic-only. It should *detect* likely divisi/chord
+strips (e.g. bar overflow that looks like stacked notes, vertically stacked noteheads in the strip)
+and flag them `review_needed` rather than silently playing them as sequential notes.
+
+**Acceptance Criteria (draft, to be confirmed with the user):**
+1. Data-only CTC frame-budget feasibility audit passes for chords up to the chosen size (per-epoch
+   zero-loss counter added).
+2. Chord token (`chordnote-*`) added to the end of `VOCAB`; existing indices and the
+   `finetuned_font_seed{1,2}.pt` checkpoints unchanged until PIYA-106 closes.
+3. `infer_pitch` emits chord members with shared onset/duration and an explicit `chord_id`.
+4. Training data built from ds2_dense and camera-grandstaff (label source only, split per staff);
+   SynthSalienceChoralSet is not usable for training.
+5. `piyanota_dataset` remains test-only; results reported per source, per font, chord vs non-chord.
+6. ml-cv-lead review before training code and after any reported number; senior-reviewer before merge.
+
+### PIYA-127 — Recapture Prompt & Page Replacement (FR-24)
+**Trigger:** A page cannot be used: zero staves (`no_staff_detected`), staff count not a multiple of 4
+(`unsupported_staff_layout`), or a missing voice (`incomplete_voice_sequence`). Split out of BUG-001
+(signed off 2026-09-26); tracked as BUG-018. Full spec, checklist and draft acceptance criteria:
+`docs/tickets/recapture-prompt-fr24.md`.
+**Summary:** Today a zero-box page is silently skipped and the other failures are bare `ValueError`s, so
+PIYA-102/116 have no structured reason or `page_index` to act on. Needs (1) one structured failure type with
+reason + `page_index`, (2) the recapture checklist on the app (steady phone, good lighting, eye level, nothing
+blocking the page), and (3) retake replaces the failed page in place: new image id, same `page_index`, other
+pages' order untouched, old image kept as superseded. Overlaps PIYA-116 (job-level resubmit) - reconcile
+before implementation. Acceptance criteria are DRAFT until confirmed with the user.
+
