@@ -1,36 +1,39 @@
 """PiyaNota - Stage 3, version (b): CRNN transcription with the clef/key classifier (ClefKeyNet).
 
-Version (a) is ``stage3_transcription.py`` unchanged: the CRNN's own clef and key-signature tokens
-decide pitch, and Tenor is lowered an octave by voice. This module is the opt-in version (b), used by
-the fresh-photo evaluation (data/eval_fresh/PREREG.md). It imports Stage 3 unchanged and changes only
-where the clef, key and octave come from:
+Version (a) is ``stage3_transcription.infer_pitch`` without a header override: the CRNN's own clef and
+key-signature tokens decide pitch, and Tenor is lowered an octave by voice. Version (b) is the pipeline
+default since 2026-09-29 (``transcribe_voice_sequences(clef_key_decisions=...)``, built by
+``decisions_for_pages``); it was first used by the fresh-photo evaluation (data/eval_fresh/PREREG.md).
+It changes only where the clef, key and octave come from, through ``infer_pitch``'s ``header_override``:
 
 * Clef: ``clef_voice_rules.resolve_clef`` (classifier + voice constraint) is the single owner. Every
   CRNN clef token is dropped, because a CRNN clef (BUG-011 collapses to clef.C-L3) would otherwise
   replace the rule's clef inside ``infer_pitch`` (user decision 2026-09-28: the CRNN's raw clef can't
   override the rule).
-* Octave: Stage 3's voice-based Tenor lookup (``get_clef_reference``) is switched off for the call, and
-  the rule's ``octave_shift`` is added once to every pitched event. Switching off by patching the module
-  global covers all of its call sites inside ``infer_pitch``; otherwise a Tenor would drop two octaves.
+* Octave: the rule's ``octave_shift`` is added to the clef reference and Stage 3's voice-based Tenor
+  lookup is not used, so a Tenor can't drop two octaves.
 * Key: key signatures are shared by all four voices of a system (choral-conductor review 2026-09-28),
   so only confident classifier readings vote per system; with no majority the previous system's key is
-  carried and the system is flagged. The CRNN never votes. The CRNN's leading key-signature accidentals
-  are consumed so they cannot leak into the first notes as inline accidentals.
-* CRNN mid-strip key changes are left to Stage 3 but flagged ``review_needed`` (a mid-system key change
-  is not in either test piece, so a firing one is a recognition error).
+  carried and the system is flagged. The CRNN never votes. Every CRNN accidental before the first
+  note/rest is kept out of the key; only one directly before a note on its own position survives, as
+  that note's inline accidental (BUG-027: glyphs after the time-signature digits used to be added to the key).
+* CRNN mid-strip key changes are left to Stage 3 but flagged ``review_needed``. A post-barline burst
+  matching the next system's classifier key counts even with one glyph (BUG-029).
 
-Known limit: a real accidental on the first note that the CRNN emits directly after the key signature
-is indistinguishable from a key-signature accidental and is dropped with it.
+Known limit: the classifier fails the real-photo gate (BUG-021, ~4.5% of clefs confidently wrong), so
+its flags are kept on every event for review.
 """
 from __future__ import annotations
 
+import argparse
 import contextlib
+import hashlib
 import io
 import json
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator, Optional, Sequence
+from typing import Any, Optional, Sequence
 
 import numpy as np
 import torch
@@ -39,16 +42,21 @@ import clef_key_core as ck
 import stage3_transcription as s3
 from clef_voice_rules import ClefDecision, resolve_clef
 
-DEFAULT_CLEF_KEY_CHECKPOINT = Path("training/clef_key_artifacts/t4_full_seed20260926_runA/clef_key_classifier.pt")
+# Resolved from the repo, not the working directory, so the API and CLIs find the same file. The checkpoint
+# is gitignored (copy it from the training tree); the hash pins the T4 seed-20260926 run A weights that
+# the BUG-021 validation and the fresh-photo eval used.
+DEFAULT_CLEF_KEY_CHECKPOINT = (Path(__file__).resolve().parent / "training" / "clef_key_artifacts"
+                               / "t4_full_seed20260926_runA" / "clef_key_classifier.pt")
+DEFAULT_CLEF_KEY_SHA256 = "e718d4479b1310369b64cfaf9a8f1ff433179543ffa9d1810b24c683de13fe10"
+# The checkpoint failed its real-photo gate (BUG-021: ~4.5% of clefs confidently wrong, which no per-strip
+# flag catches). The user accepted it as the default only with every event flagged for review, so while
+# this is False each version (b) event carries CLEF_KEY_UNVALIDATED_FLAG and review_needed. Set it True
+# only after a gate pass on fresh photos.
+CLEF_KEY_GATE_PASSED = False
+CLEF_KEY_UNVALIDATED_FLAG = "clef_key_unvalidated"
+SHA256_CHUNK_BYTES = 1 << 20
 
-# Printed key-signature positions (PrIMuS agnostic) in the order they are engraved; the same table the
-# ground-truth builder uses, so a correctly recognised key produces exactly the ground-truth header tokens.
-KEY_SIG_ORDER: dict[str, dict[str, list[str]]] = {
-    "clef.G-L2": {"sharp": ["L5", "S3", "S5", "L4", "S2", "S4", "L3"],
-                  "flat": ["L3", "S4", "S2", "L4", "S1", "S3", "L2"]},
-    "clef.F-L4": {"sharp": ["L4", "S2", "S4", "L3", "S1", "S3", "L2"],
-                  "flat": ["L2", "S3", "S1", "L3", "L1", "S2", "S0"]},
-}
+DEFAULT_PIPELINE_MANIFEST = "manifest.json"
 INJECTED_TOKEN_CONFIDENCE = 1.0  # clef/key tokens are not folded into per-note confidence by infer_pitch
 STAFF_HALF_HEIGHT_SPACINGS = 2.0  # outer staff lines = centre -/+ 2 spacings
 BAND_MAX_OFFSET_SPACINGS = 1.0    # a Stage 2 box must sit within 1 spacing of a tracked staff (realval 3.1)
@@ -75,6 +83,9 @@ class StripDecision:
     key: int
     key_source: str
     flags: list[str] = field(default_factory=list)
+    # Key of the next system in page/system order (None on the last one); lets Stage 3 accept a
+    # one-glyph mid-strip key change that the classifier confirms (BUG-029).
+    next_key: Optional[int] = None
 
     @property
     def review_needed(self) -> bool:
@@ -187,23 +198,120 @@ def decide(readings: Sequence[ClefKeyReading], ckm: ClefKeyModel) -> dict[str, S
                 flags.append("no_classifier_geometry")
             decision = resolve_clef(r.voice, r.clef_probs or no_read, ckm.clef_threshold, ckm.g8vb_reliable)
             out[r.strip_id] = StripDecision(decision, sys_key, source, sorted(set(flags)))
+    order = sorted(systems)
+    for this, nxt in zip(order, order[1:]):
+        if not _systems_adjacent(this, nxt):
+            continue    # a system Stage 2 missed in between: its key is unknown, so confirm nothing
+        next_key = out[systems[nxt][0].strip_id].key
+        for r in systems[this]:
+            out[r.strip_id].next_key = next_key
     return out
+
+
+def _systems_adjacent(this: tuple[int, int], nxt: tuple[int, int]) -> bool:
+    """True if (page, system) ``nxt`` directly follows ``this`` (systems are 1-based per page, Stage 2).
+
+    A missed last system on a page can't be seen from here; only gaps within a page, a skipped page, or a
+    next page that doesn't start at system 1 are caught.
+    """
+    page, sys_ = this
+    return nxt == (page, sys_ + 1) or nxt == (page + 1, 1)
+
+
+def decisions_for_pages(pages: Sequence[tuple], manifest: Sequence[dict[str, Any]],
+                        ckm: ClefKeyModel) -> tuple[dict[str, StripDecision], list[ClefKeyReading]]:
+    """Clef/key decisions for every Stage 2 strip of a run.
+
+    Args:
+        pages: ``stage1_preprocessing.preprocess_batch(keep_unmasked=True)`` output; the 4th element of
+            each tuple is the PreprocessedPage the classifier crops from.
+        manifest: Stage 2's manifest for the same run (``detect_staff_regions(manifest_path=...)``).
+
+    Raises:
+        ValueError: A page tuple lacks its PreprocessedPage (Stage 1 run without keep_unmasked).
+    """
+    by_page: dict[int, list[dict[str, Any]]] = {}
+    for m in manifest:
+        by_page.setdefault(m["page"], []).append(m)
+    readings: list[ClefKeyReading] = []
+    for page in pages:
+        if len(page) < 4 or page[3] is None:
+            raise ValueError(f"page {page[1]}: no PreprocessedPage; run preprocess_batch(keep_unmasked=True)")
+        readings += classify_page(page[3], by_page.get(page[1], []), ckm)
+    return decide(readings, ckm), readings
+
+
+def file_sha256(path: Path) -> str:
+    """Hex sha256 of a file, read in chunks (checkpoints are tens of MB)."""
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(SHA256_CHUNK_BYTES), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def check_clef_key_weights(path: Optional[str]) -> Optional[Path]:
+    """Resolves the ClefKeyNet checkpoint for a pipeline run; None means the caller opted out.
+
+    Missing weights fail loudly instead of falling back: without the classifier Stage 3 reads the CRNN's
+    clef, which collapses on real scores (BUG-011; 8-10% pitch on the fresh-photo eval vs 64% with it).
+
+    Args:
+        path: checkpoint path, or None to run without ClefKeyNet.
+
+    Returns:
+        The resolved path, or None when opted out.
+
+    Raises:
+        FileNotFoundError: the checkpoint does not exist.
+        ValueError: the default checkpoint's sha256 is not the pinned one (a stale or different copy).
+    """
+    if path is None:
+        print("[Stage 3] WARNING: ClefKeyNet disabled; clef/key come from the CRNN (BUG-011 applies). "
+              "Every event is flagged clef_key_disabled / review_needed.")
+        return None
+    resolved = Path(path).resolve()
+    if not resolved.is_file():
+        raise FileNotFoundError(
+            f"ClefKeyNet checkpoint not found: {resolved}. Copy it from the training tree "
+            f"(training/clef_key_artifacts/t4_full_seed20260926_runA/) or pass --no-clef-key to run without it.")
+    digest = file_sha256(resolved)
+    if resolved == DEFAULT_CLEF_KEY_CHECKPOINT and digest != DEFAULT_CLEF_KEY_SHA256:
+        raise ValueError(f"ClefKeyNet checkpoint {resolved} has sha256 {digest}, expected "
+                         f"{DEFAULT_CLEF_KEY_SHA256} (T4 seed-20260926 run A). Re-copy it from the training tree.")
+    print(f"[Stage 3] ClefKeyNet checkpoint {resolved} (sha256 {digest[:12]})")
+    return resolved
+
+
+def add_clef_key_args(parser: argparse.ArgumentParser) -> None:
+    """Adds --clef-key / --no-clef-key to a stage CLI."""
+    parser.add_argument("--clef-key", default=str(DEFAULT_CLEF_KEY_CHECKPOINT),
+                        help="ClefKeyNet checkpoint (clef/key/octave for Stage 3)")
+    parser.add_argument("--no-clef-key", action="store_true",
+                        help="Run without ClefKeyNet: clef/key from the CRNN (BUG-011 applies)")
+
+
+def clef_key_arg(args: argparse.Namespace) -> Optional[str]:
+    """The checkpoint path from add_clef_key_args's flags, or None when opted out."""
+    return None if args.no_clef_key else args.clef_key
 
 
 def key_tokens(clef_token: str, key: int) -> list[str]:
     """Agnostic key-signature tokens for a signed key (+sharps / -flats) under the given clef."""
     if key == 0:
         return []
-    kind = "sharp" if key > 0 else "flat"
-    return [f"accidental.{kind}-{p}" for p in KEY_SIG_ORDER[clef_token][kind][:abs(key)]]
+    kind = "accidental.sharp" if key > 0 else "accidental.flat"
+    return [f"{kind}-{p}" for p in s3.KEY_SIG_ORDER[clef_token][kind][:abs(key)]]
 
 
 def substitute_header(tokens: Sequence[str], confs: Sequence[float], clef_token: str,
                       key: int) -> tuple[list[str], list[float], dict[str, int]]:
-    """Replaces the CRNN's clef and opening key signature with the decided ones.
+    """Replaces the CRNN's clef and opening key signature with the decided ones (token view for SER).
 
     Drops every CRNN clef token (anywhere in the strip) and the accidentals before the first
-    non-clef/non-accidental token, then prepends the decided clef and key-signature tokens.
+    non-clef/non-accidental token, then prepends the decided clef and key-signature tokens. Pitch no
+    longer comes from this sequence (``infer_pitch_b`` uses ``header_override``); it is the token
+    sequence the evaluation scores for SER.
     """
     head = 0
     while head < len(tokens) and (tokens[head].startswith("clef.") or tokens[head].startswith("accidental.")):
@@ -217,39 +325,37 @@ def substitute_header(tokens: Sequence[str], confs: Sequence[float], clef_token:
     return toks, cfs, {"dropped_clef_tokens": dropped_clef, "dropped_header_accidentals": dropped_acc}
 
 
-@contextlib.contextmanager
-def _voice_octave_off() -> Iterator[None]:
-    """Makes Stage 3's clef reference ignore the voice (no Tenor lowering) for the duration."""
-    original = s3.get_clef_reference
-    s3.get_clef_reference = lambda clef, voice: s3.CLEF_REFERENCE.get(clef, 64)
-    try:
-        yield
-    finally:
-        s3.get_clef_reference = original
-
-
 def infer_pitch_b(tokens: Sequence[str], confs: Sequence[float], voice: str, page_index: int, sys_idx: int,
                   decision: StripDecision) -> tuple[list[dict[str, Any]], list[str], dict[str, Any]]:
     """Version (b) pitch inference for one strip.
 
     Returns:
-        (events, header tokens actually used, info). Events carry ``review_needed`` and ``clef_key_flags``.
+        (events, token sequence with the decided header for SER, info). Events carry ``review_needed``
+        ``clef_key_flags`` and ``clef_key_strip_flags`` (the strip's own flags); while ``CLEF_KEY_GATE_PASSED`` is False every event is flagged
+        ``clef_key_unvalidated`` / ``review_needed``. ``info["flags"]`` / ``info["review_needed"]`` keep only
+        the strip's own flags, so evaluations can still tell which strips raised something specific.
+        ``info``'s dropped_* counts describe the SER token view (``substitute_header``), not pitch
+        inference, which drops header accidentals by its own rule (``infer_pitch``'s fixed_header stage
+        logs those).
     """
-    toks, cfs, info = substitute_header(tokens, confs, decision.clef.token, decision.key)
+    toks, _, info = substitute_header(tokens, confs, decision.clef.token, decision.key)
+    override = s3.HeaderOverride(decision.clef.token, decision.key, decision.clef.octave_shift)
     log = io.StringIO()
-    with _voice_octave_off(), contextlib.redirect_stdout(log):
-        events = s3.infer_pitch(toks, voice=voice, page_index=page_index, sys_idx=sys_idx, confidences=cfs)
+    with contextlib.redirect_stdout(log):
+        events = s3.infer_pitch(list(tokens), voice=voice, page_index=page_index, sys_idx=sys_idx,
+                                confidences=list(confs), header_override=override,
+                                next_system_key=decision.next_key)
+    print(log.getvalue(), end="")
     flags = list(decision.flags) + list(decision.clef.flags)
     info["mid_key_changes"] = log.getvalue().count(MID_KEY_CHANGE_MARK)
     if info["mid_key_changes"]:
         flags += ["crnn_mid_strip_key_change", "review_needed"]
-    for e in events:
-        if e.get("pitch") is not None:
-            e["pitch"] += decision.clef.octave_shift
     flags = sorted(set(flags))
+    event_flags = flags if CLEF_KEY_GATE_PASSED else sorted(set(flags) | {CLEF_KEY_UNVALIDATED_FLAG, "review_needed"})
     for e in events:
-        e["clef_key_flags"] = flags
-        e["review_needed"] = "review_needed" in flags
+        e["clef_key_flags"] = event_flags
+        e["clef_key_strip_flags"] = flags   # this strip's own flags; build_review reads these
+        e["review_needed"] = "review_needed" in event_flags
     info.update(clef_class=decision.clef.clef_class, clef_source=decision.clef.source,
                 octave_shift=decision.clef.octave_shift, key=decision.key, key_source=decision.key_source,
                 flags=flags, review_needed="review_needed" in flags)

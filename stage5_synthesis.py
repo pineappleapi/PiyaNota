@@ -16,8 +16,12 @@ import subprocess
 import sys
 import warnings
 from pathlib import Path
+from typing import Any, Optional
 from midiutil import MIDIFile
 
+import stage3_clefkey
+
+from stage3_transcription import CLEF_KEY_DISABLED_FLAG
 from stage4_reconstruction import TICKS_PER_QUARTER
 
 # FluidSynth output sample rate (midi2audio's former default).
@@ -26,6 +30,11 @@ RENDER_SAMPLE_RATE = 44100
 # ── MIDI constants ────────────────────────────────────────────────────────────
 PPQ          = 480          # pulses per quarter note (ticks per beat)
 DEFAULT_BPM  = 90           # default tempo if not detected
+# Client-facing review items are capped; the full list goes to the job record (backend-lead review
+# 2026-09-29: Stage 4 bar flags are unbounded, strips are at most 20 pages x 16 staves).
+REVIEW_ITEMS_CAP = 200
+# Reasons that apply to the whole job, not to one strip; reported once in `reasons`, never as items.
+JOB_LEVEL_REVIEW_CODES = frozenset({stage3_clefkey.CLEF_KEY_UNVALIDATED_FLAG, CLEF_KEY_DISABLED_FLAG})
 MIDI_CHANNEL = 0            # piano channel
 MIDI_VOLUME  = 100          # note velocity (0–127)
 PIANO_PROGRAM = 0           # General MIDI program 0 = Acoustic Grand Piano
@@ -274,6 +283,53 @@ def _report(output_files: dict):
     print()
 
 
+# ── Review summary (exposed by the result API, PIYA-103 AC6) ──────────────────
+
+def build_review(stage3_events: dict, stage4_flags: list) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Maps Stage 3 strip flags and Stage 4 reconstruction flags onto the API's fixed review shape.
+
+    The mapping is explicit so a change in Stage 3/4's internal flag dicts can't change the public
+    contract. ``reviewNeeded: False`` only means nothing was flagged, not that the transcription is right.
+    A strip's codes become items only when that strip's own flags carry ``review_needed``: informational
+    codes (e.g. ``plain_treble_on_low_voice_assumed_8vb``) must not make a clean score need review once
+    the classifier passes its gate. Stage 4 bar items come first so the cap never hides them behind
+    per-strip items (a long score has up to 320 strips).
+
+    Args:
+        stage3_events: {voice: [event, ...]} from Stage 3 (events carry ``clef_key_flags`` and, with
+            ClefKeyNet, ``clef_key_strip_flags``).
+        stage4_flags: ``reconstruct_satb_with_report``'s ``flags``; only those with ``review_needed`` count.
+
+    Returns:
+        (review, full_items): ``review`` is the client object with at most REVIEW_ITEMS_CAP items;
+        ``full_items`` is the uncapped list for the job record.
+    """
+    job_reasons: set[str] = set()
+    items: list[dict[str, Any]] = []
+    for f in stage4_flags:
+        if f.get("review_needed"):
+            items.append({"code": f["kind"], "voice": f["voice"].lower() if f.get("voice") else None,
+                          "pageIndex": f.get("page_index"), "systemIndex": f.get("sys_idx"),
+                          "bar": f.get("bar")})
+    seen_strips: set[tuple] = set()
+    for voice, events in stage3_events.items():
+        for e in events:
+            job_reasons |= set(e.get("clef_key_flags", [])) & JOB_LEVEL_REVIEW_CODES
+            strip_flags = set(e.get("clef_key_strip_flags", []))
+            if "review_needed" not in strip_flags:
+                continue
+            for code in sorted(strip_flags - {"review_needed"} - JOB_LEVEL_REVIEW_CODES):
+                key = (voice, e["page_index"], e["sys_idx"], code)
+                if key not in seen_strips:
+                    seen_strips.add(key)
+                    items.append({"code": code, "voice": voice.lower(), "pageIndex": e["page_index"],
+                                  "systemIndex": e["sys_idx"], "bar": None})
+    reasons = sorted(job_reasons | {i["code"] for i in items})
+    review = {"reviewNeeded": bool(reasons), "reasons": reasons, "items": items[:REVIEW_ITEMS_CAP],
+              "truncated": len(items) > REVIEW_ITEMS_CAP}
+    return review, items
+
+
 # ── Full pipeline helper ──────────────────────────────────────────────────────
 
 def run_full_pipeline(
@@ -286,39 +342,62 @@ def run_full_pipeline(
     soundfont_path: str = "soundfont/piano.sf2",
     bpm:            int = DEFAULT_BPM,
     img_height:     int = 64,
+    clef_key_weights: Optional[str] = str(stage3_clefkey.DEFAULT_CLEF_KEY_CHECKPOINT),
 ) -> dict:
     """
     Runs the complete PiyaNota pipeline from raw images to MP3 files.
-    Stages 1 → 2 → 3 → 4 → 5.
+    Stages 1 → 2 → 3 → 4 → 5. Returns {voice: path}; the API uses run_full_pipeline_with_report.
+
+    clef_key_weights: ClefKeyNet checkpoint for Stage 3's clef/key/octave (default: the pinned
+    checkpoint; a missing file raises). None opts out: clef/key come from the CRNN (BUG-011) and every
+    event is flagged clef_key_disabled / review_needed.
     """
-    from stage1_preprocessing  import preprocess_batch
-    from stage2_detection      import detect_staff_regions
-    from stage3_transcription  import transcribe_voice_sequences
-    from stage4_reconstruction import reconstruct_satb
+    return run_full_pipeline_with_report(input_dir, prep_dir, strips_dir, output_dir, crnn_weights,
+                                         yolo_weights, soundfont_path, bpm, img_height,
+                                         clef_key_weights)["audio"]
+
+
+def run_full_pipeline_with_report(
+    input_dir:      str = "data/raw",
+    prep_dir:       str = "data/preprocessed",
+    strips_dir:     str = "data/strips",
+    output_dir:     str = "output/audio",
+    crnn_weights:   str = "crnn_weights/best.pt",
+    yolo_weights:   str = "staff_detector_files/weights/best.pt",
+    soundfont_path: str = "soundfont/piano.sf2",
+    bpm:            int = DEFAULT_BPM,
+    img_height:     int = 64,
+    clef_key_weights: Optional[str] = str(stage3_clefkey.DEFAULT_CLEF_KEY_CHECKPOINT),
+) -> dict[str, Any]:
+    """Runs Stages 1-5 and returns the audio plus what the result API and job record need.
+
+    Returns:
+        {"audio": {voice: path},
+         "review": client object for PIYA-103 (see build_review),
+         "review_detail": uncapped review items for the job record,
+         "provenance": INTERNAL ONLY (job record and logs, never the client response; backend-lead
+                       2026-09-29): classifier on/off, checkpoint sha256, gate status}.
+    """
+    from stage3_transcription  import run_stages_1_to_3
+    from stage4_reconstruction import reconstruct_satb_with_report
 
     print("=" * 60)
     print("PiyaNota — Full Pipeline")
     print("=" * 60)
 
-    # Stage 1
-    pages = preprocess_batch(input_dir, prep_dir, save_debug=False)
-
-    # Stage 2
-    voice_strips = detect_staff_regions(
-        pages,
-        model_weights=yolo_weights,
-        output_dir=strips_dir,
-    )
-
-    # Stage 3
-    voice_events = transcribe_voice_sequences(
-        voice_strips,
-        model_weights=crnn_weights,
-        img_height=img_height,
-    )
+    # Stages 1-3
+    voice_events = run_stages_1_to_3(input_dir, prep_dir, strips_dir, yolo_weights, crnn_weights,
+                                     clef_key_weights, img_height=img_height)
 
     # Stage 4
-    satb = reconstruct_satb(voice_events)
+    satb, recon_report = reconstruct_satb_with_report(voice_events)
+    review, review_detail = build_review(voice_events, recon_report["flags"])
+    provenance = {
+        "clefKeyEnabled": clef_key_weights is not None,
+        "clefKeyCheckpointSha256": (stage3_clefkey.file_sha256(Path(clef_key_weights))
+                                    if clef_key_weights is not None else None),
+        "clefKeyGatePassed": stage3_clefkey.CLEF_KEY_GATE_PASSED,
+    }
 
     # Stage 5
     mp3_files = synthesize_satb(
@@ -334,7 +413,7 @@ def run_full_pipeline(
         print(f"  {voice}: {path}")
     print("=" * 60)
 
-    return mp3_files
+    return {"audio": mp3_files, "review": review, "review_detail": review_detail, "provenance": provenance}
 
 
 # ── CLI entry point ───────────────────────────────────────────────────────────
@@ -357,6 +436,7 @@ if __name__ == "__main__":
     parser.add_argument("--bpm",       type=int, default=DEFAULT_BPM,
                         help="Playback tempo in BPM")
     parser.add_argument("--img-height", type=int, default=64)
+    stage3_clefkey.add_clef_key_args(parser)
     args = parser.parse_args()
 
     mp3s = run_full_pipeline(
@@ -369,6 +449,7 @@ if __name__ == "__main__":
         soundfont_path = args.soundfont,
         bpm            = args.bpm,
         img_height     = args.img_height,
+        clef_key_weights = stage3_clefkey.clef_key_arg(args),
     )
 
     print(f"\nStage 5 complete. {len(mp3s)} audio file(s) ready.")

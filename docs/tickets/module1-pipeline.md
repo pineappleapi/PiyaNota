@@ -75,6 +75,7 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
 3. Returns 404 if `job_id` doesn't exist or doesn't belong to caller's account.
 4. Every returned audio track URL is independently playable/downloadable without additional auth beyond the session token.
 5. Repeated calls return cached results and do not re-trigger pipeline computation.
+6. Once complete, the response includes a `review` object. `reviewNeeded` is true whenever any Stage 3 strip flag or Stage 4 reconstruction flag carries `review_needed`, or the clef/key classifier was disabled. `reasons` lists the distinct flag codes. `items` holds at most 200 entries, each with `code`, `voice`, `pageIndex`, `systemIndex`, `bar`, and `truncated` is set when entries were left out. `reviewNeeded: false` means no flag was raised, not that the transcription is verified correct. Model provenance (checkpoint hash, gate status) is never included in the response. *(Added 2026-09-29, backend-lead review. While the clef/key classifier has not passed its real-photo gate (BUG-021), every job carries the reason `clef_key_unvalidated`, so `reviewNeeded` is always true. The pipeline side is `stage5_synthesis.run_full_pipeline_with_report()` / `build_review()`; flag codes stay snake_case, voice is lowercase.)*
 
 **Response Schema:**
 ```json
@@ -89,7 +90,16 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
       "bass": "https://cdn.piyanota.app/audio/job_8841_bass.mp3"
     },
     "scoreImages": ["https://cdn.piyanota.app/pages/job_8841_p1.png"],
-    "timingMetadataUrl": "https://cdn.piyanota.app/timing/job_8841.json"
+    "timingMetadataUrl": "https://cdn.piyanota.app/timing/job_8841.json",
+    "review": {
+      "reviewNeeded": true,
+      "reasons": ["bar_overflow_clipped", "clef_key_unvalidated", "key_no_majority"],
+      "items": [
+        {"code": "key_no_majority", "voice": "tenor", "pageIndex": 1, "systemIndex": 2, "bar": null},
+        {"code": "bar_overflow_clipped", "voice": "bass", "pageIndex": 1, "systemIndex": 1, "bar": 4}
+      ],
+      "truncated": false
+    }
   },
   "success": true,
   "status": 200,

@@ -80,8 +80,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, List, NamedTuple, Optional, Tuple, Union
 import json
+
+if TYPE_CHECKING:
+    from stage3_clefkey import StripDecision
 
 logger = logging.getLogger(__name__)
 
@@ -811,6 +814,26 @@ KEY_SIG_ORDER: dict[str, dict[str, list[str]]] = {
 # wrapper), so a missed 1-accidental change costs at most the rest of one
 # strip. Hand-set, not tuned.
 MIN_MID_KEY_CHANGE_ACCIDENTALS = 2
+
+
+class HeaderOverride(NamedTuple):
+    """Clef, opening key and octave decided outside the CRNN (ClefKeyNet + voice rule, stage3_clefkey).
+
+    Attributes:
+        clef_token: ``clef.G-L2`` or ``clef.F-L4``.
+        key: Signed key signature, +sharps / -flats.
+        octave_shift: Semitones added to the clef reference (0 or -12). Replaces Stage 3's voice-based
+            Tenor octave, so the two can never both apply.
+    """
+
+    clef_token: str
+    key: int
+    octave_shift: int
+
+
+def _signed_key_counts(key: int) -> tuple[int, int]:
+    """(n_sharp, n_flat) for a signed key."""
+    return (key, 0) if key > 0 else (0, -key)
  
  
 # ── Pitch helpers ─────────────────────────────────────────────────────────────
@@ -878,15 +901,32 @@ def _accidental_is_anchored(symbols: list[str], idx: int) -> bool:
     return pos is not None and _next_note_position(symbols, idx) == pos
 
 
-def _is_mid_key_change(burst: list[str], symbols: list[str], burst_end: int, acc_type: str, active_clef: str) -> bool:
+def _header_accidental_is_inline(symbols: list[str], idx: int) -> bool:
+    """True if a pre-first-note accidental directly precedes a note on its own position.
+
+    Stricter than _accidental_is_anchored, which looks past rests and header tokens: a key signature is
+    engraved before the time signature and any rest, so a glyph followed by a metersign, digit, rest or
+    multirest is a (misread) key-signature glyph, not the first note's accidental. Only slur and fermata
+    tokens (engraved above/below the note, emitted before it) may sit between the accidental and its note.
+    """
+    pos = _position_suffix(symbols[idx])
+    for sym in symbols[idx + 1:]:
+        if sym.startswith(("slur.", "fermata.")):
+            continue
+        return pos is not None and sym.startswith("note.") and _position_suffix(sym) == pos
+    return False
+
+
+def _is_mid_key_change(burst: list[str], symbols: list[str], burst_end: int, acc_type: str, active_clef: str,
+                       min_glyphs: int = MIN_MID_KEY_CHANGE_ACCIDENTALS) -> bool:
     """True if a same-type accidental burst right after a barline is a key change, not inline accidentals.
 
     Requires the burst to be exactly the leading part of a printed key signature (engraving positions and
-    order) with at least MIN_MID_KEY_CHANGE_ACCIDENTALS glyphs, and the next note not to sit on the last
-    glyph's position (that note would be the one the accidental belongs to).
+    order) with at least ``min_glyphs`` glyphs, and the next note not to sit on the last glyph's position
+    (that note would be the one the accidental belongs to).
     """
     order = KEY_SIG_ORDER.get(active_clef, {}).get(acc_type)
-    if order is None or len(burst) < MIN_MID_KEY_CHANGE_ACCIDENTALS:
+    if order is None or not burst or len(burst) < min_glyphs:
         return False
     positions = [_position_suffix(t) for t in burst]
     if positions != order[:len(burst)]:
@@ -895,13 +935,18 @@ def _is_mid_key_change(burst: list[str], symbols: list[str], burst_end: int, acc
 
 
 def _natural_led_key_change(symbols: list[str], start: int, active_clef: str,
-                            key_alterations: dict[str, int]) -> Optional[tuple[int, int, int]]:
+                            key_alterations: dict[str, int],
+                            confirmed: Optional[tuple[int, int]] = None) -> Optional[tuple[int, int, int]]:
     """Detects a key change that opens with naturals cancelling the old key (e.g. 2# -> 3b: ♮♮♭♭♭).
 
     Engravers print cancelling naturals whenever the new key drops accidentals or switches between
     sharps and flats, which covers the common "up a step for the last verse" modulation (choral-conductor
     review 2026-09-28). The naturals must sit on the old key's positions and the optional sharp/flat burst
     after them must be the leading part of a printed key signature, so phantom naturals rarely qualify.
+
+    Args:
+        confirmed: (n_sharp, n_flat) of a key read independently (ClefKeyNet on the next system); a change
+            to exactly that key may have fewer than MIN_MID_KEY_CHANGE_ACCIDENTALS glyphs (BUG-029).
 
     Returns:
         (n_sharp, n_flat, end) of the new key and the index after the burst, or None.
@@ -936,9 +981,13 @@ def _natural_led_key_change(symbols: list[str], start: int, active_clef: str,
             return None
 
     glyphs = naturals + burst
-    if len(glyphs) < MIN_MID_KEY_CHANGE_ACCIDENTALS or _next_note_position(symbols, end - 1) == glyphs[-1]:
+    result = (n_new, 0) if type_new == "accidental.sharp" else (0, n_new)
+    if n_new == 0:
+        result = (0, 0)
+    enough = len(glyphs) >= MIN_MID_KEY_CHANGE_ACCIDENTALS or result == confirmed
+    if not enough or _next_note_position(symbols, end - 1) == glyphs[-1]:
         return None
-    return (n_new, 0, end) if type_new == "accidental.sharp" else (0, n_new, end)
+    return result + (end,)
 
 
 # ── Pitch inference ────────────────────────────────────────────────────────────
@@ -949,9 +998,19 @@ def infer_pitch(
     page_index: int = 1,
     sys_idx:    int = 1,
     confidences: Optional[list] = None,
+    header_override: Optional[HeaderOverride] = None,
+    next_system_key: Optional[int] = None,
 ) -> list:
     """
     Converts a CRNN symbol sequence into note events with MIDI pitch.
+
+    header_override: clef, opening key and octave decided by ClefKeyNet (stage3_clefkey). Every CRNN clef
+    token is then ignored (the CRNN's clef can't override the rule, user decision 2026-09-28), and the
+    CRNN's own header accidentals are not counted into the key: one directly before a note on its own
+    position is kept as that note's inline accidental, the rest are dropped (BUG-027). The time signature is still read.
+    next_system_key: ClefKeyNet's key for the following system (only used with header_override). A
+    post-barline burst that is exactly that key's signature is a key change even with a single glyph
+    (BUG-029); otherwise MIN_MID_KEY_CHANGE_ACCIDENTALS still applies.
 
     confidences: optional per-token CRNN confidences, parallel to `symbols`
     (same length, else ValueError). When given, every emitted note/rest event
@@ -1019,11 +1078,27 @@ def infer_pitch(
                                                    (inline if anchored)
       • clef change                              → update reference, stay
       • anything else                            → → "body", fall-through
+
+    "fixed_header" (header_override only; replaces "clef"/"keysig")
+      • clef                                     → ignored
+      • accidental directly before a note on its position → inline, stay
+      • other accidental                         → dropped, stay
+      • metersign / time-signature digits        → read time signature
+      • note / rest                              → → "body", fall-through
     """
- 
+
     # ── Initialise ────────────────────────────────────────────────────────
     active_clef     = CLEF_FALLBACK[voice]
     reference_pitch = get_clef_reference(active_clef, voice)
+    clef_fixed      = header_override is not None
+    confirmed_next: Optional[tuple[int, int]] = None
+    if header_override is not None:
+        if header_override.clef_token not in CLEF_REFERENCE:
+            raise ValueError(f"header_override clef {header_override.clef_token!r} not in CLEF_REFERENCE")
+        active_clef     = header_override.clef_token
+        reference_pitch = CLEF_REFERENCE[active_clef] + header_override.octave_shift
+        if next_system_key is not None and next_system_key != header_override.key:
+            confirmed_next = _signed_key_counts(next_system_key)
  
     pending_acc: Optional[int] = None
     pending_acc_conf       = 1.0
@@ -1068,6 +1143,7 @@ def infer_pitch(
     ks_sharp        = 0
     ks_flat         = 0
     key_alterations = {}
+    header_dropped  = 0
     # PIYA-107 AC4/AC6: Camera-PrIMuS encodes a numeric time signature (e.g.
     # "3/4") as two consecutive digit.N tokens in the header, rather than a
     # metersign.* token -- confirmed against ground truth: 1586/3996 (40%) of
@@ -1077,6 +1153,7 @@ def infer_pitch(
     # before the first note/rest are unrelated noise and are ignored, same
     # as prior (pre-PIYA-107) behaviour.
     meter_digits = []
+    meter_seen   = False  # fixed_header: a metersign was read, so later digits are multirest counts
  
     # ── Commit helpers ────────────────────────────────────────────────────
  
@@ -1096,6 +1173,10 @@ def infer_pitch(
         desc = f"{n_sharp}#" if n_sharp else (f"{n_flat}b" if n_flat else "C major")
         print(f"[Stage 3] {voice} p{page_index}: mid-piece key change {desc} -> {alts}")
         return alts
+
+    if header_override is not None:
+        key_alterations = _commit_opening(*_signed_key_counts(header_override.key))
+        ks_stage = "fixed_header"
 
     if confidences is not None and len(confidences) != len(symbols):
         raise ValueError(
@@ -1167,6 +1248,42 @@ def infer_pitch(
             else:
                 continue    # barline / digit / slur.start before clef — skip
  
+        # ── "fixed_header" ────────────────────────────────────────────────
+        elif ks_stage == "fixed_header":
+
+            if sym.startswith("clef."):
+                continue
+            elif is_acc:
+                if _header_accidental_is_inline(symbols, tok_idx):
+                    pending_acc      = ACCIDENTAL_OFFSET.get(acc_type, 0)
+                    pending_acc_conf = tok_conf
+                else:
+                    header_dropped += 1
+                continue
+            elif sym.startswith("metersign"):
+                # Stay in the header: an accidental after the metersign is still a misread key glyph
+                # unless it sits directly on the first note, and must not reach body's looser anchoring.
+                time_signature = TIME_SIG_TOKENS.get(sym.split("-")[0], time_signature)
+                meter_seen     = True
+                continue
+            elif sym.startswith("digit.") and not meter_seen and len(meter_digits) < 2:
+                try:
+                    meter_digits.append(int(sym.split(".")[1].split("-")[0]))
+                except ValueError:
+                    pass
+                continue
+            elif sym.startswith(("note.", "rest.", "multirest", "digit.")):
+                # A digit here follows a complete meter, so it is a multirest count for body.
+                if len(meter_digits) == 2 and not meter_seen:
+                    time_signature = f"{meter_digits[0]}/{meter_digits[1]}"
+                ks_stage = "body"
+                # fall through to body processing below
+            elif sym.startswith("slur.end"):
+                slur_end_pending = True
+                continue
+            else:
+                continue    # barline / slur.start in header — skip
+
         # ── "keysig" ──────────────────────────────────────────────────────
         elif ks_stage == "keysig":
  
@@ -1222,7 +1339,8 @@ def infer_pitch(
         elif ks_stage == "post_bar":
 
             if sym.startswith("accidental.natural"):
-                change = _natural_led_key_change(symbols, tok_idx, active_clef, key_alterations)
+                change = _natural_led_key_change(symbols, tok_idx, active_clef, key_alterations,
+                                                 confirmed_next)
                 if change is not None:
                     n_sharp, n_flat, skip_until = change
                     key_alterations = _commit_mid(n_sharp, n_flat)
@@ -1243,6 +1361,18 @@ def infer_pitch(
                     # The last glyph sits on the next note: read it as that note's accidental and keep
                     # the rest as the key change, instead of losing the key change for the whole strip.
                     n = len(burst) - 1
+                elif (confirmed_next is not None
+                      and _signed_key_counts(len(burst) if is_sharp else -len(burst)) == confirmed_next
+                      and _is_mid_key_change(burst, symbols, burst_end, acc_type, active_clef, min_glyphs=1)):
+                    # Too short for the unconfirmed rule, but it is exactly the key ClefKeyNet reads on the
+                    # next system (BUG-029).
+                    n = len(burst)
+                elif (confirmed_next is not None and len(burst) > 1
+                      and _signed_key_counts(len(burst) - 1 if is_sharp else 1 - len(burst)) == confirmed_next
+                      and _is_mid_key_change(burst[:-1], symbols, burst_end - 1, acc_type, active_clef,
+                                             min_glyphs=1)):
+                    # As above, with the last glyph belonging to the next note (e.g. #L5 #S3 note-S3).
+                    n = len(burst) - 1
                 if n:
                     new_alts = get_key_sig_alterations(n if is_sharp else 0, n if is_flat else 0)
                     # A burst repeating the current key (cautionary reprint or phantom) changes nothing;
@@ -1256,7 +1386,7 @@ def infer_pitch(
                 # fall through: not a key change, so each accidental is an inline candidate
 
             elif sym.startswith("clef."):
-                if sym in CLEF_REFERENCE:
+                if sym in CLEF_REFERENCE and not clef_fixed:
                     active_clef     = sym
                     reference_pitch = get_clef_reference(sym, voice)
                 # Stay in "post_bar" — key sig accidentals may still follow
@@ -1277,7 +1407,7 @@ def infer_pitch(
  
         # ── Clef change mid-piece ─────────────────────────────────────────
         if sym.startswith("clef."):
-            if sym in CLEF_REFERENCE:
+            if sym in CLEF_REFERENCE and not clef_fixed:
                 active_clef     = sym
                 reference_pitch = get_clef_reference(sym, voice)
             continue
@@ -1516,6 +1646,9 @@ def infer_pitch(
     if dropped_acc_count:
         print(f"[Stage 3] {voice} p{page_index} s{sys_idx}: dropped {dropped_acc_count} "
               "unanchored accidental(s) (not on the next note's staff position)")
+    if header_dropped:
+        print(f"[Stage 3] {voice} p{page_index} s{sys_idx}: dropped {header_dropped} CRNN header "
+              "accidental(s) (key taken from header_override)")
     return events
  
     return events
@@ -1810,6 +1943,9 @@ def visualize_strip(
     print(f"  [Viz] Saved -> {fname}")
  
  
+CLEF_KEY_DISABLED_FLAG = "clef_key_disabled"  # event flag when Stage 3 runs without ClefKeyNet
+
+
 # ── Full pipeline for one strip ───────────────────────────────────────────────
  
 def process_strip(
@@ -1823,15 +1959,25 @@ def process_strip(
     viz_dir:    str = None,
     sys_idx:    int = 1,
     strip_id:   str = "",
+    clef_key_decision: Optional["StripDecision"] = None,
 ) -> list:
 
-    """Transcribes one strip and returns pitch-assigned events for Stage 4."""
+    """Transcribes one strip and returns pitch-assigned events for Stage 4.
+
+    clef_key_decision: a stage3_clefkey.StripDecision; when given, clef/key/octave come from ClefKeyNet
+    (version b) and every event carries ``review_needed`` / ``clef_key_flags``.
+    """
     scored  = transcribe_strip(strip, model, device, img_height,
                                return_confidence=True, strip_id=strip_id)
     symbols = [s for s, _ in scored]
-    events  = infer_pitch(symbols, voice=voice, page_index=page_index,
-                          sys_idx=sys_idx,
-                          confidences=[c for _, c in scored])
+    confs   = [c for _, c in scored]
+    if clef_key_decision is not None:
+        import stage3_clefkey  # lazy: stage3_clefkey imports this module
+        events, _, _ = stage3_clefkey.infer_pitch_b(symbols, confs, voice, page_index, sys_idx,
+                                                    clef_key_decision)
+    else:
+        events = infer_pitch(symbols, voice=voice, page_index=page_index,
+                             sys_idx=sys_idx, confidences=confs)
 
     print(f"[Stage 3] {voice} p{page_index}: "
           f"{len(symbols)} symbols -> {len(events)} events")
@@ -1850,6 +1996,7 @@ def transcribe_voice_sequences(
     img_height:      int = 64,
     viz_dir:         str = r"D:\PiyaNota (Code)\data\symbol_detection_viz",
     events_dir:      str = r"D:\PiyaNota (Code)\data\transcribed_symbols",   # ← add this
+    clef_key_decisions: Optional[dict[str, "StripDecision"]] = None,
 ) -> dict:
     """
     Processes all voice strips from Stage 2 and returns event sequences.
@@ -1864,6 +2011,13 @@ def transcribe_voice_sequences(
           (page_index, tick_onset).
         model_weights:   Path to weights file trained on Kaggle.
         img_height:      Must match the height used during Kaggle training.
+        clef_key_decisions: {strip_id: stage3_clefkey.StripDecision} from
+          ``stage3_clefkey.decisions_for_pages``; None runs version (a) (CRNN clef/key), and every
+          event is then flagged ``clef_key_disabled`` / ``review_needed`` (the CRNN clef collapses on
+          real scores, BUG-011).
+
+    Raises:
+        ValueError: clef_key_decisions is given but lacks a strip.
 
     Returns:
         {voice: [event_dict, ...]} sorted by page_index, then sys_idx, then
@@ -1884,12 +2038,22 @@ def transcribe_voice_sequences(
         all_events = []
         for strip, page_index, sys_idx, voice_label, v_idx in strips:
             strip_id = f"page{page_index:03d}_sys{sys_idx:02d}_{voice_label}_vidx{v_idx}"
+            decision = None
+            if clef_key_decisions is not None:
+                if strip_id not in clef_key_decisions:
+                    raise ValueError(f"no clef/key decision for {strip_id} (Stage 2 manifest out of sync)")
+                decision = clef_key_decisions[strip_id]
             events = process_strip(strip, voice_label, page_index,
                     model, device, img_height,
                     v_idx=v_idx,
                     viz_dir=viz_dir,
                     sys_idx=sys_idx,
-                    strip_id=strip_id)
+                    strip_id=strip_id,
+                    clef_key_decision=decision)
+            if decision is None:
+                for e in events:
+                    e["clef_key_flags"] = [CLEF_KEY_DISABLED_FLAG, "review_needed"]
+                    e["review_needed"] = True
             all_events.extend(events)
         all_events.sort(key=lambda e: (e["page_index"], e["sys_idx"], e["tick_onset"]))
         results[voice] = all_events
@@ -1950,12 +2114,66 @@ def _report(results: dict):
         print(f"  {voice}: {len(events)} events ({notes} notes, {rests} rests)")
  
  
+# ── Stages 1-3 runner (shared by the Stage 3/4/5 CLIs and run_full_pipeline) ──
+
+def run_stages_1_to_3(
+    input_dir:        str,
+    prep_dir:         str,
+    strips_dir:       str,
+    yolo_weights:     str,
+    crnn_weights:     str,
+    clef_key_weights: Optional[str],
+    img_height:       int = 64,
+    **transcribe_kwargs: Any,
+) -> dict:
+    """Preprocesses, detects and transcribes a folder of score photos.
+
+    Args:
+        input_dir: raw score photos.
+        prep_dir: Stage 1 output folder.
+        strips_dir: Stage 2 output folder (also holds the strip manifest ClefKeyNet reads).
+        yolo_weights: Stage 2 staff detector.
+        crnn_weights: Stage 3 CRNN checkpoint.
+        clef_key_weights: ClefKeyNet checkpoint; None opts out (version a, CRNN clef/key).
+        img_height: CRNN input height.
+        **transcribe_kwargs: passed on to ``transcribe_voice_sequences`` (viz_dir, events_dir).
+
+    Returns:
+        {voice: [event_dict, ...]} as ``transcribe_voice_sequences``.
+
+    Raises:
+        FileNotFoundError / ValueError: from ``stage3_clefkey.check_clef_key_weights``.
+    """
+    from stage1_preprocessing import preprocess_batch
+    from stage2_detection import detect_staff_regions
+    import stage3_clefkey
+
+    ck_path = stage3_clefkey.check_clef_key_weights(clef_key_weights)
+    use_ck  = ck_path is not None
+    pages   = preprocess_batch(input_dir, prep_dir, save_debug=False, keep_unmasked=use_ck)
+    manifest_path = str(Path(strips_dir) / stage3_clefkey.DEFAULT_PIPELINE_MANIFEST)
+    voices  = detect_staff_regions(pages, model_weights=yolo_weights, output_dir=strips_dir,
+                                   manifest_path=manifest_path)
+    decisions = None
+    if use_ck:
+        ckm = stage3_clefkey.load_clef_key_model(ck_path)
+        manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+        decisions, _ = stage3_clefkey.decisions_for_pages(pages, manifest, ckm)
+        n_review = sum(d.review_needed for d in decisions.values())
+        print(f"[Stage 3] ClefKeyNet: {len(decisions)} strip decision(s), {n_review} flagged review_needed")
+    return transcribe_voice_sequences(voices, model_weights=crnn_weights, img_height=img_height,
+                                      clef_key_decisions=decisions, **transcribe_kwargs)
+
+
 # ── CLI entry point ───────────────────────────────────────────────────────────
- 
+
 if __name__ == "__main__":
     import argparse
-    from stage2_detection import detect_staff_regions
-    from stage1_preprocessing import preprocess_batch
+    import sys
+    # Run as a script this module is __main__; register it under its import name so stage3_clefkey's
+    # "import stage3_transcription" reuses it instead of executing it a second time.
+    sys.modules.setdefault("stage3_transcription", sys.modules[__name__])
+    import stage3_clefkey
  
     parser = argparse.ArgumentParser(
         description="PiyaNota Stage 3 — CRNN-CTC Transcription (inference only)")
@@ -1973,16 +2191,11 @@ if __name__ == "__main__":
     parser.add_argument("--events-dir",
                     default=r"D:\PiyaNota (Code)\data\transcribed_symbols",
                     help="Directory to save per-voice pitch event JSONs")
+    stage3_clefkey.add_clef_key_args(parser)
     args = parser.parse_args()
- 
-    pages  = preprocess_batch(args.input, args.prep, save_debug=False)
-    voices = detect_staff_regions(pages,
-                                  model_weights=args.yolo,
-                                  output_dir=args.strips)
-    events = transcribe_voice_sequences(voices,
-                                    model_weights=args.weights,
-                                    img_height=args.img_height,
-                                    viz_dir=args.viz_dir,
-                                    events_dir=args.events_dir)
+
+    events = run_stages_1_to_3(args.input, args.prep, args.strips, args.yolo, args.weights,
+                               stage3_clefkey.clef_key_arg(args), img_height=args.img_height,
+                               viz_dir=args.viz_dir, events_dir=args.events_dir)
     print("\nStage 3 complete. Events ready for Stage 4 (SATB reconstruction).")
  

@@ -68,6 +68,27 @@ on branch `piya106/groundtruth-eval` (worktree `D:\PiyaNota-training`).
    - BUG-016's single-variable experiments (grayscale vs binarized CRNN input; crop the system bracket).
 3. **Decoding without retraining.** Try CTC beam search with a measure-duration check against the time signature,
    to suppress spurious notes (insertions).
+   - **Plain beam search: NO-GO (2026-09-29, ml-cv-lead).** It was run without an LM on eval_prelim, which is
+     dev data, so this is diagnostic only. The two seeds' strip pools overlap, so 7082 is not N.
+     - Pitch: greedy 6129/7082; beam5/10/20 6136/6136/6134 (+0.1 pp at most).
+     - Token SER got worse: 32.38% → 32.78-32.94%.
+     - Paired beam20 vs greedy: 8 notes gained, 3 lost. Beam changed 143 note/accidental tokens and 383
+       others, mostly dots, multirests, slurs and digits.
+     - CPM raw token Levenshtein error rate (not the SOW SER definition):
+       - clean: about 0.02 pp better;
+       - distorted: about 0.2 pp better (4.53-4.54% → 4.34-4.38%).
+     - Worse SER on real scores means the CRNN is miscalibrated off its training distribution (BUG-011 class).
+     - Script: `beam_check.py` / `beam_followup.py` in the 2026-09-29 job tmp (not in the repo).
+   - **Oracle top-k on the same dev data.** Of 706 greedy note/accidental tokens that substitute a GT
+     note/accidental (1:1 alignment), the GT token was:
+     - the 2nd choice in 36%;
+     - in the top 3 in 50%;
+     - above p 1e-2 in 74%;
+     - both in the top 3 and above p 1e-2 in 47%.
+
+     So a rescoring step that knows which alternative is musically right (key signature, accidental
+     grammar, bar duration) has headroom. Plain beam has no such signal. This is a candidate for after
+     fine-tuning, not a result.
 4. **Training:**
    - Add camera-style augmentation to fine-tuning (illumination, shadow, blur, perspective, JPEG, paper texture) to
      close the 9 pp camera gap.
