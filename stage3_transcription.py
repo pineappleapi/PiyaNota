@@ -872,7 +872,7 @@ def _accidental_is_anchored(symbols: list, idx: int) -> bool:
     on them) only 26-36% of predicted inline sharps were real and this rule alone moved SOW pitch
     +0.9 to +1.3 pp. Cost: an accidental the CRNN places one step off its note is dropped (seen on
     distorted Camera-PrIMuS). Accepting +-1 step was worse on every dev pool and no better on Camera-PrIMuS,
-    and recovering it from the CTC probabilities did not help either (BUG-033).
+    and the greedy-CTC evidence rescue tried in BUG-033 did not recover it either.
     """
     pos = _position_suffix(symbols[idx])
     return pos is not None and _next_note_position(symbols, idx) == pos
@@ -974,8 +974,8 @@ def infer_pitch(
               2. a tie into this note from the same step keeps the tied note's
                  alteration (across a barline too, for this note only)
               3. an earlier accidental on the same step in this measure (costs
-                 pitches when the CRNN drops a cancelling natural; kept because
-                 it gains more than it costs on real pages, BUG-033)
+                 pitches when the CRNN drops a cancelling natural; kept on
+                 notation grounds, net +26 notes on real dev pages, BUG-033)
               4. the key-signature alteration of the step's pitch class
       Inline accidentals not on the next note's staff position are dropped as
       CRNN phantoms (_accidental_is_anchored).
