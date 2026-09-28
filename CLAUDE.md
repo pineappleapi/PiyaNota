@@ -329,6 +329,10 @@ treat it as stale if either doc has moved on.
   - At the time, `stage3_clefkey.py` was an eval wrapper only; it is wired into the pipeline since 2026-09-29.
   - New bugs: BUG-024, BUG-025, BUG-026.
 
+- **CTC beam search (2026-09-29, dev data, NO-GO):** without an LM, beam search gives at most +0.1 pp pitch and
+  makes token SER worse. An oracle check shows the correct token is in the top 3 for about half of the misread
+  notes/accidentals, so constrained rescoring has headroom. Detail: `docs/NEXT-SESSION.md`, suggested order item 3.
+
 - **DS2 Dense (DeepScoresV2) — YOLOv8 staff detector (Stage 2):** one number on record, and it is
   compromised — do not present it as a clean result.
   - Interim PIYA-105 eval logged 2026-09-10: mAP50 0.9766, mAP50-95 0.8654, precision 0.954,
