@@ -282,6 +282,7 @@ Permanently removes a saved score and its associated audio/image assets from a u
 4. Migration scripts are version-numbered and re-runnable idempotently.
 5. Schema documented in a single reference file (ERD or equivalent) committed to the repository.
 6. Applying the full migration set to a fresh database completes without error, verified before Sprint 8 ends.
+7. `jobs` also carries `review_needed boolean NOT NULL`, `review_detail jsonb NOT NULL` (the full, uncapped review item list; PIYA-103 returns at most 200) and an internal `model_provenance jsonb` (classifier on/off, checkpoint sha256, gate status) that no client endpoint returns. Deleting a score deletes all three with the job. *(Added 2026-09-29, backend-lead review; source: `run_full_pipeline_with_report()`.)*
 
 ---
 
@@ -292,6 +293,7 @@ Permanently removes a saved score and its associated audio/image assets from a u
 1. On job completion, a `scores` record is created with a non-null `title`, defaulting to the original filename (PDF) or a timestamp-based label (camera/gallery capture), since no dedicated title-input UI is in scope.
 2. The generated default title is what Get User Score Library (PIYA-308) returns and what its search parameter filters against.
 3. Title generation never blocks or delays the `complete` status response to the client.
+4. The job's review fields (`review_needed`, `review_detail`, `model_provenance`, PIYA-311 AC7) are written in the same transaction that marks the job `complete`, so a complete job never lacks its review state. *(Added 2026-09-29, backend-lead review.)*
 
 ---
 
