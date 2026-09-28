@@ -138,6 +138,28 @@ def test_accidental_not_anchored_across_barline() -> None:
     assert _pitches(tokens) == [G4, B4]
 
 
+def test_dropped_accidental_is_traced_on_next_note() -> None:
+    tokens = TREBLE + ["note.quarter-L2", "accidental.sharp-L4", "note.quarter-L3", "note.quarter-L3",
+                       "accidental.sharp-L4", BAR, "note.quarter-L3"]
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        events = s3.infer_pitch(tokens, voice="Soprano", page_index=1, sys_idx=1)
+    traces = [e.get("unanchored_accidental_dropped") for e in events]
+    # The second drop is followed by a barline, so no note carries it; the count still includes it.
+    assert traces == [None, "accidental.sharp-L4", None, None]
+    assert "dropped 2 unanchored accidental(s)" in out.getvalue()
+
+
+def test_burst_repeating_current_key_is_not_logged_as_key_change() -> None:
+    tokens = TREBLE + ["accidental.sharp-L5", "accidental.sharp-S3", "note.quarter-L2", BAR,
+                       "accidental.sharp-L5", "accidental.sharp-S3", "note.quarter-L2", "note.quarter-L5"]
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        events = s3.infer_pitch(tokens, voice="Soprano", page_index=1, sys_idx=1)
+    assert [e["pitch"] for e in events] == [G4, G4, F_SHARP5]
+    assert "mid-piece key change" not in out.getvalue()
+
+
 # ── measure memory (F2) ──────────────────────────────────────────────────────
 
 def test_inline_accidental_carries_to_end_of_measure() -> None:

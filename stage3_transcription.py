@@ -850,7 +850,7 @@ def _position_suffix(sym: str) -> Optional[str]:
     return sym.split("-", 1)[1] if "-" in sym else None
 
 
-def _next_note_position(symbols: list, idx: int) -> Optional[str]:
+def _next_note_position(symbols: list[str], idx: int) -> Optional[str]:
     """Position of the first note after ``symbols[idx]`` in the same measure, or None.
 
     A barline ends the search: an accidental never modifies a note in the next bar.
@@ -863,7 +863,7 @@ def _next_note_position(symbols: list, idx: int) -> Optional[str]:
     return None
 
 
-def _accidental_is_anchored(symbols: list, idx: int) -> bool:
+def _accidental_is_anchored(symbols: list[str], idx: int) -> bool:
     """True if the inline accidental at ``idx`` sits on the staff position of the note it precedes.
 
     Engraving puts an accidental directly left of its notehead on the same line/space, so an accidental
@@ -878,7 +878,7 @@ def _accidental_is_anchored(symbols: list, idx: int) -> bool:
     return pos is not None and _next_note_position(symbols, idx) == pos
 
 
-def _is_mid_key_change(burst: list, symbols: list, burst_end: int, acc_type: str, active_clef: str) -> bool:
+def _is_mid_key_change(burst: list[str], symbols: list[str], burst_end: int, acc_type: str, active_clef: str) -> bool:
     """True if a same-type accidental burst right after a barline is a key change, not inline accidentals.
 
     Requires the burst to be exactly the leading part of a printed key signature (engraving positions and
@@ -894,8 +894,8 @@ def _is_mid_key_change(burst: list, symbols: list, burst_end: int, acc_type: str
     return _next_note_position(symbols, burst_end - 1) != positions[-1]
 
 
-def _natural_led_key_change(symbols: list, start: int, active_clef: str,
-                            key_alterations: dict) -> Optional[tuple[int, int, int]]:
+def _natural_led_key_change(symbols: list[str], start: int, active_clef: str,
+                            key_alterations: dict[str, int]) -> Optional[tuple[int, int, int]]:
     """Detects a key change that opens with naturals cancelling the old key (e.g. 2# -> 3b: ♮♮♭♭♭).
 
     Engravers print cancelling naturals whenever the new key drops accidentals or switches between
@@ -1027,13 +1027,17 @@ def infer_pitch(
  
     pending_acc: Optional[int] = None
     pending_acc_conf       = 1.0
+    # Inline accidental rejected by _accidental_is_anchored, kept until the next note so that note
+    # carries a trace of it: a real accidental placed one step off plays a wrong pitch (BUG-033).
+    dropped_acc: Optional[str] = None
+    dropped_acc_count      = 0
     # (alteration, accidental confidence) set by an inline accidental, per staff step, until the next
     # barline. The confidence travels with it so every note that inherits the accidental reports it.
     measure_alterations: dict[int, tuple[int, float]] = {}
     # Step/alteration of the last note, so a tie into the same step keeps its pitch across a barline.
     last_note_step: Optional[int] = None
-    last_note_alteration   = 0
-    last_note_alt_conf     = 1.0
+    last_note_alteration: int = 0
+    last_note_alt_conf: float = 1.0
     # Tokens before this index were consumed by a mid-piece key-change lookahead.
     skip_until             = 0
     # Dots stack on the event they follow; its undotted length is kept so a second dot adds a quarter
@@ -1135,6 +1139,9 @@ def infer_pitch(
                     if _accidental_is_anchored(symbols, tok_idx):
                         pending_acc      = ACCIDENTAL_OFFSET.get(acc_type, 0)
                         pending_acc_conf = tok_conf
+                    else:
+                        dropped_acc = sym
+                        dropped_acc_count += 1
                     ks_stage = "body"
                 continue
 
@@ -1237,7 +1244,11 @@ def infer_pitch(
                     # the rest as the key change, instead of losing the key change for the whole strip.
                     n = len(burst) - 1
                 if n:
-                    key_alterations = _commit_mid(n if is_sharp else 0, n if is_flat else 0)
+                    new_alts = get_key_sig_alterations(n if is_sharp else 0, n if is_flat else 0)
+                    # A burst repeating the current key (cautionary reprint or phantom) changes nothing;
+                    # committing it would log "mid-piece key change" and flag the strip for review.
+                    if new_alts != key_alterations:
+                        key_alterations = _commit_mid(n if is_sharp else 0, n if is_flat else 0)
                     skip_until = tok_idx + n
                     ks_stage = "body"
                     continue
@@ -1276,6 +1287,9 @@ def infer_pitch(
             if _accidental_is_anchored(symbols, tok_idx):
                 pending_acc      = ACCIDENTAL_OFFSET.get(acc_type, 0)
                 pending_acc_conf = tok_conf
+            else:
+                dropped_acc = sym
+                dropped_acc_count += 1
             continue
  
         # ── Dot (augmentation) ────────────────────────────────────────────
@@ -1415,6 +1429,9 @@ def infer_pitch(
             })
             if with_conf:
                 events[-1]["confidence"] = note_conf
+            if dropped_acc is not None:
+                events[-1]["unanchored_accidental_dropped"] = dropped_acc
+                dropped_acc = None
             if slur_end_pending:
                 # A tie chain (A~A~A) puts slur.end then slur.start on the
                 # middle note; the later "start" overwrites "slur", so the
@@ -1428,6 +1445,7 @@ def infer_pitch(
         # ── Barline ───────────────────────────────────────────────────────
         if sym.startswith("barline"):
             pending_acc = None      # stale inline accidental — discard
+            dropped_acc = None
             measure_alterations = {}
             in_chord    = False
             ks_stage    = "post_bar"
@@ -1494,6 +1512,11 @@ def infer_pitch(
             slur_active      = False
             slur_end_pending = True
             continue
+
+    if dropped_acc_count:
+        print(f"[Stage 3] {voice} p{page_index} s{sys_idx}: dropped {dropped_acc_count} "
+              "unanchored accidental(s) (not on the next note's staff position)")
+    return events
  
     return events
  

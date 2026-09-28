@@ -191,7 +191,8 @@ local to each system strip; Stage 4 rewrites `tick_onset` to a global tick and k
 accidental and dot tokens) only when run on CRNN output; it is absent on ground-truth events. It ranks
 likely misreads within a bar but is not a trust signal (BUG-011: confidently wrong). It is a frame-mean softmax, not a calibrated
 probability, and excludes the clef, key signature and omitted tokens; Stage 4 uses it only as an
-overflow tie-break, and every Stage 4 threshold/weight is a hand-set prior with no held-out validation. Hand-authored ground truth
+overflow tie-break, and every Stage 4 threshold/weight is a hand-set prior with no held-out validation. A note preceded (in the same bar) by an inline accidental that
+failed position anchoring carries `unanchored_accidental_dropped` (the dropped token; BUG-033). Hand-authored ground truth
 (`ground_truth/build_ground_truth.py`) additionally carries `note_id`, `written_pitch`, `chord_tail`
 and `source_image`.
 
