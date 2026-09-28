@@ -297,7 +297,11 @@ def build_review(stage3_events: dict, stage4_flags: list) -> tuple[dict[str, Any
 
     Args:
         stage3_events: {voice: [event, ...]} from Stage 3 (events carry ``clef_key_flags`` and, with
-            ClefKeyNet, ``clef_key_strip_flags``).
+            ClefKeyNet, ``clef_key_strip_flags``; ``header_flags`` when the Stage 3 header filter kept a
+            quorum meter change on a continuation system).
+            ``code`` is an open, additive set (clients treat unknown codes as generic review items); for
+            triage, current per-strip codes come from stage3_clefkey and ``header_meter_change_kept``
+            (docs/decisions/piya-106-ser-15-plan.md §3).
         stage4_flags: ``reconstruct_satb_with_report``'s ``flags``; only those with ``review_needed`` count.
 
     Returns:
@@ -315,15 +319,16 @@ def build_review(stage3_events: dict, stage4_flags: list) -> tuple[dict[str, Any
     for voice, events in stage3_events.items():
         for e in events:
             job_reasons |= set(e.get("clef_key_flags", [])) & JOB_LEVEL_REVIEW_CODES
-            strip_flags = set(e.get("clef_key_strip_flags", []))
-            if "review_needed" not in strip_flags:
-                continue
-            for code in sorted(strip_flags - {"review_needed"} - JOB_LEVEL_REVIEW_CODES):
-                key = (voice, e["page_index"], e["sys_idx"], code)
-                if key not in seen_strips:
-                    seen_strips.add(key)
-                    items.append({"code": code, "voice": voice.lower(), "pageIndex": e["page_index"],
-                                  "systemIndex": e["sys_idx"], "bar": None})
+            for field in ("clef_key_strip_flags", "header_flags"):
+                strip_flags = set(e.get(field, []))
+                if "review_needed" not in strip_flags:
+                    continue
+                for code in sorted(strip_flags - {"review_needed"} - JOB_LEVEL_REVIEW_CODES):
+                    key = (voice, e["page_index"], e["sys_idx"], code)
+                    if key not in seen_strips:
+                        seen_strips.add(key)
+                        items.append({"code": code, "voice": voice.lower(), "pageIndex": e["page_index"],
+                                      "systemIndex": e["sys_idx"], "bar": None})
     reasons = sorted(job_reasons | {i["code"] for i in items})
     review = {"reviewNeeded": bool(reasons), "reasons": reasons, "items": items[:REVIEW_ITEMS_CAP],
               "truncated": len(items) > REVIEW_ITEMS_CAP}

@@ -4,7 +4,35 @@ Handoff doc for continuing PiyaNota work in a fresh session. Read this first; it
 full detail rather than repeating it. Written 2026-09-14, rewritten 2026-09-16, rewritten 2026-09-19,
 rewritten 2026-09-24, top sections added 2026-09-28.
 
-## Transcription accuracy targets: camera pitch > 85%, SER < 15% (2026-09-28, newest, read first)
+## SER < 15% plan (2026-09-29, newest, read first)
+
+**The plan is `docs/decisions/piya-106-ser-15-plan.md`.** Branch `piya106/ser15-header-rule` is not merged.
+
+**Phase 0 is implemented:** a Stage 3 header-zone filter. The CRNN copies CPM's clef + key + time-signature
+opening onto continuation systems; the filter drops it, with a voice quorum for real meter changes and multirests.
+
+On eval_prelim (dev data, diagnostic only):
+
+| Input | SER before | SER after | Pitch |
+|---|---|---|---|
+| Camera | 34.5-36.2% | 26.8-28.4% | unchanged |
+| Digital | 25.0-25.5% | 16.3-16.5% | unchanged |
+
+**No-training experiments:**
+- NO-GO: two-seed ensemble, chunked decoding, conservative meter rule.
+- Speck filter: see the plan doc.
+
+**Next:**
+1. Phase 1 data engine: music→agnostic converter gated at ≥99% vs CPM gold; Verovio SATB renders cut by our own
+   Stage 1/2; camera augmentation.
+2. Phase 2 retraining on Kaggle, with ml-cv-lead first.
+3. Phase 3 grammar rescoring.
+4. Phase 4 held-out eval, still on hold for the user's questions.
+
+**Timing (PIYA-110, 2026-09-29):** 7/7 Both Sides Now pages take 23.7-37.4 s per page with ClefKeyNet (mean
+32.1 s), well under the 2 min limit.
+
+## Transcription accuracy targets: camera pitch > 85%, SER < 15% (2026-09-28)
 
 **Goal (set by the user, 2026-09-28):** raise the final system to **pitch accuracy above 85%** and **token SER
 below 15%**. The target applies to **camera input**, the harder condition and the one the thesis hypothesis

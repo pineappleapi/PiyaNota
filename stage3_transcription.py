@@ -79,6 +79,7 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from collections import Counter
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, List, NamedTuple, Optional, Tuple, Union
 import json
@@ -1946,6 +1947,90 @@ def visualize_strip(
 CLEF_KEY_DISABLED_FLAG = "clef_key_disabled"  # event flag when Stage 3 runs without ClefKeyNet
 
 
+# ── Header-zone hallucination filter (PIYA-106, docs/decisions/piya-106-ser-15-plan.md, E1c) ─────────────
+# Every Camera-PrIMuS sample opens with clef + key + time signature, so the CRNN writes a time signature (and
+# often a fermata or multirest) at the start of continuation systems that have none. On eval_prelim (dev data)
+# the GT has none of these before the first barline on 207 continuation strips; dropping them cut token SER by
+# about 8 pp camera and 9 pp digital with pitch unchanged. Conditions follow the choral-conductor review of
+# 2026-09-29: an open-score system shares its barlines and meter, so a real multirest or meter change shows in
+# (nearly) every voice at once, and a multirest's digit tokens are its bar count and must go with it.
+HEADER_QUORUM = 3  # voices of one system that must agree before a header meter/multirest is believed
+HEADER_METER_CHANGE_FLAG = "header_meter_change_kept"
+_TIME_SIG_PREFIXES = ("digit", "metersign")
+_BODY_PREFIXES = ("note", "rest", "gracenote")
+
+
+def _header_parts(symbols: list) -> tuple[set, tuple, set, set]:
+    """Splits the zone before the first barline into (multirest-unit indices, time-signature group,
+    time-signature indices, fermata indices before the first note/rest)."""
+    first_bar = next((i for i, s in enumerate(symbols) if s.startswith("barline")), len(symbols))
+    multirest: set[int] = set()
+    i = 0
+    while i < first_bar:
+        if symbols[i].startswith("multirest"):
+            multirest.add(i)
+            i += 1
+            while i < first_bar and symbols[i].startswith("digit"):
+                multirest.add(i)
+                i += 1
+        else:
+            i += 1
+    ts_idx = {i for i in range(first_bar) if i not in multirest and symbols[i].startswith(_TIME_SIG_PREFIXES)}
+    first_body = next((i for i, s in enumerate(symbols) if s.startswith(_BODY_PREFIXES)), len(symbols))
+    fermatas = {i for i in range(min(first_bar, first_body)) if symbols[i].startswith("fermata")}
+    return multirest, tuple(symbols[i] for i in sorted(ts_idx)), ts_idx, fermatas
+
+
+def filter_header_hallucinations(
+    system_symbols: dict[str, tuple[str, list]],
+    running_meter: dict[str, tuple],
+    is_first_system: bool,
+) -> tuple[dict[str, list[int]], dict[str, list[str]], dict[str, tuple]]:
+    """Drops header-zone tokens the CRNN copies from its training layout on a continuation system.
+
+    Args:
+        system_symbols: {strip_id: (voice, symbols)} for every strip of one system.
+        running_meter: {voice: time-signature token group} in force before this system.
+        is_first_system: the piece's first system keeps its header untouched (its time signature is real).
+
+    Returns:
+        (keep, flags, running): per strip the indices of symbols to keep (in order, so confidences can be
+        filtered alike), per strip the review flags, and the updated running meter per voice.
+    """
+    parts = {sid: _header_parts(syms) for sid, (_, syms) in system_symbols.items()}
+    running = dict(running_meter)
+    keep: dict[str, list[int]] = {}
+    flags: dict[str, list[str]] = {}
+    if is_first_system:
+        for sid, (voice, syms) in system_symbols.items():
+            keep[sid] = list(range(len(syms)))
+            flags[sid] = []
+            running[voice] = parts[sid][1]
+        return keep, flags, running
+    n_multirest = sum(1 for p in parts.values() if p[0])
+    meter_votes = Counter(p[1] for p in parts.values() if p[1])
+    top = meter_votes.most_common(1)
+    accepted = top[0][0] if top and top[0][1] >= HEADER_QUORUM else None
+    voices = {voice for voice, _ in system_symbols.values()}
+    # A meter change is a system-wide event, so it moves every voice's running meter, and the whole system is
+    # flagged: the CRNN also agrees with itself on phantoms, and a voice that misread the change is exactly the
+    # disagreement a reviewer should see (choral-conductor, 2026-09-29).
+    changed = accepted is not None and any(running.get(v) != accepted for v in voices)
+    for sid, (voice, syms) in system_symbols.items():
+        multirest, group, ts_idx, fermatas = parts[sid]
+        drop = set(fermatas)
+        if n_multirest < HEADER_QUORUM:
+            drop |= multirest
+        if group and not (changed and group == accepted):
+            drop |= ts_idx
+        flags[sid] = [HEADER_METER_CHANGE_FLAG, "review_needed"] if changed else []
+        keep[sid] = [i for i in range(len(syms)) if i not in drop]
+    if changed:
+        for v in voices:
+            running[v] = accepted
+    return keep, flags, running
+
+
 # ── Full pipeline for one strip ───────────────────────────────────────────────
  
 def process_strip(
@@ -1971,6 +2056,23 @@ def process_strip(
                                return_confidence=True, strip_id=strip_id)
     symbols = [s for s, _ in scored]
     confs   = [c for _, c in scored]
+    return _events_for_symbols(strip, symbols, confs, voice, page_index, img_height, v_idx, viz_dir,
+                               sys_idx, clef_key_decision)
+
+
+def _events_for_symbols(
+    strip:      np.ndarray,
+    symbols:    list,
+    confs:      list,
+    voice:      str,
+    page_index: int,
+    img_height: int,
+    v_idx:      int,
+    viz_dir:    Optional[str],
+    sys_idx:    int,
+    clef_key_decision: Optional["StripDecision"],
+) -> list:
+    """Pitch inference, log line and optional viz for one strip's decoded tokens (process_strip's second half)."""
     if clef_key_decision is not None:
         import stage3_clefkey  # lazy: stage3_clefkey imports this module
         events, _, _ = stage3_clefkey.infer_pitch_b(symbols, confs, voice, page_index, sys_idx,
@@ -1997,10 +2099,11 @@ def transcribe_voice_sequences(
     viz_dir:         str = r"D:\PiyaNota (Code)\data\symbol_detection_viz",
     events_dir:      str = r"D:\PiyaNota (Code)\data\transcribed_symbols",   # ← add this
     clef_key_decisions: Optional[dict[str, "StripDecision"]] = None,
+    header_filter:   bool = True,
 ) -> dict:
     """
     Processes all voice strips from Stage 2 and returns event sequences.
- 
+
     Args:
         voice_sequences: Output of Stage 2 detect_staff_regions().
           Format: {voice: [(strip, page_index, sys_idx, voice, v_idx), ...]}
@@ -2015,6 +2118,9 @@ def transcribe_voice_sequences(
           ``stage3_clefkey.decisions_for_pages``; None runs version (a) (CRNN clef/key), and every
           event is then flagged ``clef_key_disabled`` / ``review_needed`` (the CRNN clef collapses on
           real scores, BUG-011).
+        header_filter: drop the time signatures / fermatas / multirests the CRNN invents at the start of
+          continuation systems (``filter_header_hallucinations``); a meter change kept by voice quorum flags
+          its events ``header_flags`` / ``review_needed``. False keeps the raw CRNN tokens.
 
     Raises:
         ValueError: clef_key_decisions is given but lacks a strip.
@@ -2033,9 +2139,9 @@ def transcribe_voice_sequences(
     print(f"[Stage 3] Loaded weights -> {model_weights} "
           f"(epoch {checkpoint.get('epoch', '?')})")
  
-    results = {}
+    # Pass 1: decode every strip. The header filter needs all voices of a system at once (quorum).
+    decoded: dict[str, dict[str, Any]] = {}
     for voice, strips in voice_sequences.items():
-        all_events = []
         for strip, page_index, sys_idx, voice_label, v_idx in strips:
             strip_id = f"page{page_index:03d}_sys{sys_idx:02d}_{voice_label}_vidx{v_idx}"
             decision = None
@@ -2043,16 +2149,45 @@ def transcribe_voice_sequences(
                 if strip_id not in clef_key_decisions:
                     raise ValueError(f"no clef/key decision for {strip_id} (Stage 2 manifest out of sync)")
                 decision = clef_key_decisions[strip_id]
-            events = process_strip(strip, voice_label, page_index,
-                    model, device, img_height,
-                    v_idx=v_idx,
-                    viz_dir=viz_dir,
-                    sys_idx=sys_idx,
-                    strip_id=strip_id,
-                    clef_key_decision=decision)
-            if decision is None:
+            scored = transcribe_strip(strip, model, device, img_height, return_confidence=True, strip_id=strip_id)
+            decoded[strip_id] = dict(voice=voice, strip=strip, page_index=page_index, sys_idx=sys_idx,
+                                     voice_label=voice_label, v_idx=v_idx, decision=decision,
+                                     symbols=[s for s, _ in scored], confs=[c for _, c in scored],
+                                     header_flags=[])
+
+    if header_filter and decoded:
+        systems: dict[tuple, dict[str, tuple[str, list]]] = {}
+        for sid, d in decoded.items():
+            systems.setdefault((d["page_index"], d["sys_idx"]), {})[sid] = (d["voice_label"], d["symbols"])
+        first_system = min(systems)
+        running: dict[str, tuple] = {}
+        n_dropped = 0
+        for key in sorted(systems):
+            keep, flags, running = filter_header_hallucinations(systems[key], running, key == first_system)
+            for sid, idx in keep.items():
+                d = decoded[sid]
+                n_dropped += len(d["symbols"]) - len(idx)
+                d["symbols"] = [d["symbols"][i] for i in idx]
+                d["confs"] = [d["confs"][i] for i in idx]
+                d["header_flags"] = flags[sid]
+        print(f"[Stage 3] Header filter: dropped {n_dropped} header-zone tokens on continuation systems")
+
+    # Pass 2: pitch inference per strip, in the original voice/strip order.
+    results = {}
+    for voice in voice_sequences:
+        all_events = []
+        for sid, d in decoded.items():
+            if d["voice"] != voice:
+                continue
+            events = _events_for_symbols(d["strip"], d["symbols"], d["confs"], d["voice_label"], d["page_index"],
+                                         img_height, d["v_idx"], viz_dir, d["sys_idx"], d["decision"])
+            if d["decision"] is None:
                 for e in events:
                     e["clef_key_flags"] = [CLEF_KEY_DISABLED_FLAG, "review_needed"]
+                    e["review_needed"] = True
+            if d["header_flags"]:
+                for e in events:
+                    e["header_flags"] = list(d["header_flags"])
                     e["review_needed"] = True
             all_events.extend(events)
         all_events.sort(key=lambda e: (e["page_index"], e["sys_idx"], e["tick_onset"]))
