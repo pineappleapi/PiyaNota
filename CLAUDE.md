@@ -125,7 +125,10 @@ later stages import functions from earlier ones rather than duplicating logic.
    `run_full_pipeline` defaults to the checkpoint too; `clef_key_weights=None` opts out and flags every
    event `clef_key_disabled` / `review_needed`. A mid-strip key change counts with one glyph when it
    matches ClefKeyNet's key on the next adjacent system (BUG-029). The classifier still fails
-   its real-photo gate (BUG-021). Emits one JSON event
+   its real-photo gate (BUG-021). Keeping it the default is a user decision (2026-09-29), NOT a gate pass: while
+   `stage3_clefkey.CLEF_KEY_GATE_PASSED` is False every event is flagged `clef_key_unvalidated` / `review_needed`, and
+   `stage5_synthesis.run_full_pipeline_with_report()` returns the client `review` object for PIYA-103 AC6 (provenance
+   stays internal). Revisit the default after the fresh held-out photo results. Emits one JSON event
    file per voice under `data/transcribed_symbols/`.
 
 4. **`stage4_reconstruction.py`** — merges Stage 3's per-strip events into one continuous sequence per

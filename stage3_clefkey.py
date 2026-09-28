@@ -48,6 +48,12 @@ from clef_voice_rules import ClefDecision, resolve_clef
 DEFAULT_CLEF_KEY_CHECKPOINT = (Path(__file__).resolve().parent / "training" / "clef_key_artifacts"
                                / "t4_full_seed20260926_runA" / "clef_key_classifier.pt")
 DEFAULT_CLEF_KEY_SHA256 = "e718d4479b1310369b64cfaf9a8f1ff433179543ffa9d1810b24c683de13fe10"
+# The checkpoint failed its real-photo gate (BUG-021: ~4.5% of clefs confidently wrong, which no per-strip
+# flag catches). The user accepted it as the default only with every event flagged for review, so while
+# this is False each version (b) event carries CLEF_KEY_UNVALIDATED_FLAG and review_needed. Set it True
+# only after a gate pass on fresh photos.
+CLEF_KEY_GATE_PASSED = False
+CLEF_KEY_UNVALIDATED_FLAG = "clef_key_unvalidated"
 SHA256_CHUNK_BYTES = 1 << 20
 
 DEFAULT_PIPELINE_MANIFEST = "manifest.json"
@@ -235,7 +241,8 @@ def decisions_for_pages(pages: Sequence[tuple], manifest: Sequence[dict[str, Any
     return decide(readings, ckm), readings
 
 
-def _sha256(path: Path) -> str:
+def file_sha256(path: Path) -> str:
+    """Hex sha256 of a file, read in chunks (checkpoints are tens of MB)."""
     digest = hashlib.sha256()
     with path.open("rb") as fh:
         for chunk in iter(lambda: fh.read(SHA256_CHUNK_BYTES), b""):
@@ -268,7 +275,7 @@ def check_clef_key_weights(path: Optional[str]) -> Optional[Path]:
         raise FileNotFoundError(
             f"ClefKeyNet checkpoint not found: {resolved}. Copy it from the training tree "
             f"(training/clef_key_artifacts/t4_full_seed20260926_runA/) or pass --no-clef-key to run without it.")
-    digest = _sha256(resolved)
+    digest = file_sha256(resolved)
     if resolved == DEFAULT_CLEF_KEY_CHECKPOINT and digest != DEFAULT_CLEF_KEY_SHA256:
         raise ValueError(f"ClefKeyNet checkpoint {resolved} has sha256 {digest}, expected "
                          f"{DEFAULT_CLEF_KEY_SHA256} (T4 seed-20260926 run A). Re-copy it from the training tree.")
@@ -324,9 +331,12 @@ def infer_pitch_b(tokens: Sequence[str], confs: Sequence[float], voice: str, pag
 
     Returns:
         (events, token sequence with the decided header for SER, info). Events carry ``review_needed``
-        and ``clef_key_flags``. ``info``'s dropped_* counts describe the SER token view
-        (``substitute_header``), not pitch inference, which drops header accidentals by its own rule
-        (``infer_pitch``'s fixed_header stage logs those).
+        and ``clef_key_flags``; while ``CLEF_KEY_GATE_PASSED`` is False every event is flagged
+        ``clef_key_unvalidated`` / ``review_needed``. ``info["flags"]`` / ``info["review_needed"]`` keep only
+        the strip's own flags, so evaluations can still tell which strips raised something specific.
+        ``info``'s dropped_* counts describe the SER token view (``substitute_header``), not pitch
+        inference, which drops header accidentals by its own rule (``infer_pitch``'s fixed_header stage
+        logs those).
     """
     toks, _, info = substitute_header(tokens, confs, decision.clef.token, decision.key)
     override = s3.HeaderOverride(decision.clef.token, decision.key, decision.clef.octave_shift)
@@ -341,9 +351,10 @@ def infer_pitch_b(tokens: Sequence[str], confs: Sequence[float], voice: str, pag
     if info["mid_key_changes"]:
         flags += ["crnn_mid_strip_key_change", "review_needed"]
     flags = sorted(set(flags))
+    event_flags = flags if CLEF_KEY_GATE_PASSED else sorted(set(flags) | {CLEF_KEY_UNVALIDATED_FLAG, "review_needed"})
     for e in events:
-        e["clef_key_flags"] = flags
-        e["review_needed"] = "review_needed" in flags
+        e["clef_key_flags"] = event_flags
+        e["review_needed"] = "review_needed" in event_flags
     info.update(clef_class=decision.clef.clef_class, clef_source=decision.clef.source,
                 octave_shift=decision.clef.octave_shift, key=decision.key, key_source=decision.key_source,
                 flags=flags, review_needed="review_needed" in flags)
