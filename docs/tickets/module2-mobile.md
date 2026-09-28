@@ -164,7 +164,6 @@ _Covers: UI tickets (Onboarding, Account, Score Library, Playback, Settings, Sys
 6. A vertical playback indicator overlays the score image, updates horizontal position in sync with audio timestamp, using timing metadata from PIYA-103.
 7. Tapping/dragging the seek bar updates the playback indicator's position within 200ms.
 8. Voice Mixer and Speed controls accessible from this screen without navigating away.
-9. When PIYA-103's `review.reviewNeeded` is true, the screen shows a visible "transcription needs checking" notice before and during playback; it never implies the audio is verified. *(Added 2026-09-29; needs frontend-lead review. While BUG-021 is open every score shows it.)*
 
 ---
 
@@ -286,7 +285,6 @@ Wires Processing Status (PIYA-207) and Score Playback (PIYA-208) to PIYA-102 and
 1. Processing Status polls PIYA-102 at the fixed interval defined in PIYA-207, maps status/percentComplete/failureReason directly to the UI states already specified there.
 2. On `status: complete`, Playback calls PIYA-103 and binds `audioTracks`, `scoreImages`, `timingMetadataUrl` to the player, seek bar, and playback-indicator overlay as defined in PIYA-208.
 3. A 409 response from PIYA-103 (job not yet complete) is handled defensively even though the UI shouldn't normally trigger it before `complete` status.
-4. Playback binds PIYA-103's `review` object to the PIYA-208 notice (AC9); a missing `review` is treated as `reviewNeeded: true`. *(Added 2026-09-29.)*
 
 ---
 
