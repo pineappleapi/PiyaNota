@@ -120,7 +120,7 @@ later stages import functions from earlier ones rather than duplicating logic.
    `stage3_clefkey.decisions_for_pages` decides clef (voice rule), key (per-system vote) and octave, and
    `infer_pitch(header_override=..., next_system_key=...)` uses them. In that `fixed_header` mode CRNN clefs are
    ignored and no CRNN header accidental counts into the key. The CLI default checkpoint is
-   `training/clef_key_artifacts/t4_full_seed20260926_runA/clef_key_classifier.pt` (resolved from the repo, sha256-pinned; gitignored, copy it from the
+   `training/clef_key_artifacts/t4_full_seed20260926_runA/clef_key_classifier.pt` (resolved from the repo; its sha256 is checked only at that default path; gitignored, copy it from the
    training tree). Missing weights raise, and `--no-clef-key` opts out (CRNN clef/key, BUG-011).
    `run_full_pipeline` defaults to the checkpoint too; `clef_key_weights=None` opts out and flags every
    event `clef_key_disabled` / `review_needed`. A mid-strip key change counts with one glyph when it

@@ -290,9 +290,14 @@ def build_review(stage3_events: dict, stage4_flags: list) -> tuple[dict[str, Any
 
     The mapping is explicit so a change in Stage 3/4's internal flag dicts can't change the public
     contract. ``reviewNeeded: False`` only means nothing was flagged, not that the transcription is right.
+    A strip's codes become items only when that strip's own flags carry ``review_needed``: informational
+    codes (e.g. ``plain_treble_on_low_voice_assumed_8vb``) must not make a clean score need review once
+    the classifier passes its gate. Stage 4 bar items come first so the cap never hides them behind
+    per-strip items (a long score has up to 320 strips).
 
     Args:
-        stage3_events: {voice: [event, ...]} from Stage 3 (events carry ``clef_key_flags``).
+        stage3_events: {voice: [event, ...]} from Stage 3 (events carry ``clef_key_flags`` and, with
+            ClefKeyNet, ``clef_key_strip_flags``).
         stage4_flags: ``reconstruct_satb_with_report``'s ``flags``; only those with ``review_needed`` count.
 
     Returns:
@@ -301,22 +306,24 @@ def build_review(stage3_events: dict, stage4_flags: list) -> tuple[dict[str, Any
     """
     job_reasons: set[str] = set()
     items: list[dict[str, Any]] = []
-    seen_strips: set[tuple] = set()
-    for voice, events in stage3_events.items():
-        for e in events:
-            codes = set(e.get("clef_key_flags", [])) - {"review_needed"}
-            job_reasons |= codes & JOB_LEVEL_REVIEW_CODES
-            for code in sorted(codes - JOB_LEVEL_REVIEW_CODES):
-                key = (voice, e["page_index"], e["sys_idx"], code)
-                if key not in seen_strips:
-                    seen_strips.add(key)
-                    items.append({"code": code, "voice": voice.lower(), "pageIndex": e["page_index"],
-                                  "systemIndex": e["sys_idx"], "bar": None})
     for f in stage4_flags:
         if f.get("review_needed"):
             items.append({"code": f["kind"], "voice": f["voice"].lower() if f.get("voice") else None,
                           "pageIndex": f.get("page_index"), "systemIndex": f.get("sys_idx"),
                           "bar": f.get("bar")})
+    seen_strips: set[tuple] = set()
+    for voice, events in stage3_events.items():
+        for e in events:
+            job_reasons |= set(e.get("clef_key_flags", [])) & JOB_LEVEL_REVIEW_CODES
+            strip_flags = set(e.get("clef_key_strip_flags", []))
+            if "review_needed" not in strip_flags:
+                continue
+            for code in sorted(strip_flags - {"review_needed"} - JOB_LEVEL_REVIEW_CODES):
+                key = (voice, e["page_index"], e["sys_idx"], code)
+                if key not in seen_strips:
+                    seen_strips.add(key)
+                    items.append({"code": code, "voice": voice.lower(), "pageIndex": e["page_index"],
+                                  "systemIndex": e["sys_idx"], "bar": None})
     reasons = sorted(job_reasons | {i["code"] for i in items})
     review = {"reviewNeeded": bool(reasons), "reasons": reasons, "items": items[:REVIEW_ITEMS_CAP],
               "truncated": len(items) > REVIEW_ITEMS_CAP}

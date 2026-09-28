@@ -331,7 +331,7 @@ def infer_pitch_b(tokens: Sequence[str], confs: Sequence[float], voice: str, pag
 
     Returns:
         (events, token sequence with the decided header for SER, info). Events carry ``review_needed``
-        and ``clef_key_flags``; while ``CLEF_KEY_GATE_PASSED`` is False every event is flagged
+        ``clef_key_flags`` and ``clef_key_strip_flags`` (the strip's own flags); while ``CLEF_KEY_GATE_PASSED`` is False every event is flagged
         ``clef_key_unvalidated`` / ``review_needed``. ``info["flags"]`` / ``info["review_needed"]`` keep only
         the strip's own flags, so evaluations can still tell which strips raised something specific.
         ``info``'s dropped_* counts describe the SER token view (``substitute_header``), not pitch
@@ -354,6 +354,7 @@ def infer_pitch_b(tokens: Sequence[str], confs: Sequence[float], voice: str, pag
     event_flags = flags if CLEF_KEY_GATE_PASSED else sorted(set(flags) | {CLEF_KEY_UNVALIDATED_FLAG, "review_needed"})
     for e in events:
         e["clef_key_flags"] = event_flags
+        e["clef_key_strip_flags"] = flags   # this strip's own flags; build_review reads these
         e["review_needed"] = "review_needed" in event_flags
     info.update(clef_class=decision.clef.clef_class, clef_source=decision.clef.source,
                 octave_shift=decision.clef.octave_shift, key=decision.key, key_source=decision.key_source,
