@@ -1,0 +1,11 @@
+[prelim-ft] digital gaano_ko_ikaw_kamahal p1: 8 strips
+[prelim-ft] digital gaano_ko_ikaw_kamahal p2: 8 strips
+[prelim-ft] digital gaano_ko_ikaw_kamahal p3: 8 strips
+[prelim-ft] digital gaano_ko_ikaw_kamahal p4: 8 strips
+[prelim-ft] digital gaano_ko_ikaw_kamahal p5: 12 strips
+[prelim-ft] digital gaano_ko_ikaw_kamahal p6: 8 strips
+[prelim-ft] digital gaano_ko_ikaw_kamahal p7: 8 strips
+[prelim-ft] digital gaano_ko_ikaw_kamahal p8: 8 strips
+[prelim-ft] digital gaano_ko_ikaw_kamahal p9: 4 strips
+[eval] gaano_ko_ikaw_kamahal seed1: 72 strips, reproduction failures 0
+[eval] gaano_ko_ikaw_kamahal seed2: 72 strips, reproduction failures 0

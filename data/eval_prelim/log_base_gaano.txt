@@ -1,0 +1,9 @@
+[prelim-base] digital gaano_ko_ikaw_kamahal p1: 8 strips
+[prelim-base] digital gaano_ko_ikaw_kamahal p2: 8 strips
+[prelim-base] digital gaano_ko_ikaw_kamahal p3: 8 strips
+[prelim-base] digital gaano_ko_ikaw_kamahal p4: 8 strips
+[prelim-base] digital gaano_ko_ikaw_kamahal p5: 12 strips
+[prelim-base] digital gaano_ko_ikaw_kamahal p6: PIPELINE FAILURE ValueError: [Stage 2] page 6: unsupported_staff_layout — detected 7 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-base] digital gaano_ko_ikaw_kamahal p7: 8 strips
+[prelim-base] digital gaano_ko_ikaw_kamahal p8: 8 strips
+[prelim-base] digital gaano_ko_ikaw_kamahal p9: 4 strips

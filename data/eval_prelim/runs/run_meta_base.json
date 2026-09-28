@@ -1,0 +1,12 @@
+{
+ "started": "2026-09-28 14:20:44",
+ "torch": "2.6.0+cu124",
+ "main_commit": "23516232de04f0ca0d989a8185160d822f940a64",
+ "hashes": {
+  "stage1_preprocessing.py": "48e2a56301f6d66ecdd12477b2e1ee6b569eb1507bc62ec241f4b55177c7b58d",
+  "stage2_detection.py": "32b07d2dc4bc5ffc1669b4f92c184b8b248d2d22feabf7e8e10b288d6e13fe99",
+  "stage3_transcription.py": "6a7c6b441b11f97fbc8588c4503cc74da8fc891f60122dce004866a3f4358d39"
+ },
+ "crnn": "b1c9803cebb2ce83c6c132dd70c5219bb64989659fc46a7003d357f03596d47e",
+ "yolo": "f55bb85176876d8af6eb5d02b56e22f65193e6bbc244f2e33f59ea6234018213"
+}

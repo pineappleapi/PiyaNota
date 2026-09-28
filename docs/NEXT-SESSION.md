@@ -2,7 +2,88 @@
 
 Handoff doc for continuing PiyaNota work in a fresh session. Read this first; it links out to the
 full detail rather than repeating it. Written 2026-09-14, rewritten 2026-09-16, rewritten 2026-09-19,
-rewritten 2026-09-24, top section added 2026-09-28.
+rewritten 2026-09-24, top sections added 2026-09-28.
+
+## Transcription accuracy targets: camera pitch > 85%, SER < 15% (2026-09-28, newest, read first)
+
+**Goal (set by the user, 2026-09-28):** raise the final system to **pitch accuracy above 85%** and **token SER
+below 15%**. The target applies to **camera input**, the harder condition and the one the thesis hypothesis
+names. Digital input should clear it too.
+
+### Where it stands
+
+These are the numbers from the preliminary digital-vs-camera eval. Its full record is `data/eval_prelim/REPORT.md`
+on branch `piya106/groundtruth-eval` (worktree `D:\PiyaNota-training`).
+
+- **Test set:** Non Nobis Domine pp.1-3 + Gaano Ko Ikaw Kamahal pp.1-9.
+- **Size:** 12 pages, 100 staves, 1,008 notes per condition.
+- **System:** fine-tuned CRNN + clef/key classifier, both seeds reported as a range.
+
+| Input | Staff recall | Token SER | Pitch acc. | Target gap |
+|---|---|---|---|---|
+| Digital | 100% | 25.0-25.5% | 88.7-89.1% | SER needs about -10 pp |
+| Camera | 100% | 33.8-34.8% | 83.3-83.4% (95% CI 79.8-86.6%) | Pitch needs about +2 pp; SER needs about -19 to -20 pp |
+
+- **SER is the hard target.** Pitch is close, but the claim needs the CI above 85%, measured on a new held-out
+  set, not this one.
+- **For context:** published polyphonic camera OMR is above 39% error (Martinez-Sevilla 2025). A 15% SER is
+  ambitious, so report honestly whatever is reached.
+
+### What the numbers say about the remaining error
+
+- **The clef/key classifier solved the clef/key header**: 100% clef and key accuracy on both test pieces. The
+  remaining error is in the CRNN's **note and rhythm tokens**.
+- **Camera capture adds about 9 pp SER in every fine-tuned configuration**, with or without the classifier. So the
+  camera gap is image quality acting on note/rhythm tokens.
+- **Note precision is 66-69%**: about 1 in 3 predicted notes is spurious or wrong-pitched. SER counts these
+  insertions but pitch accuracy does not.
+  - Cutting insertions is probably the biggest SER lever. Confirm this with the error breakdown (next-steps step 1).
+  - Always report note precision next to pitch accuracy, so a pitch gain can't come from over-predicting notes.
+- **Camera rhythm is 80-87% per piece, and pitch+duration is 70-78%.**
+- **Known caps**, all in `docs/bug-tracker.md`:
+  - BUG-024: an explicit accidental is stacked on the key alteration (silent wrong pitch).
+  - BUG-015: tuplets can't be represented, which guarantees SER on triplet passages.
+  - BUG-016: binarized input, bracket and spacing differ between training and inference (hypothesis).
+  - BUG-025: the clef/key crop is misplaced under page-edge shadow.
+
+### Rules before starting
+
+- **The test pieces are spent.** Non Nobis, Gaano, Honneur, Handog and DSMN have all been evaluated on.
+  - Develop and tune only on other pieces.
+  - Claim the targets only on a **new held-out set**, pre-registered like `data/eval_fresh/PREREG.md`. It also
+    covers abstract Remaining Work item (2); the proposal §1.7 promises 10 scores.
+- **ml-cv-lead goes before any training code, and again after results** (CLAUDE.md).
+- **Report results this way:** both seeds as a range, with note precision and pitch+duration alongside pitch.
+- **Keep the metrics fixed.** Don't redefine SER (agnostic tokens, slurs/ties excluded) or pitch accuracy to hit
+  the target.
+- **Seed `finetune_train_loader` (notebook cell 12) before any new fine-tuning run**, so runs are comparable. It is
+  still open from Step 2.
+
+### Suggested order (candidates only; vet them with ml-cv-lead)
+
+1. **Error breakdown (no training).** Split camera SER into insertions, deletions and substitutions by token class
+   (note, rest, duration, accidental, barline, beam/dot) from `data/eval_prelim/runs/`. Pick the lever from this.
+2. **Cheap fixes:**
+   - BUG-024 (pitch ceiling).
+   - BUG-016's single-variable experiments (grayscale vs binarized CRNN input; crop the system bracket).
+3. **Decoding without retraining.** Try CTC beam search with a measure-duration check against the time signature,
+   to suppress spurious notes (insertions).
+4. **Training:**
+   - Add camera-style augmentation to fine-tuning (illumination, shadow, blur, perspective, JPEG, paper texture) to
+     close the 9 pp camera gap.
+   - Then fine-tune on real-photo strips from non-test pieces (needs GT).
+   - Consider tuplet tokens (BUG-015).
+5. **Final pre-registered eval** on the new held-out set, digital and camera, with the same metrics as
+   `eval_prelim`.
+
+### Also done this session (2026-09-28)
+
+- **The WCTP 2026 abstract has been revised.** The files are all in `docs/studies/` on `feature/piya106-run-manifest`:
+  - `PiyaNota_WCTP_Abstract_revised.docx` and `.pdf`
+  - the rationale and checks in `preliminary-results-abstract-plan.md`
+- **The deadline is Sep 30, 2026.** Submit the PDF.
+- **The abstract's Remaining Work** already lists this accuracy work, the larger held-out set, the Flutter app and
+  Flask integration, and the SUS study.
 
 ## Fresh-photo pipeline eval: Stage 3 with and without the clef/key classifier (2026-09-28) - newest, read first
 
