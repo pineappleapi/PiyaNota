@@ -1590,7 +1590,17 @@ def blank_lyrics_regions(binary: np.ndarray) -> np.ndarray:
     return result
 
 
-def preprocess_batch(image_dir: str, output_dir: str, save_debug: bool = False) -> list:
+def preprocess_batch(image_dir: str, output_dir: str, save_debug: bool = False,
+                     keep_unmasked: bool = False) -> list:
+    """Runs Stage 1 on every image in ``image_dir``.
+
+    Args:
+        keep_unmasked: Also keep each page's unmasked native image and tracked staves and append the
+            PreprocessedPage as a 4th tuple element; ClefKeyNet crops from it (stage3_clefkey).
+
+    Returns:
+        (detection page, page index, native strip source or None[, PreprocessedPage]) per image.
+    """
     input_path = Path(image_dir)
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -1605,7 +1615,7 @@ def preprocess_batch(image_dir: str, output_dir: str, save_debug: bool = False) 
 
     results = []
     for i, img_file in enumerate(image_files, start=1):
-        page = preprocess_score_page(str(img_file), save_debug=save_debug)
+        page = preprocess_score_page(str(img_file), save_debug=save_debug, keep_unmasked=keep_unmasked)
         out_file = output_path / f"page_{i:03d}_preprocessed.png"
         cv2.imwrite(str(out_file), page.detect)
         print(f"  Saved -> {out_file}")
@@ -1613,8 +1623,10 @@ def preprocess_batch(image_dir: str, output_dir: str, save_debug: bool = False) 
             src_file = output_path / f"page_{i:03d}_strip_source.png"
             cv2.imwrite(str(src_file), page.strip_source)
             print(f"  Saved -> {src_file}")
-        # (detection page, page index, native strip source or None); Stage 2 accepts 2-tuples too.
-        results.append((page.detect, i, page.strip_source))
+        # (detection page, page index, native strip source or None); Stage 2 accepts 2-tuples too and
+        # ignores the 4th element.
+        results.append((page.detect, i, page.strip_source, page) if keep_unmasked
+                       else (page.detect, i, page.strip_source))
 
     print(f"\n[Stage 1] Preprocessed {len(results)} page(s). Output: {output_dir}")
     return results

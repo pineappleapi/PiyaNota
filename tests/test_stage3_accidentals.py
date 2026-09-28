@@ -199,6 +199,105 @@ def test_natural_cancels_key_signature_for_the_measure() -> None:
     assert _pitches(tokens) == [B_FLAT4, B4, B4, B_FLAT4]
 
 
+# ── header_override: ClefKeyNet clef/key (BUG-027) and confirmed key change (BUG-029) ──
+
+def _events_fixed(tokens: list, key: int, clef: str = "clef.G-L2", octave: int = 0,
+                  voice: str = "Soprano", next_key: "int | None" = None) -> list:
+    with contextlib.redirect_stdout(io.StringIO()):
+        return s3.infer_pitch(tokens, voice=voice, page_index=1, sys_idx=1,
+                              header_override=s3.HeaderOverride(clef, key, octave), next_system_key=next_key)
+
+
+def _pitches_fixed(tokens: list, key: int, **kw) -> list:
+    return [e["pitch"] for e in _events_fixed(tokens, key, **kw) if e["type"] == "note"]
+
+
+def test_override_key_applies_without_crnn_key_signature() -> None:
+    assert _pitches_fixed(TREBLE + ["note.quarter-L3", "note.quarter-L5"], key=-1) == [B_FLAT4, F5]
+
+
+def test_override_ignores_crnn_header_accidentals_after_digits() -> None:
+    # BUG-027: a flat read after the time-signature digits used to be added to the key (E-flat here).
+    tokens = TREBLE + ["accidental.flat-L3", "digit.3-L4", "digit.4-L2", "accidental.flat-S4",
+                       "note.quarter-L2", "note.quarter-S4", "note.quarter-L3"]
+    assert _pitches_fixed(tokens, key=-1) == [G4, 76, B_FLAT4]
+
+
+def test_override_ignores_extra_crnn_key_glyphs() -> None:
+    tokens = TREBLE + ["accidental.flat-L3", "accidental.flat-S4", "accidental.flat-S2",
+                       "note.quarter-L2", "note.quarter-S4"]
+    assert _pitches_fixed(tokens, key=-1) == [G4, 76]
+
+
+def test_override_keeps_accidental_anchored_to_first_note() -> None:
+    assert _pitches_fixed(TREBLE + ["accidental.sharp-L5", "note.quarter-L5", "note.quarter-L5",
+                                    BAR, "note.quarter-L5"], key=0) == [F_SHARP5, F_SHARP5, F5]
+
+
+def test_override_drops_key_glyph_separated_from_first_note() -> None:
+    # A misread key glyph on the first note's position, but with the time signature and a rest in between.
+    tokens = BASS + ["accidental.flat-L4", "metersign.C-L3", "rest.quarter-L3", "note.quarter-L4"]
+    assert _pitches_fixed(tokens, key=-3, clef="clef.F-L4", voice="Bass") == [53]
+
+
+def test_override_ignores_crnn_clefs() -> None:
+    tokens = BASS + ["note.quarter-L2", BAR, "clef.F-L4", "note.quarter-L2"]
+    assert _pitches_fixed(tokens, key=0) == [G4, G4]
+
+
+def test_override_octave_shift_replaces_voice_tenor_octave() -> None:
+    # Tenor on treble-8vb: one octave down, not two (the voice lookup must not apply on top).
+    assert _pitches_fixed(TREBLE + ["note.quarter-L2"], key=0, octave=-12, voice="Tenor") == [55]
+    assert _pitches_fixed(BASS + ["note.quarter-L4"], key=-1, clef="clef.F-L4", voice="Bass") == [53]
+
+
+def test_override_still_reads_time_signature() -> None:
+    events = _events_fixed(TREBLE + ["accidental.flat-L3", "digit.3-L4", "digit.4-L2", "note.quarter-L2"], key=-1)
+    assert events[0]["time_signature"] == "3/4"
+
+
+def test_one_glyph_key_change_confirmed_by_next_system() -> None:
+    # BUG-029: 0 -> 1 sharp inside the strip; accepted only when ClefKeyNet reads 1# on the next system.
+    tokens = TREBLE + ["note.quarter-L2", BAR, "accidental.sharp-L5", "note.quarter-L2", "note.quarter-L5"]
+    assert _pitches_fixed(tokens, key=0, next_key=1) == [G4, G4, F_SHARP5]
+    assert _pitches_fixed(tokens, key=0, next_key=None) == [G4, G4, F5]
+    assert _pitches_fixed(tokens, key=0, next_key=2) == [G4, G4, F5]
+
+
+def test_one_natural_key_change_confirmed_by_next_system() -> None:
+    tokens = TREBLE + ["note.quarter-L2", BAR, "accidental.natural-L5", "note.quarter-L2", "note.quarter-L5"]
+    assert _pitches_fixed(tokens, key=1, next_key=0) == [G4, G4, F5]
+    assert _pitches_fixed(tokens, key=1, next_key=None) == [G4, G4, F_SHARP5]
+
+
+def test_override_drops_key_glyph_after_metersign() -> None:
+    # senior-reviewer probe: a glyph after the metersign used to reach body and anchor past the rest.
+    tokens = TREBLE + ["metersign.C-L3", "accidental.sharp-L5", "rest.quarter-L3", "note.quarter-L5"]
+    assert _pitches_fixed(tokens, key=0) == [F5]
+    assert _events_fixed(tokens, key=0)[0]["time_signature"] == "4/4"
+
+
+def test_override_keeps_inline_accidental_after_metersign() -> None:
+    tokens = TREBLE + ["metersign.C-L3", "accidental.sharp-L5", "note.quarter-L5", "note.quarter-L5"]
+    assert _pitches_fixed(tokens, key=0) == [F_SHARP5, F_SHARP5]
+
+
+def test_override_multirest_after_metersign() -> None:
+    events = _events_fixed(TREBLE + ["metersign.C-L3", "digit.4-S5", "multirest-L3", BAR, "note.quarter-L2"],
+                           key=0)
+    assert events[0]["symbol"].startswith("multirest")
+    assert events[0]["duration_ticks"] == 4 * s3.NOTE_DURATION_TICKS["whole"]
+    assert events[0]["time_signature"] == "4/4"
+
+
+def test_confirmed_key_change_with_last_glyph_on_next_note() -> None:
+    # 0 -> 1 sharp confirmed by the next system; the C# belongs to the note right after it.
+    tokens = TREBLE + ["note.quarter-L2", BAR, "accidental.sharp-L5", "accidental.sharp-S3",
+                       "note.quarter-S3", "note.quarter-L5"]
+    assert _pitches_fixed(tokens, key=0, next_key=1) == [G4, C_SHARP5, F_SHARP5]
+    assert _pitches_fixed(tokens, key=0, next_key=None)[-1] == F5
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in list(globals().items()):

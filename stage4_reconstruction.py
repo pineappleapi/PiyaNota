@@ -1401,9 +1401,8 @@ def _report(reconstructed: dict, report_data: dict) -> None:
 
 if __name__ == "__main__":
     import argparse
-    from stage1_preprocessing import preprocess_batch
-    from stage2_detection import detect_staff_regions
-    from stage3_transcription import transcribe_voice_sequences
+    import stage3_clefkey
+    from stage3_transcription import run_stages_1_to_3
 
     parser = argparse.ArgumentParser(
         description="PiyaNota Stage 4 — SATB Part Reconstruction")
@@ -1413,15 +1412,11 @@ if __name__ == "__main__":
     parser.add_argument("--weights", default="crnn_weights/best.pt")
     parser.add_argument("--yolo",    default="staff_detector_files/weights/best.pt")
     parser.add_argument("--img-height", type=int, default=64)
+    stage3_clefkey.add_clef_key_args(parser)
     args = parser.parse_args()
 
-    pages  = preprocess_batch(args.input, args.prep, save_debug=False)
-    voices = detect_staff_regions(pages,
-                                  model_weights=args.yolo,
-                                  output_dir=args.strips)
-    events = transcribe_voice_sequences(voices,
-                                        model_weights=args.weights,
-                                        img_height=args.img_height)
+    events = run_stages_1_to_3(args.input, args.prep, args.strips, args.yolo, args.weights,
+                               stage3_clefkey.clef_key_arg(args), img_height=args.img_height)
     satb   = reconstruct_satb(events)
 
     print("\nStage 4 complete. SATB sequences ready for Stage 5 (MIDI synthesis).")

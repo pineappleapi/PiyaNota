@@ -16,7 +16,10 @@ import subprocess
 import sys
 import warnings
 from pathlib import Path
+from typing import Optional
 from midiutil import MIDIFile
+
+import stage3_clefkey
 
 from stage4_reconstruction import TICKS_PER_QUARTER
 
@@ -286,36 +289,26 @@ def run_full_pipeline(
     soundfont_path: str = "soundfont/piano.sf2",
     bpm:            int = DEFAULT_BPM,
     img_height:     int = 64,
+    clef_key_weights: Optional[str] = str(stage3_clefkey.DEFAULT_CLEF_KEY_CHECKPOINT),
 ) -> dict:
     """
     Runs the complete PiyaNota pipeline from raw images to MP3 files.
     Stages 1 → 2 → 3 → 4 → 5.
+
+    clef_key_weights: ClefKeyNet checkpoint for Stage 3's clef/key/octave (default: the pinned
+    checkpoint; a missing file raises). None opts out: clef/key come from the CRNN (BUG-011) and every
+    event is flagged clef_key_disabled / review_needed.
     """
-    from stage1_preprocessing  import preprocess_batch
-    from stage2_detection      import detect_staff_regions
-    from stage3_transcription  import transcribe_voice_sequences
+    from stage3_transcription  import run_stages_1_to_3
     from stage4_reconstruction import reconstruct_satb
 
     print("=" * 60)
     print("PiyaNota — Full Pipeline")
     print("=" * 60)
 
-    # Stage 1
-    pages = preprocess_batch(input_dir, prep_dir, save_debug=False)
-
-    # Stage 2
-    voice_strips = detect_staff_regions(
-        pages,
-        model_weights=yolo_weights,
-        output_dir=strips_dir,
-    )
-
-    # Stage 3
-    voice_events = transcribe_voice_sequences(
-        voice_strips,
-        model_weights=crnn_weights,
-        img_height=img_height,
-    )
+    # Stages 1-3
+    voice_events = run_stages_1_to_3(input_dir, prep_dir, strips_dir, yolo_weights, crnn_weights,
+                                     clef_key_weights, img_height=img_height)
 
     # Stage 4
     satb = reconstruct_satb(voice_events)
@@ -357,6 +350,7 @@ if __name__ == "__main__":
     parser.add_argument("--bpm",       type=int, default=DEFAULT_BPM,
                         help="Playback tempo in BPM")
     parser.add_argument("--img-height", type=int, default=64)
+    stage3_clefkey.add_clef_key_args(parser)
     args = parser.parse_args()
 
     mp3s = run_full_pipeline(
@@ -369,6 +363,7 @@ if __name__ == "__main__":
         soundfont_path = args.soundfont,
         bpm            = args.bpm,
         img_height     = args.img_height,
+        clef_key_weights = stage3_clefkey.clef_key_arg(args),
     )
 
     print(f"\nStage 5 complete. {len(mp3s)} audio file(s) ready.")

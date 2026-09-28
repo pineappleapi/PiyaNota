@@ -114,7 +114,18 @@ later stages import functions from earlier ones rather than duplicating logic.
    MIDI pitch, tracking active clef and key signature as it goes. Tenor voice is a special case:
    `get_clef_reference()` looks up voice, not just the clef token, and returns pitches an octave lower
    (`TENOR_CLEF_REFERENCE`) because a treble clef with an implicit 8vb (used for Tenor in SATB choral
-   writing) is visually indistinguishable from a plain treble clef to the CRNN. Emits one JSON event
+   writing) is visually indistinguishable from a plain treble clef to the CRNN. **ClefKeyNet (2026-09-29,
+   branch `piya106/clefkey-wiring`, BUG-027/029):** the Stage 3/4/5 CLIs and `run_full_pipeline` go through
+   `run_stages_1_to_3()`: Stage 1 keeps the unmasked page, Stage 2 writes `strips/manifest.json`,
+   `stage3_clefkey.decisions_for_pages` decides clef (voice rule), key (per-system vote) and octave, and
+   `infer_pitch(header_override=..., next_system_key=...)` uses them. In that `fixed_header` mode CRNN clefs are
+   ignored and no CRNN header accidental counts into the key. The CLI default checkpoint is
+   `training/clef_key_artifacts/t4_full_seed20260926_runA/clef_key_classifier.pt` (resolved from the repo, sha256-pinned; gitignored, copy it from the
+   training tree). Missing weights raise, and `--no-clef-key` opts out (CRNN clef/key, BUG-011).
+   `run_full_pipeline` defaults to the checkpoint too; `clef_key_weights=None` opts out and flags every
+   event `clef_key_disabled` / `review_needed`. A mid-strip key change counts with one glyph when it
+   matches ClefKeyNet's key on the next adjacent system (BUG-029). The classifier still fails
+   its real-photo gate (BUG-021). Emits one JSON event
    file per voice under `data/transcribed_symbols/`.
 
 4. **`stage4_reconstruction.py`** — merges Stage 3's per-strip events into one continuous sequence per
@@ -299,19 +310,20 @@ treat it as stale if either doc has moved on.
   the T4 seed-20260926 checkpoint, run on 222 real staves (Dormi, Livin', Flashlight), is right 95.5% of the time on clefs
   and 96.0% on keys when "sure", with 4.5% of clefs confidently wrong. The gate needs 99% / Wilson LB 97% / at most 1%
   confident-wrong. The checkpoint was used under a post-hoc user override after the T4-vs-CPU
-  reproducibility cross-check failed 5 tolerances. The validation set is now spent for tuning. The classifier is not
-  wired into Stage 3; as of 2026-09-28 it is used only through the eval wrapper `stage3_clefkey.py`. Detail: `docs/decisions/piya-106-clef-keysig-detector-plan.md` (last sections).
+  reproducibility cross-check failed 5 tolerances. The validation set is now spent for tuning. Since 2026-09-29
+  (branch `piya106/clefkey-wiring`) it is wired into the pipeline; see the Stage 3 notes above. Detail: `docs/decisions/piya-106-clef-keysig-detector-plan.md` (last sections).
 
 - **Fresh-photo pipeline eval, Stage 3 with/without ClefKeyNet (2026-09-28, pre-registered;
   `data/eval_fresh/REPORT.md`):**
   - **Non Nobis Domine** is the only user-verified GT and the only gated piece (36 staves, 275 notes).
-    End-to-end pitch accuracy is 8.0-10.2% as-is and 64.0% with the classifier, or 86% on the 28 strips
+    End-to-end pitch accuracy is 8.0-10.2% as-is and 64.0% with the classifier (pre-wiring eval
+    wrapper with header substitution, before the BUG-027 fix), or 86% on the 28 strips
     Stage 2 found. Gate: PASS.
   - Rhythm stays at 64%, and token SER falls only from 58% to 50-51%. All of the gain comes from the clef/key
     header; note reading is the main source of error.
   - Agent-made, diagnostic-only GT: Honneur 73-76%, Gaano 83%, Handog 54% (78% on found strips).
   - All four pieces use voice-default clefs, so a voice-default rule would match the classifier on clefs.
-  - `stage3_clefkey.py` is an eval wrapper; the classifier is still not wired into `stage3_transcription.py`.
+  - At the time, `stage3_clefkey.py` was an eval wrapper only; it is wired into the pipeline since 2026-09-29.
   - New bugs: BUG-024, BUG-025, BUG-026.
 
 - **DS2 Dense (DeepScoresV2) — YOLOv8 staff detector (Stage 2):** one number on record, and it is
