@@ -43,24 +43,25 @@ Changes vs original stage3_transcription.py
 6.  KEY_SIG_OFFSETS  (removed)
       • Was empty and never referenced — deleted to avoid confusion.
  
-7.  KEY_SIG_POSITIONS  (new table)
-      • Conventional staff-position suffixes (e.g. "L5", "S3") at which
-        key-signature accidentals appear for each clef.
-      • Used by _is_keysig_position() to distinguish key-sig accidentals
-        from inline accidentals after a barline.
- 
+7.  KEY_SIG_ORDER  (replaces KEY_SIG_POSITIONS, PIYA-106 2026-09-28)
+      • Engraving-order staff positions of key-signature accidentals for the
+        in-scope clefs (treble, bass). The old unordered table was a step off
+        and missed treble Bb.
+
 8.  _is_keysig_position()  (new helper)
       • Returns True if an accidental token is at a known key-sig position
         for the active clef.
- 
+
 9.  infer_pitch()  — full rewrite
-      • Replaced the two-pass linear scan + boolean flag with a 5-stage
+      • Replaced the two-pass linear scan + boolean flag with a 4-stage
         key-signature state machine:
           "clef"        wait for opening clef; handle dropped-clef recovery
           "keysig"      count opening key-sig accidentals safely
           "body"        normal note / rest processing
           "post_bar"    watch symbol after every barline for key changes
-          "mid_keysig"  accumulate mid-piece key-sig bursts
+      • Accidental semantics (PIYA-106 2026-09-28): an inline accidental must
+        sit on the next note's staff position, sets the absolute alteration
+        (BUG-024), and holds for that position until the barline.
       • All CLEF_REFERENCE direct lookups replaced with get_clef_reference()
         so Tenor octave transposition is applied everywhere consistently.
       • Augmentation dots: n dots give base * (2 - 1/2**n) (PIYA-109 AC3), see _dotted_ticks().
@@ -783,55 +784,33 @@ def _dotted_ticks(base_ticks: int, n_dots: int) -> int:
  
 # ── Key signature position tables ─────────────────────────────────────────────
 #
-# Conventional staff-position suffixes at which key-signature accidentals
-# appear for each clef.  Used by _is_keysig_position() to distinguish a
-# key-change accidental (after a barline) from a plain inline accidental.
+# Staff positions of key-signature accidentals in engraving order, in the
+# 1-indexed agnostic convention (L1 = bottom line, S1 = space above it; see
+# BUG-009). Used to tell a key-change burst after a barline from inline
+# accidentals, and to spot a key signature whose clef the CRNN dropped.
 #
-# Treble clef sharps (engraving order): F5 C5 G5 D5 A4 E5 B4
-#   → suffixes: L5 S3 L6 S4 L5 S3 L5  → unique set: {L5, S3, L6, S4}
-# Treble clef flats:  Bb4 Eb5 Ab4 Db5 Gb4 Cb5 Fb4
-#   → suffixes: S4 S2 S5 S3 S6 S4 S2  → unique set: {S4, S2, S5, S3, S6}
+# Treble sharps F5 C5 G5 D5 A4 E5 B4    Treble flats Bb4 Eb5 Ab4 Db5 Gb4 Cb5 Fb4
+# Bass sharps   F3 C3 G3 D3 A2 E3 B2    Bass flats   Bb2 Eb3 Ab2 Db3 Gb2 Cb3 Fb2
 #
-# NOTE: Verify these against your CameraPrIMuS training corpus — the exact
-# suffix values depend on how the dataset was engraved. Inspect strips in a
-# known key and check which tokens appear between the clef and the meter sign.
- 
-KEY_SIG_POSITIONS = {
+# Only the in-scope SATB clefs are listed (no C clefs, user decision
+# 2026-09-26); any other clef gets no key-change detection, so its
+# post-barline accidentals are treated as inline.
+KEY_SIG_ORDER: dict[str, dict[str, list[str]]] = {
     "clef.G-L2": {
-        "accidental.sharp": {"L5", "S3", "L6", "S4"},
-        "accidental.flat":  {"S4", "S2", "S5", "S3", "S6"},
-    },
-    "clef.G-L1": {
-        "accidental.sharp": {"L5", "S3", "L6", "S4"},
-        "accidental.flat":  {"S4", "S2", "S5", "S3", "S6"},
+        "accidental.sharp": ["L5", "S3", "S5", "L4", "S2", "S4", "L3"],
+        "accidental.flat":  ["L3", "S4", "S2", "L4", "L2", "S3", "S1"],
     },
     "clef.F-L4": {
-        "accidental.sharp": {"L4", "S2", "L5", "S3"},
-        "accidental.flat":  {"S3", "S1", "S4", "S2", "S5"},
-    },
-    "clef.F-L3": {
-        "accidental.sharp": {"L4", "S2", "L5", "S3"},
-        "accidental.flat":  {"S3", "S1", "S4", "S2", "S5"},
-    },
-    # C clefs are rare in SATB choral — positions approximated from standard
-    # engraving. Verify before relying on mid-piece key changes for these.
-    "clef.C-L1": {
-        "accidental.sharp": {"L5", "S3", "L6", "S4"},
-        "accidental.flat":  {"S4", "S2", "S5", "S3", "S6"},
-    },
-    "clef.C-L2": {
-        "accidental.sharp": {"L4", "S2", "L5", "S3"},
-        "accidental.flat":  {"S3", "S1", "S4", "S2"},
-    },
-    "clef.C-L3": {
-        "accidental.sharp": {"L4", "S2", "L5", "S3"},
-        "accidental.flat":  {"S3", "S1", "S4", "S2"},
-    },
-    "clef.C-L4": {
-        "accidental.sharp": {"L3", "S1", "L4", "S2"},
-        "accidental.flat":  {"S2", "L1", "S3", "S1"},
+        "accidental.sharp": ["L4", "S2", "S4", "L3", "S1", "S3", "L2"],
+        "accidental.flat":  ["L2", "S3", "S1", "L3", "L1", "S2", "S0"],
     },
 }
+# A lone accidental after a barline is far more often an inline accidental (or
+# a CRNN phantom) than a one-accidental key change. Each strip restarts from
+# its own key signature (CRNN-read, or the clef/key classifier's in the eval
+# wrapper), so a missed 1-accidental change costs at most the rest of one
+# strip. Hand-set, not tuned.
+MIN_MID_KEY_CHANGE_ACCIDENTALS = 2
  
  
 # ── Pitch helpers ─────────────────────────────────────────────────────────────
@@ -862,14 +841,105 @@ def _is_keysig_position(sym: str, acc_type: str, active_clef: str) -> bool:
       acc_type   base type  e.g. "accidental.sharp"
       active_clef           e.g. "clef.G-L2"
     """
-    if "-" not in sym:
+    suffix = _position_suffix(sym)
+    return suffix is not None and suffix in KEY_SIG_ORDER.get(active_clef, {}).get(acc_type, [])
+
+
+def _position_suffix(sym: str) -> Optional[str]:
+    """Staff-position suffix of a token ("L5", "S3", "L-1"), or None if it has none."""
+    return sym.split("-", 1)[1] if "-" in sym else None
+
+
+def _next_note_position(symbols: list, idx: int) -> Optional[str]:
+    """Position of the first note after ``symbols[idx]`` in the same measure, or None.
+
+    A barline ends the search: an accidental never modifies a note in the next bar.
+    """
+    for sym in symbols[idx + 1:]:
+        if sym.startswith("barline"):
+            return None
+        if sym.startswith("note."):
+            return _position_suffix(sym)
+    return None
+
+
+def _accidental_is_anchored(symbols: list, idx: int) -> bool:
+    """True if the inline accidental at ``idx`` sits on the staff position of the note it precedes.
+
+    Engraving puts an accidental directly left of its notehead on the same line/space, so an accidental
+    whose next note is elsewhere is a CRNN phantom. Diagnostic only, not accuracy evidence: on the
+    eval_prelim camera runs (version b, 2026-09-28; pieces already spent as test data, rule designed
+    on them) only 26-36% of predicted inline sharps were real and this rule alone moved SOW pitch
+    +0.9 to +1.3 pp. Cost: an accidental the CRNN places one step off its note is dropped (seen on
+    distorted Camera-PrIMuS).
+    """
+    pos = _position_suffix(symbols[idx])
+    return pos is not None and _next_note_position(symbols, idx) == pos
+
+
+def _is_mid_key_change(burst: list, symbols: list, burst_end: int, acc_type: str, active_clef: str) -> bool:
+    """True if a same-type accidental burst right after a barline is a key change, not inline accidentals.
+
+    Requires the burst to be exactly the leading part of a printed key signature (engraving positions and
+    order) with at least MIN_MID_KEY_CHANGE_ACCIDENTALS glyphs, and the next note not to sit on the last
+    glyph's position (that note would be the one the accidental belongs to).
+    """
+    order = KEY_SIG_ORDER.get(active_clef, {}).get(acc_type)
+    if order is None or len(burst) < MIN_MID_KEY_CHANGE_ACCIDENTALS:
         return False
-    suffix   = sym.split("-", 1)[1]             # "L5", "S3", etc.
-    clef_map = KEY_SIG_POSITIONS.get(active_clef, {})
-    valid    = clef_map.get(acc_type, set())
-    return suffix in valid
- 
- 
+    positions = [_position_suffix(t) for t in burst]
+    if positions != order[:len(burst)]:
+        return False
+    return _next_note_position(symbols, burst_end - 1) != positions[-1]
+
+
+def _natural_led_key_change(symbols: list, start: int, active_clef: str,
+                            key_alterations: dict) -> Optional[tuple[int, int, int]]:
+    """Detects a key change that opens with naturals cancelling the old key (e.g. 2# -> 3b: ♮♮♭♭♭).
+
+    Engravers print cancelling naturals whenever the new key drops accidentals or switches between
+    sharps and flats, which covers the common "up a step for the last verse" modulation (choral-conductor
+    review 2026-09-28). The naturals must sit on the old key's positions and the optional sharp/flat burst
+    after them must be the leading part of a printed key signature, so phantom naturals rarely qualify.
+
+    Returns:
+        (n_sharp, n_flat, end) of the new key and the index after the burst, or None.
+    """
+    order = KEY_SIG_ORDER.get(active_clef)
+    if order is None or not key_alterations:
+        return None
+    old_type = "accidental.sharp" if next(iter(key_alterations.values())) > 0 else "accidental.flat"
+    old_positions = order[old_type][:len(key_alterations)]
+
+    nat_end = start
+    while nat_end < len(symbols) and symbols[nat_end].startswith("accidental.natural"):
+        nat_end += 1
+    naturals = [_position_suffix(t) for t in symbols[start:nat_end]]
+    if len(set(naturals)) != len(naturals) or not set(naturals) <= set(old_positions):
+        return None
+
+    new_type = symbols[nat_end].split("-")[0] if nat_end < len(symbols) else ""
+    end = nat_end
+    if new_type in order:
+        while end < len(symbols) and symbols[end].split("-")[0] == new_type:
+            end += 1
+    burst = [_position_suffix(t) for t in symbols[nat_end:end]]
+    if burst:
+        if burst != order[new_type][:len(burst)] or set(burst) & set(naturals):
+            return None
+        n_new, type_new = len(burst), new_type
+    else:
+        # Naturals alone only shorten the old key, cancelling the last accidentals of its order.
+        n_new, type_new = len(old_positions) - len(naturals), old_type
+        if set(naturals) != set(old_positions[n_new:]):
+            return None
+
+    glyphs = naturals + burst
+    if len(glyphs) < MIN_MID_KEY_CHANGE_ACCIDENTALS or _next_note_position(symbols, end - 1) == glyphs[-1]:
+        return None
+    return (n_new, 0, end) if type_new == "accidental.sharp" else (0, n_new, end)
+
+
 # ── Pitch inference ────────────────────────────────────────────────────────────
  
 def infer_pitch(
@@ -894,12 +964,19 @@ def infer_pitch(
     accidentals and the clef also shape pitch but apply to every note, so
     they are deliberately not folded into per-note confidence.
 
-    Pitch formula:  M = R_c + Δ(p) + K + A
+    Pitch formula:  M = R_c + Δ(p) + A(p)
       R_c   clef reference pitch at bottom line (voice-aware via get_clef_reference)
       Δ(p)  diatonic semitone offset for staff step p
-      K     key-signature alteration for this pitch class (0 if natural cancels)
-      A     inline accidental offset
- 
+      A(p)  alteration of step p, first match wins:
+              1. an anchored inline accidental on this note (absolute: sharp +1,
+                 flat -1, natural 0; it replaces the key alteration, BUG-024)
+              2. a tie into this note from the same step keeps the tied note's
+                 alteration (across a barline too, for this note only)
+              3. an earlier accidental on the same step in this measure
+              4. the key-signature alteration of the step's pitch class
+      Inline accidentals not on the next note's staff position are dropped as
+      CRNN phantoms (_accidental_is_anchored).
+
     Key-signature state machine
     ───────────────────────────
     "clef"
@@ -909,7 +986,7 @@ def infer_pitch(
       • accidental at valid key-sig position
         (clef dropped by CRNN)                   → infer clef was missed,
                                                    start counting, → "keysig"
-      • accidental at wrong position             → inline pending_acc, → "body"
+      • accidental at wrong position             → inline if anchored, → "body"
       • metersign / note / rest                  → warn, commit empty key sig,
                                                    → "body", fall-through
  
@@ -931,28 +1008,31 @@ def infer_pitch(
  
     "post_bar"
       Symbol immediately after a barline.
-      • accidental at valid key-sig position     → start burst, → "mid_keysig"
-      • accidental at wrong position             → inline, → "body"
+      • sharp/flat burst that _is_mid_key_change → commit new key, skip the
+                                                   burst, → "body"
+      • naturals cancelling the old key, then an → commit new key, skip the
+        optional burst (_natural_led_key_change)   glyphs, → "body"
+      • any other accidental                    → → "body", fall-through
+                                                   (inline if anchored)
       • clef change                              → update reference, stay
       • anything else                            → → "body", fall-through
- 
-    "mid_keysig"
-      Accumulating a mid-piece key-sig burst.
-      • accidental, same type, valid position    → count++
-      • accidental, valid position, wrong type   → mixed → discard burst,
-                                                   treat as inline, → "body"
-      • accidental at wrong position             → commit burst, treat this
-                                                   one as inline, → "body"
-      • any non-accidental                       → commit burst (single
-                                                   accidental OK: G major = 1#),
-                                                   fall-through to body
     """
  
     # ── Initialise ────────────────────────────────────────────────────────
     active_clef     = CLEF_FALLBACK[voice]
     reference_pitch = get_clef_reference(active_clef, voice)
  
-    pending_acc            = None
+    pending_acc: Optional[int] = None
+    pending_acc_conf       = 1.0
+    # (alteration, accidental confidence) set by an inline accidental, per staff step, until the next
+    # barline. The confidence travels with it so every note that inherits the accidental reports it.
+    measure_alterations: dict[int, tuple[int, float]] = {}
+    # Step/alteration of the last note, so a tie into the same step keeps its pitch across a barline.
+    last_note_step: Optional[int] = None
+    last_note_alteration   = 0
+    last_note_alt_conf     = 1.0
+    # Tokens before this index were consumed by a mid-piece key-change lookahead.
+    skip_until             = 0
     # Dots stack on the event they follow; its undotted length is kept so a second dot adds a quarter
     # of it rather than half of the already-dotted length.
     dot_target: Optional[dict] = None
@@ -980,8 +1060,6 @@ def infer_pitch(
     ks_stage        = "clef"
     ks_sharp        = 0
     ks_flat         = 0
-    mid_sharp       = 0
-    mid_flat        = 0
     key_alterations = {}
     # PIYA-107 AC4/AC6: Camera-PrIMuS encodes a numeric time signature (e.g.
     # "3/4") as two consecutive digit.N tokens in the header, rather than a
@@ -1005,37 +1083,29 @@ def infer_pitch(
         print(f"[Stage 3] {voice} p{page_index}: opening key sig {desc} -> {alts}")
         return alts
  
-    def _commit_mid(n_sharp, n_flat):
-        if n_sharp > 0 and n_flat > 0:
-            print(f"[Stage 3] {voice} p{page_index}: "
-                  "mixed accidentals in mid-piece key sig — keeping previous key")
-            return None          # None = don't update key_alterations
+    def _commit_mid(n_sharp: int, n_flat: int) -> dict:
+        # stage3_clefkey counts this exact log line ("mid-piece key change") to flag strips for review.
         alts = get_key_sig_alterations(n_sharp, n_flat)
-        desc = (f"{n_sharp}#" if n_sharp else (f"{n_flat}b" if n_flat else "C major"))
+        desc = f"{n_sharp}#" if n_sharp else (f"{n_flat}b" if n_flat else "C major")
         print(f"[Stage 3] {voice} p{page_index}: mid-piece key change {desc} -> {alts}")
         return alts
- 
+
     if confidences is not None and len(confidences) != len(symbols):
         raise ValueError(
             f"confidences ({len(confidences)}) must be parallel to "
             f"symbols ({len(symbols)})")
     with_conf = confidences is not None
-    # Confidence of the most recent accidental token. Any accidental that
-    # ends up in pending_acc is necessarily the latest accidental seen (each
-    # one overwrites it), so tracking it here, once, covers every branch of
-    # the state machine that sets pending_acc.
-    last_acc_conf = 1.0
 
     # ── Main loop ─────────────────────────────────────────────────────────
     for tok_idx, sym in enumerate(symbols):
 
+        if tok_idx < skip_until:
+            continue
         tok_conf = float(confidences[tok_idx]) if with_conf else 1.0
         acc_type = sym.split("-")[0]
         is_sharp = sym.startswith("accidental.sharp")
         is_flat  = sym.startswith("accidental.flat")
         is_acc   = sym.startswith("accidental.")
-        if is_acc:
-            last_acc_conf = tok_conf
 
         # ══════════════════════════════════════════════════════════════════
         # KEY-SIG STATE MACHINE
@@ -1059,10 +1129,12 @@ def infer_pitch(
                     ks_flat  = 1 if is_flat  else 0
                     ks_stage = "keysig"
                 else:
-                    pending_acc = ACCIDENTAL_OFFSET.get(acc_type, 0)
-                    ks_stage    = "body"
+                    if _accidental_is_anchored(symbols, tok_idx):
+                        pending_acc      = ACCIDENTAL_OFFSET.get(acc_type, 0)
+                        pending_acc_conf = tok_conf
+                    ks_stage = "body"
                 continue
- 
+
             elif (sym.startswith("metersign") or
                   sym.startswith("note.")     or
                   sym.startswith("rest.")):
@@ -1138,63 +1210,46 @@ def infer_pitch(
  
         # ── "post_bar" ────────────────────────────────────────────────────
         elif ks_stage == "post_bar":
- 
-            if is_sharp or is_flat:
-                if _is_keysig_position(sym, acc_type, active_clef):
-                    mid_sharp = 1 if is_sharp else 0
-                    mid_flat  = 1 if is_flat  else 0
-                    ks_stage  = "mid_keysig"
-                else:
-                    pending_acc = ACCIDENTAL_OFFSET.get(acc_type, 0)
-                    ks_stage    = "body"
-                continue
- 
+
+            if sym.startswith("accidental.natural"):
+                change = _natural_led_key_change(symbols, tok_idx, active_clef, key_alterations)
+                if change is not None:
+                    n_sharp, n_flat, skip_until = change
+                    key_alterations = _commit_mid(n_sharp, n_flat)
+                    ks_stage = "body"
+                    continue
+                ks_stage = "body"
+                # fall through: an inline natural candidate
+
+            elif is_sharp or is_flat:
+                burst_end = tok_idx
+                while burst_end < len(symbols) and symbols[burst_end].split("-")[0] == acc_type:
+                    burst_end += 1
+                burst = symbols[tok_idx:burst_end]
+                n = 0
+                if _is_mid_key_change(burst, symbols, burst_end, acc_type, active_clef):
+                    n = len(burst)
+                elif _is_mid_key_change(burst[:-1], symbols, burst_end - 1, acc_type, active_clef):
+                    # The last glyph sits on the next note: read it as that note's accidental and keep
+                    # the rest as the key change, instead of losing the key change for the whole strip.
+                    n = len(burst) - 1
+                if n:
+                    key_alterations = _commit_mid(n if is_sharp else 0, n if is_flat else 0)
+                    skip_until = tok_idx + n
+                    ks_stage = "body"
+                    continue
+                ks_stage = "body"
+                # fall through: not a key change, so each accidental is an inline candidate
+
             elif sym.startswith("clef."):
                 if sym in CLEF_REFERENCE:
                     active_clef     = sym
                     reference_pitch = get_clef_reference(sym, voice)
                 # Stay in "post_bar" — key sig accidentals may still follow
                 continue
- 
+
             else:
                 ks_stage = "body"
-                # fall through to body processing below
- 
-        # ── "mid_keysig" ─────────────────────────────────────────────────
-        elif ks_stage == "mid_keysig":
- 
-            if (is_sharp and mid_flat == 0) or (is_flat and mid_sharp == 0):
-                if _is_keysig_position(sym, acc_type, active_clef):
-                    if is_sharp:
-                        mid_sharp += 1
-                    else:
-                        mid_flat += 1
-                else:
-                    # Position mismatch mid-burst: commit what we have
-                    new_alts = _commit_mid(mid_sharp, mid_flat)
-                    if new_alts is not None:
-                        key_alterations = new_alts
-                    pending_acc = ACCIDENTAL_OFFSET.get(acc_type, 0)
-                    mid_sharp = mid_flat = 0
-                    ks_stage  = "body"
-                continue
- 
-            elif is_sharp or is_flat:
-                # Mixed type mid-burst — discard whole burst
-                print(f"[Stage 3] {voice} p{page_index}: "
-                      "mixed types in mid-piece key sig burst — discarding as noise")
-                pending_acc = ACCIDENTAL_OFFSET.get(acc_type, 0)
-                mid_sharp = mid_flat = 0
-                ks_stage  = "body"
-                continue
- 
-            else:
-                # Burst ended — commit (single accidental is valid: G maj = 1#)
-                new_alts = _commit_mid(mid_sharp, mid_flat)
-                if new_alts is not None:
-                    key_alterations = new_alts
-                mid_sharp = mid_flat = 0
-                ks_stage  = "body"
                 # fall through to body processing below
  
         # ══════════════════════════════════════════════════════════════════
@@ -1215,7 +1270,9 @@ def infer_pitch(
  
         # ── Inline accidental ─────────────────────────────────────────────
         if is_acc:
-            pending_acc = ACCIDENTAL_OFFSET.get(acc_type, 0)
+            if _accidental_is_anchored(symbols, tok_idx):
+                pending_acc      = ACCIDENTAL_OFFSET.get(acc_type, 0)
+                pending_acc_conf = tok_conf
             continue
  
         # ── Dot (augmentation) ────────────────────────────────────────────
@@ -1303,23 +1360,25 @@ def infer_pitch(
             bottom_letter = CLEF_BOTTOM_LETTER.get(active_clef, "E")
             delta         = _diatonic_delta(step, bottom_letter)
  
-            # Accidental: natural cancels key sig for this note only
-            cancel_key = False
-            acc        = 0
-            note_conf  = tok_conf
+            # Alteration precedence: see A(p) in the docstring.
+            alt_conf = 1.0   # key-signature alterations are excluded from confidence
             if pending_acc is not None:
-                note_conf = min(note_conf, last_acc_conf)
-                if pending_acc == 0:     # natural sign
-                    cancel_key = True
-                else:
-                    acc = pending_acc
+                alteration, alt_conf = pending_acc, pending_acc_conf
+                measure_alterations[step] = (alteration, alt_conf)
+            elif slur_end_pending and last_note_step == step:
+                # Not stored in measure_alterations: a tie carries the accidental into the next bar for the
+                # tied note only, later notes on that step fall back to the key.
+                alteration, alt_conf = last_note_alteration, last_note_alt_conf
+            elif step in measure_alterations:
+                alteration, alt_conf = measure_alterations[step]
+            else:
+                alteration = key_alterations.get(_pitch_class_at_step(step, bottom_letter), 0)
+            note_conf = min(tok_conf, alt_conf)
             pending_acc = None
- 
-            pitch_class = _pitch_class_at_step(step, bottom_letter)
-            key_acc     = 0 if cancel_key else key_alterations.get(pitch_class, 0)
- 
+            last_note_step, last_note_alteration, last_note_alt_conf = step, alteration, alt_conf
+
             midi_pitch  = max(0, min(127,
-                reference_pitch + delta + key_acc + acc))
+                reference_pitch + delta + alteration))
  
             ticks = NOTE_DURATION_TICKS.get(dur_name, 480)
  
@@ -1366,10 +1425,9 @@ def infer_pitch(
         # ── Barline ───────────────────────────────────────────────────────
         if sym.startswith("barline"):
             pending_acc = None      # stale inline accidental — discard
+            measure_alterations = {}
             in_chord    = False
             ks_stage    = "post_bar"
-            mid_sharp   = 0
-            mid_flat    = 0
             measure_index += 1
             continue
  
