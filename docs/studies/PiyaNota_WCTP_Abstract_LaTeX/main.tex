@@ -56,21 +56,21 @@ Dasmari\~nas, Cavite, Philippines}
 
 \begin{abstract}
 Choral singing is prevalent in Filipino culture, practiced in worship
-services, schools, and community choirs, yet many choir members have
+services, schools, and community choirs, yet many choristers have
 limited music-reading skills and learn parts from conductors. Existing
 tools fall short: Optical Music Recognition (OMR) models degrade on
 photos, commercial apps assume musical literacy, SkiMusic, a
 Filipino-developed system, applies fixed rules to piano scores only, and
 no annotated Filipino SATB dataset exists. We present PiyaNota, an
 Android app converting photos of open-score SATB (Soprano, Alto, Tenor,
-Bass) scores into per-voice piano audio. YOLOv8 isolates staves, and a
+Bass) scores into per-voice piano audio. YOLOv8 isolates staves; a
 convolutional recurrent network fine-tuned on multi-font renderings, with
-a clef and key-signature classifier, transcribes them. In a 12-page pilot
-evaluation, all 100 staves were detected; camera pitch accuracy rose from
-under 5\% before fine-tuning to 83.3--83.4\% (88.7--89.1\% digital),
-though music symbol error rate remains 33.8--34.8\%. PiyaNota offers an
-annotated Filipino SATB dataset, a deep learning pipeline, and an app for
-untrained singers.
+a clef and key-signature classifier, transcribes them. In a 12-page
+pilot, all 100 staves detected; camera pitch accuracy rose from under
+5\% to 83.3--83.4\% (88.7--89.1\% digital), though symbol error rate
+remains 33.8--34.8\%. PiyaNota contributes a dataset, a deep learning
+pipeline, and a step toward musical literacy for singers who learn by
+ear.
 \keywords{Optical Music Recognition, Computer Vision, Deep Learning,
 Mobile Application, Filipino Choral Music, Musical Literacy}
 \end{abstract}
