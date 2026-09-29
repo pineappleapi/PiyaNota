@@ -66,14 +66,16 @@ Android app converting photos of open-score SATB (Soprano, Alto, Tenor,
 Bass) scores into per-voice piano audio. YOLOv8 isolates staves; a
 convolutional recurrent network fine-tuned on multi-font renderings, with
 a clef and key-signature classifier, transcribes them. In a 12-page
-pilot, all 100 staves detected; camera pitch accuracy rose from under
-5\% to 83.3--83.4\% (88.7--89.1\% digital), though symbol error rate
+pilot, all 100 staves were detected; camera pitch accuracy rose from under
+5\% to 83.3--83.4\% (88.7--89.1\% digital), though camera symbol error rate
 remains 33.8--34.8\%. PiyaNota contributes a dataset, a deep learning
 pipeline, and a step toward musical literacy for singers who learn by
 ear.
 \keywords{Optical Music Recognition, Computer Vision, Deep Learning,
 Mobile Application, Filipino Choral Music, Musical Literacy}
 \end{abstract}
+
+\noindent\textbf{Session:} Computation for Community-based Applications
 
 \section*{Contact Author/s}
 % Two authors side by side to keep the abstract page to one page.
@@ -84,6 +86,7 @@ Mobile Application, Filipino Choral Music, Musical Literacy}
 Student Author, BS Computer Science with Specialization in
 Intelligent Systems, 4th Year\\
 \textbf{Phone:} 09190747420\\
+\textbf{Fax:} N/A\\
 \textbf{Email:} \email{MPV0154@dlsud.edu.ph}
 \end{minipage}\hfill
 \begin{minipage}[t]{0.47\textwidth}
@@ -91,6 +94,7 @@ Intelligent Systems, 4th Year\\
 \textbf{Name:} Tita R. Herradura\\
 Adviser, College of Information and Computer Studies\\
 \textbf{Phone:} 09234019514\\
+\textbf{Fax:} N/A\\
 \textbf{Email:} \email{TRHerradura@dlsud.edu.ph}
 \end{minipage}
 
@@ -118,8 +122,8 @@ processing, and per-voice audio playback.}
 Digital Input}
 
 \begin{table}[H]
-\caption{Final system (fine-tuned CRNN-CTC + clef/key classifier) on 12
-test pages (100 staves, 1,008 notes per condition). Ranges span two
+\caption{Final system (fine-tuned CRNN-CTC + clef/key classifier) on a
+12-page pilot (100 staves, 1,008 notes per condition). Ranges span two
 training seeds. Staff detection = share of staves found and assigned the
 correct voice; pitch accuracy ignores note duration; lower SER is
 better.}
@@ -163,7 +167,7 @@ three predicted notes is spurious or wrong-pitched (note precision
 \end{minipage}
 
 {\figurecaptype
-\caption{The same test page (\emph{Gaano Ko Ikaw Kamahal}, p.~2) as
+\caption{The same pilot page (\emph{Gaano Ko Ikaw Kamahal}, p.~2) as
 digital render (a) and smartphone capture (b), showing lighting, skew,
 and noise artifacts.}
 \label{fig:capture}}
