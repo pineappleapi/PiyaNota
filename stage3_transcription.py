@@ -77,8 +77,6 @@ import torch.nn.functional as F
 from torchvision import transforms
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, List, NamedTuple, Optional, Tuple, Union
 import json
@@ -737,6 +735,18 @@ def _pitch_class_at_step(step: int, bottom_letter: str) -> str:
     start_idx = LETTER_ORDER.index(bottom_letter)
     return LETTER_ORDER[(start_idx + step) % 7]
  
+def _staff_step(pos_str: str) -> int:
+    """Diatonic step (0 = bottom line) of an agnostic position suffix like "L4", "S3", "L-1".
+
+    Camera-PrIMuS numbers the bottom line L1 and the space above it S1 (1-indexed), so pos is shifted
+    down by one before doubling (BUG-009). Shared by infer_pitch and the visualization so a notehead is
+    drawn on the same step its pitch was computed from.
+    """
+    loc = pos_str[0]
+    pos = int(pos_str[1:])
+    return (pos - 1) * 2 if loc == "L" else (pos - 1) * 2 + 1
+
+
 ACCIDENTAL_OFFSET = {
     "accidental.sharp":       1,
     "accidental.flat":       -1,
@@ -1000,6 +1010,7 @@ def infer_pitch(
     confidences: Optional[list] = None,
     header_override: Optional[HeaderOverride] = None,
     next_system_key: Optional[int] = None,
+    trace:      Optional[list] = None,
 ) -> list:
     """
     Converts a CRNN symbol sequence into note events with MIDI pitch.
@@ -1011,6 +1022,12 @@ def infer_pitch(
     next_system_key: ClefKeyNet's key for the following system (only used with header_override). A
     post-barline burst that is exactly that key's signature is a key change even with a single glyph
     (BUG-029); otherwise MIN_MID_KEY_CHANGE_ACCIDENTALS still applies.
+    trace: optional out-list for the visualization. When given, one dict per
+    input token is appended with the state right AFTER that token: which
+    events it created (indices into the returned list), the clef in effect
+    and its reference pitch, the committed key alterations, the time
+    signature and the state-machine stage. It only reads state, so the
+    returned events are identical with or without it.
 
     confidences: optional per-token CRNN confidences, parallel to `symbols`
     (same length, else ValueError). When given, every emitted note/rest event
@@ -1184,8 +1201,35 @@ def infer_pitch(
             f"symbols ({len(symbols)})")
     with_conf = confidences is not None
 
+    # Trace entries are written at the top of the NEXT iteration (and once
+    # after the loop) rather than at each of the loop body's many `continue`
+    # points, so the pitch logic below is untouched.
+    traced_events = 0
+
+    def _trace_token(idx: int) -> None:
+        nonlocal traced_events
+        if trace is None:
+            return
+        trace.append({
+            "token_index":     idx,
+            "symbol":          symbols[idx],
+            "event_indices":   list(range(traced_events, len(events))),
+            "active_clef":     active_clef,
+            "reference_pitch": reference_pitch,
+            "key_alterations": dict(key_alterations),
+            "time_signature":  time_signature,
+            "stage":           ks_stage,
+            # A mid-piece key-signature burst is consumed by lookahead (skip_until), so its glyphs never
+            # reach a stage of their own; this is the only way the viz can tell them from inline accidentals.
+            "key_change_glyph": idx < skip_until,
+            "clef_fixed":      clef_fixed,
+        })
+        traced_events = len(events)
+
     # ── Main loop ─────────────────────────────────────────────────────────
     for tok_idx, sym in enumerate(symbols):
+        if tok_idx:
+            _trace_token(tok_idx - 1)
 
         if tok_idx < skip_until:
             continue
@@ -1500,10 +1544,8 @@ def infer_pitch(
             # shifted down by one before doubling to land step=0 on the
             # bottom line, matching STEP_TO_PITCH_CLASS/_diatonic_delta's own
             # step=0-is-bottom-line convention (see BUG-009).
-            loc  = pos_str[0]                        # "L" or "S"
-            pos  = int(pos_str[1:])                  # integer, may be negative
-            step = (pos - 1) * 2 if loc == "L" else (pos - 1) * 2 + 1
- 
+            step = _staff_step(pos_str)
+
             bottom_letter = CLEF_BOTTOM_LETTER.get(active_clef, "E")
             delta         = _diatonic_delta(step, bottom_letter)
  
@@ -1643,14 +1685,14 @@ def infer_pitch(
             slur_end_pending = True
             continue
 
+    if symbols:
+        _trace_token(len(symbols) - 1)
     if dropped_acc_count:
         print(f"[Stage 3] {voice} p{page_index} s{sys_idx}: dropped {dropped_acc_count} "
               "unanchored accidental(s) (not on the next note's staff position)")
     if header_dropped:
         print(f"[Stage 3] {voice} p{page_index} s{sys_idx}: dropped {header_dropped} CRNN header "
               "accidental(s) (key taken from header_override)")
-    return events
- 
     return events
  
  
@@ -1731,6 +1773,12 @@ class CRNN(nn.Module):
         return F.log_softmax(output, dim=2)
  
  
+# Input-pixel width of one CTC frame: the two MaxPool2d(2, 2) layers in
+# CRNN.cnn each halve the width; the (2, 1) pools only shrink height. Must be
+# changed together with the backbone or token x-positions drift.
+CNN_WIDTH_STRIDE = 4
+
+
 # ── Inference ─────────────────────────────────────────────────────────────────
  
 def _greedy_ctc_decode(log_probs: torch.Tensor) -> list:
@@ -1745,6 +1793,7 @@ def _greedy_ctc_decode(log_probs: torch.Tensor) -> list:
 
 def _greedy_ctc_decode_with_confidence(
     log_probs: torch.Tensor,
+    spans_out: Optional[List[Tuple[int, int]]] = None,
 ) -> Tuple[List[int], List[float]]:
     """
     Greedy CTC decode that also reports a per-symbol confidence score.
@@ -1767,6 +1816,10 @@ def _greedy_ctc_decode_with_confidence(
 
     Args:
         log_probs: (T, vocab_size) log-softmax output from the CRNN.
+        spans_out: If a list is given, one (first_frame, last_frame + 1)
+          pair per decoded symbol is appended to it -- the CTC alignment the
+          visualization uses to place each token. Passed as an out-list so
+          the return value (and every existing caller) is unchanged.
 
     Returns:
         (decoded_indices, confidences) -- parallel lists; confidences[i]
@@ -1778,12 +1831,16 @@ def _greedy_ctc_decode_with_confidence(
     max_probs = max_probs.tolist()
 
     decoded, confidences = [], []
+    frame = 0
     for idx, group in itertools.groupby(zip(indices, max_probs), key=lambda pair: pair[0]):
+        group_probs = [p for _, p in group]
+        start, frame = frame, frame + len(group_probs)
         if idx == BLANK_IDX:
             continue
-        group_probs = [p for _, p in group]
         decoded.append(idx)
         confidences.append(sum(group_probs) / len(group_probs))
+        if spans_out is not None:
+            spans_out.append((start, frame))
     return decoded, confidences
  
  
@@ -1794,6 +1851,7 @@ def transcribe_strip(
     img_height:        int = 64,
     return_confidence: bool = False,
     strip_id:          str = "",
+    spans_out:         Optional[List[Tuple[float, float]]] = None,
 ) -> Union[List[str], List[Tuple[str, float]]]:
     """
     Runs CRNN-CTC inference on a single staff strip.
@@ -1814,6 +1872,11 @@ def transcribe_strip(
           misreads be traced back to a specific strip's input tensor shape
           and raw (pre-infer_pitch) decoded tokens. Purely a log tag; has
           no effect on inference.
+        spans_out: If a list is given, one (x_start, x_end) pair per returned
+          symbol is appended, in pixels of the input strip (before the
+          height resize). This is the CTC frame alignment, not a detection:
+          CTC is peaky, so a token usually owns one or two frames that land
+          somewhere on its glyph, and the BiLSTM can shift that by a frame.
 
     Returns:
         List[str] symbols in reading order (default), or
@@ -1838,35 +1901,307 @@ def transcribe_strip(
         log_probs = model(tensor)           # (T, 1, V)
     log_probs = log_probs.squeeze(1)        # (T, V)
 
+    frame_spans: Optional[List[Tuple[int, int]]] = [] if spans_out is not None else None
+    if return_confidence or frame_spans is not None:
+        # Same decode as _greedy_ctc_decode (which wraps this function), so
+        # asking for spans cannot change the tokens.
+        indices, confidences = _greedy_ctc_decode_with_confidence(log_probs, frame_spans)
+        px_per_frame = CNN_WIDTH_STRIDE * w / new_w
+        if spans_out is not None and frame_spans is not None:
+            spans_out.extend((s * px_per_frame, e * px_per_frame) for s, e in frame_spans)
+
     if return_confidence:
-        indices, confidences = _greedy_ctc_decode_with_confidence(log_probs)
         tokens = [(IDX_TO_SYM.get(i, "<unk>"), c) for i, c in zip(indices, confidences)]
         logger.info("transcribe_strip strip_id=%s raw_tokens=%s", strip_id, [t for t, _ in tokens])
         return tokens
 
-    indices = _greedy_ctc_decode(log_probs)
+    if frame_spans is None:
+        indices = _greedy_ctc_decode(log_probs)
     tokens = [IDX_TO_SYM.get(i, "<unk>") for i in indices]
     logger.info("transcribe_strip strip_id=%s raw_tokens=%s", strip_id, tokens)
     return tokens
  
  
 # ── Visualization ─────────────────────────────────────────────────────────────
- 
-COLOR_MAP = {
-    "note":       "#2196F3",
-    "rest":       "#FF9800",
-    "clef":       "#9C27B0",
-    "accidental": "#F44336",
-    "barline":    "#222222",
-    "dot":        "#4CAF50",
-    "digit":      "#795548",
-    "metersign":  "#00BCD4",
-    "slur":       "#E91E63",
-    "gracenote":  "#8BC34A",
-    "multirest":  "#FF5722",
+#
+# One annotated image per strip: a box per decoded token at its CTC-aligned x
+# position (and, for notes, on the staff step its pitch was computed from),
+# with a sounding-pitch ASPN label (C4 = MIDI 60). Labels are derived here
+# from infer_pitch's events + trace so the event JSON schema is unchanged.
+
+VIZ_SCALE              = 4      # strips are 64 px tall; upscale so tags are readable
+VIZ_LANE_HEIGHT        = 22     # px per tag row above/below the staff
+VIZ_LANES_PER_SIDE     = 4
+VIZ_HEADER_HEIGHT      = 30
+VIZ_CAPTION_LINE       = 18
+VIZ_FONT               = cv2.FONT_HERSHEY_SIMPLEX
+VIZ_TAG_FONT_SCALE     = 0.5
+VIZ_SMALL_FONT_SCALE   = 0.42
+VIZ_TAG_PAD            = 3
+# Below this mean CTC probability a box is drawn orange. The CRNN is
+# confidently wrong on real photos (BUG-011), so orange flags doubt; red is
+# not a correctness claim.
+VIZ_LOW_CONFIDENCE     = 0.80
+# Half-height of a notehead box and minimum token box width, in staff spacings.
+VIZ_HEAD_HALF_HEIGHT   = 0.6
+VIZ_MIN_BOX_WIDTH      = 1.2
+# A row counts as a staff line when at least this fraction of it is ink; the
+# strip's left part (voice name, bracket) has no lines, so this is not 1.0.
+STAFF_LINE_INK_FRACTION = 0.5
+STAFF_LINE_INK_LEVEL    = 128   # gray < this is ink
+N_STAFF_LINES           = 5
+
+COLOR_BOX      = (40, 40, 220)     # BGR red
+COLOR_BOX_LOW  = (0, 140, 255)     # BGR orange
+COLOR_TAG_BG   = (20, 20, 20)
+COLOR_TAG_FG   = (255, 255, 255)
+COLOR_MINOR_BG = (110, 110, 110)   # dots, slurs, inline accidentals, digits
+COLOR_BARLINE  = (170, 120, 40)
+COLOR_TEXT     = (30, 30, 30)
+
+DURATION_LABELS = {
+    "whole": "whole", "half": "half", "quarter": "quarter", "eighth": "8th",
+    "sixteenth": "16th", "thirty_second": "32nd", "sixty_fourth": "64th",
+    "double_whole": "breve", "quadruple_whole": "long",
 }
- 
- 
+ALTER_TEXT = {0: "", 1: "#", -1: "b", 2: "##", -2: "bb"}
+MAJOR_BY_SHARPS = ["C", "G", "D", "A", "E", "B", "F#", "C#"]
+MINOR_BY_SHARPS = ["A", "E", "B", "F#", "C#", "G#", "D#", "A#"]
+MAJOR_BY_FLATS  = ["C", "F", "Bb", "Eb", "Ab", "Db", "Gb", "Cb"]
+MINOR_BY_FLATS  = ["A", "D", "G", "C", "F", "Bb", "Eb", "Ab"]
+VIZ_CAPTION = ("Labels show sounding pitch; tenor parts in a plain G clef sound an octave "
+               "below written.")
+
+
+def _octave_lowered(clef: str, reference_pitch: int) -> bool:
+    """True if a G clef is played an octave below written.
+
+    Read from the reference pitch infer_pitch actually used rather than from the voice, because the
+    octave has two owners: Stage 3's voice rule (get_clef_reference) without ClefKeyNet, and the
+    decision's octave_shift with it (where the voice rule is off).
+    """
+    return clef.startswith("clef.G") and reference_pitch < CLEF_REFERENCE.get(clef, reference_pitch)
+
+
+def _clef_name(clef: str, reference_pitch: int) -> str:
+    """Short clef name as a singer reads it; an octave-lowered G clef is G8vb."""
+    body = clef.split(".", 1)[1] if "." in clef else clef
+    letter = body.split("-")[0]
+    if letter == "G":
+        return "G8vb" if _octave_lowered(clef, reference_pitch) else "G"
+    if letter == "F":
+        return "F"
+    return f"{body} (out of scope)"
+
+
+def _pitch_label(midi: int, step: int, clef: str, reference_pitch: int) -> Tuple[str, int]:
+    """Sounding ASPN name for a note, spelled from its staff letter.
+
+    The letter comes from the staff step under the clef in effect, and the
+    alteration is whatever infer_pitch actually added (key + inline
+    accidental), read back as pitch - natural. Deriving it from the MIDI value
+    means the label can never disagree with what is played; a BUG-024 stacked
+    accidental shows up as a visible double flat/sharp. The octave is taken
+    from the natural note, so Cb5 (MIDI 71) is not renamed B4.
+
+    Returns (name, octave) -- the octave lets the caller add the written pitch.
+    """
+    bottom_letter = CLEF_BOTTOM_LETTER.get(clef, "E")
+    natural = reference_pitch + _diatonic_delta(step, bottom_letter)
+    letter = _pitch_class_at_step(step, bottom_letter)
+    octave = natural // 12 - 1
+    alter = midi - natural
+    acc = ALTER_TEXT.get(alter, f"?{alter:+d}")
+    return f"{letter}{acc}{octave}", octave
+
+
+def _duration_label(ticks: int) -> str:
+    """Duration name (+ one "." per augmentation dot) for an event's final tick length."""
+    for n_dots in range(4):
+        for name, base in NOTE_DURATION_TICKS.items():
+            if _dotted_ticks(base, n_dots) == ticks:
+                return DURATION_LABELS.get(name, name) + "." * n_dots
+    return f"{ticks}t"
+
+
+def _key_label(alterations: dict) -> str:
+    n_sharp = sum(1 for v in alterations.values() if v > 0)
+    n_flat = sum(1 for v in alterations.values() if v < 0)
+    if n_sharp:
+        notes = " ".join(f"{p}#" for p in SHARP_ORDER[:n_sharp])
+        return f"key {n_sharp}#: {notes} ({MAJOR_BY_SHARPS[n_sharp]} maj / {MINOR_BY_SHARPS[n_sharp]} min)"
+    if n_flat:
+        notes = " ".join(f"{p}b" for p in FLAT_ORDER[:n_flat])
+        return f"key {n_flat}b: {notes} ({MAJOR_BY_FLATS[n_flat]} maj / {MINOR_BY_FLATS[n_flat]} min)"
+    return "key: none (C maj / A min)"
+
+
+def _find_staff_lines(gray: np.ndarray) -> Optional[List[float]]:
+    """Five staff-line row centres (top to bottom), or None if the strip does not show five evenly spaced lines.
+
+    None is a real outcome (e.g. a tilted strip): the caller then draws
+    staff-height boxes instead of inventing notehead positions.
+    """
+    ink = (gray < STAFF_LINE_INK_LEVEL).mean(axis=1)
+    rows = np.where(ink >= STAFF_LINE_INK_FRACTION)[0]
+    if len(rows) == 0:
+        return None
+    runs: List[List[int]] = [[int(rows[0])]]
+    for r in rows[1:]:
+        if r == runs[-1][-1] + 1:
+            runs[-1].append(int(r))
+        else:
+            runs.append([int(r)])
+    centres = [float(np.mean(run)) for run in runs]
+    if len(centres) < N_STAFF_LINES:
+        return None
+    best: Optional[List[float]] = None
+    best_spread = float("inf")
+    for i in range(len(centres) - N_STAFF_LINES + 1):
+        cand = centres[i:i + N_STAFF_LINES]
+        gaps = np.diff(cand)
+        if gaps.min() <= 0:
+            continue
+        spread = float(gaps.std() / gaps.mean())
+        if spread < best_spread:
+            best, best_spread = cand, spread
+    # More than ~25% spacing variation means these are not one staff's lines.
+    return best if best is not None and best_spread < 0.25 else None
+
+
+def _token_role(symbols: List[str], idx: int, stage_before: str, entry: dict) -> str:
+    """What token ``idx`` did in infer_pitch, from the stage before it and its trace entry.
+
+    The accidental rules repeat infer_pitch's own predicates (_header_accidental_is_inline,
+    _accidental_is_anchored) so a glyph that pitch inference dropped is never drawn as if it applied.
+    """
+    symbol, stage_after = symbols[idx], entry["stage"]
+    if symbol.startswith("clef."):
+        return "clef_ignored" if entry.get("clef_fixed") else "clef"
+    if symbol.startswith("accidental."):
+        if stage_after == "keysig" or entry.get("key_change_glyph"):
+            return "keysig"
+        if stage_before == "fixed_header":
+            return "accidental" if _header_accidental_is_inline(symbols, idx) else "header_dropped"
+        if stage_before in ("clef", "body", "post_bar"):
+            return "accidental" if _accidental_is_anchored(symbols, idx) else "accidental_dropped"
+        return "accidental"
+    if symbol.startswith("metersign"):
+        return "meter"
+    if symbol.startswith("digit."):
+        in_header = stage_before == stage_after and stage_after in ("keysig", "fixed_header")
+        return "meter" if in_header else "digit"
+    for prefix, role in (("note.", "note"), ("rest.", "rest"), ("multirest", "rest"),
+                         ("barline", "barline"), ("dot", "dot"), ("slur.", "slur"),
+                         ("gracenote.", "grace")):
+        if symbol.startswith(prefix):
+            return role
+    return "other"
+
+
+def build_strip_labels(
+    symbols:     List[str],
+    events:      List[dict],
+    trace:       List[dict],
+    voice:       str,
+    confidences: Optional[List[float]] = None,
+) -> List[dict]:
+    """Groups tokens into labelled items: {kind, text, sub, token_indices, event_indices, step, confidence}.
+
+    Consecutive key-signature accidentals become one "key" item and
+    consecutive time-signature tokens one "meter" item, each labelled with the
+    value infer_pitch COMMITTED (read from the first body-stage trace entry
+    after the group), not with a per-glyph guess.
+    """
+    if len(trace) != len(symbols):
+        raise ValueError(f"trace ({len(trace)}) must have one entry per symbol ({len(symbols)})")
+    first_stage = "fixed_header" if trace and trace[0].get("clef_fixed") else "clef"
+    roles = [_token_role(symbols, i, trace[i - 1]["stage"] if i else first_stage, trace[i])
+             for i in range(len(symbols))]
+
+    def committed_after(i: int) -> dict:
+        for entry in trace[i + 1:]:
+            if entry["stage"] == "body":
+                return entry
+        return trace[-1]
+
+    def conf_of(idxs: List[int]) -> Optional[float]:
+        return min(confidences[j] for j in idxs) if confidences is not None else None
+
+    items: List[dict] = []
+    i = 0
+    while i < len(symbols):
+        role, sym, entry = roles[i], symbols[i], trace[i]
+        if role in ("keysig", "meter", "header_dropped"):
+            j = i
+            while j + 1 < len(symbols) and roles[j + 1] == role:
+                j += 1
+            idxs = list(range(i, j + 1))
+            after = committed_after(j)
+            if role == "keysig":
+                text = _key_label(after["key_alterations"])
+            elif role == "meter":
+                text = f"time {after['time_signature']}"
+            else:
+                text = "CRNN key glyph(s) ignored"
+            items.append(dict(kind=role, text=text, sub=None, token_indices=idxs, event_indices=[],
+                              step=None, confidence=conf_of(idxs)))
+            i = j + 1
+            continue
+
+        text, sub, step = sym, None, None
+        ev_idx = entry["event_indices"]
+        if role == "clef":
+            name = (_clef_name(entry["active_clef"], entry["reference_pitch"]) if sym in CLEF_REFERENCE
+                    else sym)
+            text = f"clef {name}"
+        elif role == "clef_ignored":
+            text = f"CRNN {sym.split('.', 1)[1]} ignored"
+        elif role == "note" and ev_idx:
+            ev = events[ev_idx[0]]
+            step = _staff_step(ev["symbol"].split("-", 1)[1])
+            pname, octave = _pitch_label(ev["pitch"], step, entry["active_clef"], entry["reference_pitch"])
+            text = f"{pname}_{_duration_label(ev['duration_ticks'])}"
+            if _octave_lowered(entry["active_clef"], entry["reference_pitch"]):
+                sub = f"(written {pname[:-len(str(octave))]}{octave + 1})"
+        elif role == "rest" and ev_idx:
+            ev = events[ev_idx[0]]
+            if ev["symbol"].startswith("multirest"):
+                text = f"rest x{ev['duration_ticks'] // NOTE_DURATION_TICKS['whole']} bars"
+            else:
+                text = f"rest_{_duration_label(ev['duration_ticks'])}"
+        elif role in ("accidental", "accidental_dropped"):
+            text = {"accidental.sharp": "#", "accidental.flat": "b", "accidental.natural": "nat",
+                    "accidental.doubleSharp": "##", "accidental.doubleFlat": "bb"}.get(sym.split("-")[0], sym)
+            if role == "accidental_dropped":
+                text += " dropped (not on next note)"
+        elif role == "dot":
+            text = "dot"
+        elif role == "slur":
+            text = "slur(" if sym.startswith("slur.start") else ")slur"
+        elif role == "digit":
+            text = f"{sym.split('.')[1].split('-')[0]} bars"
+        elif role == "grace":
+            text = "grace (not played)"
+        elif role == "barline":
+            text = ""
+        items.append(dict(kind=role, text=text, sub=sub, token_indices=[i], event_indices=ev_idx,
+                          step=step, confidence=conf_of([i])))
+        i += 1
+    return items
+
+
+def _draw_dashed_rect(img: np.ndarray, p0: Tuple[int, int], p1: Tuple[int, int],
+                      color: Tuple[int, int, int], dash: int = 6) -> None:
+    (x0, y0), (x1, y1) = p0, p1
+    for x in range(x0, x1, dash * 2):
+        cv2.line(img, (x, y0), (min(x + dash, x1), y0), color, 2)
+        cv2.line(img, (x, y1), (min(x + dash, x1), y1), color, 2)
+    for y in range(y0, y1, dash * 2):
+        cv2.line(img, (x0, y), (x0, min(y + dash, y1)), color, 2)
+        cv2.line(img, (x1, y), (x1, min(y + dash, y1)), color, 2)
+
+
 def visualize_strip(
     img:         np.ndarray,
     symbols:     list,
@@ -1875,72 +2210,179 @@ def visualize_strip(
     v_idx:       int,
     output_dir:  str,
     img_height:  int = 64,
-) -> None:
+    sys_idx:     int = 1,
+    spans:       Optional[List[Tuple[float, float]]] = None,
+    events:      Optional[List[dict]] = None,
+    trace:       Optional[List[dict]] = None,
+    confidences: Optional[List[float]] = None,
+    clef_key_decision: Optional["StripDecision"] = None,
+) -> str:
     """
-    Saves a visualization of the detected symbol sequence for one strip.
-    Top panel: strip image with symbol labels overlaid.
-    Bottom panel: symbol sequence color-coded by type.
+    Saves one annotated image (+ a .json sidecar) for one strip and returns the PNG path.
+
+    With clef_key_decision (the one infer_pitch_b used) the title names ClefKeyNet as the clef/key
+    source; the CRNN's own clef and header key glyphs are then tagged "ignored", as in infer_pitch.
+
+    Each token gets a box at its CTC-aligned x-range (spans, from
+    transcribe_strip(spans_out=...)); notes are boxed on the staff step their
+    pitch came from, if five staff lines are found. Without spans the tokens
+    are spaced evenly, which does NOT show where they are -- the title says so.
+    Without events/trace (infer_pitch(trace=...)) tokens are labelled with the
+    raw symbol.
+
+    The filename carries sys_idx: several systems share a page, and without
+    it each system's image overwrote the previous one.
     """
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
     h, w = gray.shape
- 
-    fig_w = max(14, len(symbols) * 0.45)
-    fig, (ax_img, ax_sym) = plt.subplots(
-        2, 1, figsize=(fig_w, 4),
-        gridspec_kw={"height_ratios": [3, 1]}
-    )
- 
-    ax_img.imshow(gray, cmap="gray", aspect="auto")
-    ax_img.set_title(
-        f"{voice}  |  Page {page_index}  |  vidx{v_idx}  |  {len(symbols)} symbols",
-        fontsize=9, fontweight="bold"
-    )
-    ax_img.axis("off")
- 
-    for i, sym in enumerate(symbols):
-        x_pos  = (i + 0.5) * w / max(len(symbols), 1)
-        prefix = sym.split(".")[0]
-        color  = COLOR_MAP.get(prefix, "#555555")
-        ax_img.text(
-            x_pos, h * 0.02, sym,
-            fontsize=4.5, color=color, ha="center", va="top",
-            rotation=90,
-            bbox=dict(boxstyle="round,pad=0.1", fc="white", alpha=0.65, ec="none")
-        )
- 
-    ax_sym.axis("off")
-    x, y = 0.0, 0.95
-    for sym in symbols:
-        prefix = sym.split(".")[0]
-        color  = COLOR_MAP.get(prefix, "#555555")
-        short  = sym[:20] + "…" if len(sym) > 20 else sym
-        ax_sym.text(
-            x, y, short + "  ",
-            fontsize=5, color=color,
-            ha="left", va="top",
-            transform=ax_sym.transAxes,
-            fontfamily="monospace"
-        )
-        x += len(short) * 0.012
-        if x > 0.95:
-            x = 0.0
-            y -= 0.28
- 
-    legend_patches = [
-        mpatches.Patch(color=c, label=k)
-        for k, c in COLOR_MAP.items()
-    ]
-    ax_sym.legend(
-        handles=legend_patches, loc="lower right",
-        fontsize=5, ncol=4, framealpha=0.5
-    )
- 
-    plt.tight_layout()
+    s = VIZ_SCALE
+
+    if events is not None and trace is not None:
+        items = build_strip_labels(symbols, events, trace, voice, confidences)
+    else:
+        items = [dict(kind=_token_role(symbols, i, "body", {"stage": "body"}), text=t, sub=None,
+                      token_indices=[i],
+                      event_indices=[], step=None,
+                      confidence=confidences[i] if confidences is not None else None)
+                 for i, t in enumerate(symbols)]
+
+    aligned = spans is not None and len(spans) == len(symbols)
+    if not aligned:
+        spans = [(i * w / max(len(symbols), 1), (i + 1) * w / max(len(symbols), 1))
+                 for i in range(len(symbols))]
+
+    lines = _find_staff_lines(gray)
+    spacing = float(np.mean(np.diff(lines))) if lines else h / 8
+    staff_top = lines[0] - spacing / 2 if lines else 0.0
+    staff_bot = lines[-1] + spacing / 2 if lines else float(h - 1)
+
+    band = VIZ_LANE_HEIGHT * VIZ_LANES_PER_SIDE
+    top_off = VIZ_HEADER_HEIGHT + band
+    raw_lines = _wrap_tokens(symbols, max_chars=max(40, (w * s) // 7))
+    canvas_h = top_off + h * s + band + VIZ_CAPTION_LINE * (3 + len(raw_lines))
+    canvas = np.full((canvas_h, w * s, 3), 255, np.uint8)
+    canvas[top_off:top_off + h * s] = cv2.cvtColor(
+        cv2.resize(gray, (w * s, h * s), interpolation=cv2.INTER_NEAREST), cv2.COLOR_GRAY2BGR)
+
+    # Staff label with the clef in effect at the start of the strip.
+    if clef_key_decision is not None:
+        d = clef_key_decision
+        key_text = _key_label(get_key_sig_alterations(*_signed_key_counts(d.key)))
+        clef_name = _clef_name(d.clef.token, CLEF_REFERENCE[d.clef.token] + d.clef.octave_shift)
+        clef_desc = f"{clef_name} (ClefKeyNet: {d.clef.source}; {key_text}, {d.key_source})"
+        strip_flags = sorted(set(d.flags) | set(d.clef.flags))
+        if strip_flags:
+            clef_desc += f"  flags: {', '.join(strip_flags)}"
+    else:
+        first = next((e for e in (trace or []) if e["symbol"].startswith("clef.")), None)
+        if first is None:
+            fb = CLEF_FALLBACK[voice]
+            clef_desc = f"{_clef_name(fb, get_clef_reference(fb, voice))} (fallback: no clef decoded)"
+        else:
+            clef_desc = _clef_name(first["active_clef"], first["reference_pitch"])
+        clef_desc += " (CRNN clef/key, no ClefKeyNet)"
+    title = (f"{voice}, {clef_desc}  |  page {page_index}, system {sys_idx}, vidx{v_idx}  |  "
+             f"{len(symbols)} tokens -> {len(events or [])} events  |  "
+             + ("boxes: CTC frame alignment (approximate, not detections)" if aligned
+                else "NO ALIGNMENT: tokens evenly spaced, positions are not real"))
+    if not lines:
+        title += "  |  staff lines not found: staff-height boxes"
+    cv2.putText(canvas, title, (6, 20), VIZ_FONT, 0.55, COLOR_TEXT, 1, cv2.LINE_AA)
+
+    lanes: dict = {"above": [[] for _ in range(VIZ_LANES_PER_SIDE)],
+                   "below": [[] for _ in range(VIZ_LANES_PER_SIDE)]}
+
+    def place(x0: int, x1: int, prefer: str) -> Tuple[str, int]:
+        for side in (prefer, "below" if prefer == "above" else "above"):
+            for lane, used in enumerate(lanes[side]):
+                if all(x1 + 4 < a or x0 > b + 4 for a, b in used):
+                    used.append((x0, x1))
+                    return side, lane
+        lanes[prefer][-1].append((x0, x1))
+        return prefer, VIZ_LANES_PER_SIDE - 1
+
+    sidecar: List[dict] = []
+    n_tagged = 0
+    for item in items:
+        idxs = item["token_indices"]
+        x0 = min(spans[j][0] for j in idxs)
+        x1 = max(spans[j][1] for j in idxs)
+        cx = (x0 + x1) / 2
+        half_w = max((x1 - x0) / 2, VIZ_MIN_BOX_WIDTH * spacing / 2)
+        bx0, bx1 = max(0.0, cx - half_w), min(float(w - 1), cx + half_w)
+        if item["step"] is not None and lines:
+            cy = lines[-1] - item["step"] * spacing / 2
+            by0, by1 = cy - VIZ_HEAD_HALF_HEIGHT * spacing, cy + VIZ_HEAD_HALF_HEIGHT * spacing
+        else:
+            by0, by1 = staff_top, staff_bot
+        conf = item["confidence"]
+        low = conf is not None and conf < VIZ_LOW_CONFIDENCE
+        color = COLOR_BOX_LOW if low else COLOR_BOX
+        p0 = (int(bx0 * s), int(top_off + by0 * s))
+        p1 = (int(bx1 * s), int(top_off + by1 * s))
+        sidecar.append(dict(item, symbols=[symbols[j] for j in idxs],
+                            box_px=[round(bx0, 1), round(by0, 1), round(bx1, 1), round(by1, 1)],
+                            low_confidence=low))
+
+        if item["kind"] == "barline":
+            xm = int(cx * s)
+            cv2.line(canvas, (xm, int(top_off + staff_top * s)), (xm, int(top_off + staff_bot * s)),
+                     COLOR_BARLINE, 1)
+            continue
+        if low:
+            _draw_dashed_rect(canvas, p0, p1, color)
+        else:
+            cv2.rectangle(canvas, p0, p1, color, 2)
+
+        minor = item["kind"] in ("dot", "slur", "accidental", "accidental_dropped", "digit", "grace", "other",
+                                 "clef_ignored", "header_dropped")
+        scale = VIZ_SMALL_FONT_SCALE if minor else VIZ_TAG_FONT_SCALE
+        text = item["text"] + (f" {item['sub']}" if item["sub"] else "")
+        (tw, th), _ = cv2.getTextSize(text, VIZ_FONT, scale, 1)
+        tx0 = int(min(max(0, cx * s - tw / 2), w * s - tw - 2 * VIZ_TAG_PAD))
+        side, lane = place(tx0, tx0 + tw + 2 * VIZ_TAG_PAD, "above" if n_tagged % 2 == 0 else "below")
+        n_tagged += 1
+        if side == "above":
+            ty1 = top_off - lane * VIZ_LANE_HEIGHT - 3
+            anchor_y = p0[1]
+        else:
+            ty1 = top_off + h * s + (lane + 1) * VIZ_LANE_HEIGHT - 3
+            anchor_y = p1[1]
+        ty0 = ty1 - th - 2 * VIZ_TAG_PAD
+        cv2.line(canvas, (int(cx * s), anchor_y), (int(cx * s), ty1 if side == "above" else ty0),
+                 color, 1)
+        cv2.rectangle(canvas, (tx0, ty0), (tx0 + tw + 2 * VIZ_TAG_PAD, ty1),
+                      COLOR_MINOR_BG if minor else COLOR_TAG_BG, -1)
+        cv2.putText(canvas, text, (tx0 + VIZ_TAG_PAD, ty1 - VIZ_TAG_PAD), VIZ_FONT, scale,
+                    COLOR_TAG_FG, 1, cv2.LINE_AA)
+
+    y = top_off + h * s + band + VIZ_CAPTION_LINE
+    captions = [VIZ_CAPTION,
+                f"Orange dashed box = CRNN confidence < {VIZ_LOW_CONFIDENCE:.2f}; high confidence is not "
+                f"correctness (BUG-011).  Raw CRNN tokens:"]
+    for line in captions + raw_lines:
+        cv2.putText(canvas, line, (6, y), VIZ_FONT, VIZ_SMALL_FONT_SCALE, COLOR_TEXT, 1, cv2.LINE_AA)
+        y += VIZ_CAPTION_LINE
+
     os.makedirs(output_dir, exist_ok=True)
-    fname = f"{voice}_p{page_index:03d}_vidx{v_idx}.png"
-    plt.savefig(os.path.join(output_dir, fname), dpi=150, bbox_inches="tight")
-    plt.close()
-    print(f"  [Viz] Saved -> {fname}")
+    stem = f"{voice}_p{page_index:03d}_s{sys_idx:02d}_vidx{v_idx}"
+    png = os.path.join(output_dir, stem + ".png")
+    cv2.imwrite(png, canvas)
+    with open(os.path.join(output_dir, stem + ".json"), "w", encoding="utf-8") as f:
+        json.dump(dict(voice=voice, page_index=page_index, sys_idx=sys_idx, v_idx=v_idx, clef=clef_desc,
+                       aligned=aligned, staff_lines_px=lines, items=sidecar), f, indent=1)
+    print(f"  [Viz] Saved -> {stem}.png")
+    return png
+
+
+def _wrap_tokens(symbols: List[str], max_chars: int) -> List[str]:
+    lines, cur = [], ""
+    for t in symbols:
+        if cur and len(cur) + len(t) + 1 > max_chars:
+            lines.append(cur)
+            cur = ""
+        cur = f"{cur} {t}" if cur else t
+    return lines + ([cur] if cur else [])
  
  
 CLEF_KEY_DISABLED_FLAG = "clef_key_disabled"  # event flag when Stage 3 runs without ClefKeyNet
@@ -1967,23 +2409,30 @@ def process_strip(
     clef_key_decision: a stage3_clefkey.StripDecision; when given, clef/key/octave come from ClefKeyNet
     (version b) and every event carries ``review_needed`` / ``clef_key_flags``.
     """
+    # Spans and trace are only side-outputs for the visualization; the tokens
+    # and events are the same with or without them.
+    spans: Optional[List[Tuple[float, float]]] = [] if viz_dir else None
+    trace: Optional[list] = [] if viz_dir else None
     scored  = transcribe_strip(strip, model, device, img_height,
-                               return_confidence=True, strip_id=strip_id)
+                               return_confidence=True, strip_id=strip_id,
+                               spans_out=spans)
     symbols = [s for s, _ in scored]
     confs   = [c for _, c in scored]
     if clef_key_decision is not None:
         import stage3_clefkey  # lazy: stage3_clefkey imports this module
         events, _, _ = stage3_clefkey.infer_pitch_b(symbols, confs, voice, page_index, sys_idx,
-                                                    clef_key_decision)
+                                                    clef_key_decision, trace=trace)
     else:
         events = infer_pitch(symbols, voice=voice, page_index=page_index,
-                             sys_idx=sys_idx, confidences=confs)
+                             sys_idx=sys_idx, confidences=confs, trace=trace)
 
     print(f"[Stage 3] {voice} p{page_index}: "
           f"{len(symbols)} symbols -> {len(events)} events")
- 
+
     if viz_dir and symbols:
-        visualize_strip(strip, symbols, voice, page_index, v_idx, viz_dir, img_height)
+        visualize_strip(strip, symbols, voice, page_index, v_idx, viz_dir, img_height,
+                        sys_idx=sys_idx, spans=spans, events=events, trace=trace,
+                        confidences=confs, clef_key_decision=clef_key_decision)
  
     return events
  
