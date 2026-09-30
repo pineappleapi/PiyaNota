@@ -907,12 +907,25 @@ so freezing Stage 1/2 before this step would bake the thick strokes into the tra
      - If Phase 1 can afford only one training source, train on E7 as registered, but decode the held-out set
        with both arms.
      - Switching to thin2 on this dev result would be metric shopping.
-   - **Fill (proposed, not yet applied; needs the user's OK).**
-     - Replace the 255 erasure/border fill with the local paper estimate from Stage 1's own code, on
-       train = serve grounds alone.
-     - Re-run the live parity check after the change.
-     - Phase 1 must import the same fill function.
-     - The current E7 dev numbers become stale. The dev set is not re-decoded to re-justify E7.
+   - **Fill (applied 2026-09-30, user OK).**
+     - The erasure (dilated by ceil(2σ)) and the page border are filled with `stage1_preprocessing.paper_fill()`, not
+       255. It is a normalised Gaussian convolution of the paper pixels (outside dilated ink and the border) at
+       detection size, σ = 12 px at 1600 px, with the page median paper where no paper is nearby. The choice was
+       made on train = serve grounds alone.
+     - Phase 1 must import `paper_fill()` (train = serve).
+     - Parity against E7 at 2ea869b (42 dev pages, 388 strips, `fill_parity.py`):
+       - detection page, unmasked page, staves, grey page and binary source are identical;
+       - no pixel changed outside E7's 255 region;
+       - ClefKeyNet crops and probabilities are identical (it reads the binary unmasked page);
+       - on the 25 camera pages no fill pixel is left at 255, and the fill median is within 2 grey levels of the
+         paper median;
+       - on the 17 digital pages the paper itself is 255 (87% of pixels), so the fill stays 255, which is correct;
+       - Stage 1 time rises by about 10% (1094 s vs 989 s over 42 pages, CPU).
+     - The current E7 dev numbers are stale. The dev set is not re-decoded to re-justify E7.
+   - **Held-out decision (user, 2026-09-30).**
+     - Both arms (E7 with the paper fill, and thin2) go through the held-out evaluation.
+     - Camera pitch recall and note precision are primary; token SER is secondary.
+     - Each seed is reported separately, with Q4 (most-masked quartile) broken out.
 
    **4b. Contrast-relative threshold (pre-registered 2026-09-30, before any E7 decode; ml-cv-lead).**
    - **Form.** Per pixel, T = paper − k·(paper − ink), with dark if gray < T.

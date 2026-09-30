@@ -138,9 +138,13 @@ STRIP_SOURCE_THRESHOLD_C = 10     # same offset as _binarize
 # Strips are cut from the normalized GRAY page, not the binary one (PIYA-106 Phase 0b, frozen 2026-09-30,
 # docs/decisions/piya-106-ser-15-plan.md). The CRNN was trained on gray renders: our binarization multiplied
 # its SER ~4x on distorted Camera-PrIMuS and created speck-driven phantom dots/accidentals on photos. The binary
-# page still decides WHAT is erased (non_staff_ink_mask); erased ink and its blur halo are painted paper white.
+# page still decides WHAT is erased (non_staff_ink_mask); erased ink and its blur halo are painted with the
+# LOCAL PAPER grey, not 255 (ml-cv-lead 2026-09-30): a 255 patch on grey paper is brighter than any paper,
+# an artefact no training render contains, so Phase 1 would have to reproduce it exactly (train = serve).
 STRIP_SOURCE_MASK_DILATE_SIGMAS = 2.0  # erase radius = ceil(this x blur sigma) px, covers the blurred ink's halo
-PAPER_WHITE = 255
+PAPER_FILL_SIGMA_1600 = 12.0     # px at DETECT_MAX_DIM; paper window wider than a lyric line, narrow enough
+                                 # to follow the illumination residue left after normalization
+PAPER_FILL_MIN_WEIGHT = 1e-3     # below this paper weight the local estimate is undefined -> page median paper
 
 # ── Non-staff ink (lyric/text) mask, run once on the straightened page ────────
 # Everything that is neither a tracked staff nor connected to one is removed. "Connected"
@@ -670,7 +674,7 @@ def _build_strip_source(hi: np.ndarray, bg: np.ndarray, map_y: np.ndarray | None
     Returns:
         (masked binary page, binary page before the mask, staves in native pixels, normalized
         dewarped gray, masked gray strip source). The gray strip source is the gray page with the
-        border and the erased ink, dilated by its blur halo, set to paper white.
+        border and the erased ink, dilated by its blur halo, filled with the local paper grey.
     """
     gray = cv2.cvtColor(hi, cv2.COLOR_BGR2GRAY)
     h, w = gray.shape
@@ -694,10 +698,42 @@ def _build_strip_source(hi: np.ndarray, bg: np.ndarray, map_y: np.ndarray | None
     # pixels; dilating by the blur radius stops the halo surviving as faint smudges.
     r = math.ceil(STRIP_SOURCE_MASK_DILATE_SIGMAS * sigma)
     erased = ((unmasked < 128) & (binary >= 128)).astype(np.uint8)
-    erased = cv2.dilate(erased, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))) > 0
+    disk = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
+    erased = cv2.dilate(erased, disk) > 0
+    # Paper = away from ANY ink by the same halo radius, and not border.
+    near_ink = cv2.dilate((unmasked < 128).astype(np.uint8), disk) > 0
+    fill = erased | border
     gray_source = norm.copy()
-    gray_source[erased | border] = PAPER_WHITE
+    gray_source[fill] = paper_fill(norm, ~near_ink & ~border, bg.shape)[fill]
     return binary, unmasked, hi_staves, norm, gray_source
+
+
+def paper_fill(gray: np.ndarray, paper: np.ndarray, work_shape: tuple[int, ...]) -> np.ndarray:
+    """Smooth local paper-grey field, used to paint erased ink and borders on the gray strip source.
+
+    Normalized convolution (Gaussian-weighted mean over paper pixels only), computed at the detection
+    page size because the field is smooth and a wide blur on a 12 MP page is slow. Phase 1 must import
+    this function rather than reimplement the fill (train = serve).
+
+    Args:
+        gray: Normalized gray page (uint8).
+        paper: Boolean mask of clean-paper pixels, same shape as gray.
+        work_shape: (h, w, ...) of the detection page; the field is computed at this size.
+
+    Returns:
+        uint8 field of gray's shape. Where no paper is near, the page's median paper value.
+    """
+    h, w = gray.shape
+    wh, ww = work_shape[0], work_shape[1]
+    sigma = PAPER_FILL_SIGMA_1600 * max(wh, ww) / DETECT_MAX_DIM
+    wgt = cv2.resize(paper.astype(np.float32), (ww, wh), interpolation=cv2.INTER_AREA)
+    val = cv2.resize(np.where(paper, gray, 0).astype(np.float32), (ww, wh), interpolation=cv2.INTER_AREA)
+    wgt_b = cv2.GaussianBlur(wgt, (0, 0), sigma)
+    val_b = cv2.GaussianBlur(val, (0, 0), sigma)
+    median_paper = float(np.median(gray[paper])) if paper.any() else float(np.median(gray))
+    field = np.where(wgt_b > PAPER_FILL_MIN_WEIGHT, val_b / np.maximum(wgt_b, PAPER_FILL_MIN_WEIGHT), median_paper)
+    field = cv2.resize(field.astype(np.float32), (w, h), interpolation=cv2.INTER_LINEAR)
+    return np.clip(np.rint(field), 0, 255).astype(np.uint8)
 
 
 def _restore_staff_rows(
