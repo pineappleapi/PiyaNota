@@ -957,6 +957,34 @@ so freezing Stage 1/2 before this step would bake the thick strokes into the tra
      the chosen k.
    - **Decode once.** Any retune after decoding needs leave-one-piece-out.
 5. **Decide the strip source**, record it, and freeze Stage 1/2 (commit hash) for Phase 1.
+
+   **E6 canary baseline through the grey path (2026-09-30, the last step-5 prerequisite; diagnostic).**
+   - Same 399 canary stems, interline estimate and Stage 1 constants as E6. The grey arm is `_build_strip_source`
+     without the threshold: background divide, blur, no contrast stretch. CPM has no lyrics or border, so the mask
+     and `paper_fill()` leave it unchanged and are skipped, as E6's binary arms skipped the mask. The E6 caveat on the
+     background kernel being taller than an incipit still applies.
+   - Raw reproduces E6 exactly, so the setup matches.
+
+   | CPM SER, seed1 / seed2 | raw | grey | C10 binary (E6) |
+   |---|---|---|---|
+   | clean | 2.59 / 2.69% | 2.68 / 2.62% | 3.52-3.93% |
+   | distorted | 5.73 / 5.83% | 5.84 / 5.68% | 22.13-23.76% |
+
+   - Grey stroke line/stem per interline: clean 0.128/0.141, distorted 0.176/0.235 (raw 0.128/0.128,
+     0.176/0.202). Grey keeps CPM's line width; C10 fattened it to 0.24-0.28.
+   - The grey path costs the current model at most about 0.1 pp on CPM, against 4× under C10. **These are the
+     canary baselines for Phase 2**: rerun the same script on each retrained checkpoint.
+   - Script: job tmp `e6_grey.py` (reuses `e6_cpm.py`); to be moved into `training/` with the Phase 2 canary.
+
+   **Step 5 decision (2026-09-30).** All four prerequisites are met: F1 decided (hard fill, then `paper_fill()`),
+   live ClefKeyNet parity passed, pitch breakdown filed, E6 grey baseline above.
+   - **Training source: grey (E7 recipe with `paper_fill()`), chosen by tie-break (a)-(c); headline SER tied on
+     dev.** Never "E7 beats thin2".
+   - **thin2 stays a second arm, used at decode time only**, through the held-out evaluation, as ml-cv-lead's
+     CONDITIONAL call and the user's held-out decision require. It is not a training source.
+   - **Frozen: Stage 1/2 at commit 9b9e12f** (`stage1_preprocessing.py` and `stage2_detection.py` are unchanged
+     after it; branch head e3fdf2d). Phase 1 cutting and every Phase 2 input use exactly this code. Any change to
+     either file un-freezes step 5 and needs re-review.
 6. **Redo the per-class error budget** on the chosen strips before choosing Phase 1/2 oversampling targets.
 
 ### Phase 1: data engine (CPU, local; Sep 30 - Oct 5)
