@@ -326,8 +326,13 @@ def substitute_header(tokens: Sequence[str], confs: Sequence[float], clef_token:
 
 
 def infer_pitch_b(tokens: Sequence[str], confs: Sequence[float], voice: str, page_index: int, sys_idx: int,
-                  decision: StripDecision) -> tuple[list[dict[str, Any]], list[str], dict[str, Any]]:
+                  decision: StripDecision, trace: Optional[list[dict[str, Any]]] = None,
+                  ) -> tuple[list[dict[str, Any]], list[str], dict[str, Any]]:
     """Version (b) pitch inference for one strip.
+
+    Args:
+        trace: passed to ``infer_pitch`` for the visualization; indexed by the CRNN's own ``tokens``
+            (pitch runs on those, not on the substituted SER view), so it lines up with the CTC spans.
 
     Returns:
         (events, token sequence with the decided header for SER, info). Events carry ``review_needed``
@@ -344,7 +349,7 @@ def infer_pitch_b(tokens: Sequence[str], confs: Sequence[float], voice: str, pag
     with contextlib.redirect_stdout(log):
         events = s3.infer_pitch(list(tokens), voice=voice, page_index=page_index, sys_idx=sys_idx,
                                 confidences=list(confs), header_override=override,
-                                next_system_key=decision.next_key)
+                                next_system_key=decision.next_key, trace=trace)
     print(log.getvalue(), end="")
     flags = list(decision.flags) + list(decision.clef.flags)
     info["mid_key_changes"] = log.getvalue().count(MID_KEY_CHANGE_MARK)
