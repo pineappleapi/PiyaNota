@@ -49,6 +49,15 @@ BORDER_RIGHT_PX  = 80
 # content-destruction bug, so this errs toward under-blanking, not over-).
 BORDER_PROTECT_MARGIN_RATIO = 0.75
 
+# ── Side-border exemption at a tracked staff's right end (BUG-039) ────────────
+# On camera pages the staves often run into the fixed BORDER_RIGHT_PX band (measured on the dev
+# pages: 41 camera staves end 3-87 px inside it at the 1600px page), and the blank cut them with a
+# vertical edge, erasing the final barline and the last stretch of staff line. The
+# tracked curve's x_max marks where the 5 lines were last seen (within ~15 native px of the gray
+# staff end), so the band is left alone inside the staff's rows up to this many line spacings past
+# x_max: enough for a thin+thick final barline, too little to keep a page-edge shadow beyond it.
+BORDER_STAFF_END_MARGIN_SPACINGS = 2.0
+
 # ── Perspective correction (camera-photo specific) ────────────────────────────
 # Corrects keystone/perspective distortion from off-axis phone photography —
 # same rationale as oemer's own dewarp step. Deliberately strict: a missed or
@@ -422,13 +431,47 @@ def non_staff_ink_mask(binary: np.ndarray, staves: list[StaffBand]) -> np.ndarra
     return ink & ~keep[labels]
 
 
-def _border_region(shape: tuple[int, int], border_rows: np.ndarray, left_px: int, right_px: int) -> np.ndarray:
-    """Bool region blanked by the border step on the detection page (transferred to native)."""
+def _side_border_region(shape: tuple[int, int], left_px: int, right_px: int,
+                        staff_ends: list[tuple[StaffBand, float]]) -> np.ndarray:
+    """Bool region of the left/right border bands, minus each tracked staff's right end (BUG-039).
+
+    The right band is a fixed width because shadow ink cannot be told from a barline by a column
+    test alone, but a tracked staff's own rows up to just past where its lines were last seen are
+    staff, not border: blanking them cut the final barline off camera pages. The left band is
+    left whole (it is narrow for the clef's sake already; see BORDER_LEFT_PX).
+
+    Args:
+        shape: (height, width) of the detection page.
+        left_px: Left band width.
+        right_px: Right band width (0 disables it).
+        staff_ends: (band, x_max) per tracked staff, band in the page's current (post-dewarp)
+            geometry and x_max the curve's last observed column (x is unchanged by the dewarp).
+
+    Returns:
+        Bool mask of the side-border pixels to blank.
+    """
+    height, width = shape
     region = np.zeros(shape, dtype=bool)
-    region[border_rows, :] = True
     region[:, :left_px] = True
-    if right_px > 0:
-        region[:, -right_px:] = True
+    if right_px <= 0:
+        return region
+    x_band = width - right_px
+    region[:, x_band:] = True
+    half = (STAFF_LINES_PER_STAFF - 1) / 2.0 + STAFF_PROTECT_MARGIN_SPACINGS
+    for band, x_max in staff_ends:
+        x_hi = min(width, int(math.ceil(x_max + BORDER_STAFF_END_MARGIN_SPACINGS * band.spacing)) + 1)
+        if x_hi <= x_band:
+            continue
+        lo = max(0, int(math.floor(band.center - half * band.spacing - band.slack)))
+        hi = min(height, int(math.ceil(band.center + half * band.spacing + band.slack)) + 1)
+        region[lo:hi, x_band:x_hi] = False
+    return region
+
+
+def _border_region(shape: tuple[int, int], border_rows: np.ndarray, side: np.ndarray) -> np.ndarray:
+    """Bool region blanked by the border step on the detection page (transferred to native)."""
+    region = side.copy()
+    region[border_rows, :] = True
     return region
 
 
@@ -556,29 +599,31 @@ def preprocess_score_page(
     # Left/right are NOT content-aware the same way — there is no equivalent
     # of "already looks like a staffline" for a narrow vertical band that
     # reliably tells a real clef/barline stroke apart from thresholded shadow
-    # ink, and Stage 1 doesn't yet know where staves/clefs are (that's Stage
-    # 2's job) to gate on real symbol locations instead. Risk is mitigated,
-    # not eliminated, by keeping BORDER_LEFT_PX deliberately small (see
-    # comment above) rather than by content detection. Bounds-guarded so a
+    # ink. Risk is mitigated, not eliminated, by keeping BORDER_LEFT_PX
+    # deliberately small (see comment above). The one exception is the right
+    # band inside a tracked staff's rows up to just past its last seen column
+    # (BUG-039: the blank cut camera staves' final barlines). Bounds-guarded so a
     # page narrower than the border constants can't blank its entire width.
-    pre_blank = binary.copy()
-    border_rows = _border_rows_to_blank(binary, BORDER_TOP_PX, BORDER_BOTTOM_PX)
-    binary[border_rows, :] = 255
-    left_px = min(BORDER_LEFT_PX, binary.shape[1])
-    binary[:, :left_px] = 255
-    right_px = min(BORDER_RIGHT_PX, binary.shape[1])
-    if right_px > 0:
-        binary[:, -right_px:] = 255
-
-    _dbg_save(save_debug, img_path, binary, "3_binary")
-
-    # Step 3.15: Non-staff ink (lyric/text) mask, on the straightened page. Post-dewarp each
-    # staff sits at its curve's mean_center with median spacing (see staff_grid_map); an
-    # un-dewarped staff drifts < DEWARP_MIN_DRIFT_PX, half of which is carried as band slack.
+    #
+    # Post-dewarp each staff sits at its curve's mean_center with median spacing (see
+    # staff_grid_map); an un-dewarped staff drifts < DEWARP_MIN_DRIFT_PX, half of which is carried
+    # as band slack. Needed here already: the side blank spares each staff's right end (BUG-039).
     staves = [StaffBand(
         center=c.mean_center,
         spacing=float(np.median(c.spacing_at(np.linspace(c.x_min, c.x_max, 32)))),
         slack=0.0 if dewarped else c.drift_px / 2.0) for c in curves]
+    pre_blank = binary.copy()
+    border_rows = _border_rows_to_blank(binary, BORDER_TOP_PX, BORDER_BOTTOM_PX)
+    binary[border_rows, :] = 255
+    left_px = min(BORDER_LEFT_PX, binary.shape[1])
+    right_px = min(BORDER_RIGHT_PX, binary.shape[1])
+    side_border = _side_border_region(binary.shape, left_px, right_px,
+                                      [(b, c.x_max) for b, c in zip(staves, curves)])
+    binary[side_border] = 255
+
+    _dbg_save(save_debug, img_path, binary, "3_binary")
+
+    # Step 3.15: Non-staff ink (lyric/text) mask, on the straightened page.
     remove: np.ndarray | None = None
     removed_px = 0
     if mask_non_staff_ink and staves:
@@ -609,9 +654,7 @@ def preprocess_score_page(
     # Side columns are re-blanked so shadow ink is not resurrected with them.
     if curves:
         binary = _restore_staff_rows(binary, pre_blank, [(b.center, b.spacing) for b in staves])
-        binary[:, :left_px] = 255
-        if right_px > 0:
-            binary[:, -right_px:] = 255
+        binary[side_border] = 255
     _dbg_save(save_debug, img_path, binary, "3a_blanked")
 
     strip_source: np.ndarray | None = None
@@ -621,7 +664,7 @@ def preprocess_score_page(
     strip_binary: np.ndarray | None = None
     if build_strip_source and remove is not None:
         strip_binary, unmasked, hi_staves, strip_gray, strip_source = _build_strip_source(
-            hi, bg, map_y, _border_region(binary.shape, border_rows, left_px, right_px), staves)
+            hi, bg, map_y, _border_region(binary.shape, border_rows, side_border), staves)
 
     # Step 4: Grid alignment using stafflines + barlines
     # After a dewarp the staves are horizontal by construction; a further global
