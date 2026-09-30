@@ -3,6 +3,7 @@ PiyaNota - Stage 1: Image Preprocessing Pipeline
 """
 
 import logging
+import math
 from dataclasses import dataclass
 
 import cv2
@@ -134,6 +135,12 @@ STRIP_SOURCE_BLUR_SIGMA_PER_SCALE = 0.4  # gaussian sigma per unit of native/det
 STRIP_SOURCE_BLUR_MIN_SIGMA_PX = 0.8
 STRIP_SOURCE_BLOCK_SIZE_1600 = 31  # adaptive-threshold block at 1600px (see _binarize); scaled with the page
 STRIP_SOURCE_THRESHOLD_C = 10     # same offset as _binarize
+# Strips are cut from the normalized GRAY page, not the binary one (PIYA-106 Phase 0b, frozen 2026-09-30,
+# docs/decisions/piya-106-ser-15-plan.md). The CRNN was trained on gray renders: our binarization multiplied
+# its SER ~4x on distorted Camera-PrIMuS and created speck-driven phantom dots/accidentals on photos. The binary
+# page still decides WHAT is erased (non_staff_ink_mask); erased ink and its blur halo are painted paper white.
+STRIP_SOURCE_MASK_DILATE_SIGMAS = 2.0  # erase radius = ceil(this x blur sigma) px, covers the blurred ink's halo
+PAPER_WHITE = 255
 
 # ── Non-staff ink (lyric/text) mask, run once on the straightened page ────────
 # Everything that is neither a tracked staff nor connected to one is removed. "Connected"
@@ -232,18 +239,21 @@ class PreprocessedPage:
 
     Attributes:
         detect: Binary page at DETECT_MAX_DIM for YOLO and the staff tracker (ink = 0).
-        strip_source: Native-resolution binary page in the same (dewarped, masked) geometry, or
-            None when the non-staff mask could not be applied (Stage 2 then cuts strips from
-            ``detect``). Strips are cut from this page so thin glyphs (rests, flags, ties) are
-            not lost to a 1600px binarization.
+        strip_source: Native-resolution normalized GRAY page in the same (dewarped, masked)
+            geometry, with non-staff ink and the border painted paper white, or None when the
+            non-staff mask could not be applied (Stage 2 then cuts strips from ``detect``).
+            Strips are cut from this page so thin glyphs (rests, flags, ties) are not lost to a
+            1600px binarization, and gray so the CRNN sees what it was trained on.
         angle: Staffline angle measured by correct_to_grid (degrees).
         mask_applied: Whether the non-staff-ink mask ran on this page.
         removed_px: Ink pixels removed by the mask at detection resolution (0 if not applied).
         strip_unmasked: Same page as ``strip_source`` before the mask (audit only; None unless
             keep_unmasked was requested).
         strip_staves: The tracked staves in ``strip_source`` pixels (audit only).
-        strip_gray: The native normalized+dewarped gray page the strip source was thresholded
-            from (audit only): the analog reference thin-glyph fidelity is measured against.
+        strip_gray: The native normalized+dewarped gray page before any masking (audit only):
+            the analog reference thin-glyph fidelity is measured against.
+        strip_binary: The masked native binary page the mask was decided on (ink = 0); kept-ink
+            reference for mask audits. None when ``strip_source`` is None.
     """
     detect: np.ndarray
     strip_source: np.ndarray | None
@@ -253,6 +263,7 @@ class PreprocessedPage:
     strip_unmasked: np.ndarray | None = None
     strip_staves: list[StaffBand] | None = None
     strip_gray: np.ndarray | None = None
+    strip_binary: np.ndarray | None = None
 
 
 def _band_row_mask(height: int, staves: list[StaffBand], tol_spacings: float) -> np.ndarray:
@@ -603,8 +614,9 @@ def preprocess_score_page(
     unmasked: np.ndarray | None = None
     hi_staves: list[StaffBand] | None = None
     strip_gray: np.ndarray | None = None
+    strip_binary: np.ndarray | None = None
     if build_strip_source and remove is not None:
-        strip_source, unmasked, hi_staves, strip_gray = _build_strip_source(
+        strip_binary, unmasked, hi_staves, strip_gray, strip_source = _build_strip_source(
             hi, bg, map_y, _border_region(binary.shape, border_rows, left_px, right_px), staves)
 
     # Step 4: Grid alignment using stafflines + barlines
@@ -619,8 +631,11 @@ def preprocess_score_page(
         if abs(rot) > GRID_ROTATION_MIN_DEG:
             sh, sw = strip_source.shape
             rot_m = cv2.getRotationMatrix2D((sw // 2, sh // 2), -rot, 1.0)
-            strip_source = cv2.warpAffine(strip_source, rot_m, (sw, sh), flags=cv2.INTER_NEAREST,
+            strip_source = cv2.warpAffine(strip_source, rot_m, (sw, sh), flags=cv2.INTER_LINEAR,
                                           borderMode=cv2.BORDER_REPLICATE)
+            if strip_binary is not None:
+                strip_binary = cv2.warpAffine(strip_binary, rot_m, (sw, sh), flags=cv2.INTER_NEAREST,
+                                              borderMode=cv2.BORDER_REPLICATE)
             if unmasked is not None:
                 unmasked = cv2.warpAffine(unmasked, rot_m, (sw, sh), flags=cv2.INTER_NEAREST,
                                           borderMode=cv2.BORDER_REPLICATE)
@@ -630,13 +645,13 @@ def preprocess_score_page(
 
     return PreprocessedPage(corrected, strip_source, h_angle, remove is not None, removed_px,
                             unmasked if keep_unmasked else None, hi_staves if keep_unmasked else None,
-                            strip_gray if keep_unmasked else None)
+                            strip_gray if keep_unmasked else None, strip_binary)
 
 
 def _build_strip_source(hi: np.ndarray, bg: np.ndarray, map_y: np.ndarray | None,
                         border_lo: np.ndarray, staves: list[StaffBand]
-                        ) -> tuple[np.ndarray, np.ndarray, list[StaffBand], np.ndarray]:
-    """Builds the native-resolution, lyric-masked binary page in the detection page's geometry.
+                        ) -> tuple[np.ndarray, np.ndarray, list[StaffBand], np.ndarray, np.ndarray]:
+    """Builds the native-resolution, lyric-masked strip pages in the detection page's geometry.
 
     Same steps as the detection path (normalize, dewarp with the same tracked curves,
     adaptive threshold, border blank) but at native resolution, then the same non-staff mask
@@ -653,7 +668,9 @@ def _build_strip_source(hi: np.ndarray, bg: np.ndarray, map_y: np.ndarray | None
         staves: Tracked staves in detection pixels.
 
     Returns:
-        (masked page, page before the mask, staves in native pixels, normalized dewarped gray).
+        (masked binary page, binary page before the mask, staves in native pixels, normalized
+        dewarped gray, masked gray strip source). The gray strip source is the gray page with the
+        border and the erased ink, dilated by its blur halo, set to paper white.
     """
     gray = cv2.cvtColor(hi, cv2.COLOR_BGR2GRAY)
     h, w = gray.shape
@@ -666,13 +683,21 @@ def _build_strip_source(hi: np.ndarray, bg: np.ndarray, map_y: np.ndarray | None
     binary = cv2.adaptiveThreshold(
         norm, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY,
         _odd(STRIP_SOURCE_BLOCK_SIZE_1600 * scale), STRIP_SOURCE_THRESHOLD_C)
-    binary[cv2.resize(border_lo.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST) > 0] = 255
+    border = cv2.resize(border_lo.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST) > 0
+    binary[border] = 255
     # Pixel-centre mapping between the two grids (same convention as _remap_rows).
     hi_staves = [StaffBand(scale * (s.center + 0.5) - 0.5, s.spacing * scale, s.slack * scale)
                  for s in staves]
     unmasked = binary.copy()
     binary[non_staff_ink_mask(binary, hi_staves)] = 255
-    return binary, unmasked, hi_staves, norm
+    # Erased ink was blurred before thresholding, so its gray halo reaches past its binary
+    # pixels; dilating by the blur radius stops the halo surviving as faint smudges.
+    r = math.ceil(STRIP_SOURCE_MASK_DILATE_SIGMAS * sigma)
+    erased = ((unmasked < 128) & (binary >= 128)).astype(np.uint8)
+    erased = cv2.dilate(erased, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))) > 0
+    gray_source = norm.copy()
+    gray_source[erased | border] = PAPER_WHITE
+    return binary, unmasked, hi_staves, norm, gray_source
 
 
 def _restore_staff_rows(

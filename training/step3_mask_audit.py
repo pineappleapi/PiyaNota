@@ -200,12 +200,13 @@ def audit_new(path: str, page_id: str, out: str) -> dict[str, Any]:
     import stage2_detection as s2
     page = s1.preprocess_score_page(path, keep_unmasked=True)
     res: dict[str, Any] = {"page": page_id, "mode": "new", "mask_applied": page.mask_applied}
-    if page.strip_source is None or page.strip_unmasked is None:
+    if page.strip_binary is None or page.strip_unmasked is None:
         res["error"] = "no strip source (mask not applied)"
         return res
     detect_bgr = cv2.cvtColor(page.detect, cv2.COLOR_GRAY2BGR)
     raw_ink = page.strip_unmasked < 128
-    kept_ink = page.strip_source < 128
+    # strip_source is gray since PIYA-106 Phase 0b; the mask verdict lives on the binary page.
+    kept_ink = page.strip_binary < 128
     removed = raw_ink & ~kept_ink
     hi_h, hi_w = raw_ink.shape
     ky, kx = hi_h / page.detect.shape[0], hi_w / page.detect.shape[1]

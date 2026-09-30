@@ -682,6 +682,238 @@ so freezing Stage 1/2 before this step would bake the thick strokes into the tra
      - E7 changes edges and dynamic range together.
      - BUG-011's confidently-wrong problem is untouched.
 
+   **False dots and pitch: ml-cv-lead review, requested by the user (2026-09-30). Pre-registered before any
+   analysis of the saved-hypothesis decode `hyp_decode.json`.**
+
+   *Assessment:*
+   - **Stage-3 pitch metric: probably not a material risk.**
+     - `score_strip` aligns on (kind, pitch). A false dot can only cost pitch by displacing or replacing a
+       pitch-bearing token.
+     - The metric is recall-only, so from now on **note precision** (matched hypothesis notes / hypothesis notes)
+       is reported next to it.
+   - **End-to-end audio: a real risk.** A dot token lengthens `events[-1]` whatever its position suffix and
+     whatever tokens come between (`stage3_transcription.py` ~L1426-1450). Ranked:
+     1. **Stage 4 overflow repair.** Every false dot on a note or rest overfills its bar. Run-scaling, clipping or
+        confidence drops can then move or remove real notes.
+     2. **Confidence coupling.** A dot's confidence folds into its host note's `confidence` (min). A low-confidence
+        false dot can make its own host the note that a confidence drop deletes.
+     3. **Orphan dots.** After a barline, accidental or clef, a dot lengthens the previous bar's last note.
+     4. **Substitution.** A dot replaces a note or accidental.
+     5. **CTC split duplicate.** A dot between two identical notes prevents the CTC collapse, giving a phantom note.
+     6. **Dot-S/L anchoring.** No effect.
+
+   *2a. Scope and alignment:*
+   - Primary: E7 camera, each seed reported separately. Secondary: base, thin2, digital. Nothing is pooled.
+   - Cells with fewer than 10 events are reported as counts only.
+   - Alignment is identical to `score_strip`. S categories are upper bounds, because a dot next to a deletion
+     aligns as one S.
+
+   *2b. Definitions:*
+   - **False dot** = I with hyp `dot`, or S with hyp `dot` against a non-dot reference token.
+   - Each false dot gets one context class, checked in order:
+     - **C3p:** S replacing a `note.*` or `accidental.*`.
+     - **C3o:** other S.
+     - **C4 (split duplicate):** hyp[j−1] == hyp[j+1], both `note.*`, and at most one of the two aligned M.
+     - **C2 (orphan):** the preceding non-dot hyp token is not a note or rest. Subtyped by that token: barline,
+       accidental, clef/key/meter, strip start.
+     - **C1u / C1d (valid host):** the host's GT event is undotted / already dotted. The host's next token is also
+       recorded.
+   - C4 is also counted on `raw`.
+
+   *2c. Co-location with pitch errors (k = 2 tokens, fixed; k = 0 also reported):*
+   - A pitch error is a GT note that is D or S in the pitch-key event alignment.
+   - The n-th note event maps to the n-th `note.*` token. Strips where the counts differ are excluded, and the
+     excluded count is reported.
+   - Null: each strip's false dots placed uniformly over ref positions, 1000 permutations, RNG seed 0.
+   - Enrichment E = observed pairs / mean under the null.
+   - U = GT pitch errors co-located with a C3p or C4 dot, divided by all GT notes.
+
+   *2d. Also report:* false dots per dotted reference token and per 100 GT notes; host-note mean confidence for
+   false vs true dots; C2 counts by subtype.
+
+   *2e. Image audit:*
+   - All seed-1 E7 camera false dots, plus new seed-2 locations. Crops ±1 interline, randomised order, arm hidden.
+   - Classes:
+     - I1: other ink (speck, mask residue, lyric punctuation, articulation);
+     - I2: a real dot, so the GT is wrong;
+     - I3: no ink (hallucination).
+   - Needs the per-token CTC frame index.
+
+   *Decision rules (fixed now):*
+   - **R0:** I2 ≥ 5 → fix the GT and rescore first.
+   - **R1:** U < 1 pp on both seeds and C3p + C4 < 20% → false dots are not a Stage-3 pitch risk. Treat them as a
+     rhythm/audio problem (section 3) and do no pitch-motivated dot work.
+   - **R2:** U ≥ 1 pp on either seed, or E ≥ 2 with C3p ≥ 20% → record "dots co-locate with pitch errors"
+     (co-occurrence, not cause). Act only through Phase 1 augmentation, never through inference dot suppression.
+   - **R3:**
+     - I3 ≥ 50%, or C1u-then-eighth is the majority of C1 → Phase 1 rhythm diversity becomes a must.
+     - I1 dominant → Phase 1 negative speck, residue and punctuation items become a must.
+   - **R4:** C2 ≥ 10% of false dots → register the G1 orphan-dot guard for post-Phase-1 evaluation.
+
+   *3. Stage 4 counterfactual (run now; no Stage 4 change until after Phase 1):*
+   - E7, both seeds, camera, only systems where all 4 voice strips were detected.
+   - Arms:
+     - A: decoded;
+     - B: A with the 2b false dots removed, re-run through `infer_pitch` with the same header decisions and
+       `next_system_key`;
+     - G: GT events.
+   - Each arm goes through `reconstruct_satb_with_report()`. Report A − B:
+     - overflow, clip, tuplet, missing-barline, drop and `review_needed` flag counts;
+     - notes lost in Stage 4;
+     - notes whose duration or onset was repaired;
+     - post-Stage-4 pitch recall and precision against G;
+     - onset agreement with G.
+
+   *4. Fixes, registered:*
+   - **Phase 1 training:**
+     - the dot-survival label rule (already registered);
+     - negative grey specks outside the augmentation-dot zone (0.3-1.5 notehead widths right of a head, on a space),
+       with statistics taken from pages outside eval_prelim and piyanota_dataset;
+     - lyric punctuation and mask residue, label unchanged;
+     - meter-valid rhythm diversity (quarter-eighth vs dotted-quarter-eighth balanced).
+   - **Loss:** no dot class weighting or focal loss.
+   - **Held-out reporting per arm:** false dots per dotted token; dotted-eighth and dotted-quarter recall; note
+     precision; section 3 A − B.
+   - **Inference guards.** Pre-registered, flagged, and judged only on held-out data after Phase 1:
+     - **G1:** a dot is valid only right after a note, rest or dot; otherwise drop it and flag
+       `orphan_dot_dropped`.
+     - **G2:** before run-scaling, clipping or drops, remove a dot and flag `dot_removed_overflow` /
+       `review_needed`, but only when the bar overflows by exactly that one dot's value and removing it fills the
+       bar exactly. If more than one dot qualifies, remove none.
+   - **Not legitimate:** a dot-confidence threshold, or any rule chosen because it lowers dev SER.
+
+   **Results (2026-09-30; dev data, diagnostic only; each seed reported, nothing pooled).**
+
+   *Pitch breakdown (step 6, first entry).* It comes from a re-decode that saves hypotheses
+   (`hyp_decode.json`: arms base / thin2 / E7, camera 227 + digital 100 strips per arm and seed). That is one
+   decode of existing arms, not a tuning run.
+   - Camera pitch recall, E7 / thin2 / base: 88.0-89.3 / 91.6-92.1 / 85.1-85.2. Note precision:
+     70.7-72.1 / 72.2-73.0 / 68.9-70.0.
+   - Digital pitch recall: 90.7-91.0 / 91.2-91.6 / 89.7-90.2.
+   - E7's alteration-only misses rose (86-92 vs thin2 65-82), mostly GT-sharp notes (25-26 vs 15-18), all in
+     mask quartile Q1. They trace to one system: Honneur camera p3 s1, where ClefKeyNet's stored key is 0 on both
+     seeds but GT is 3#.
+     - Logged as **BUG-037** (a ClefKeyNet key error, BUG-021 class). It is shared by all arms.
+     - base/thin2 hid it with phantom inline sharps that happened to land on those notes; E7 emits fewer phantoms.
+   - Excluding that system:
+     - recall E7 89.7-90.9 / thin2 93.3-93.9 / base 86.8-87.0;
+     - alteration-only misses E7 42-48 / thin2 43-53 / base 48-65.
+     - **Alteration-only errors do not rise under E7, so the blocking rule does not fire.**
+   - The remaining E7-vs-thin2 gap (~3 pp) comes from:
+     - position ±2 or more: 121 / 85 vs 57 / 48, seed-dependent;
+     - no hyp note: 37 vs 16-22;
+     - position ±1: 54-55 vs 38-40.
+   - The gap sits in mask quartile Q4, the most-masked strips: E7 83.6-86.8 vs thin2 92.5-93.2. In Q1 the arms
+     are equal. Q4 is confounded with lyric-heavy pieces. This goes to ml-cv-lead: E7 wins SER but thin2 wins
+     pitch on heavily masked strips.
+
+   *Live ClefKeyNet / grey-source parity (before the freeze).* Worktree Stage 1 against HEAD, on all 42 dev
+   cache pages:
+   - Detection page, unmasked page, tracked staves, grey and binary are all equal, and every `strip_source` is
+     grey.
+   - Live Stage 2 strips match the E7 sweep strips on 388 of 388, byte-identical after PNG round trip.
+   - ClefKeyNet crops and probabilities are identical on 388 of 388, and decisions are identical on 388 of 388.
+   - **PASS: the grey strip source does not touch ClefKeyNet.**
+
+   *False-dot review.*
+   - **Counts (2a/2b, 2d), camera.** False dots are counted per arm and seed, excluding dots inside a GT `<OOV>`
+     wildcard (unscorable: E7 68 / 77).
+
+     | Arm | False dots (seed1 / seed2) | Per dotted ref token | Per 100 GT notes |
+     |---|---|---|---|
+     | E7 | 34 / 53 | 0.11 / 0.17 | 1.34 / 2.09 |
+     | thin2 | 66 / 103 | | |
+     | base | 98 / 123 | | |
+
+     - **E7 has the fewest false dots of the three arms**, so the grey source removed false dots rather than
+       adding them.
+     - E7 classes, seed1 / seed2:
+       - C3p 5 / 5, C3o 6 / 7, C4 0 / 0;
+       - C2 8 / 13 (23.5 / 24.5%; mostly after an accidental);
+       - C1u 7 / 13, C1d 3 / 2, C1x 5 / 13.
+     - Raw C4: 0 / 2.
+   - **Co-location (2c).** U = 0.08 / 0.08 pp.
+     - k=2: 2 / 2 observed vs a null mean of 1.61 / 1.14, so E = 1.24 / 1.75.
+     - k=0: 0 observed.
+     - No strips excluded; 37-38 misses unlocatable.
+     - The null permutes over hyp token slots, not ref positions as registered. Misses are located in hyp slots,
+       so this is the consistent space; noted as a deviation.
+   - **Confidence (2d).** False dots: mean 0.44 / 0.45. True dots: 0.91 / 0.92. False-dot hosts: 0.58 / 0.60 vs
+     0.81 / 0.83 for true-dot hosts.
+     - This is descriptive only; a dot-confidence threshold stays not legitimate.
+     - For 11 / 16 false dots no preceding note or rest exists; they sit in the header zone.
+   - **Image audit (2e).** 65 crops: all 34 seed-1 false dots plus 31 new seed-2 locations. Order was randomised
+     and the class hidden. Frame-to-x localisation is approximate (±~10 px).
+     - I1 other ink: 32 (49%).
+       - Voice-label text and periods at the strip's left edge ("T.", "S.", "Soprano"): 18.
+       - In-band lyric residue, including "don't" apostrophes, and dynamics/text: 8.
+       - Specks: 3.
+       - Repeat-sign and fermata dots: 3.
+     - Real dot ink that is not a GT error: 11 (17%).
+       - Second dot of a divisi chord: 7. There is no chord vocabulary, so this is a known gap.
+       - Real dot emitted twice: 2.
+       - Real dot aligned against a barline next to a GT `<OOV>`: 2.
+     - **I2 (GT wrong): 0.** The 4 candidates were unblinded against the alignment; none is a missing GT dot.
+     - I3 (no dark ink): 22 (34%). Many I3 crops show only bright erasure specks: dilated erased ink set to 255 on
+       grey paper.
+     - Header zone (x < 220 px): 27 of 65.
+
+   *Rulings (rules fixed in advance):*
+   - **R0 does not fire** (I2 = 0).
+   - **R1 fires on both seeds** (U 0.08 pp < 1 pp; C3p + C4 = 14.7% / 9.4% < 20%). False dots are **not a
+     Stage-3 pitch risk**: no pitch-motivated dot work, no inference dot suppression.
+   - **R2 does not fire** (E ≥ 2 on neither seed).
+   - **R3:** I3 is 34% (< 50%), and C1u-then-eighth is not the majority of C1 (5 of 15, 6 of 28).
+     - I1 is the largest class, so **Phase 1 negative items for label punctuation, lyric apostrophes, specks and
+       mask residue become a must**.
+     - The strip-start voice label is the single biggest source (18 of 65). This is the known Stage 2
+       "left-edge label text" residual.
+   - **R4 fires** (C2 ≥ 10%). The G1 orphan-dot guard is registered for post-Phase-1 held-out evaluation (already
+     in section 4); nothing changes now.
+
+   *Stage 4 counterfactual (section 3).* E7 camera, complete 4-voice systems; 2,497 GT notes per seed.
+   - A reproduces the stored decode on every strip (0 mismatches, 0 unmapped dots).
+   - Removing every false dot (B) changes, A − B, seed1 / seed2:
+     - bar-overflow clips +4 / +10;
+     - notes lost in Stage 4 +5 / +6;
+     - notes with changed duration +4 / +16;
+     - post-Stage-4 pitch recall −0.20 / −0.16 pp; precision −0.05 / +0.02 pp;
+     - onset agreement −0.10 / −0.58 pp.
+   - The end-to-end cost is real but small. It is dwarfed by Stage 4's baseline repair load: in A, 100 / 121
+     clipped bars and 200 / 230 notes lost, mostly from other rhythm misreads. No Stage 4 change until after
+     Phase 1, as registered.
+
+   *ml-cv-lead review of these results (2026-09-30).* The rulings above were applied correctly. Caveat: dots
+   inside `<OOV>` spans (68 / 77) outnumber the scored ones, so their pitch impact is unmeasured. The exclusion
+   was like-for-like (thin2 70 / 86, base 59 / 70). ml-cv-lead then requested a Q4 check (`q4_check.py`,
+   diagnostic, BUG-037 system excluded):
+   - **(a) Q4 pitch recall per piece, E7 vs thin2 on the same strips.** E7 is lower in all 5 pieces on both
+     seeds.
+     - dont_stop_me_now: 90.0 vs 99.4 / 92.8 vs 97.8;
+     - gaano: 77.2 vs 89.0 / 81.7 vs 89.5;
+     - handog: 86.4 vs 93.2 / 88.3 vs 91.3;
+     - honneur: 84.1 vs 88.6 / 81.8 vs 86.4;
+     - non_nobis: 82.1 vs 92.3 / 89.7 vs 94.9.
+     - That is 5 of 5 pieces (one-sided sign-test p = 0.03, post hoc).
+   - **(b) Do E7's misses sit on the 255 fill?** The measure is the share of pixels == 255 within ±8 columns of
+     each note.
+     - In Q4 the paired per-strip difference (misses minus correct notes) is −0.0013 / +0.0001.
+     - Misses are whiter in 17 / 15 strips; correct notes are whiter in 23 / 16.
+     - **No co-location with the fill.** No mechanism for the gap is known.
+   - **Final call: CONDITIONAL. E7 is not frozen as the only strip source.**
+     - Carry E7 and thin2 through the held-out evaluation.
+     - Pre-register camera pitch recall and note precision as primary, SER as secondary, each seed separately,
+       Q4 broken out.
+     - If Phase 1 can afford only one training source, train on E7 as registered, but decode the held-out set
+       with both arms.
+     - Switching to thin2 on this dev result would be metric shopping.
+   - **Fill (proposed, not yet applied; needs the user's OK).**
+     - Replace the 255 erasure/border fill with the local paper estimate from Stage 1's own code, on
+       train = serve grounds alone.
+     - Re-run the live parity check after the change.
+     - Phase 1 must import the same fill function.
+     - The current E7 dev numbers become stale. The dev set is not re-decoded to re-justify E7.
+
    **4b. Contrast-relative threshold (pre-registered 2026-09-30, before any E7 decode; ml-cv-lead).**
    - **Form.** Per pixel, T = paper − k·(paper − ink), with dark if gray < T.
      - paper and ink are the local 90th and 10th grey percentiles in a window about 2 interlines wide,
