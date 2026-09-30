@@ -124,7 +124,13 @@ later stages import functions from earlier ones rather than duplicating logic.
    training tree). Missing weights raise, and `--no-clef-key` opts out (CRNN clef/key, BUG-011).
    `run_full_pipeline` defaults to the checkpoint too; `clef_key_weights=None` opts out and flags every
    event `clef_key_disabled` / `review_needed`. A mid-strip key change counts with one glyph when it
-   matches ClefKeyNet's key on the next adjacent system (BUG-029). The classifier still fails
+   matches ClefKeyNet's key on the next adjacent system (BUG-029). **Key/meter continuity (2026-09-30, PIYA-106,
+   branch `piya106/stroke-calibration`, uncommitted pending review):** a system key that breaks from the carried
+   key needs a sign (adjacent system agrees, courtesy signature, cancelling naturals, meter change) or is held and
+   flagged `key_change_unconfirmed` with both `key_candidates` (R1, `stage3_clefkey.apply_key_continuity`); a
+   mid-strip key change applies only when 3 of 4 voices read it at the same bar (R4, `decide_mid_changes`), and a
+   mid-strip meter is flagged, never applied (R3). Dev replay: 0 false firings; detail in
+   `docs/decisions/piya-106-ser-15-plan.md` (Phase 4 section). The classifier still fails
    its real-photo gate (BUG-021). Keeping it the default is a user decision (2026-09-29), NOT a gate pass: while
    `stage3_clefkey.CLEF_KEY_GATE_PASSED` is False every event is flagged `clef_key_unvalidated` / `review_needed`, and
    `stage5_synthesis.run_full_pipeline_with_report()` returns the client `review` object for PIYA-103 AC6 (provenance

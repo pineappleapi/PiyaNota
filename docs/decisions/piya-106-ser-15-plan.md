@@ -1037,6 +1037,51 @@ still open from Step 2) goes in first.
 - Run once and report both seeds as a range, with 95% CI and note precision.
 - **This is the only number that can go in the thesis as the AC1 result.**
 
+#### Key / time-signature continuity R1-R4 (implemented 2026-09-30; choral-conductor and ml-cv-lead reviewed the rules)
+
+**Rules** (`stage3_clefkey.apply_key_continuity`, `stage3_transcription.decide_mid_changes`; all thresholds pinned
+before any held-out decode: quorum = `HEADER_QUORUM` = 3, ClefKeyNet threshold unchanged):
+- **R1, system key.** A ClefKeyNet system vote that differs from the carried key is accepted only with a sign:
+  the adjacent next system votes the same, the adjacent previous system votes the same, a courtesy signature in
+  ≥3 voices of the system before, cancelling naturals in ≥3 voices, or a kept header meter change. A change to
+  C with neither naturals nor courtesy needs two signs. Otherwise the old key is held and every strip is flagged
+  `key_change_unconfirmed` + `review_needed`, with `key_candidates` [held, vote]. A change on the last system
+  (no next system) with no sign is accepted and flagged `key_change_unverifiable`.
+- **R2, mid-strip key glyphs.** After a barline, a key-ordered burst (or naturals) directly followed by a time
+  signature counts with one glyph; a full cancel may be followed by a restated key.
+- **R3, mid-strip meter.** Reported (`mid_strip_meter_change` at quorum, else `mid_strip_meter_unconfirmed`), never
+  applied; the meter digits are no longer read as a multirest count.
+- **R4, mid-strip key change.** Applied only when ≥3 voices read the same key at the same bar index, then in every
+  voice (a voice with no glyphs follows the gate). Below quorum: not applied, `mid_strip_key_change_rejected`.
+  `key_change_contradicted` marks a gated change that the next system's key does not confirm.
+
+**Known limits.** R4 needs the same bar index in 3 voices, so a missed barline turns a real change into a flagged
+rejection. Courtesy signatures are found only after a barline. `key_candidates` are on events and Stage 3 info
+but not yet in the client review item (API contract change, needs backend-lead).
+
+**Validation 1 (synthetic).** 28 token tests in `tests/test_stage3_key_continuity.py` (R1-R4 plus negatives:
+multirest count, lone tuplet-like digit, one glyph before a multirest, out-of-order burst, partial cancel).
+They test the logic only, not recognition.
+
+**Validation 2 (dev replay, diagnostic only).** E7 greedy tokens, 654 strips / 164 systems (82 per seed), live
+header filter, both seeds:
+- R4: 0 key candidates, 0 meter candidates, 0 gate firings, 0 strip flags per seed (target 0: met).
+- R1: accepted Gaano p6s1 3♭→1♭ (the one real change; sign `next_system`) in both conditions and seeds; held
+  Honneur p3s1 at 3♯ (the BUG-037 misread 0) and flagged it, both seeds. No other system changed.
+- 5-6 systems per seed have a kept header meter change; none coincides with a key vote change.
+- This is dev data with 1 real change and 1 misread: it shows no false firing, not recall.
+
+**Validation 3 (pre-registered here, before any held-out decode).** On the Phase 4 held-out set, each seed
+separately, both strip-source arms, R1-R4 on vs off (off = `apply_key_continuity` and the gate skipped):
+- Per-system key accuracy against GT.
+- 2×2 table: R1 accepted / held changes vs GT change real / not real; the same for R4 gate vs GT mid-strip changes.
+- End-to-end pitch accuracy delta (on minus off) and the count of each new flag.
+- **Pass rule:** R1-R4 stay on only if the number of *unflagged* wrong-key systems does not increase in either
+  seed. A held real change counts as a wrong-key system only if unflagged (it is always flagged by construction).
+- Recall on real changes is measured on a separate synthetic-positive set (Phase 1 renders with key and meter
+  changes, both at system breaks and mid-strip), never on the held-out photos.
+- No threshold or evidence rule changes after the held-out decode; a change after that needs a new held-out set.
+
 **Oct 19:** report whatever Phase 4 gives, honestly. For context, published polyphonic camera OMR is above 39%
 error (Martinez-Sevilla 2025).
 

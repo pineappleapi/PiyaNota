@@ -17,8 +17,13 @@ It changes only where the clef, key and octave come from, through ``infer_pitch`
   carried and the system is flagged. The CRNN never votes. Every CRNN accidental before the first
   note/rest is kept out of the key; only one directly before a note on its own position survives, as
   that note's inline accidental (BUG-027: glyphs after the time-signature digits used to be added to the key).
+  In the pipeline, ``apply_key_continuity`` (R1) then holds the previous key when a system's vote breaks
+  from it with no corroborating sign (next system agrees, courtesy signature, cancelling naturals, meter
+  change), flagging ``key_change_unconfirmed`` with both candidate keys.
 * CRNN mid-strip key changes are left to Stage 3 but flagged ``review_needed``. A post-barline burst
-  matching the next system's classifier key counts even with one glyph (BUG-029).
+  matching the next system's classifier key counts even with one glyph (BUG-029). In the pipeline a
+  mid-strip change applies only when 3 voices of the system read it at the same bar (R4,
+  ``stage3_transcription.decide_mid_changes``).
 
 Known limit: the classifier fails the real-photo gate (BUG-021, ~4.5% of clefs confidently wrong), so
 its flags are kept on every event for review.
@@ -31,7 +36,7 @@ import hashlib
 import io
 import json
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
@@ -86,6 +91,11 @@ class StripDecision:
     # Key of the next system in page/system order (None on the last one); lets Stage 3 accept a
     # one-glyph mid-strip key change that the classifier confirms (BUG-029).
     next_key: Optional[int] = None
+    # The system's confident-majority key (None: no majority); apply_key_continuity weighs it against the
+    # key carried from the previous system.
+    vote_key: Optional[int] = None
+    # [key applied, other candidate] when R1 held or accepted a key change without corroboration.
+    key_candidates: Optional[list[int]] = None
 
     @property
     def review_needed(self) -> bool:
@@ -178,8 +188,10 @@ def decide(readings: Sequence[ClefKeyReading], ckm: ClefKeyModel) -> dict[str, S
         votes = Counter(conf.values())
         top = votes.most_common(1)
         sys_flags: list[str] = []
+        vote: Optional[int] = None
         if top and top[0][1] * 2 > len(conf):
             sys_key, source = top[0][0], "system_majority"
+            vote = sys_key
         elif carried is not None:
             sys_key, source = carried, "carried_from_previous_system"
             sys_flags = ["key_no_majority", "review_needed"]
@@ -197,14 +209,139 @@ def decide(readings: Sequence[ClefKeyReading], ckm: ClefKeyModel) -> dict[str, S
             if r.clef_probs is None:
                 flags.append("no_classifier_geometry")
             decision = resolve_clef(r.voice, r.clef_probs or no_read, ckm.clef_threshold, ckm.g8vb_reliable)
-            out[r.strip_id] = StripDecision(decision, sys_key, source, sorted(set(flags)))
+            out[r.strip_id] = StripDecision(decision, sys_key, source, sorted(set(flags)), vote_key=vote)
+    _set_next_keys(out, {k: [r.strip_id for r in v] for k, v in systems.items()})
+    return out
+
+
+def _set_next_keys(out: dict[str, StripDecision], systems: dict[tuple[int, int], list[str]]) -> None:
+    """Sets each strip's ``next_key`` to the adjacent next system's key (None when there is none)."""
     order = sorted(systems)
-    for this, nxt in zip(order, order[1:]):
-        if not _systems_adjacent(this, nxt):
-            continue    # a system Stage 2 missed in between: its key is unknown, so confirm nothing
-        next_key = out[systems[nxt][0].strip_id].key
-        for r in systems[this]:
-            out[r.strip_id].next_key = next_key
+    for this, nxt in zip(order, order[1:] + [None]):
+        # A system Stage 2 missed in between has an unknown key, so it confirms nothing.
+        next_key = out[systems[nxt][0]].key if nxt is not None and _systems_adjacent(this, nxt) else None
+        for sid in systems[this]:
+            out[sid].next_key = next_key
+
+
+# ── R1: key continuity between systems (choral-conductor + ml-cv-lead review 2026-09-30) ──────────────────
+# A key signature is reprinted on every system and changes rarely, and then usually with a meter change, a
+# courtesy signature at the end of the previous system or cancelling naturals. ClefKeyNet fails its gate
+# (BUG-021): on dev data (diagnostic only) a whole system once read 0 between two 3# systems (BUG-037). So a
+# vote that breaks from the carried key is believed only with a corroborating sign; otherwise the carried key
+# is held and the system flagged with both candidates. Two adjacent systems voting the same new key
+# corroborate each other, which also keeps a wrong hold from spreading past one system.
+KEY_CHANGE_UNCONFIRMED_FLAG = "key_change_unconfirmed"      # change held back, old key kept
+KEY_CHANGE_UNVERIFIABLE_FLAG = "key_change_unverifiable"    # change accepted with no next system to check
+# Corroborators needed. A change to C major with no naturals anywhere is the classic misread (a missed
+# signature reads as none), so it needs two; other changes to fewer accidentals need the usual one, since
+# modern editions often omit cancelling naturals (choral-conductor). Hand-set, not tuned.
+KEY_CHANGE_MIN_EVIDENCE = 1
+KEY_CHANGE_TO_C_NO_NATURALS_MIN_EVIDENCE = 2
+
+
+def header_override(decision: StripDecision) -> s3.HeaderOverride:
+    """infer_pitch's header override for a strip decision."""
+    return s3.HeaderOverride(decision.clef.token, decision.key, decision.clef.octave_shift)
+
+
+def _opening_naturals_cancel(symbols: Sequence[str], clef_token: str, old_key: int) -> bool:
+    """True if the strip opens (before any note, rest or barline) with naturals on the old key's positions."""
+    if old_key == 0:
+        return False
+    kind = "accidental.sharp" if old_key > 0 else "accidental.flat"
+    old_positions = set(s3.KEY_SIG_ORDER.get(clef_token, {}).get(kind, [])[:abs(old_key)])
+    naturals = []
+    for t in symbols:
+        if t.startswith(("note.", "rest.", "multirest", "barline")):
+            break
+        if t.startswith("accidental.natural"):
+            naturals.append(s3._position_suffix(t))
+    return bool(naturals) and set(naturals) <= old_positions
+
+
+def _courtesy_votes(system_key: tuple[int, int], system: dict[str, tuple[str, list]],
+                    decisions: dict[str, StripDecision], new_key: int) -> int:
+    """Voices whose strip ends with a courtesy signature of ``new_key`` (key glyphs after the last note).
+
+    ``new_key`` is passed as the next system's key, so a one-glyph courtesy of exactly that key counts.
+    """
+    voices = set()
+    for sid, (voice, symbols) in system.items():
+        for c in s3.scan_mid_changes(symbols, voice, system_key[0], system_key[1], header_override(decisions[sid]),
+                                     new_key):
+            if c["kind"] == "key" and c["courtesy"] and c["key"] == new_key:
+                voices.add(voice)
+    return len(voices)
+
+
+def apply_key_continuity(decisions: dict[str, StripDecision], systems: dict[tuple[int, int], dict[str, tuple[str, list]]],
+                         meter_change_systems: set[tuple[int, int]]) -> dict[str, StripDecision]:
+    """R1: revises each system's key so a ClefKeyNet key change needs a corroborating sign.
+
+    A system whose majority vote differs from the key carried from the previous system keeps the vote only
+    with enough evidence: the adjacent next (or previous) system votes the same key; HEADER_QUORUM voices end
+    the previous system with a courtesy signature of it; HEADER_QUORUM voices open this system with
+    naturals cancelling the old key; or the header filter kept a meter change here. With no adjacent next
+    system to check, an uncorroborated change is accepted and flagged ``key_change_unverifiable``;
+    otherwise the old key is held and the system flagged ``key_change_unconfirmed``. Both carry
+    ``key_candidates`` and ``review_needed``. The hidden thresholds are pinned (HEADER_QUORUM, ClefKeyNet's
+    own confidence cutoff), and none of this fixes a confidently wrong vote that persists (BUG-021).
+
+    Args:
+        decisions: {strip_id: StripDecision} from ``decide`` (not modified).
+        systems: {(page, system): {strip_id: (voice, CRNN symbols after the header filter)}}.
+        meter_change_systems: systems where the header filter kept a quorum meter change.
+
+    Returns:
+        Revised copies of the decisions, with ``next_key`` recomputed from the revised keys.
+    """
+    out = {sid: replace(d, flags=list(d.flags)) for sid, d in decisions.items()}
+    order = sorted(systems)
+    held: Optional[int] = None
+    prev: Optional[tuple[int, int]] = None
+    for i, sk in enumerate(order):
+        sids = list(systems[sk])
+        first = out[sids[0]]
+        vote = first.vote_key
+        nxt = order[i + 1] if i + 1 < len(order) and _systems_adjacent(sk, order[i + 1]) else None
+        prev_adj = prev if prev is not None and _systems_adjacent(prev, sk) else None
+        key, source, extra, candidates = first.key, first.key_source, [], None
+        if held is not None and vote is None:
+            key = held     # decide() carried its own unrevised chain; carry the revised one
+        elif held is not None and vote != held:
+            evidence = []
+            if nxt is not None and out[next(iter(systems[nxt]))].vote_key == vote:
+                evidence.append("next_system")
+            if prev_adj is not None and out[next(iter(systems[prev_adj]))].vote_key == vote:
+                # The previous system voted this key too and was held: two votes in a row are believed.
+                evidence.append("previous_system")
+            if (prev_adj is not None
+                    and _courtesy_votes(prev_adj, systems[prev_adj], out, vote) >= s3.HEADER_QUORUM):
+                evidence.append("courtesy_signature")
+            naturals = sum(1 for sid, (_, symbols) in systems[sk].items()
+                           if _opening_naturals_cancel(symbols, out[sid].clef.token, held))
+            if naturals >= s3.HEADER_QUORUM:
+                evidence.append("cancelling_naturals")
+            if sk in meter_change_systems:
+                evidence.append("meter_change")
+            naturals_seen = "cancelling_naturals" in evidence or "courtesy_signature" in evidence
+            needed = (KEY_CHANGE_TO_C_NO_NATURALS_MIN_EVIDENCE if vote == 0 and not naturals_seen
+                      else KEY_CHANGE_MIN_EVIDENCE)
+            if len(evidence) >= needed:
+                key, source = vote, "system_majority_change:" + "+".join(evidence)
+            elif nxt is None and not evidence:
+                key, source = vote, "system_majority_change_unverifiable"
+                extra, candidates = [KEY_CHANGE_UNVERIFIABLE_FLAG, "review_needed"], [vote, held]
+            else:
+                key, source = held, "held_key_change_unconfirmed"
+                extra, candidates = [KEY_CHANGE_UNCONFIRMED_FLAG, "review_needed"], [held, vote]
+        for sid in sids:
+            d = out[sid]
+            d.key, d.key_source, d.key_candidates = key, source, candidates
+            d.flags = sorted(set(d.flags) | set(extra))
+        held, prev = key, sk
+    _set_next_keys(out, {k: list(v) for k, v in systems.items()})
     return out
 
 
@@ -326,8 +463,18 @@ def substitute_header(tokens: Sequence[str], confs: Sequence[float], clef_token:
 
 
 def infer_pitch_b(tokens: Sequence[str], confs: Sequence[float], voice: str, page_index: int, sys_idx: int,
-                  decision: StripDecision) -> tuple[list[dict[str, Any]], list[str], dict[str, Any]]:
+                  decision: StripDecision, system_key_changes: Optional[dict[int, int]] = None,
+                  trace: Optional[list[dict[str, Any]]] = None,
+                  ) -> tuple[list[dict[str, Any]], list[str], dict[str, Any]]:
     """Version (b) pitch inference for one strip.
+
+    ``system_key_changes`` is passed to ``infer_pitch`` (the system's agreed mid-strip key changes, R4);
+    None keeps the single-strip rule. With ``decision.key_candidates`` set (R1 held or accepted an
+    uncorroborated key change), events and info carry ``key_candidates`` for the reviewer.
+
+    Args:
+        trace: passed to ``infer_pitch`` for the visualization; indexed by the CRNN's own ``tokens``
+            (pitch runs on those, not on the substituted SER view), so it lines up with the CTC spans.
 
     Returns:
         (events, token sequence with the decided header for SER, info). Events carry ``review_needed``
@@ -339,12 +486,12 @@ def infer_pitch_b(tokens: Sequence[str], confs: Sequence[float], voice: str, pag
         logs those).
     """
     toks, _, info = substitute_header(tokens, confs, decision.clef.token, decision.key)
-    override = s3.HeaderOverride(decision.clef.token, decision.key, decision.clef.octave_shift)
     log = io.StringIO()
     with contextlib.redirect_stdout(log):
         events = s3.infer_pitch(list(tokens), voice=voice, page_index=page_index, sys_idx=sys_idx,
-                                confidences=list(confs), header_override=override,
-                                next_system_key=decision.next_key)
+                                confidences=list(confs), header_override=header_override(decision),
+                                next_system_key=decision.next_key, trace=trace,
+                                system_key_changes=system_key_changes)
     print(log.getvalue(), end="")
     flags = list(decision.flags) + list(decision.clef.flags)
     info["mid_key_changes"] = log.getvalue().count(MID_KEY_CHANGE_MARK)
@@ -356,9 +503,11 @@ def infer_pitch_b(tokens: Sequence[str], confs: Sequence[float], voice: str, pag
         e["clef_key_flags"] = event_flags
         e["clef_key_strip_flags"] = flags   # this strip's own flags; build_review reads these
         e["review_needed"] = "review_needed" in event_flags
+        if decision.key_candidates is not None:
+            e["key_candidates"] = list(decision.key_candidates)
     info.update(clef_class=decision.clef.clef_class, clef_source=decision.clef.source,
                 octave_shift=decision.clef.octave_shift, key=decision.key, key_source=decision.key_source,
-                flags=flags, review_needed="review_needed" in flags)
+                key_candidates=decision.key_candidates, flags=flags, review_needed="review_needed" in flags)
     return events, toks, info
 
 

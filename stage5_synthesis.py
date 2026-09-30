@@ -297,7 +297,8 @@ def build_review(stage3_events: dict, stage4_flags: list) -> tuple[dict[str, Any
 
     Args:
         stage3_events: {voice: [event, ...]} from Stage 3 (events carry ``clef_key_flags`` and, with
-            ClefKeyNet, ``clef_key_strip_flags``; ``header_flags`` when the Stage 3 header filter kept a
+            ClefKeyNet, ``clef_key_strip_flags``; ``mid_change_flags`` from the system-level mid-strip
+            key/meter check; ``header_flags`` when the Stage 3 header filter kept a
             quorum meter change on a continuation system).
             ``code`` is an open, additive set (clients treat unknown codes as generic review items); for
             triage, current per-strip codes come from stage3_clefkey and ``header_meter_change_kept``
@@ -319,7 +320,7 @@ def build_review(stage3_events: dict, stage4_flags: list) -> tuple[dict[str, Any
     for voice, events in stage3_events.items():
         for e in events:
             job_reasons |= set(e.get("clef_key_flags", [])) & JOB_LEVEL_REVIEW_CODES
-            for field in ("clef_key_strip_flags", "header_flags"):
+            for field in ("clef_key_strip_flags", "header_flags", "mid_change_flags"):
                 strip_flags = set(e.get(field, []))
                 if "review_needed" not in strip_flags:
                     continue
