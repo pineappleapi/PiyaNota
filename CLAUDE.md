@@ -130,7 +130,10 @@ later stages import functions from earlier ones rather than duplicating logic.
    flagged `key_change_unconfirmed` with both `key_candidates` (R1, `stage3_clefkey.apply_key_continuity`); a
    mid-strip key change applies only when 3 of 4 voices read it at the same bar (R4, `decide_mid_changes`), and a
    mid-strip meter is flagged, never applied (R3). Dev replay: 0 false firings; detail in
-   `docs/decisions/piya-106-ser-15-plan.md` (Phase 4 section). The classifier still fails
+   `docs/decisions/piya-106-ser-15-plan.md` (Phase 4 section). **Phase 1 label converter (2026-09-30, same branch,
+   uncommitted):** `training/music_to_agnostic.py` turns MEI (PrIMuS or Verovio dialect) into agnostic tokens per
+   staff/system; gate G1 (`training/g1_converter_gate.py`) = 99.557% on CPM, residuals all verified gold defects;
+   G1 was developed on the same set, so SATB label correctness still needs G1b. The classifier still fails
    its real-photo gate (BUG-021). Keeping it the default is a user decision (2026-09-29), NOT a gate pass: while
    `stage3_clefkey.CLEF_KEY_GATE_PASSED` is False every event is flagged `clef_key_unvalidated` / `review_needed`, and
    `stage5_synthesis.run_full_pipeline_with_report()` returns the client `review` object for PIYA-103 AC6 (provenance

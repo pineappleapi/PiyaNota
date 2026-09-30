@@ -967,6 +967,62 @@ so freezing Stage 1/2 before this step would bake the thick strokes into the tra
      converter must add both.
    - **Gate G1:** at least 99% token agreement with CPM's gold `.agnostic` on all 3,996 local CPM samples.
      Below that, labels are noise and nothing downstream is trusted.
+   - **Result (2026-09-30): G1 PASS, 99.557%** (`training/music_to_agnostic.py`, gate
+     `training/g1_converter_gate.py`, rule tests `tests/test_music_to_agnostic.py`; uncommitted pending review).
+     - Method: agreement = 1 - (sum of token edit distances) / (sum of gold tokens), over all 3,995 CPM samples
+       that have an `.mei` (one of the 3,996 has none). A refused sample would count its full length as errors.
+     - 454 errors over 102,585 gold tokens; 3,639 of 3,995 samples match exactly; 0 refused.
+     - Every residual pattern was checked against the CPM image, and each is a gold defect, not a converter
+       error. They still count against G1:
+       - final barline in gold present or absent regardless of the image: about 297 tokens (226 + 71 samples);
+       - grace-note order rotated in gold (e.g. 000100017-17_1_1): about 60;
+       - mid-piece `metersign.C` / `C/` drawn but missing from gold: 11;
+       - trailing grace notes after the barline, and one scrambled gold (000100648-1_1_1): the rest.
+       - Without the barline defects agreement would be about 99.85%.
+     - **Limit:** CPM was both the development set and the gate, so the rules (accidental re-engraving, ties
+       only between same-pitch notes, fermata at S6 before `slur.end`, key-signature placement per clef) were
+       read off the same gold. G1 shows the converter reproduces CPM's engraver; it does not show SATB labels
+       are right. That is G1b's job (human check of about 30 rendered SATB strips, 6b).
+     - **Verovio dialect** (`dialect="verovio"`, for Phase 1 renders): only `@accid` is drawn (not
+       `@accid.ges`); `<tie>`/`<fermata>` control events; `<sb>` splits systems. A continuation system gets
+       clef + key and no meter unless the meter changes at the break. Smoke test: 31/31 four-part music21 Bach
+       chorales convert on all four staves with the same system count per staff; bwv10.7 labels checked by eye
+       against the rendered page. Courtesy glyphs at a system end are not validated (left to G1b). Chords,
+       tuplets and tremolos raise `ConversionError`, so the sample is skipped rather than mislabelled.
+     - Chorale tenors come in bass or treble clef as the source has them. Treble-8vb for tenor is a rendering
+       choice for step 3.
+     - Residual attribution was checked per pattern on example samples against their images, not on every
+       affected sample.
+   - **ml-cv-lead review (2026-09-30): G1 PASS for the `primus` dialect only. GO on steps 2-3 (corpus, Verovio
+     rendering); NO-GO on cutting and training until the conditions below are met.**
+     - The 99.557% says nothing about the `verovio` dialect's accidental and tie tokens. That path skips the
+       re-engraving logic and reads `<tie>` events, so those are untested by G1.
+     - A post-hoc split of local CPM means nothing (every sample shaped the rules). The held-out check is the
+       full PrIMuS minus the local 3,996 IDs: freeze the converter (commit hash), then run G1 once on a
+       pre-registered random ~5k sample before PrIMuS becomes a source. A drop there means the rules fit the local set.
+     - **Conditions:**
+       - (a) freeze the converter and write its commit hash into the render metadata;
+       - (b) run the held-out PrIMuS G1 before PrIMuS is used as a source;
+       - (c) no render counts as training data until it passes an automatic SVG check and G1b.
+     - **Automatic SVG check, run on every render:** compare Verovio's SVG glyph-class counts (`accid`,
+       `keySig`, `meterSig`, `barLine`, `clef`, `tie`, `dots`, `rest`, `mRest`/`multiRest`) with the label token
+       counts per (page, system, staff).
+     - **G1b (human, 30 strips):** stratified across all 5 fonts, and covering each of these:
+       - a key change and a meter change at a system break, with any end-of-system courtesy signature;
+       - a tie across a break (`slur.start` at the end of system N, `slur.end` after the clef and key of N+1);
+       - an accidental on a tied note continued after the break;
+       - accidentals carried within a bar, cancelling naturals, cautionary accidentals;
+       - multirests and constructed meter changes;
+       - beams across a break;
+       - a treble-8vb tenor, labelled from the *drawn* clef with the token Stage 3's tenor rule expects;
+       - first-system label text, drawn but not labelled.
+
+       Pass rule: 0 systematic errors. Any fix means a fresh sample of 30.
+     - **CPM replay labels (Phase 2):** replace the final-barline and grace-order gold defects (about 7% of
+       samples have the barline defect) with converter output, after checking a random 30 of them against their
+       images. This way replay and synthetic strips agree on end-of-strip barlines. Keep the CPM canary scored on
+       the original gold, so it stays comparable with the 0.0562-0.0926 range; report the cleaned number only
+       as a second figure. Leave the metersign, trailing-grace and scrambled cases (about 20 tokens) alone.
 2. **Assemble the corpus:**
    - the music21 corpus: 433 Bach chorales (true SATB), 1,318 Palestrina, 97 Monteverdi;
    - CPM MEI;
