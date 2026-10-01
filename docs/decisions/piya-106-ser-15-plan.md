@@ -1204,6 +1204,40 @@ so freezing Stage 1/2 before this step would bake the thick strokes into the tra
      - **Regression metric:** rest precision per class on the held-out set, since the main failure is
        insertion.
      Rests are in the CRNN vocabulary already, so this needs no head change.
+   - **Amendment 2 (2026-10-01, user): drop out-of-vocabulary data, no vocabulary expansion.**
+     - PrIMuS samples with any gold token outside `stage3_transcription.VOCAB` are dropped, including the longa
+       samples: 3,065 of all 87,678 PrIMuS samples (3.5%; denominator checked in `primus_g1/survey/vocab.json`).
+     - Palestrina strips quarantined for the breve rest (`oov:rest.double_whole-L3`) are dropped (11,803 of
+       18,504 strips stay usable). No re-barring of 4/2 pieces.
+   - **Amendment 3 (2026-10-01, user approved ml-cv-lead's recommendations; weights now FROZEN).**
+     - Corpus mix: 45% PrIMuS/CPM replay (natural distribution, vocabulary-filtered), 30% Bach + Palestrina
+       renders (natural distribution, 5 fonts, camera augmentation), 20% targeted selection (at most about 3
+       repeats per strip per epoch, fresh augmentation on each draw), 5% negatives (false dots, phantom
+       sharps/flats, header-label and lyric crops, crops with no rest drawn).
+     - Targeted budget: ties 15% (G1b passed), position/ledger 15% (own class, chosen by note position;
+       position errors are taken out of the duration classes), quarter 5% (digital quarter→eighth only), rests
+       5% (every duration, plain and dotted, at a minimum count; dotted and sixteenth rests from PrIMuS),
+       32nd 2% (track 32nd insertions). The remaining 58% is split by error count with position errors
+       removed: sixteenth capped at 12%, half at a 2% floor, cap slack returned pro rata. The tuplet 5% is
+       folded pro rata into the error-count classes only. Exact shares are recomputed from `budget_live.json`
+       when the sampler is built.
+     - Tie targets come from choral renders, not PrIMuS gold (some PrIMuS "ties" are slurs across different
+       pitches).
+     - Tuplets: `tuplet.3` (optionally `tuplet.2`), position-free, emitted only where the number is drawn;
+       Stage 3 scales durations. Built in a later vocabulary-expansion arm together with chords (2 seeds), NOT in
+       Phase 2. Source: script-injected triplets in choral MEI. Minimum work now: converter support behind an
+       off flag (samples with a drawn tuplet are still refused); tuplets labelled explicitly in the Phase 4 GT
+       with no tuplet support pre-registered; `tuplet` added to the SVG check. Meanwhile Stage 4
+       `suspected_tuplet` stays a `review_needed` fallback; 6/8 duplets (underfull bar) are a known gap.
+     - Blocking before training:
+       - every one of the 3,996 CPM IDs is excluded from PrIMuS replay (canary leakage);
+       - the synthetic validation split is by piece/melody, not by strip;
+       - the Palestrina G1b page is checked before any Palestrina strip is used;
+       - CPM replay relabels are hand-checked on a random 30;
+       - the DataLoader seeding fix is applied;
+       - ml-cv-lead reviews the training code.
+     - Not addressed by this retrain: confident-wrong output (BUG-011). The held-out report includes
+       confident-wrong rates.
    - **Amendment rule.** The list and weights may change before Phase 2 training starts, only with a written
      reason in this block. After that, no dev-driven changes: new targets come only from a new, separately
      registered dev round. A later dev gain on these targets is not evidence; the held-out report covers every
