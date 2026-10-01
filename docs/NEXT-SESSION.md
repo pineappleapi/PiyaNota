@@ -28,9 +28,8 @@ Worktree `D:/PiyaNota/.claude/worktrees/piya106-bug042` (base 9eb5752).
   (Scarborough Fair SSAATB, `C:/Users/paul_/Downloads/8staff_sample.svg`, 3 x 5-staff systems): links measured
   5+5+5 correctly, rejected by Rule 3.6; its systems stacked into a 20-staff page are rejected by the strict rule (`partial`), not by a measured link.
 - senior-reviewer re-review (2026-10-01): merge with changes. Fixed in a follow-up commit: fail-fast `TypeError`
-  for short tuples, eval callers, required typed `status`, doc counts. Open: Medium 3 (strict rule + Stage 1's
-  `STAFF_MIN_SPAN_FRAC` = 0.3 rejects pages whose short final system the tracker misses; user decision pending),
-  Low 5, Low 8 (single-system pages labelled `checked`), "draw viz before raising", Low 11 (page-edge line as a
+  for short tuples, eval callers, required typed `status`, doc counts. Medium 3 (short final systems missed by
+  Stage 1) is addressed by BUG-043 (uncommitted, pending review). Open: Low 5, Low 8 (single-system pages labelled `checked`), "draw viz before raising", Low 11 (page-edge line as a
   false link; watch on held-out photos).
 - Follow-up in the stroke-calibration worktree: chord-plan ruling 5 should say "A implemented on
   `piya106/bug042-system-grouping`, B out of thesis scope". Reconcile its older BUG-042 row there.
@@ -78,11 +77,12 @@ Outputs are in `D:/PiyaNota-training/data/phase1_strips/`.
 
 ### C. Other open user decisions
 
-- **Dev/test policy:** fill the `split` column in `data/piyanota_dataset/dataset_manifest.csv` (dev = every page of
-  DSMN, Gaano, Handog, Honneur and Non Nobis; test = the rest), and amend CLAUDE.md's "TEST-only" line to name
-  the dev exception. The camera stats come from those 5 dev pieces only (verified), all from one phone.
-- **New bug to log:** Stage 1's `STAFF_MIN_SPAN_FRAC` (staves narrower than 0.3 of the frame are not tracked)
-  drops real short final systems at inference too.
+- **Dev/test split: written 2026-10-01** to `data/piyanota_dataset/dataset_manifest.csv` (`split` column, gitignored;
+  backup `dataset_manifest.pre_split_2026-10-01.csv`): 32 `dev` / 85 `test` / 33 `heldout_scope` (pages with >4-staff
+  systems, eyeballed). Open: magdiwang pg02 (a 3-staff ATB system, labelled test); CLAUDE.md's "TEST-only" line
+  still needs a user-approved amendment naming the dev exception.
+- **BUG-043 (short final systems dropped by Stage 1):** fixed on `piya106/bug042-system-grouping`, uncommitted
+  pending user review. Phase 1 cut stays on the frozen Stage 1 (c77ce7b) until it is unfrozen.
 
 ### D. Still queued after B (unchanged)
 

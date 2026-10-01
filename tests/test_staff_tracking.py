@@ -257,6 +257,33 @@ def test_crop_from_native_source_maps_geometry() -> None:
     assert abs(float(a[:, :w].mean()) - float(b[:, :w].mean())) < 3.0
 
 
+MARGIN_X = 60
+SHORT_END_X = 330  # ~22% of the page: below STAFF_MIN_SPAN_FRAC, a one-bar final system
+
+
+def _draw_staff(page: np.ndarray, center: int, x0: int, x1: int) -> None:
+    for line in range(-2, 3):
+        y = center + line * SPACING_PX
+        page[y - 1:y + 1, x0:x1] = 0
+
+
+def test_short_final_system_is_kept_and_floating_clutter_is_not() -> None:
+    """A short final system must not be dropped by the page-width rule (it held real bars).
+
+    One short staff starts 6 spacings in, as when a clef breaks the left-end detection; it is
+    kept because it ends at its system's barline. A 5-line block floating mid-page aligns with
+    nothing and must stay rejected.
+    """
+    page = np.full((PAGE_H, PAGE_W), 255, dtype=np.uint8)
+    _draw_staff(page, 120, MARGIN_X, PAGE_W - MARGIN_X)          # full-width anchor
+    _draw_staff(page, 320, MARGIN_X, SHORT_END_X)                # short, flush left
+    _draw_staff(page, 440, MARGIN_X + 6 * SPACING_PX, SHORT_END_X)  # short, left end lost
+    _draw_staff(page, 640, 600, 860)                             # floating clutter
+    centers = sorted(round(c.mean_center) for c in s1.track_staff_curves(page))
+    assert len(centers) == 3, centers
+    assert all(abs(got - want) <= 3 for got, want in zip(centers, (120, 320, 440))), centers
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

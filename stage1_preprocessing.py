@@ -106,7 +106,15 @@ STAFF_TRACK_LINK_TOL     = 0.6    # link tolerance, in staffline spacings per mi
 STAFF_TRACK_MERGE_TOL    = 0.6    # broken-track merge: max extrapolation mismatch, in staff heights
 STAFF_TRACK_MERGE_MAX_GAP_FRAC = 0.5  # broken pieces further apart than this fraction of page width are not merged
 STAFF_TRACK_MIN_POINTS   = 8      # a raw track needs at least this many block detections
-STAFF_MIN_SPAN_FRAC      = 0.3    # a real staff spans at least this fraction of the page width
+STAFF_MIN_SPAN_FRAC      = 0.3    # an anchor staff spans at least this fraction of the page width
+# A short final system (engravers leave one under ~30% of the line unjustified) is shorter than
+# STAFF_MIN_SPAN_FRAC; it is kept when it starts at the left margin of the nearest anchor staff.
+STAFF_SHORT_MIN_SPAN_SPACINGS = 8.0   # ~ clef + one bar, in line spacings
+STAFF_SHORT_LEFT_TOL_SPACINGS = 2.5   # left-end alignment tolerance vs the nearest anchor staff
+# A short staff spans ~10 blocks and its clef can split off a fragment, so the full-width point
+# minimum would drop it; span and left alignment are its evidence instead.
+STAFF_SHORT_MIN_POINTS = 5
+STAFF_SHORT_END_TOL_SPACINGS = 2.5    # right-end alignment tolerance vs an accepted short staff
 STAFF_FIT_MAX_RESIDUAL_PX = 2.0   # RMS of the polynomial center-line fit; worse = not trusted
 STAFF_FIT_OUTLIER_PX     = 2.5    # points further than this from the first fit are dropped and refit
 STAFF_EXTRAP_SLOPE_SPAN_PX = 150  # px of track end used to estimate the slope for linear extrapolation
@@ -1365,11 +1373,13 @@ def track_staff_curves(binary: np.ndarray) -> list[StaffCurve]:
     tracks = _merge_broken_tracks(tracks, spacing, w)
 
     curves: list[StaffCurve] = []
+    short: list[StaffCurve] = []
     for t in tracks:
-        if len(t["pts"]) < STAFF_TRACK_MIN_POINTS:
-            continue
         span = t["pts"][-1][0] - t["pts"][0][0]
-        if span < STAFF_MIN_SPAN_FRAC * w:
+        full = span >= STAFF_MIN_SPAN_FRAC * w
+        if len(t["pts"]) < (STAFF_TRACK_MIN_POINTS if full else STAFF_SHORT_MIN_POINTS):
+            continue
+        if span < STAFF_SHORT_MIN_SPAN_SPACINGS * spacing:
             continue
         # Try the curl-following extension first; if the longer track no longer
         # fits a smooth curve, fall back to the block-tracked span alone.
@@ -1378,10 +1388,49 @@ def track_staff_curves(binary: np.ndarray) -> list[StaffCurve]:
         if curve is None:
             curve = _fit_staff_curve(t["pts"])
         if curve is not None:
-            curves.append(curve)
+            (curves if full else short).append(curve)
     curves = _drop_duplicate_curves(curves, spacing)
+    # A short raw track on a full staff can extend to full width with more points than the
+    # anchor; it must never replace the anchor, so short staves only fill gaps.
+    short = _left_aligned_short_staves(short, curves, spacing)
+    curves += [c for c in _drop_duplicate_curves(short, spacing)
+               if not _duplicates_any(c, curves, spacing)]
     curves.sort(key=lambda c: c.mean_center)
     return curves
+
+
+def _left_aligned_short_staves(short: list[StaffCurve], anchors: list[StaffCurve],
+                               spacing: float) -> list[StaffCurve]:
+    """Short staves that start at the left margin of the nearest full-width staff.
+
+    A short final system is a real staff that the page-width rule drops, so its bars were
+    silently lost. Left alignment is the evidence: staves start flush at the margin, while
+    5-line-looking clutter (text, tables) rarely does. The nearest anchor by height is used
+    rather than a page-wide margin, so page tilt and an indented first system do not matter.
+
+    A clef or key signature can break the line detection at a staff's left end (a one-bar
+    system is mostly header), so a candidate that misses the margin is still kept when its
+    right end meets the nearest already-kept short staff: the staves of one system end at the
+    same barline. That needs a left-aligned staff in the system first, so lone clutter fails.
+    """
+    if not anchors:
+        return []
+    kept: list[StaffCurve] = []
+    misaligned: list[StaffCurve] = []
+    for c in short:
+        nearest = min(anchors, key=lambda a: abs(a.mean_center - c.mean_center))
+        if abs(c.x_min - nearest.x_min) <= STAFF_SHORT_LEFT_TOL_SPACINGS * spacing:
+            kept.append(c)
+        else:
+            misaligned.append(c)
+    if not kept:
+        return kept
+    left_kept = list(kept)
+    for c in misaligned:
+        partner = min(left_kept, key=lambda k: abs(k.mean_center - c.mean_center))
+        if abs(c.x_max - partner.x_max) <= STAFF_SHORT_END_TOL_SPACINGS * spacing:
+            kept.append(c)
+    return kept
 
 
 def _drop_duplicate_curves(curves: list[StaffCurve], spacing: float) -> list[StaffCurve]:
@@ -1392,18 +1441,21 @@ def _drop_duplicate_curves(curves: list[StaffCurve], spacing: float) -> list[Sta
     """
     kept: list[StaffCurve] = []
     for c in sorted(curves, key=lambda c: -c.n_points):
-        duplicate = False
-        for k in kept:
-            lo, hi = max(c.x_min, k.x_min), min(c.x_max, k.x_max)
-            if hi <= lo:
-                continue
-            xs = np.linspace(lo, hi, 16)
-            if float(np.mean(np.abs(c.center_at(xs) - k.center_at(xs)))) < STAFF_DUPLICATE_SPACINGS * spacing:
-                duplicate = True
-                break
-        if not duplicate:
+        if not _duplicates_any(c, kept, spacing):
             kept.append(c)
     return kept
+
+
+def _duplicates_any(c: StaffCurve, others: list[StaffCurve], spacing: float) -> bool:
+    """True when c runs within STAFF_DUPLICATE_SPACINGS of another curve over their shared x range."""
+    for k in others:
+        lo, hi = max(c.x_min, k.x_min), min(c.x_max, k.x_max)
+        if hi <= lo:
+            continue
+        xs = np.linspace(lo, hi, 16)
+        if float(np.mean(np.abs(c.center_at(xs) - k.center_at(xs)))) < STAFF_DUPLICATE_SPACINGS * spacing:
+            return True
+    return False
 
 
 def staff_grid_map(shape: tuple[int, int], curves: list[StaffCurve]) -> np.ndarray:
