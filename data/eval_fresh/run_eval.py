@@ -69,7 +69,7 @@ def phase1(piece: str, n_pages: int, ckm: s3b.ClefKeyModel) -> dict[str, Any]:
             with contextlib.redirect_stdout(log):
                 page = s1.preprocess_score_page(str(photo), keep_unmasked=True)
                 manifest_path = work / f"page{p:02d}_manifest.json"
-                vs = detect_staff_regions([(page.detect, p, page.strip_source)], model_weights=str(YOLO),
+                vs = detect_staff_regions([(page.detect, p, page.strip_source, page)], model_weights=str(YOLO),
                                           output_dir=str(work / "stage2_strips"), save_strips=False, save_viz=True,
                                           viz_dir=str(work / "viz"), manifest_path=str(manifest_path))
         except (ValueError, RuntimeError, cv2.error) as exc:

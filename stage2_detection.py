@@ -13,7 +13,9 @@ from pathlib import Path
 # Ultralytics YOLOv8 — install with: pip install ultralytics
 from ultralytics import YOLO
 
-from stage1_preprocessing import StaffCurve, track_staff_curves
+from typing import Literal
+
+from stage1_preprocessing import PreprocessedPage, StaffCurve, track_staff_curves
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +42,7 @@ STAFFS_PER_SYSTEM = 4
 
 
 def detect_staff_regions(
-    preprocessed_images: list,
+    preprocessed_images: list[tuple[np.ndarray, int, np.ndarray | None, PreprocessedPage]],
     model_weights: str = "staff_detector_files\\weights\\best.pt",
     output_dir: str = "data/strips",
     save_strips: bool = True,
@@ -51,10 +53,9 @@ def detect_staff_regions(
     """Detects staves per page and crops one fixed-height strip per staff.
 
     Args:
-        preprocessed_images: Stage 1 output: (page, page_index), (page, page_index,
-            strip_source) or (page, page_index, strip_source, PreprocessedPage) tuples; the
-            PreprocessedPage's staff_links drive Rule 3.7 (BUG-042); without it every page with
-            staves is rejected as unverified. Boxes are found on ``page``; when a native-
+        preprocessed_images: Stage 1 output (``preprocess_batch``): (page, page_index,
+            strip_source, PreprocessedPage) tuples; the PreprocessedPage's staff_links drive
+            Rule 3.7 (BUG-042), so shorter tuples raise TypeError. Boxes are found on ``page``; when a native-
             resolution ``strip_source`` (same geometry, already lyric-masked) is given, strips
             are cut from it and shrunk to STRIP_HEIGHT with INTER_AREA, so thin glyphs
             (rests, flags, ties) are not lost to the 1600px detection binarization.
@@ -72,6 +73,13 @@ def detect_staff_regions(
     viz_path = Path(viz_dir)
     if save_viz:
         viz_path.mkdir(parents=True, exist_ok=True)
+
+    # Rule 3.7 needs Stage 1's system links. A caller that drops the PreprocessedPage is a
+    # programming error, so it fails here rather than surfacing to the user as a page rejection.
+    for page in preprocessed_images:
+        if len(page) < 4 or not isinstance(page[3], PreprocessedPage):
+            raise TypeError("detect_staff_regions requires (detect, page_index, strip_source, "
+                            "PreprocessedPage) tuples, as returned by preprocess_batch")
 
     model = YOLO(model_weights)
 
@@ -125,7 +133,7 @@ def detect_staff_regions(
         # Rule 3.7: every system must be 4 staves (BUG-042). The count check above passes an
         # 8-staff SSAATTBB or double-choir system, which the 4-at-a-time chunking below would
         # silently turn into two SATB systems.
-        links, grouping_status = _staff_links_for(boxes, page, page_index)
+        links, grouping_status = _staff_links_for(boxes, page[3], page_index)
         if boxes:
             _check_system_grouping(links, page_index, grouping_status)
 
@@ -243,8 +251,11 @@ def _reconcile_with_classical(boxes: list, image_bgr: np.ndarray, page_index: in
     return classical
 
 
-def _staff_links_for(boxes: list[dict], page: tuple,
-                     page_index: int) -> tuple[list[bool | None] | None, str]:
+GroupingStatus = Literal["checked", "partial", "no_tracked_staves"]
+
+
+def _staff_links_for(boxes: list[dict], stage1_page: PreprocessedPage,
+                     page_index: int) -> tuple[list[bool | None] | None, GroupingStatus]:
     """Stage 1's system links for consecutive boxes, matched by position.
 
     Each box takes the nearest Stage 1 staff within MATCH_MAX_CENTER_SPACINGS (the tolerance
@@ -254,17 +265,15 @@ def _staff_links_for(boxes: list[dict], page: tuple,
 
     Returns:
         (links, status). ``links`` has one entry per consecutive box pair (None = unknown), or
-        is None without Stage 1 data. ``status`` goes into the strip manifest: "checked" (every
-        4-staff boundary measured), "partial" (some boundary unknown) or "unchecked_no_stage1";
-        the caller rejects every status but "checked".
+        is None when Stage 1 tracked no staves. ``status`` goes into the strip manifest:
+        "checked" (every 4-staff boundary measured), "partial" (some boundary unknown) or
+        "no_tracked_staves"; the caller rejects every status but "checked".
     """
-    stage1_page = page[3] if len(page) > 3 else None
-    staff_links = getattr(stage1_page, "staff_links", None)
-    link_staves = getattr(stage1_page, "link_staves", None)
-    if staff_links is None or link_staves is None:
+    staff_links, link_staves = stage1_page.staff_links, stage1_page.link_staves
+    if staff_links is None or not link_staves:
         if boxes:
-            logger.warning("page=%d system grouping unchecked: no Stage 1 staff links", page_index)
-        return None, "unchecked_no_stage1"
+            logger.warning("page=%d system grouping unchecked: Stage 1 tracked no staves", page_index)
+        return None, "no_tracked_staves"
     matched: list[int | None] = []
     for b in boxes:
         j = min(range(len(link_staves)), key=lambda k: abs(link_staves[k].center - b["cy"]))
@@ -283,7 +292,7 @@ def _staff_links_for(boxes: list[dict], page: tuple,
 
 
 def _check_system_grouping(links: list[bool | None] | None, page_index: int,
-                           status: str = "checked") -> None:
+                           status: GroupingStatus) -> None:
     """Rejects a page where a system line joins staves across a 4-staff boundary.
 
     Such a join means a system of more than 4 staves (divisi on extra staves, double choir),
@@ -311,6 +320,12 @@ def _check_system_grouping(links: list[bool | None] | None, page_index: int,
                 f"{STAFFS_PER_SYSTEM} staves (e.g. divisi on extra staves or double choir). "
                 f"Only 4-staff open-score SATB systems are supported (see docs/sow.md Section 3)."
             )
+    if status == "no_tracked_staves":
+        raise ValueError(
+            f"[Stage 2] page {page_index}: unsupported_staff_layout — no staves could be traced "
+            f"on the page, so {STAFFS_PER_SYSTEM} staves per system cannot be confirmed (photo "
+            f"may be blurred, cropped or too tilted)."
+        )
     if status != "checked":
         raise ValueError(
             f"[Stage 2] page {page_index}: unsupported_staff_layout — system grouping could not "

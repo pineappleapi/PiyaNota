@@ -480,7 +480,7 @@ def run_page(photo: Path, labels: list[StaffLabel], yolo: Path, work: Path,
         r.extra["rotated_not_dewarped"] = geo.rotated_not_dewarped
     manifest_path = work / f"{photo.stem}_manifest.json"
     try:
-        detect_staff_regions([(page.detect, 0, page.strip_source)], model_weights=str(yolo),
+        detect_staff_regions([(page.detect, 0, page.strip_source, page)], model_weights=str(yolo),
                              output_dir=str(work / "strips"), save_strips=False, save_viz=False,
                              manifest_path=str(manifest_path))
     except ValueError as exc:

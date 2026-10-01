@@ -109,11 +109,11 @@ later stages import functions from earlier ones rather than duplicating logic.
      PreprocessedPage. Stage 2 maps boxes to those staves by position and raises `unsupported_staff_layout` when a
      link crosses a 4-staff boundary (8-staff SSAATTBB/double choir, SATB+piano), instead of re-chunking it into
      two SATB systems. A missing link inside a group of 4 never rejects. A page whose grouping cannot be
-     verified (`partial`: a 4-staff boundary gap unmeasured; `unchecked_no_stage1`: caller passed no
-     PreprocessedPage) is also rejected (user ruling 2026-10-01: scope is 4 staves per system, so callers must pass
-     the 4-tuple). Kept manifest rows carry `system_grouping: checked`. Closed score (2-staff systems) is a known
-     gap, not caught. Validated on synthetic Verovio pages and one real 5-staff SSAATB engraving (Scarborough Fair,
-     rejected); no real 8-staff photo. Pages with >4 staves per system are held out of the dev/test split.
+     verified (`partial`: a 4-staff boundary gap unmeasured; `no_tracked_staves`) is also rejected (user ruling
+     2026-10-01: scope is 4 staves per system). Callers must pass the 4-tuple from `preprocess_batch`; shorter tuples
+     raise `TypeError`. Kept manifest rows carry `system_grouping: checked`. Closed score (2-staff systems) is a known
+     gap, not caught. The link detector's target case is validated on synthetic Verovio pages only; a real 5-staff
+     SSAATB engraving (Scarborough Fair) was rejected by Rule 3.6 / the strict rule, not by a measured link. Pages with >4 staves per system are held out of the dev/test split.
    - **Non-staff-ink masking now lives in Stage 1 (PIYA-121, 2026-09-25; supersedes the earlier Stage 2 mask; BUG-015):** Stage 2 does NOT mask. Strips are cut from the Stage 1 native-resolution strip source (`PreprocessedPage.strip_source`, mapped through the same geometry and dewarp as the 1600 px detection page) with an INTER_AREA shrink to `STRIP_HEIGHT` (BUG-016); since 2026-09-30 that source is grey, not binary (see Stage 1). Known residuals: band-overlapping dust, handwriting, dynamics and left-edge label text survive by design; Stage 3 effect unmeasured.
    Also contains `train_yolov8()` / `evaluate_model()`, reused by `train_staff_detector.py`.
 

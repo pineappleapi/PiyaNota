@@ -17,18 +17,21 @@ Worktree `D:/PiyaNota/.claude/worktrees/piya106-bug042` (base 9eb5752).
 - User rulings: open-score SATB only. A system with more than 4 staves (SSAATTBB, double choir, SATB+piano) is
   rejected (`unsupported_staff_layout`), never re-chunked. A page whose staff count is not divisible by 4 is rejected
   (Rule 3.6, unchanged). A page whose grouping cannot be verified (`partial` / `unchecked_no_stage1`) is also
-  rejected (strict rule, after the restart). Closed score is a known gap, no heuristic. The generic message is fine.
+  rejected (strict rule, after the restart; status `partial` / `no_tracked_staves`). Closed score is a known gap, no heuristic. The generic message is fine.
 - Stage 1 `staff_system_links()` measures system-line links before blanking. Stage 2 Rule 3.7 maps boxes to staves
   by position.
-- **Callers must pass the 4-tuple** `(detect, page_no, strip_source, PreprocessedPage)`; 3-tuple callers now reject
-  every page. Affects `training/eval_clef_key_realval.py`, `data/eval_*` scripts and Phase 1 `cut_corpus.py` (frozen
-  at c77ce7b in the stroke-calibration worktree; must be updated when it moves to the new Stage 2).
-- Checks: pytest 140 passed. Synthetic 8-staff 8/8 rejected, SATB 4/4 accepted. Dev pages 65/76 accepted, all
+- **Callers must pass the 4-tuple** `(detect, page_no, strip_source, PreprocessedPage)`; shorter tuples raise
+  `TypeError`. The in-repo eval scripts are fixed; Phase 1 `cut_corpus.py` (frozen at c77ce7b in the
+  stroke-calibration worktree) must be updated when it moves to the new Stage 2.
+- Checks: pytest 141 passed. Synthetic 8-staff 8/8 rejected, SATB 4/4 accepted. Dev pages 65/76 accepted, all
   `checked`, so the strict rule changes no dev verdict. Strips byte-identical to HEAD. User's real sample
   (Scarborough Fair SSAATB, `C:/Users/paul_/Downloads/8staff_sample.svg`, 3 x 5-staff systems): links measured
-  5+5+5 correctly, rejected by Rule 3.6; its systems stacked into a 20-staff page are rejected by the strict rule.
-- Not done: senior-reviewer re-review of the post-review fixes and the strict rule (required before merge);
-  reviewer Low 5 and "draw viz before raising".
+  5+5+5 correctly, rejected by Rule 3.6; its systems stacked into a 20-staff page are rejected by the strict rule (`partial`), not by a measured link.
+- senior-reviewer re-review (2026-10-01): merge with changes. Fixed in a follow-up commit: fail-fast `TypeError`
+  for short tuples, eval callers, required typed `status`, doc counts. Open: Medium 3 (strict rule + Stage 1's
+  `STAFF_MIN_SPAN_FRAC` = 0.3 rejects pages whose short final system the tracker misses; user decision pending),
+  Low 5, Low 8 (single-system pages labelled `checked`), "draw viz before raising", Low 11 (page-edge line as a
+  false link; watch on held-out photos).
 - Follow-up in the stroke-calibration worktree: chord-plan ruling 5 should say "A implemented on
   `piya106/bug042-system-grouping`, B out of thesis scope". Reconcile its older BUG-042 row there.
 
