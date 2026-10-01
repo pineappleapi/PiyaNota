@@ -78,11 +78,11 @@ Outputs are in `D:/PiyaNota-training/data/phase1_strips/`.
 ### C. Other open user decisions
 
 - **Dev/test split: written 2026-10-01** to `data/piyanota_dataset/dataset_manifest.csv` (`split` column, gitignored;
-  backup `dataset_manifest.pre_split_2026-10-01.csv`): 32 `dev` / 85 `test` / 33 `heldout_scope` (pages with >4-staff
-  systems, eyeballed). Open: magdiwang pg02 (a 3-staff ATB system, labelled test); CLAUDE.md's "TEST-only" line
-  still needs a user-approved amendment naming the dev exception.
-- **BUG-043 (short final systems dropped by Stage 1):** fixed on `piya106/bug042-system-grouping`, uncommitted
-  pending user review. Phase 1 cut stays on the frozen Stage 1 (c77ce7b) until it is unfrozen.
+  backup `dataset_manifest.pre_split_2026-10-01.csv`): 32 `dev` / 84 `test` / 34 `heldout_scope` (pages with systems
+  that are not 4 staves, eyeballed; magdiwang_magpuri pg02, a 3-staff ATB system, held out by user ruling). CLAUDE.md's
+  "TEST-only" line names the dev exception (user-approved 2026-10-01).
+- **BUG-043 (short final systems dropped by Stage 1):** committed 6b2f74d on `piya106/bug042-system-grouping`.
+  Phase 1 cut stays on the frozen Stage 1 (c77ce7b) until it is unfrozen.
 
 ### D. Still queued after B (unchanged)
 
