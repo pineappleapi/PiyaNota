@@ -1179,6 +1179,31 @@ so freezing Stage 1/2 before this step would bake the thick strokes into the tra
      - Remaining 75% by error count (mean errors in brackets): eighth 24.8 (145), sixteenth 12.1 (70.5),
        half 10.5 (61.5), dotted notes 7.2 (42), whole 6.4 (37.5), natural 4.7 (27.5), meter 3.6 (21),
        sharp 2.0 (11.5), dotted rests 1.9 (11), flat 1.8 (10.5).
+   - **Amendment 1 (2026-10-01, user): rests are a target class.** The step 6 table showed only `rest.eighth`
+     and dotted rests, because the other rest classes are each under 1.3% share. Summed over every rest class
+     (camera, from `budget_live.json`), rests are 41 (seed 1) / 42 (seed 2) errors, a 5.3-5.6% share, about the
+     same as dotted notes. Most of that is *false* rests, not missed ones:
+     - common rests are read well: rest.quarter recall 94.7-95.7% (n = 94), rest.eighth 97.4-98.0% (n = 153),
+       rest.whole 91.7-100% (n = 12);
+     - phantom rests: rest.half precision 45-50% (6-7 insertions, n = 11), rest.sixteenth precision 29-39%,
+       multirest 4-5 insertions with none in GT, rest.eighth 6-7 insertions, rest.eighth.dotted 0-3;
+     - dotted rests are misses (already a target): rest.quarter.dotted recall 33-40%, read as dotted notes;
+     - digital: rest.eighth 21-29 and rest.quarter 7-11 insertions (the header-label negative above).
+     **Coverage gap in the choral corpus** (usable strips after the vocabulary guard, 2026-10-01):
+     - Bach (29,715 strips, 5,170 with a rest): quarter 3,665, multirest 2,300, eighth 90, half 40, whole 35;
+     - Palestrina (11,803 strips, 6,886 with a rest): half 6,345, whole 3,822, multirest 303, quarter 9;
+     - **neither has any dotted rest or sixteenth rest**, and eighth rests are almost absent.
+     PrIMuS supplies them (dotted rests in 1,654 held-out samples, see Part B). So the rest target is filled from
+     PrIMuS/CPM replay, not from the choral renders.
+     Proposed handling, pending the user's ruling on the weights:
+     - **DATA:** "rests" as one class at its error count (~30.5 mean errors excluding the dotted rests already
+       counted, so about 5% of the 75% pool). Within it, sample so every rest duration (whole to 32nd, plain and
+       dotted) appears, rather than in proportion to the corpus.
+     - **Negatives:** extend the header-label negative to phantom rests in general (staff-free residue,
+       lyric/label crops in which no rest is drawn).
+     - **Regression metric:** rest precision per class on the held-out set, since the main failure is
+       insertion.
+     Rests are in the CRNN vocabulary already, so this needs no head change.
    - **Amendment rule.** The list and weights may change before Phase 2 training starts, only with a written
      reason in this block. After that, no dev-driven changes: new targets come only from a new, separately
      registered dev round. A later dev gain on these targets is not evidence; the held-out report covers every
