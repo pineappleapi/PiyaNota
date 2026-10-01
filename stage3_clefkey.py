@@ -372,7 +372,9 @@ def decisions_for_pages(pages: Sequence[tuple], manifest: Sequence[dict[str, Any
         by_page.setdefault(m["page"], []).append(m)
     readings: list[ClefKeyReading] = []
     for page in pages:
-        if len(page) < 4 or page[3] is None:
+        # Since BUG-042 preprocess_batch always passes the PreprocessedPage (for staff_links); a
+        # strip source without its unmasked twin means Stage 1 ran without keep_unmasked.
+        if len(page) < 4 or page[3] is None or (page[2] is not None and page[3].strip_unmasked is None):
             raise ValueError(f"page {page[1]}: no PreprocessedPage; run preprocess_batch(keep_unmasked=True)")
         readings += classify_page(page[3], by_page.get(page[1], []), ckm)
     return decide(readings, ckm), readings

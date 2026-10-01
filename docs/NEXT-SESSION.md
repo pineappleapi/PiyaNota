@@ -4,7 +4,92 @@ Handoff doc for continuing PiyaNota work in a fresh session. Read this first; it
 full detail rather than repeating it. Written 2026-09-14, rewritten 2026-09-16, rewritten 2026-09-19,
 rewritten 2026-09-24, top sections added 2026-09-28.
 
-## SER < 15% plan (2026-09-29, newest, read first)
+## 2026-10-01 session: paused for a PC restart (newest, read first)
+
+BUG-042 (section A) is committed; the rest is uncommitted on disk in two worktrees. Session scratch files are archived at
+`D:/PiyaNota-training/session_archive/2026-10-01_job61611c36/` (copy of the job tmp folder; `p1/cut/` = Phase 1
+cut scripts and patches; `bug042_*` = BUG-042 check scripts).
+
+### A. BUG-042 system grouping: committed on `piya106/bug042-system-grouping` (2026-10-01, user-approved), not merged
+
+Worktree `D:/PiyaNota/.claude/worktrees/piya106-bug042` (base 9eb5752).
+
+- User rulings: open-score SATB only. A system with more than 4 staves (SSAATTBB, double choir, SATB+piano) is
+  rejected (`unsupported_staff_layout`), never re-chunked. A page whose staff count is not divisible by 4 is rejected
+  (Rule 3.6, unchanged). A page whose grouping cannot be verified (`partial` / `unchecked_no_stage1`) is also
+  rejected (strict rule, after the restart). Closed score is a known gap, no heuristic. The generic message is fine.
+- Stage 1 `staff_system_links()` measures system-line links before blanking. Stage 2 Rule 3.7 maps boxes to staves
+  by position.
+- **Callers must pass the 4-tuple** `(detect, page_no, strip_source, PreprocessedPage)`; 3-tuple callers now reject
+  every page. Affects `training/eval_clef_key_realval.py`, `data/eval_*` scripts and Phase 1 `cut_corpus.py` (frozen
+  at c77ce7b in the stroke-calibration worktree; must be updated when it moves to the new Stage 2).
+- Checks: pytest 140 passed. Synthetic 8-staff 8/8 rejected, SATB 4/4 accepted. Dev pages 65/76 accepted, all
+  `checked`, so the strict rule changes no dev verdict. Strips byte-identical to HEAD. User's real sample
+  (Scarborough Fair SSAATB, `C:/Users/paul_/Downloads/8staff_sample.svg`, 3 x 5-staff systems): links measured
+  5+5+5 correctly, rejected by Rule 3.6; its systems stacked into a 20-staff page are rejected by the strict rule.
+- Not done: senior-reviewer re-review of the post-review fixes and the strict rule (required before merge);
+  reviewer Low 5 and "draw viz before raising".
+- Follow-up in the stroke-calibration worktree: chord-plan ruling 5 should say "A implemented on
+  `piya106/bug042-system-grouping`, B out of thesis scope". Reconcile its older BUG-042 row there.
+
+### B. Phase 1 training-data cut (Bach / Palestrina): blocked, the re-smoke failed
+
+Code is in worktree `D:/PiyaNota/.claude/worktrees/piya106-stroke-calibration`, uncommitted:
+`training/phase1/cut_corpus.py` (frozen hash 18b26dff...) and `training/phase1/camera_page_stats.py` (0155592a...).
+Outputs are in `D:/PiyaNota-training/data/phase1_strips/`.
+
+- smoke50 (40% page drop) led to fixes, then smoke50b. The full Bach run was launched without review, then
+  stopped by me with 0 pages cut.
+- **ml-cv-lead review (2026-10-01)** of the recalibration:
+  - (a) Photographed-pages denominator: GO, but report structural skips, structural-band failures and
+    augmentation drops separately.
+  - (b) Short final systems (0.20-0.60 page width), found or not: GO.
+  - (c) Contrast: NO-GO, far too faint (93% of staves in the camera's bottom quartile). Add ISP sharpening,
+    recalibrate noise, measure paper/illumination on paper only.
+  - (d) Thicker lines with reduced weight. I later approved 2.6-4.2 at P=0.30 (amendment), with survival-by-
+    thickness checks.
+  - (e) Staff tolerance of 4 interlines: GO, with an identity margin of at least 2 interlines.
+  - (f) Replace the STAFF_OFFSET_P99 gate with identity margin + registration-failure share. Do not cite curl.
+  - Process rules: never loosen pre-registered thresholds. Tune only against camera page stats. The gate is
+    re-smoke passes, then review, then full run. Palestrina needs its own smoke of at least 50 pages.
+  - The full verdict and the 10 re-smoke checks are in the session transcript. Summary: checks 1-10 =
+    original checks; at least 25%/25%/30% of staves at or above the camera p50 (line depth, line/head, head);
+    noise tail at most 0.15; FWHM share above camera p95 between 0.05 and 0.20; paper/illumination p50 inside
+    the camera IQR; identity margin; drop_by_param at most 2x; structural loss reported; visual check;
+    timing.
+- **bach_smoke100c** (seed 20261002) was killed at page 70 of 120 for low system memory (17 GB machine, about
+  3.8 GB free; Opera was using about 2 GB). The partial report
+  (`<archive>/p1/cut/partial100c/report.json`) shows checks failing:
+  - Line depth: 0.16 at or above p50 (needs 0.25). Line/head: 0.20 (needs 0.25).
+  - Noise tail: 0.21 (at most 0.15).
+  - FWHM above p95: 0.010 (needs 0.05-0.20).
+  - Paper grey p50: 208 (camera IQR 215-226).
+  - drop_by_param: 3x (but only 1 drop).
+  - Passing: identity margin (min 6.8 interlines), feature drops, bias, page drops (0.185), illumination.
+  - Known bias: 14.5% of labelled systems are never cut, all of them final systems.
+- **Recommended next step (awaiting user):** don't resume smoke100c. Have ml-cv-lead set the next recalibration
+  from the partial numbers, then run one more re-smoke into a new folder with memory freed first. Resume command
+  if the user wants it anyway: `python training/phase1/cut_corpus.py run --out
+  D:/PiyaNota-training/data/phase1_strips/bach_smoke100c --prefix bach_ --smoke 120 --stats` (skips finished
+  pages).
+
+### C. Other open user decisions
+
+- **Dev/test policy:** fill the `split` column in `data/piyanota_dataset/dataset_manifest.csv` (dev = every page of
+  DSMN, Gaano, Handog, Honneur and Non Nobis; test = the rest), and amend CLAUDE.md's "TEST-only" line to name
+  the dev exception. The camera stats come from those 5 dev pieces only (verified), all from one phone.
+- **New bug to log:** Stage 1's `STAFF_MIN_SPAN_FRAC` (staves narrower than 0.3 of the frame are not tracked)
+  drops real short final systems at inference too.
+
+### D. Still queued after B (unchanged)
+
+The data mix build (CPM IDs excluded, targeted sampler, negatives), a hand-check of 30 CPM relabels, the notebook
+DataLoader seeding fix, ml-cv-lead review, upload, the 2-seed Kaggle run and an `e6_grey.py` rerun. Then the
+chord/tuplet arm (control run, fresh held-out set) and Phases 3-4. Earlier rulings: chords in all voices; a
+control run; test the chord model on a fresh held-out set; no DeepScoresV2; a divisi chord plays both notes;
+Palestrina G1b hand-check 10/10.
+
+## SER < 15% plan (2026-09-29)
 
 **The plan is `docs/decisions/piya-106-ser-15-plan.md`.** Branch `piya106/ser15-header-rule` is not merged.
 

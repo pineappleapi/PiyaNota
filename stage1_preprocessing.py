@@ -4,7 +4,7 @@ PiyaNota - Stage 1: Image Preprocessing Pipeline
 
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import cv2
 import numpy as np
@@ -187,6 +187,17 @@ MASK_STAFFLIKE_MIN_WIDTH_FRAC = 0.15  # x page width
 MASK_STAFFLIKE_MIN_RUNS = 3
 STAFFLIKE_RUN_SPACINGS = 6.0  # a 'long horizontal run' is at least this many line spacings
 
+# System grouping (BUG-042). The staves of one system are joined at their left end by the system
+# line and bracket; staves of different systems are not. Stage 2 used to cut staves into fixed
+# groups of 4, so an 8-staff (SSAATTBB / double-choir) system became two SATB systems. Measured on
+# the dewarped page BEFORE border and lyric blanking, which erase the bracket and the ink between
+# staves. Values set on synthetic Verovio pages and dev photos (eval_prelim, Both Sides Now).
+SYSTEM_LINK_WINDOW_LEFT_SPACINGS = 3.0   # x line spacing; search starts this far left of the leftmost staff start
+SYSTEM_LINK_WINDOW_RIGHT_SPACINGS = 1.0  # ...and ends this far right of the pair's later staff start
+SYSTEM_LINK_INSET_SPACINGS = 0.5  # gap rows this close to a staff are skipped (clef tails, bracket hooks)
+SYSTEM_LINK_MAX_WIDTH_SPACINGS = 1.0  # median row width of a connector; wider = shadow/blob, not a line
+SYSTEM_LINK_MIN_GAP_ROWS = 2  # px; a narrower gap between staves cannot be measured (link = None)
+
 
 @dataclass
 class StaffCurve:
@@ -267,6 +278,12 @@ class PreprocessedPage:
             the analog reference thin-glyph fidelity is measured against.
         strip_binary: The masked native binary page the mask was decided on (ink = 0); kept-ink
             reference for mask audits. None when ``strip_source`` is None.
+        staff_links: One entry per pair of vertically adjacent tracked staves, top to bottom:
+            True if a system line/bracket joins them (same system), False if not, None if the
+            gap could not be measured. None when no staves were tracked. Stage 2 uses it to
+            reject systems that are not 4 staves (BUG-042).
+        link_staves: The staves ``staff_links`` refers to, same order, with centers in ``detect``
+            coordinates (the grid rotation applied), so Stage 2 can match its boxes by position.
     """
     detect: np.ndarray
     strip_source: np.ndarray | None
@@ -277,6 +294,56 @@ class PreprocessedPage:
     strip_staves: list[StaffBand] | None = None
     strip_gray: np.ndarray | None = None
     strip_binary: np.ndarray | None = None
+    staff_links: list[bool | None] | None = None
+    link_staves: list[StaffBand] | None = None
+
+
+def staff_system_links(binary: np.ndarray, staves: list[StaffBand],
+                       x_starts: list[float]) -> list[bool | None]:
+    """Says, for each pair of adjacent staves, whether a system line or bracket joins them.
+
+    The test is a connected ink component that crosses the whole gap between the two staves near
+    their left end and is narrow in most rows. Row width uses the median so bracket hooks at the
+    ends of a system do not count against it, while a page-edge shadow (wide in every row) does.
+    The window starts left of the page's leftmost staff start rather than this pair's, because the
+    tracker's first observed column can sit past the clef on some staves.
+
+    Args:
+        binary: Dewarped binary page before border/lyric blanking (ink = 0).
+        staves: Tracked staves in the page's current geometry, sorted top to bottom.
+        x_starts: First observed column of each staff's lines, same order as ``staves``.
+
+    Returns:
+        len(staves) - 1 entries: True (joined), False (not joined) or None (gap too small or
+        window empty to measure).
+    """
+    ink = (binary == 0).astype(np.uint8)
+    height, width = ink.shape
+    page_start = min(x_starts) if x_starts else 0.0
+    links: list[bool | None] = []
+    for upper, lower, x_u, x_l in zip(staves, staves[1:], x_starts, x_starts[1:]):
+        spacing = min(upper.spacing, lower.spacing)
+        x_lo = max(0, int(page_start - SYSTEM_LINK_WINDOW_LEFT_SPACINGS * spacing))
+        x_hi = min(width, int(max(x_u, x_l) + SYSTEM_LINK_WINDOW_RIGHT_SPACINGS * spacing))
+        half = (STAFF_LINES_PER_STAFF - 1) / 2.0 + SYSTEM_LINK_INSET_SPACINGS
+        y_lo = max(0, int(math.ceil(upper.center + half * upper.spacing + upper.slack)))
+        y_hi = min(height - 1, int(math.floor(lower.center - half * lower.spacing - lower.slack)))
+        if y_hi - y_lo < SYSTEM_LINK_MIN_GAP_ROWS or x_hi <= x_lo:
+            links.append(None)
+            continue
+        gap = ink[y_lo:y_hi + 1, x_lo:x_hi]
+        n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(gap, connectivity=8)
+        joined = False
+        for label in range(1, n_labels):
+            top, comp_h = stats[label, cv2.CC_STAT_TOP], stats[label, cv2.CC_STAT_HEIGHT]
+            if top != 0 or comp_h != gap.shape[0]:
+                continue
+            row_width = float(np.median((labels == label).sum(axis=1)))
+            if row_width <= SYSTEM_LINK_MAX_WIDTH_SPACINGS * spacing:
+                joined = True
+                break
+        links.append(joined)
+    return links
 
 
 def _band_row_mask(height: int, staves: list[StaffBand], tol_spacings: float) -> np.ndarray:
@@ -613,6 +680,10 @@ def preprocess_score_page(
         spacing=float(np.median(c.spacing_at(np.linspace(c.x_min, c.x_max, 32)))),
         slack=0.0 if dewarped else c.drift_px / 2.0) for c in curves]
     pre_blank = binary.copy()
+    # Measured before the border/lyric blanking below, which erases the bracket (BUG-042).
+    by_center = sorted(zip(staves, curves), key=lambda sc: sc[0].center)
+    staff_links = (staff_system_links(pre_blank, [s for s, _ in by_center],
+                                      [c.x_min for _, c in by_center]) if by_center else None)
     border_rows = _border_rows_to_blank(binary, BORDER_TOP_PX, BORDER_BOTTOM_PX)
     binary[border_rows, :] = 255
     left_px = min(BORDER_LEFT_PX, binary.shape[1])
@@ -673,6 +744,7 @@ def preprocess_score_page(
     corrected, h_angle, v_angle = correct_to_grid(binary, bgr, apply_rotation=not dewarped)
     _dbg_save(save_debug, img_path, corrected, "4_corrected")
     print(f"[Stage 1] '{img_path.name}' -> h={h_angle:.2f} deg v={v_angle:.2f} deg")
+    link_staves = _staves_in_detect_coords(by_center, binary.shape, h_angle, v_angle, dewarped)
     if strip_source is not None and not dewarped:
         rot = grid_correction_deg(h_angle, v_angle)
         if abs(rot) > GRID_ROTATION_MIN_DEG:
@@ -692,7 +764,26 @@ def preprocess_score_page(
 
     return PreprocessedPage(corrected, strip_source, h_angle, remove is not None, removed_px,
                             unmasked if keep_unmasked else None, hi_staves if keep_unmasked else None,
-                            strip_gray if keep_unmasked else None, strip_binary)
+                            strip_gray if keep_unmasked else None, strip_binary, staff_links,
+                            link_staves)
+
+
+def _staves_in_detect_coords(by_center: list[tuple[StaffBand, StaffCurve]], shape: tuple[int, ...],
+                             h_angle: float, v_angle: float, dewarped: bool) -> list[StaffBand] | None:
+    """Moves the link staves into the detection page's frame, which correct_to_grid may rotate.
+
+    Uses the same rotation (center, angle, threshold) as correct_to_grid; each staff's center is
+    taken at the middle of its tracked extent.
+    """
+    if not by_center:
+        return None
+    rot = grid_correction_deg(h_angle, v_angle)
+    if dewarped or abs(rot) <= GRID_ROTATION_MIN_DEG:
+        return [StaffBand(center=s.center, spacing=s.spacing) for s, _ in by_center]
+    h, w = shape[:2]
+    m = cv2.getRotationMatrix2D((w // 2, h // 2), -rot, 1.0)
+    return [StaffBand(center=float(m[1, 0] * (c.x_min + c.x_max) / 2.0 + m[1, 1] * s.center + m[1, 2]),
+                      spacing=s.spacing) for s, c in by_center]
 
 
 def _build_strip_source(hi: np.ndarray, bg: np.ndarray, map_y: np.ndarray | None,
@@ -1699,11 +1790,11 @@ def preprocess_batch(image_dir: str, output_dir: str, save_debug: bool = False,
     """Runs Stage 1 on every image in ``image_dir``.
 
     Args:
-        keep_unmasked: Also keep each page's unmasked native image and tracked staves and append the
-            PreprocessedPage as a 4th tuple element; ClefKeyNet crops from it (stage3_clefkey).
+        keep_unmasked: Also keep each page's unmasked native image and tracked staves in the
+            PreprocessedPage; ClefKeyNet crops from it (stage3_clefkey).
 
     Returns:
-        (detection page, page index, native strip source or None[, PreprocessedPage]) per image.
+        (detection page, page index, native strip source or None, PreprocessedPage) per image.
     """
     input_path = Path(image_dir)
     output_path = Path(output_dir)
@@ -1727,10 +1818,11 @@ def preprocess_batch(image_dir: str, output_dir: str, save_debug: bool = False,
             src_file = output_path / f"page_{i:03d}_strip_source.png"
             cv2.imwrite(str(src_file), page.strip_source)
             print(f"  Saved -> {src_file}")
-        # (detection page, page index, native strip source or None); Stage 2 accepts 2-tuples too and
-        # ignores the 4th element.
-        results.append((page.detect, i, page.strip_source, page) if keep_unmasked
-                       else (page.detect, i, page.strip_source))
+        # (detection page, page index, native strip source or None, PreprocessedPage). Stage 2 reads
+        # staff_links from the 4th element (BUG-042) and still accepts 2-/3-tuples. Without
+        # keep_unmasked the native audit binary is dropped so a batch does not hold one per page.
+        results.append((page.detect, i, page.strip_source,
+                        page if keep_unmasked else replace(page, strip_binary=None)))
 
     print(f"\n[Stage 1] Preprocessed {len(results)} page(s). Output: {output_dir}")
     return results
