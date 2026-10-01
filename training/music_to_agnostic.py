@@ -26,6 +26,7 @@ import argparse
 import sys
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
+from fractions import Fraction
 from pathlib import Path
 from typing import Literal
 
@@ -78,6 +79,9 @@ METER_SYM_POSITION = 4                                        # L3
 METER_COUNT_POSITION = 6                                      # L4
 METER_UNIT_POSITION = 2                                       # L2
 BARLINE_POSITION = 0                                          # L1
+# Verovio 6.3 draws a whole-bar rest (<mRest>) as a breve rest once the bar holds two whole notes or more (4/2,
+# 2/1, 8/4, 9/4 ...; probed over meters up to 8/2, it never uses a longa rest), else as a whole rest.
+MREST_BREVE_FROM_WHOLES = Fraction(2)
 FERMATA_ABOVE_POSITION = 11                                   # S6 in CPM gold whatever the note height
 METER_SYM_GLYPH: dict[str, str] = {"common": "C", "cut": "C/"}
 BARLINES_WRITTEN: frozenset[str] = frozenset({"single", "dbl", "end", "rptend", "rptstart", "rptboth", "dashed"})
@@ -104,6 +108,13 @@ class StaffState:
     clef_line: int = 2
     key_sig: str = "0"
     meter: tuple[str, ...] = ()
+    # Bar length in whole notes, kept apart from `meter` because a signature drawn as a symbol (C) can still
+    # carry count/unit, and the whole-bar rest glyph follows the length, not the symbol. None: not numeric.
+    bar_wholes: Fraction | None = Fraction(1)
+    # Diatonic steps from sounding to drawn position. A treble-8vb clef (clef.dis="8" place below) is +7: Verovio
+    # keeps @oct as the sounding octave and draws C4 where a plain treble clef draws C5. The token stays the drawn
+    # clef (clef.G-L2); Stage 3's tenor rule adds the octave back.
+    clef_dis: int = 0
 
     @property
     def clef_token(self) -> str:
@@ -113,7 +124,8 @@ class StaffState:
         if self.clef_shape not in CLEF_REFERENCE_DIATONIC:
             raise ConversionError(f"clef shape {self.clef_shape!r}")
         reference = 2 * (self.clef_line - 1)
-        return reference + octave * DIATONIC_PER_OCTAVE + STEPS.index(pname) - CLEF_REFERENCE_DIATONIC[self.clef_shape]
+        return (reference + octave * DIATONIC_PER_OCTAVE + STEPS.index(pname)
+                - CLEF_REFERENCE_DIATONIC[self.clef_shape] + self.clef_dis)
 
     def key_alter(self, pname: str) -> int:
         count, kind = _parse_key_sig(self.key_sig)
@@ -151,6 +163,24 @@ def _key_sig_tokens(clef_token: str, key_sig: str) -> list[str]:
     return [f"accidental.{glyph}-{position_suffix(p)}" for p in positions[:count]]
 
 
+def _key_change_tokens(clef_token: str, old_key: str, new_key: str, dialect: Dialect) -> list[str]:
+    """Glyphs drawn for a key change.
+
+    Verovio 6.3 (no @cancelaccid) draws only the new signature, except that a change to no key would draw
+    nothing, so it draws naturals on the old signature's positions instead (checked by probe on 2s->0, 2s->1s,
+    1f->3f, 3f->1s, 0->2f, mid-system and at a break). PrIMuS behaviour is left as it was: CPM has no such case.
+    """
+    old_count, old_kind = _parse_key_sig(old_key)
+    new_count, _ = _parse_key_sig(new_key)
+    if dialect == "verovio" and new_count == 0 and old_count > 0:
+        if clef_token not in KEYSIG_POSITIONS:
+            raise ConversionError(f"no key-signature table for {clef_token}")
+        sharps, flats = KEYSIG_POSITIONS[clef_token]
+        positions = sharps if old_kind == "s" else flats
+        return [f"accidental.natural-{position_suffix(p)}" for p in positions[:old_count]]
+    return _key_sig_tokens(clef_token, new_key)
+
+
 def _meter_tokens(meter: tuple[str, ...]) -> list[str]:
     if not meter:
         return []
@@ -176,6 +206,20 @@ def _meter_from(el: ET.Element) -> tuple[str, ...] | None:
     return None
 
 
+def _bar_wholes(count: str | None, unit: str | None, sym: str | None) -> Fraction | None:
+    """Bar length in whole notes; C and cut C without count/unit are one whole note, as Verovio assumes."""
+    if count is not None and unit is not None:
+        return Fraction(int(count), int(unit)) if count.isdigit() and unit.isdigit() and int(unit) else None
+    return Fraction(1) if sym in METER_SYM_GLYPH else None
+
+
+def _bar_wholes_from(el: ET.Element) -> Fraction | None:
+    child = el.find(f"{{{MEI_NS}}}meterSig")
+    if child is not None:
+        return _bar_wholes(child.attrib.get("count"), child.attrib.get("unit"), child.attrib.get("sym"))
+    return _bar_wholes(el.attrib.get("meter.count"), el.attrib.get("meter.unit"), el.attrib.get("meter.sym"))
+
+
 def _key_from(el: ET.Element) -> str | None:
     if "key.sig" in el.attrib:
         return el.attrib["key.sig"]
@@ -185,12 +229,27 @@ def _key_from(el: ET.Element) -> str | None:
     return None
 
 
-def _clef_from(el: ET.Element) -> tuple[str, int] | None:
+CLEF_DIS_STEPS: dict[str, int] = {"8": DIATONIC_PER_OCTAVE, "15": 2 * DIATONIC_PER_OCTAVE}
+
+
+def _clef_dis(dis: str | None, place: str | None) -> int:
+    """Drawn-minus-sounding diatonic offset of an octave clef; 0 when the clef has no displacement."""
+    if dis is None:
+        return 0
+    if dis not in CLEF_DIS_STEPS or place not in ("above", "below"):
+        raise ConversionError(f"clef dis {dis!r} place {place!r}")
+    return CLEF_DIS_STEPS[dis] if place == "below" else -CLEF_DIS_STEPS[dis]
+
+
+def _clef_from(el: ET.Element) -> tuple[str, int, int] | None:
+    """(shape, line, displacement offset) declared on a scoreDef/staffDef, as attributes or a <clef> child."""
     if "clef.shape" in el.attrib:
-        return el.attrib["clef.shape"], int(el.attrib["clef.line"])
+        return (el.attrib["clef.shape"], int(el.attrib["clef.line"]),
+                _clef_dis(el.attrib.get("clef.dis"), el.attrib.get("clef.dis.place")))
     child = el.find(f"{{{MEI_NS}}}clef")
     if child is not None and "shape" in child.attrib:
-        return child.attrib["shape"], int(child.attrib["line"])
+        return (child.attrib["shape"], int(child.attrib["line"]),
+                _clef_dis(child.attrib.get("dis"), child.attrib.get("dis.place")))
     return None
 
 
@@ -290,6 +349,16 @@ class _Reader:
         self.out.append(f"rest.{DUR_NAME[dur]}-{position_suffix(p)}")
         self._dots(el, p)
 
+    def mrest(self) -> None:
+        """A whole-bar rest. PrIMuS draws it as a whole rest; Verovio switches glyph with the bar length."""
+        dur = "1"
+        if self.dialect == "verovio":
+            if self.state.bar_wholes is None:
+                raise ConversionError(f"whole-bar rest under meter {self.state.meter}")
+            if self.state.bar_wholes >= MREST_BREVE_FROM_WHOLES:
+                dur = "breve"
+        self.out.append(f"rest.{DUR_NAME[dur]}-{position_suffix(REST_POSITION[dur])}")
+
     def multirest(self, el: ET.Element) -> None:
         num = el.attrib.get("num", "1")
         self.out += [f"digit.{ch}-{position_suffix(MULTIREST_DIGIT_POSITION)}" for ch in num]
@@ -301,6 +370,7 @@ class _Reader:
 
     def clef(self, el: ET.Element) -> None:
         self.state.clef_shape, self.state.clef_line = el.attrib["shape"], int(el.attrib["line"])
+        self.state.clef_dis = _clef_dis(el.attrib.get("dis"), el.attrib.get("dis.place"))
         self.out.append(self.state.clef_token)
 
     def inline_def(self, el: ET.Element) -> None:
@@ -310,10 +380,11 @@ class _Reader:
             meter: tuple[str, ...] = (("sym", sym) if sym in METER_SYM_GLYPH
                                       else ("num", el.attrib.get("count", ""), el.attrib.get("unit", "")))
             self.state.meter = meter
+            self.state.bar_wholes = _bar_wholes(el.attrib.get("count"), el.attrib.get("unit"), sym)
             self.out += _meter_tokens(meter)
         else:
-            self.state.key_sig = el.attrib.get("sig", "0")
-            self.out += _key_sig_tokens(self.state.clef_token, self.state.key_sig)
+            old_key, self.state.key_sig = self.state.key_sig, el.attrib.get("sig", "0")
+            self.out += _key_change_tokens(self.state.clef_token, old_key, self.state.key_sig, self.dialect)
 
     def walk(self, parent: ET.Element, beam_notes: list[ET.Element] | None = None) -> None:
         for el in parent:
@@ -329,7 +400,7 @@ class _Reader:
             elif tag == "multiRest":
                 self.multirest(el)
             elif tag == "mRest":
-                self.out.append(f"rest.whole-{position_suffix(REST_POSITION['1'])}")
+                self.mrest()
             elif tag == "beam":
                 notes = [n for n in el.iter(f"{{{MEI_NS}}}note")]
                 self.walk(el, notes)
@@ -353,7 +424,7 @@ def _apply_def(state: StaffState, el: ET.Element) -> tuple[bool, bool]:
     """Apply a scoreDef/staffDef to the state; return (key changed, meter changed)."""
     clef = _clef_from(el)
     if clef is not None:
-        state.clef_shape, state.clef_line = clef
+        state.clef_shape, state.clef_line, state.clef_dis = clef
     key, meter = _key_from(el), _meter_from(el)
     key_changed = key is not None and key != state.key_sig
     if key is not None:
@@ -361,6 +432,7 @@ def _apply_def(state: StaffState, el: ET.Element) -> tuple[bool, bool]:
     meter_changed = meter is not None
     if meter is not None:
         state.meter = meter
+        state.bar_wholes = _bar_wholes_from(el)
     return key_changed, meter_changed
 
 
@@ -445,6 +517,7 @@ def convert_staff(mei_path: Path, staff_n: str = "1", dialect: Dialect = "primus
         if tag in ("sb", "pb"):
             system_start = True
         elif tag == "scoreDef":
+            old_key = state.key_sig
             key_changed, meter_changed = _apply_def(state, el)
             for staff_def in el.iter(f"{{{MEI_NS}}}staffDef"):
                 if staff_def.attrib.get("n") == staff_n:
@@ -456,7 +529,7 @@ def convert_staff(mei_path: Path, staff_n: str = "1", dialect: Dialect = "primus
                 first_def = False
             else:
                 if key_changed:
-                    defs += _key_sig_tokens(state.clef_token, state.key_sig)
+                    defs += _key_change_tokens(state.clef_token, old_key, state.key_sig, dialect)
                 if meter_changed:
                     defs += _meter_tokens(state.meter)
                     meter_change = True
@@ -497,8 +570,9 @@ def split_systems(measures: list[MeasureTokens]) -> list[list[str]]:
     """Token stream per system, cut at the encoded system/page breaks.
 
     A continuation system opens with clef + key and no meter, as engraved scores do; a meter change that falls
-    on the break is still written. Unvalidated beyond CPM: courtesy key/meter glyphs Verovio may draw at the end
-    of the previous system are not labelled, which the G1b spot-check of rendered strips must confirm.
+    on the break is still written. A key or meter change on the break is also drawn as a courtesy signature after
+    the last barline of the previous system (Verovio 6.3 always does this, checked per render by
+    `training/phase1/svg_check.py`), so the change tokens are appended there as well.
     """
     systems: list[list[str]] = []
     for i, m in enumerate(measures):
@@ -506,6 +580,7 @@ def split_systems(measures: list[MeasureTokens]) -> list[list[str]]:
             systems.append(list(m.tokens))
             continue
         if m.system_start:
+            systems[-1] += m.defs
             header = m.state_before.header(with_meter=False)
             if m.meter_change:
                 header += _meter_tokens(m.state_before.meter)

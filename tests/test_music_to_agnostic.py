@@ -109,3 +109,42 @@ def test_chord_is_refused(tmp_path: Path) -> None:
     layer = '<chord dur="4"><note pname="g" oct="4"/><note pname="b" oct="4"/></chord>'
     with pytest.raises(ConversionError):
         convert_file(_mei(tmp_path, _treble(), _measure(layer)))
+
+
+def test_treble_8vb_positions_follow_the_drawn_clef(tmp_path: Path) -> None:
+    # Verovio keeps @oct sounding and draws C4 under a G-8vb clef where a treble clef draws C5 (third space).
+    score_def = ('<scoreDef key.sig="0" meter.count="4" meter.unit="4"><staffGrp><staffDef n="1" lines="5" '
+                 'clef.shape="G" clef.line="2" clef.dis="8" clef.dis.place="below"/></staffGrp></scoreDef>')
+    mei = _mei(tmp_path, score_def, _measure('<note pname="c" oct="4" dur="1"/>'))
+    assert convert_file(mei, dialect="verovio") == ["clef.G-L2", "digit.4-L4", "digit.4-L2", "note.whole-S3",
+                                                    "barline-L1"]
+
+
+def test_verovio_key_change_to_no_key_draws_naturals(tmp_path: Path) -> None:
+    measures = (_measure('<note pname="g" oct="4" dur="1"/>') + '<scoreDef key.sig="0"/>'
+                + _measure('<note pname="g" oct="4" dur="1"/>'))
+    mei = _mei(tmp_path, _treble("2s"), measures)
+    assert convert_file(mei, dialect="verovio")[7:10] == ["accidental.natural-L5", "accidental.natural-S3",
+                                                          "note.whole-L2"]
+
+
+def test_key_and_meter_change_at_break_get_courtesy_signature(tmp_path: Path) -> None:
+    measures = (_measure('<note pname="g" oct="4" dur="1"/>') + '<sb/><scoreDef key.sig="1f" meter.sym="cut"/>'
+                + _measure('<note pname="g" oct="4" dur="1"/>'))
+    systems = split_systems(convert_staff(_mei(tmp_path, _treble("1s"), measures), dialect="verovio"))
+    assert systems == [["clef.G-L2", "accidental.sharp-L5", "digit.4-L4", "digit.4-L2", "note.whole-L2",
+                        "barline-L1", "accidental.flat-L3", "metersign.C/-L3"],
+                       ["clef.G-L2", "accidental.flat-L3", "metersign.C/-L3", "note.whole-L2", "barline-L1"]]
+
+
+def test_whole_bar_rest_follows_bar_length_in_verovio_dialect(tmp_path: Path) -> None:
+    """Verovio draws <mRest> as a breve rest in a bar of two whole notes or more (Palestrina's 4/2); PrIMuS never."""
+    mrest = _measure("<mRest/>")
+    breve_bar = _mei(tmp_path, _treble(meter='meter.count="4" meter.unit="2"'), mrest)
+    assert convert_file(breve_bar, dialect="verovio")[-2] == "rest.double_whole-L3"
+    assert convert_file(breve_bar, dialect="primus")[-2] == "rest.whole-L4"
+    three_two = _mei(tmp_path, _treble(meter='meter.count="3" meter.unit="2"'), mrest)
+    assert convert_file(three_two, dialect="verovio")[-2] == "rest.whole-L4"
+    # An inline change to 2/1 switches the glyph for the rest after it.
+    change = _measure('<meterSig count="2" unit="1"/><mRest/>')
+    assert convert_file(_mei(tmp_path, _treble(), change), dialect="verovio")[-2] == "rest.double_whole-L3"

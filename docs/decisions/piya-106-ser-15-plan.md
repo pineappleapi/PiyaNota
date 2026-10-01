@@ -985,7 +985,256 @@ so freezing Stage 1/2 before this step would bake the thick strokes into the tra
    - **Frozen: Stage 1/2 at commit 9b9e12f** (`stage1_preprocessing.py` and `stage2_detection.py` are unchanged
      after it; branch head e3fdf2d). Phase 1 cutting and every Phase 2 input use exactly this code. Any change to
      either file un-freezes step 5 and needs re-review.
+   - **Stage 1 un-frozen for BUG-039 by user decision on 2026-09-30, to be re-frozen at the fix commit. Phase 1
+     cutting waits for that.** The fix (uncommitted) keeps each staff's end, plus 2 spacings, out of the right
+     border blank. Digital strips are byte-identical; 72 camera strips change (dev decode in BUG-039).
 6. **Redo the per-class error budget** on the chosen strips before choosing Phase 1/2 oversampling targets.
+
+   **Step 6 result (2026-09-30, dev data, diagnostic only).**
+   - **Purpose.** This decode only chooses oversampling targets. It is never used to re-choose the strip source,
+     which step 5 froze.
+   - **Setup.**
+     - Stage 1/2 at 9b9e12f were re-run on the 42 eval_prelim cache pages. All 388 strips are byte-identical to
+       the `paper_fill()` parity strips.
+     - One decode per seed on the same GT strips as `hyp_decode` (camera 227, digital 100), along the same path:
+       greedy, then the E1b header rule, then version_b with the stored ClefKeyNet records, then `score_strip`.
+     - Camera and digital are never pooled; seeds are given as a-b ranges.
+     - Errors are charged to classes on `score_strip`'s own alignment, asserted to sum to tok_err:
+       - substitutions and deletions go to the GT class; insertions go to the hyp class;
+       - beamed notes are grouped by duration.
+     - Ties are scored in a second alignment that keeps slurs. They sit outside SER.
+     - Cross-check: the same script run on `hyp_decode`'s E7 hard-fill arm reproduces the stored E7 pitch numbers.
+   - **Headline.**
+     - Camera: SER 15.6-16.2%, pitch recall 88.7-89.8%, note precision 70.3-71.9%.
+     - Digital: SER 14.9-15.7%, pitch recall 90.7-91.0%, note precision 69.0-69.4%.
+     - No strips were missed.
+   - **Pitch misses** (s1/s2):
+     - Camera:
+       - alteration-only 88/90 (GT natural 56/61, GT sharp 26/26); 52/54 of these are in mask Q1, mostly the Honneur p3 key from BUG-037;
+       - position ±1 63/62; ±2 or more 101/80; no hyp 34/26.
+     - Digital: alteration-only 35/38 (GT natural 32/35), ±1 19/15, ±2 or more 36/31, no hyp 4/7.
+   - **Camera pitch recall by mask quartile:** Q1 89.6/89.6, Q2 90.7/90.1, Q3 87.4/90.6, Q4 86.8/89.1.
+     - Hard-fill Q4 was 83.6/86.8.
+     - Q4 misses: ±2 or more 32/23, ±1 18/20.
+
+   | Group (ranked by camera share) | cam share % | dig share % | GT n cam/dig | cam recall % | cam mix P/C/D/I (s1+s2) | pieces (cam) | flag |
+   |---|---|---|---|---|---|---|---|
+   | note.eighth (flag+beamed) | 17.7-20.2 | 14.5-15.3 | 1050/299 | 88.1-90.4 | 89/122/15/64 | spread (DSMN 63-80) | DATA: positions; 50 of C are beam-form swaps (no pitch/rhythm cost) |
+   | note.quarter | 15.3-17.3 | 18.9-20.9 | 634/355 | 83.4-87.1 | 32/139/16/63 | Gaano 60-73 | camera: 85 are quarter→half (filled head read hollow), an augmentation fix; digital: 29 are quarter→eighth |
+   | barline | 9.9-10.2 | 2.0-2.2 | 882/460 | 91.8-92.4 | 0/33/106/15 | Honneur 29-32, Gaano 17-20 | NON-DATA: 38-40/seed erased by Stage 1 (BUG-039); 5-6/seed CRNN misses |
+   | note.sixteenth | 9.0-9.4 | 1.6-1.7 | 213/8 | 68.5-69.0 | 4/124/5/8 | **Honneur 57-58** | DATA: 109 are →eighth; fractional-beam gap survives at 64 px but only barely |
+   | note.half | 7.6-8.5 | 10.4-11.6 | 257/182 | 82.9-85.2 | 57/14/11/41 | Gaano 34-36 | DATA: positions |
+   | dotted notes | 5.0-6.0 | 5.7-6.6 | 293/117 | 85.7-89.4 | 35/31/7/12 | spread | DATA |
+   | dot | 4.5-5.8 | 5.3-10.7 | 310/117 | 96.1-97.7 | 0/4/15/60 | spread | negatives: false dots come from label/lyric residue |
+   | note.whole | 3.6-6.2 | 1.9-2.0 | 86/47 | 72.1-74.4 | 17/21/8/29 | spread | DATA (11 read as fermata, 8 as half) |
+   | inline.natural | 3.3-3.9 | 7.3-7.9 | 42/39 | 31.0-38.1 | 1/40/14/0 | **Gaano 25-27** | DATA for glyph misreads (→sharp 8-14); key-state is BUG-037 |
+   | fermata (ins. only) | 3.3 | 3.7-4.7 | 0/0 | - | I 51 | DSMN, Non Nobis | NON-DATA (GT convention); the whole→fermata part is a model error |
+   | meter | 2.7-2.8 | 3.3-3.5 | 24/12 | 25.0-33.3 | 0/26/8/8 | spread | partly DATA (digits); E1b/R3 |
+   | key signature | 2.5 | 1.3-1.6 | 460/193 | 95.7-95.9 | 1/8/30/0 | Honneur 11-12 | NON-DATA (ClefKeyNet, BUG-037) |
+   | inline sharp / flat | 1.3-1.7 / 1.3-1.4 | 0.3 / 3.5-3.7 | 25/15, 26/22 | 88-92 / 73-89 | mostly I | - | negatives (precision 25-49%) |
+   | dotted rests | 1.3-1.6 | 0.0 | 16/0 | 37.5-43.8 | 0/18/1/3 | - | DATA (read as dotted notes; small n) |
+   | rest.eighth | 1.2-1.5 | 6.6-9.6 | 153/2 | 97.4-98.0 | 0/7/0/13 | digital: Gaano 47/50 | negative: voice label/bracket read in the header; GT is right |
+   | clef | 0.1 | 0.0 | 227/100 | 99.6 | 0/2/0/0 | - | NON-DATA (ClefKeyNet) |
+
+   - **Ties** (camera; outside SER):
+     - slur.start recall 25-30% (42-50/167), precision 55-56%;
+     - slur.end recall 35-38%, precision 79-82%.
+     - Ties are a DATA target.
+   - **OOV blind spot.**
+     - GT `<OOV>` spans (chords, divisi, triplets) absorb 777-787 camera and 309-310 digital hyp tokens. That is
+       about equal to all counted errors, and none of those tokens are scored.
+     - This ranking covers only the non-OOV regions.
+     - These tokens explain most of the roughly 70% note precision. It is a vocabulary problem, not a data one.
+   - **Caveats.**
+     - Five camera pieces: the unit of evidence is the piece, not the token. Sixteenths (Honneur), inline naturals
+       (Gaano) and quarter→half (mostly Gaano) are each carried by one piece. Per-piece table: job tmp
+       `step6/perpiece.log`.
+     - `beam_check` imports stage3 from the accidental-logic-fixes worktree, as `hyp_decode` did.
+     - The ClefKeyNet records are stored ones and predate R1-R4.
+     - `score_eval.tok_class` uses `rsplit('-', 1)`, which leaves `-S`/`-L` on negative positions, so
+       `per_token_class` splits classes and counts position errors as class confusions. SER is unaffected. The
+       budget uses its own regex. Filed as BUG-038.
+   - **Follow-up checks for ml-cv-lead items 2, 4 and 6 (2026-09-30, dev strips only, diagnostic).** Crops are in
+     job tmp `step6/imgcheck/`. The old `imgcheck/barline/` folder is stale (first detector); use `final_barline/`.
+     - **2a. Honneur sixteenth→eighth.** The lost "second beam" is the short fractional stub on dotted-eighth +
+       sixteenth pairs. At 64 px the stub is about 3-4 px tall. The gap to the primary beam is 1 px, grey ~150-180
+       against paper ~220, and at some columns it partly closes (~100-120). The same figure is read correctly in
+       other Honneur strips (for example p1 sys02 Tenor/Bass).
+       - Verdict: the gap survives, but only just. This is a rare pattern at marginal resolution, in one piece.
+       - DATA: fractional-beam dotted rhythms rendered at the same scale. Held-out recall may stay capped by resolution.
+     - **2b. Strip-final barlines.** There are 43-46 deletions per seed over 49 unique camera strips. **None is
+       cropped by the Stage 2 box**: the staff ends 61+ px inside the strip.
+       - Checked visually (the automatic detector false-fires on stems and rests): 41 strips (38-40 deletions per
+         seed) have no barline in the pixels. 8 strips (5-6 per seed) have it present, and the CRNN misses it.
+       - Absent by piece (s1/s2): Honneur 19/21, Gaano 13/13, Handog 4/4, DSMN 1/0, Non Nobis 1/2.
+       - On Honneur p1 and Gaano p2 the barline is in the photo and in `strip_gray`, but gone in `strip_unmasked`,
+         `strip_binary` and `strip_source`, along with the last few px of staff line. So Stage 1 erases it before
+         the non-staff mask. The exact step is not isolated.
+       - Filed as BUG-039. Non-data. It is frozen with Stage 1/2 at 9b9e12f; any fix un-freezes step 5.
+     - **2c. Gaano digital phantom rest.eighth** (47 in seed1). Most of them (Bass: 14 of 22 strips) come out in
+       the header zone.
+       - Cause: the raw CRNN reads the "B." voice label, the bracket, the bass clef and the flats as `clef.C-L1`,
+         `metersign.C` and then runs of `rest.eighth`. Header substitution replaces only the clef and keysig
+         tokens, so the rests survive after the substituted key.
+       - Token before each phantom: keysig 21, rest 14, note 6, dot 4, inline 2.
+       - The GT is right: camera and digital agree, with 2 eighth rests. The camera copy has the same label and no
+         phantoms.
+       - Verdict: not a GT defect. The fix is negatives (voice labels and brackets) plus a header-zone rule.
+     - **4. Natural split.** Each alteration-only pitch miss (s1/s2) is split by cause: own-glyph / phantom own
+       accidental / key state / carry.
+       - GT natural, camera: 13/17, 1/1, 25/25, 17/18.
+       - GT natural, digital: 15/18, 1/2, 5/5, 11/10.
+       - So true glyph misreads are camera 14-18 and digital 16-20.
+       - Camera key-state misses are mostly the Honneur p3 key (BUG-037). GT-sharp misses (camera 26) are key
+         state 24 and carry 2. Nothing was unmapped.
+       - Inline natural tokens: camera n 42, substitutions 17/23 (→sharp 8/14, →flat 5/4), deletions 8/6. Digital
+         n 39, substitutions 20/23 (→sharp 11/14), deletions 2/2.
+       - Wilson 95% intervals on camera exact recall (s1 / s2):
+         - inline natural: 38.1 [25.0-53.2] / 31.0 [19.1-46.0]
+         - whole: 72.1 [61.8-80.5] / 74.4 [64.3-82.5]
+         - dotted rests: 37.5 [18.5-61.4] / 43.8 [23.1-66.8]
+         - meter: 25.0 [12.0-44.9] / 33.3 [18.0-53.3]
+         - inline sharp: 92.0 [75.0-97.8] / 88.0 [70.0-95.8]
+         - inline flat: 73.1 [53.9-86.3] / 88.5 [71.0-96.0]
+       - Wilson 95% intervals, digital:
+         - natural: 43.6 [29.3-59.0] / 35.9 [22.7-51.6]
+         - whole: 93.6 [82.8-97.8]
+         - meter: 41.7 [19.3-68.0] / 33.3 [13.8-60.9]
+         - sharp: 100 [79.6-100]
+         - flat: 81.8 [61.5-92.7]
+       - Script and output: `natsplit.py` and `natsplit.json`.
+     - **6. Earlier rulings that used `per_token_class`:**
+       - E5 sharp precision and natural recall (`perclass.py`);
+       - step 2 C40 sharp precision (`cal_decode.py`);
+       - the E7 result-table sharp precision and the ml-cv-lead E7 ruling that cites it.
+       - No sharp or flat token has a negative position, so sharp precision is exactly unaffected. Natural recall
+         left out 4 of 42-44 naturals per condition. The quarter, dotted, half and whole recalls came from
+         `per_symbol`, which is unaffected.
+       - **No ruling changes.** Negative-position notes: camera 112 of 2533 (4.4%), digital 12 of 1008.
+       - Other decision docs mention step 6 but not `per_token_class`.
+   - **Re-ranked targets: PROPOSED, PENDING USER FREEZE (item 5).** Ranked by camera error share after the checks.
+     Flags: DATA = oversample or render; augmentation; negative = add negative examples; non-data = not a data fix.
+     1. note.eighth positions (17.7-20.2%): DATA. The 50 beam-form swaps cost nothing.
+     2. note.quarter (15.3-17.3%): augmentation (contrast/stroke) for camera quarter→half hollow heads (85). DATA for
+        digital quarter→eighth (29).
+     3. note.sixteenth (9.0-9.4%): DATA, fractional-beam dotted rhythms. One piece; resolution-marginal.
+     4. note.half (7.6-8.5%): DATA (positions).
+     5. dotted notes (5.0-6.0%): DATA.
+     6. note.whole (3.6-6.2%): DATA, including whole→fermata.
+     7. inline natural (3.3-3.9%): DATA for the glyph misreads (mostly natural→sharp). Key-state misses are non-data
+        (BUG-037); carry misses follow from them. Gaano-heavy; wide CI.
+     8. ties (outside SER): DATA.
+     9. meter (2.7-2.8%): partly DATA (digits), plus E1b/R3.
+     10. dotted rests (1.3-1.6%): DATA. n = 16, so the CI is wide.
+     11. dot (4.5-5.8%): negative (label/lyric residue).
+     12. inline sharp/flat phantoms (1.3-1.7% / 1.3-1.4%): negative.
+     13. Gaano digital rest.eighth (digital 6.6-9.6%): negative (voice labels/brackets) plus header rule.
+     14. barline (9.9-10.2%): non-data. 38-40 per seed are BUG-039 (Stage 1, frozen); only 5-6 per seed are CRNN
+         misses (DATA, minor).
+     15. fermata insertions: non-data (GT convention). The whole→fermata part is under item 6.
+     16. key signature, clef: non-data (ClefKeyNet, BUG-037).
+   - **ml-cv-lead review: CONDITIONAL GO.** The method is sound: alignment parity, per-class sums asserted, E7
+     reproduced, both seeds from one decode, no held-out data. The data vs non-data split is not settled yet.
+     Required before the target list is used:
+     1. A per-piece table for the top groups. Done: the `perpiece.log` job output above. It confirms the
+        single-piece concentrations.
+     2. Done (see follow-up checks above). Check at 1:1 on the frozen strips:
+        - that the gap between sixteenth beams survives at 64 px;
+        - whether the strip-final barlines are cropped off or present but missed;
+        - whether the Gaano digital phantom rests are residue or a GT defect.
+     3. Treat quarter→half hollow-head errors and false dots as augmentation or negative items, not
+        oversampling. Only held-out camera recall shows whether they are closed.
+     4. Done (above). Separate inline-natural misreads from carry/key-state misses. Give Wilson intervals for small-n classes.
+     5. Open, user decision. Freeze the target list and weights in this plan before the Phase 1 cut. A later dev gain on these
+        targets is not evidence, and the held-out report must cover every class.
+     6. Done (BUG-038; above). File the `tok_class` negative-position bug, and check whether any earlier ruling used `per_token_class`.
+   - Scripts and JSON (job tmp `step6/`): `decode.py`, `hyp_live.json`, `strip_parity.json`, `budget.py`,
+     `budget_live.json`, `budget_e7hard.json`, `rank.py`/`rank.json`, `perpiece.py`/`perpiece.json`.
+
+   **Step 6 target freeze (2026-09-30, user decision).** Closes ml-cv-lead item 5. The user chose the targets
+   "based on observation" and allowed adding classes backed by the step 6 test.
+   - **User targets:**
+     - with dev evidence (step 6, camera): eighth notes (17.7-20.2% share), sixteenth notes (9.0-9.4%; one piece,
+       Honneur), ties (slur.start recall 25-30%, outside SER), inline naturals (3.3-3.9%; glyph misreads only,
+       key-state misses are BUG-037), inline sharps/flats (1.3-1.7% / 1.3-1.4%, mostly phantom insertions, so
+       they are also negatives below);
+     - user priors, no dev evidence: 32nd notes (no dev error measured), and **tuplets** (no dev GT at all:
+       they sit inside GT `<OOV>` spans). **Tuplets are BLOCKED ON DESIGN** (see below).
+   - **Added from step 6 DATA flags:** note.half (7.6-8.5%), dotted notes (5.0-6.0%), note.whole (3.6-6.2%,
+     including whole→fermata), meter (2.7-2.8%, partial: digits only; the rest is E1b/R3), dotted rests
+     (1.3-1.6%, n = 16).
+   - **Negatives** (add negative examples; not weighted): false dots (label/lyric residue), phantom inline
+     sharps/flats, and the header-label rests (voice labels and brackets read as `rest.eighth`).
+   - **Augmentation** (not weighted): hollow-head quarter→half (contrast/stroke, Phase 1 step 5).
+   - **Non-data, excluded:** barline (BUG-039, Stage 1), fermata insertions (GT convention), key signature and
+     clef (ClefKeyNet, BUG-037).
+   - **Weights (proposed; share of the *targeted* selection budget, not of the whole corpus).** Evidence-backed
+     classes are proportional to their mean camera error count over the two seeds (share × total errors; ties
+     from the tie alignment: missed + inserted slur.start/end). User-prior classes get a fixed floor.
+     - Floors: 32nd 5%, tuplets 5% (reserved; if tuplets are still blocked at Phase 2 start, the 5% goes back
+       pro rata to the rest).
+     - Ties: raw proportional value would be ~35% (279 errors vs 438 for all SER classes combined). Proposed cap
+       **15%**, because tie tokens are outside SER, ties are plentiful in any corpus, and the verovio-dialect
+       tie path is untested until G1b.
+     - Remaining 75% by error count (mean errors in brackets): eighth 24.8 (145), sixteenth 12.1 (70.5),
+       half 10.5 (61.5), dotted notes 7.2 (42), whole 6.4 (37.5), natural 4.7 (27.5), meter 3.6 (21),
+       sharp 2.0 (11.5), dotted rests 1.9 (11), flat 1.8 (10.5).
+   - **Amendment rule.** The list and weights may change before Phase 2 training starts, only with a written
+     reason in this block. After that, no dev-driven changes: new targets come only from a new, separately
+     registered dev round. A later dev gain on these targets is not evidence; the held-out report covers every
+     class.
+   - **Tuplets: blocked on design, nothing implemented.** Stage 3's vocabulary has no tuplet token and the
+     converter refuses `<tuplet>` (ConversionError, sample skipped). A decision is needed on: a tuplet-number
+     token at its drawn position; bracket handling; output-head expansion; Stage 3 duration scaling; and how
+     it interacts with Stage 4's `suspected_tuplet` overflow heuristic.
+   - **ml-cv-lead review (2026-09-30): CONDITIONAL GO.** The weights above stay PROPOSED until the user rules on
+     these items:
+     1. Tie cap: justified, but because the 279 counts slur.start and slur.end separately (each tie error
+        about twice), not because ties are plentiful. Make the 15% conditional on the verovio tie path passing
+        G1b; if it fails, the tie weight is 0.
+     2. note.quarter (#2 class) has no weight. "Augmentation" covers only the 85 quarter→half errors; its 32
+        position errors, 63 insertions and 29 digital quarter→eighth are DATA. Weight it or write down why not.
+     3. Position errors (eighth P89, half P57) are charged to duration classes that oversampling won't fix.
+        Move them to a position/ledger budget.
+     4. Cut the 32nd floor to 2-3%: zero dev evidence, and oversampling risks sixteenth→32nd confusion on the
+        beam-count axis that already fails. Track 32nd insertions as a regression metric.
+     5. Note next to sixteenth's 12.1% that it is one piece and resolution-capped.
+     6. State what fraction of the corpus the targeted budget is.
+     7. Amendment rule: pre-Phase-2 amendments only for feasibility (G1b failure, render failure, tuplets
+        unblocked), never reweighting from a new dev decode. Define now where the tuplet 5% goes (including
+        whether ties take a share). G2 and G3 scores on targeted classes are optimistic (targets chosen on
+        those pieces). The held-out report includes untargeted classes (quarter, barline) as regression checks.
+     - **Head expansion: defer out of the Phase 2 scale-up.** A vocabulary change in the same run confounds G2's
+       attribution to data. Batch all vocabulary changes (chords/`<OOV>` matter more than tuplets) into one
+       later expansion arm with 2 seeds. New rows start small with bias at the log-prior; the CPM canary is
+       scored on the full new vocabulary with new-token emissions counted as insertions (keeps it comparable
+       with 0.0562-0.0926). Watch "3" vs meter digits.
+     - **Tuplet representation:** a position-free `tuplet.<n>` token in drawn x-order, only when the number is
+       drawn. No bracket start/end pair (beamed tuplets usually have none). Group extent from the beam group or
+       the next n equal-duration notes; an explicit token applies unflagged, `suspected_tuplet` stays the flagged
+       fallback. Add `tuplet` to the automatic SVG check. Check CPM/PrIMuS for drawn tuplets whose gold has no
+       tuplet token: replaying them teaches the model to ignore the "3", so exclude or relabel them.
+   - **choral-conductor view (2026-09-30):** Stage 4's overflow heuristic is acceptable as a flagged fallback
+     but cannot be the tuplet mechanism.
+     - Practice: eighth triplets within a beat are by far the most common; quarter triplets over a half-bar
+       are common in Filipino and pop arrangements; duplets in 6/8 occur; 5/6-tuplets and nesting are rare.
+       Beamed groups usually show the number only; flagged or rest groups get a bracket; publishers drop the
+       "3" after the first few groups ("sim."). Tuplets often contain rests or start tied, and often sit in one
+       voice only, so the other voices are a cross-check.
+     - Stage 3 should scale durations (normal/actual: 2/3 triplet, 3/2 6/8 duplet). An omitted "3" is
+       inferred by bar arithmetic when a same-shape group overfills by exactly 1/3 after an explicit tuplet
+       earlier in the passage, flagged `tuplet_inferred`. Irregular/nested ratios: flag, don't guess.
+     - Stage 4 dangers: 6/8 duplets make an *underfull* bar that the overflow repair never sees; the beat
+       alignment check uses a quarter, wrong for 6/8; a hallucinated extra eighth gets "repaired" into fake
+       triplets; whole-bar scaling is off-grid. A Stage 4 tuplet scaling no other voice supports should carry
+       `review_needed`.
+     - Minimum representation: one `tuplet.3` token before the group (optionally `tuplet.2`), extent from the
+       beam or from the values summing to one beat/half-bar; no bracket tokens, no nested ratios in v1. Every
+       bar summing to the meter in every voice is the validator.
+   - **Tuplet recommendation (both reviewers agree):** position-free `tuplet.<n>` (3, optionally 2), emitted only
+     where the number is drawn, extent from beam/equal values, Stage 3 scales durations, Stage 4 heuristic kept
+     only as a flagged fallback. Not in the Phase 2 scale-up; part of one later vocabulary-expansion arm.
+     Still blocked on the user's design decision.
 
 ### Phase 1: data engine (CPU, local; Sep 30 - Oct 5)
 
@@ -1046,11 +1295,74 @@ so freezing Stage 1/2 before this step would bake the thick strokes into the tra
        - first-system label text, drawn but not labelled.
 
        Pass rule: 0 systematic errors. Any fix means a fresh sample of 30.
+       Known gaps (user decision 2026-09-30): repeats are stripped from the renders (BUG-040) and beams across a
+       break cannot be built (BUG-041), so G1b does not test either.
+     - **G1b result (2026-10-01, user hand-check; PASS, 0 systematic errors).** Bach page, seed 2, 30 strips,
+       5 fonts, 13 cases, converter sha256 `bdf1531f...` (labels unchanged by the mRest fix). Results are in
+       `D:/PiyaNota-training/data/phase1_renders/g1b/g1b_results_user.json`. 26 strips were marked correct. The
+       other 4 were flagged for one pattern only: a dot after a line note is labelled one step up
+       (`note.half-L3 dot-S3`), where the user expected `dot-L3`. That is the Camera-PrIMuS convention (the dot
+       is drawn in the space above), not a converter error. The first 3,000 PrIMuS samples label all 1,988 dots
+       after line notes `S`, and all 1,882 dots after space notes at the note's own position. So no fix was made
+       and no fresh sample is needed. The Palestrina page (`g1b_palestrina/`, 10 strips, 0 OOV) is still
+       unchecked.
      - **CPM replay labels (Phase 2):** replace the final-barline and grace-order gold defects (about 7% of
        samples have the barline defect) with converter output, after checking a random 30 of them against their
        images. This way replay and synthetic strips agree on end-of-strip barlines. Keep the CPM canary scored on
        the original gold, so it stays comparable with the 0.0562-0.0926 range; report the cleaned number only
        as a second figure. Leave the metersign, trailing-grace and scrambled cases (about 20 tokens) alone.
+   - **Held-out G1 pre-registration (2026-10-01, written before the run; condition (b)).**
+     - PrIMuS (`datasets/primus_dataset`, package_aa 43,594 + package_ab 44,084 = 87,678 samples, each with
+       `.agnostic .mei .mid .pae .png .semantic`). All 3,996 local CPM IDs are in PrIMuS. The CRNN trained only
+       on the local CPM corpus (90/10 positional split, no persisted ID list), so held-out = PrIMuS minus CPM
+       = 83,682 IDs, all with `.mei` and `.agnostic`.
+     - Sample: `sorted(random.Random(20261001).sample(sorted(eligible), 5000))`; IDs in
+       `D:/PiyaNota-training/data/primus_g1/sample_ids.txt`, full record in `preregistration.json` there.
+     - Converter `training/music_to_agnostic.py` sha256 `f96bc2f8...beb098` (uncommitted working-tree file on
+       HEAD c77ce7b; condition (a)'s commit hash must be taken when it is committed, and must match this sha).
+       Gate script unchanged, sha256 `a6698282...3647e9`, run once with `--corpus` on a copy of the 5,000
+       samples' `.mei` + `.agnostic`.
+     - Threshold: G1's own, "at least 99% token agreement" (agreement = 1 - edit distance / gold tokens;
+       refusals count in full). Below 0.99: stop, PrIMuS is not a source. Residuals are diagnosed, not fixed.
+     - Amendment 1 (before any sample was scored): attempt 1 crashed on sample 1 because the copy step also
+       copied macOS `._<id>.mei` AppleDouble stubs (in every PrIMuS sample dir) and the gate's `*.mei` glob took
+       the stub. No figure was produced. The 5,000 stubs were deleted; IDs, converter, gate and threshold are
+       unchanged.
+     - Post-run note: the scored run used converter sha256 `f96bc2f8...beb098` (checked immediately before it).
+       Afterwards the render agent changed `music_to_agnostic.py` (bar-length tracking; a verovio-dialect mRest
+       in a bar of 2+ whole notes becomes `rest.double_whole-L3`), now sha256 `bdf1531f...1da60e`. The change is
+       claimed verovio-dialect only; the render agent is rerunning CPM G1 to confirm. The held-out result is
+       kept as it stands and not rerun on this sample; condition (a)'s committed hash must be checked against
+       whichever version is frozen.
+   - **Held-out G1 result (2026-10-01, single scored run): PASS, 99.114%** against the pre-registered 0.99.
+     1,223 errors over 137,972 gold tokens; 4,711/5,000 samples exact; 45 refused. Report and log:
+     `D:/PiyaNota-training/data/primus_g1/g1_heldout_report.json`, `g1_heldout_run.log`.
+     - It sits 0.44 pp below the CPM 99.557%, and the drop is almost all refusals, a rule-coverage gap that CPM
+       never exercised (0 refused there): 45 samples with longa durations (`rest dur 'long'` 39, `note dur
+       'long'` 6), 851 tokens, 70% of all errors. Without them agreement would be about 99.73%.
+     - Other residuals (tokens / samples, diagnosed on examples, not fixed): final barline present/absent in
+       gold, the CPM defect family, 181/179; grace-note order, 150/49; gold ties across *different* pitches
+       (e.g. 100016949: MEI `tie="i/m/t"` over B-A-B, which the converter's same-pitch rule drops), 34/11;
+       `metersign` in MEI but missing from gold, 7/6; other 16/3 (one clef-change placement, one beam form,
+       grace accidentals).
+     - Implication for sourcing: longa samples are skipped (as refused); PrIMuS gold tie tokens are not purely
+       ties, so the converter's labels, not PrIMuS gold, are the label source for any PrIMuS render.
+   - **PrIMuS target availability (2026-10-01, all 87,678 gold `.agnostic`; held-out 83,682 in brackets).**
+     Samples containing each frozen target: eighth 72,261 (68,941); sixteenth 44,568 (42,543); 32nd 8,202
+     (7,763); ties 8,762 (8,274); inline sharp 15,125 (14,338), flat 5,967 (5,606), natural 11,062 (10,517);
+     half 34,814 (33,063); dotted notes 49,415 (47,008); whole 9,170 (8,746); meter every sample; dotted rests
+     1,725 (1,654). Inline vs key-signature accidentals is split by a heuristic (header run after a clef).
+     - **Tuplets: none.** No tuplet glyph type exists in PrIMuS gold (token kinds: clef, accidental, digit,
+       note, gracenote, rest, multirest, dot, metersign, fermata, barline, slur), and no `<tuplet>` element
+       is in the 5,000-sample held-out MEIs (the 113 `num="3"` hits are multirest counts). PrIMuS cannot source
+       tuplets.
+     - **Outside the CRNN vocabulary** (`stage3_transcription.VOCAB`, 513 entries): 5,412 gold tokens in 3,065
+       samples, 247 distinct. Largest: `rest.quadruple_whole` 1,163, `note.double_whole` 1,015,
+       `note.quadruple_whole` 164, grace-note shapes (quarter, half, beamed 1-3, 32nd) about 1,100, and
+       out-of-range positions (L8/S8, S-1 and below, S7) for ordinary notes, accidentals and slurs; meter
+       digits `digit.1/8/24/5/11/7-L4`, `digit.3/12/6/48-L2` 45. No `rest.double_whole` occurs in PrIMuS gold.
+       Samples with any OOV token need dropping or a vocabulary decision. Full list: job tmp
+       `primus/vocab.json`.
 2. **Assemble the corpus:**
    - the music21 corpus: 433 Bach chorales (true SATB), 1,318 Palestrina, 97 Monteverdi;
    - CPM MEI;
