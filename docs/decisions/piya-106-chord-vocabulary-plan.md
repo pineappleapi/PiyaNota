@@ -1,7 +1,21 @@
 # PIYA-106 (proposed) — Chord Token Vocabulary + Multi-Dataset Retraining Plan
 
-**Status:** PLAN ONLY, 2026-09-25. Nothing implemented, nothing trained, no GPU work (BUG-013 is open).
-**Author role:** ml-cv-lead (advisory). **Not reviewed by:** choral-conductor, senior-reviewer (see Open Questions).
+**Status:** PLAN ONLY. Written 2026-09-25, **revised 2026-10-01** (user-approved update). Nothing implemented,
+nothing trained.
+**Author role:** ml-cv-lead (advisory). Music semantics: choral-conductor,
+`docs/decisions/piya-106-chord-music-semantics.md` (2026-10-01; referenced, not duplicated). Not yet reviewed by
+senior-reviewer.
+
+**2026-10-01 revision: read section 10 first. It is the operative plan.** It replaces:
+- the "chords are rare" premise (section 0, finding 2) with dev evidence (10.1);
+- DS2 as the primary chord source (0, 3.1) with script-injected divisi in the Phase 1 Bach/Palestrina renders (10.2);
+- "one `dot-*` token per chord" (2.2) with one dot per drawn head (10.4);
+- the Stage B mix and curriculum (4) and the ordered steps (8) with one vocabulary-expansion arm, chords + tuplets,
+  2 seeds, started from the Phase 2 checkpoint after Phase 2 (10.5, 10.8; SER-15 plan, amendment 3);
+- the Stage 3 notes in 2.4 with 10.6.
+
+Open questions 1, 3 and 4 (section 9) are answered: 10.1, the user decision "a divisi chord plays both notes"
+(2026-10-01), and the CLAUDE.md ground-truth rule. Sections 1-9 stay as the 2026-09-25 record.
 **Decision context:** user chose option (b): give the CRNN a real chord signal in its token vocabulary and
 retrain, because Camera-PrIMuS (CPM) is monophonic and Stage 3's `chord_id` detection
 (`stage3_transcription.py`, body-stage "consecutive notes sharing the same tick onset") can never fire on a
@@ -12,7 +26,7 @@ Repurpose labels from: (1) DeepScoresV2 dense, (2) camera-grandstaff, (3) SynthS
 
 | Dataset | Verdict for "single-staff strips + agnostic tokens + chords" |
 |---|---|
-| DeepScoresV2 dense | **Fits, with real conversion work.** Symbol-level bbox + duration + staff position. Multi-font. Chord grouping must be derived. Lossy on beams/voices. Primary chord source. |
+| DeepScoresV2 dense | **Fits, with real conversion work.** Symbol-level bbox + duration + staff position. Multi-font. Chord grouping must be derived. Lossy on beams/voices. ~~Primary chord source.~~ **Secondary since 2026-10-01** (10.2; `piya-106-ds2-conversion-design.md`). |
 | camera-grandstaff | **Partial fit.** Labels are `**ekern` (Humdrum), not agnostic; images are 2-staff systems (closed score, out of project scope). Usable only as a *label* source: split each kern spine into a single-staff score and **re-render** (Verovio) rather than crop the given images. ~20% of onset events are chords, the best chord density of the three. Piano-style chords are not open-score SATB. |
 | SynthSalienceChoralSet_v1 | **Does not fit as provided.** It is audio-domain salience matrices (CSV), no notation, no images. Cannot yield agnostic tokens. Its only value is the *metadata*: 5365 CPDL choral pieces with source `.mxl` URLs, which are real open-score SATB notation *if* fetched separately (network, per-piece license check). Treat as a separate acquisition task, not "a converted dataset". |
 
@@ -21,10 +35,10 @@ Two findings that change the plan and should be read before the rest:
 1. **CTC frame budget makes per-note chord tokens at the same x infeasible with the current architecture**
    (Section 2.3). If not audited, `CTCLoss(zero_infinity=True)` will silently zero out the infeasible samples and
    training will look healthy while chords are never learned.
-2. **Chords are rare in the actual deployment target.** In open-score SATB, one staff = one voice, so simultaneous
-   notes occur only in divisi / double-stops. Option (b) is buying a capability whose deployment prevalence is
-   probably a few percent of onsets. It is still a valid choice, but the payoff should be sized (Open Question 1)
-   and the plan below is built so that chords cannot regress monophonic accuracy, which is what SATB mostly needs.
+2. ~~Chords are rare in the actual deployment target.~~ **Withdrawn 2026-10-01: the dev data says otherwise.**
+   Chord/divisi spans are about 17% of note onsets on the camera dev strips (14% digital), in 4 of 5 pieces, and
+   they take about 88% of the hypothesis tokens hidden inside GT `<OOV>` spans (section 10.1). The rule that chords
+   must not regress monophonic accuracy still holds.
 
 ## 1. What each dataset actually contains (inspected on disk, read-only)
 
@@ -98,8 +112,8 @@ Two findings that change the plan and should be read before the rest:
   position (`accidental.flat-L3`), so **pairing an accidental to its chord member is by matching position**,
   not by adjacency. This requires a small `infer_pitch` change (currently `pending_acc` applies to whatever note
   comes next).
-- Augmentation dot: one `dot-*` token per chord is treated as dotting the entire chord. Documented loss: chords
-  with differently dotted members (rare) are unrepresentable.
+- ~~Augmentation dot: one `dot-*` token per chord is treated as dotting the entire chord.~~ **Superseded
+  2026-10-01 (10.4):** engraving draws one dot per head, so the label has one dot per head.
 - Beams, stem direction: unchanged, carried by the base note token. Chordnotes never carry a beam suffix.
 - Not representable in v1 (must be listed as known-lost, not silently dropped): seconds with displaced noteheads
   (same x-slot offset left/right; linearization order may flip), tuplets (BUG-015), cross-staff chords, unisons of
@@ -385,3 +399,209 @@ GPU is admissible. Preconditions before any Stage B training or evaluation that 
    warm-start value?
 8. Sequencing: should this wait for PIYA-106 Stage A to close, or run in parallel using a separate branch and checkpoint
    namespace? (I recommend waiting on anything that touches VOCAB.)
+
+## 10. Revision 2026-10-01: the vocabulary-expansion arm (operative)
+
+Binding user decisions: (1) a divisi chord in one voice plays **both** notes (2026-10-01); (2) chords and tuplets
+are built in **one vocabulary-expansion arm after Phase 2**, not inside it (SER-15 plan, amendment 3, frozen).
+Music semantics come from `docs/decisions/piya-106-chord-music-semantics.md` (choral-conductor, "CM" below).
+
+### 10.1 How common chords are (replaces "chords are rare")
+Measured from the step 6 alignment (`budget.row_ops` on `hyp_live.json`, job tmp `step6/`), with each GT `<OOV>`
+mapped to its `gt_source.txt` description. **Dev data, diagnostic, used for sizing only, never for tuning.**
+Five camera pieces (227 strips) and three digital pieces (100 strips). The script is outside the repo
+(`%TEMP%/oov_kinds.py`).
+
+| | camera | digital |
+|---|---|---|
+| hyp tokens absorbed by `<OOV>` (seed 1-2) | 787 / 777 | 309 / 310 |
+| ... by chord spans | 695 / 686 (**~88%**) | 228 / 228 (~74%) |
+| ... by triplets | 54 / 54 (~7%) | 53-54 (~17%) |
+| ... by two-voice / divisi-over-held / other | 38 / 37 | 28 |
+| GT chord onsets vs GT note onsets | 535 vs 2,533 (**~17%** of note onsets) | 170 vs 1,008 (~14%) |
+| strips with at least one chord | 88 / 227, in 4 of 5 pieces (Honneur has none) | |
+| chord size (where described) | 448 dyads, 3 triads; 84 undescribed (mostly DSMN "chord e") | 156 dyads, 3 triads |
+| chords by voice (camera) | Bass 268, Tenor 127, Alto 80, Soprano 60 | |
+
+Caveats: piece-dominated (Handog has 266 of the 535 camera chords, about one chord per note); the GT is
+agent-made except Non Nobis; triplet and two-voice spans are counted separately and are not chords. Divisi on
+extra staves (Handog's 5-7 staff systems) is excluded by the scope rule, so it is not counted here (CM, item F).
+**Consequence:** chords are a main vocabulary gap, not an edge case. On dev, the chord spans alone hide about as
+many hypothesis tokens as all the scored errors combined.
+
+### 10.2 Data source
+- **Primary: script-injected divisi in the Phase 1 Bach/Palestrina corpus.** The 742 included pieces (Bach 367,
+  Palestrina 375) have **no native chords**: `corpus_log_*.json` shows no "chord in a voice" skip. So every
+  chord is injected. A new step in `build_corpus.py` (seeded, logged per piece like the constructed events)
+  edits the music21 score after SATB normalisation, before MusicXML/MEI export:
+  - Add a second pitch taken from the harmony the other voices sound at that onset (a doubling, which is how
+    real divisi works), within MIN/MAX_POSITION. Mostly 3rds, 6ths and octaves (Bass octave allowed); intervals
+    over an octave in S/A/T are not injected (CM V1).
+  - Spans: a cadence/final chord, or a 1-4 bar passage. About 95% dyads, a few triads, no 4+.
+  - Voice weights are a prior that leans to Bass/Tenor. They are not fit to 10.1.
+  - **Engraving forms:** same-stem chord (`<chord>` in MEI), and **split stems, same rhythm** (two MEI layers with
+    identical rhythm; CM says it is musically the same as a chord). Include **seconds with displaced heads** at a
+    logged share, because CM says they are common in Filipino arrangements. Not injected: split stems with
+    different rhythms, layer rests, cue/optional small notes, unison heads side by side (all out of v1, CM table).
+  - Rendered through the unchanged Phase 1 pipeline: Verovio, the 5 fonts, the same layout and camera
+    augmentation, cut by our Stage 1/2, labels from the converter, the SVG check, then the vocabulary guard.
+- **Tuplets share this pipeline:** script-injected triplets (amendment 3) go through the same seeded injection
+  step, the same render and the same checks. One corpus build makes the arm's whole new-token data.
+- **Splits:** an injected variant inherits its source piece's split (`melody_groups.py`, by melody). The arm's
+  validation pieces are the Phase 2 validation pieces. Keep the un-injected original of every injected strip in
+  training too, so the model sees the same music both with and without the chord.
+- **DS2: secondary.** Its converter drops stems with 2+ heads today (`piya-106-ds2-conversion-design.md`). Behind
+  the same off flag it could label them as chords (exact grouping from the shared stem). Not part of arm v1;
+  only after its D1-D3 gates. **camera-grandstaff:** only as stated in 3.2 (kern labels, re-rendered single
+  staff, piano-style chords); not in arm v1. **SynthSalienceChoralSet:** only as stated in 3.3 (no conversion;
+  the CPDL fetch is a separate user decision).
+
+### 10.3 Converter, SVG check and vocabulary guard (all behind one off flag, e.g. `vocab_ext=False`)
+With the flag off, behaviour stays exactly as today: chords, tuplets and multi-layer staves raise
+`ConversionError`, `build_corpus.py` still refuses `music21.chord.Chord`, and the guard quarantines any new token.
+Phase 2 data must be byte-identical with the flag off (check the corpus hash).
+- **`training/music_to_agnostic.py`:**
+  - `<chord>`: members sorted by staff position, bottom to top. The lowest is `note.<dur>-<pos>` with the chord's
+    beam form; the others are `chordnote-<pos>`.
+  - Drawn accidentals (verovio dialect `@accid` only, as today) go before the base note, in position order.
+  - **One `dot-<pos>` per head** at each member's dot position (CPM convention: a line note's dot is in the
+    space above). A double dot is two dots at the same position.
+  - `slur.start/end-<pos>` per tied member.
+  - Two layers in one measure: merge into chords **only** if both layers have the same onsets and durations
+    (split stems, same rhythm). Otherwise keep refusing (`two-voice`, out of v1).
+  - `<tuplet>`: amendment 3's `tuplet.<n>`.
+  - Bar-length tracking counts a chord once.
+  - Gate before use: re-run CPM G1 with the flag on (must be unchanged, since CPM has no chords), plus a G1b-style
+    human check of about 30 injected strips (fonts stratified; same-stem, split-stem, seconds, dotted chords,
+    tied members, accidentals on the upper member, triplets). Same pass rule: 0 systematic errors.
+- **`training/phase1/svg_check.py`:**
+  - Noteheads inside an SVG `chord` group, and same-x heads across layers, are compared as a set ordered bottom
+    to top, not in SVG order (displaced seconds are drawn out of x order).
+  - The label view counts `chordnote-*` as noteheads (today it counts only `note.`/`gracenote.`).
+  - Add a `chords` count (chord groups vs base notes followed by chordnotes). Dots are already counted per glyph,
+    which now matches one dot per head. Add the `tuplet` count (amendment 3).
+- **`training/phase1/vocab_guard.py`:** it reads `stage3_transcription.VOCAB`. With the flag on it must read
+  VOCAB plus the appended extension list (one definition in `stage3_transcription.py`, for example
+  `VOCAB_EXT_CHORD_TUPLET`, appended to the end, never merged), and keep quarantining anything else.
+
+### 10.4 Token design (kept from 2.2, with two revisions)
+- Kept: append-only `chordnote-<L|S><pos>`, base note = lowest head, members bottom to top, no beam suffix on
+  chordnotes, accidentals matched to members by position (CM confirms this rule).
+- **Revised: dots.** One dot per drawn head (see 10.3). Stage 3 reads "dots at different positions after a chord" as
+  one dot for the whole chord, and repeated dots at the same position as a double dot (CM section 4).
+- **Revised: split stems, same rhythm, use the same tokens as a same-stem chord.** The agnostic label is
+  stem-free and CM says the music is the same. Split stems with different rhythms are not representable
+  (members inherit the base duration). Stage 4 flags it (10.6), never repairs it.
+- Displaced seconds: still bottom to top. For stem-down seconds this is the reverse of x order, so report a
+  separate seconds metric. If it fails, the fallback is the known-lost list with its count (CM).
+- New vocabulary for the arm: `chordnote-*` (positions as the converted data produce them, capped at the
+  existing note range) and `tuplet.3` (optionally `tuplet.2`).
+
+### 10.5 Gates before training, and the arm
+**Data-only gates (no GPU). A failure is a no-go for training:**
+1. **CTC column-collapse measurement.** On clean renders (where SVG x maps linearly to strip x), for every chord
+   column (from the leftmost accidental to the rightmost head/dot) compare the frames it spans at Stage 3's
+   width stride (T = W/4) with the labels it needs (accidentals + base + chordnotes + dots, plus a blank between
+   identical neighbours). Report the distribution, chord columns and tuplet groups separately, at the smallest
+   augmentation scale. Gate: at most 1% of chord columns infeasible (proposed; fixed at the pre-training review).
+   If it fails, choose from 2.3's options and measure again.
+2. **Whole-sequence feasibility.** `min_T_required <= T` for every training sample after augmentation; infeasible
+   samples are dropped and counted, never left to `zero_infinity`.
+
+**Arm definition:**
+- **Init:** the frozen Phase 2 checkpoint. If Phase 2 freezes two seeds, arm seed k starts from Phase 2 seed k.
+  2 seeds; every number is a range.
+- **Head expansion:** copy the old rows; new rows start small, with bias at the log-prior (amendment 3; this
+  replaces 2.5's "strongly negative bias"). The checkpoint load rule becomes "old VOCAB is an exact prefix".
+- **Data:** Phase 2's frozen mix plus the injected chord/tuplet strips and their un-injected originals. The share
+  is proposed at the pre-training review (starting point: injected strips ~20% of samples, chordnotes ~10-15% of
+  note tokens). It is not tuned on any real decode.
+- **Silent-no-learning count, every epoch:** samples with loss zeroed by `zero_infinity` (chord / tuplet / other).
+  Gate: 0 chord or tuplet samples zeroed. On synthetic val, count chord samples with zero chordnote emissions and
+  report chordnote recall. Gate (proposed): recall above a pre-registered floor by a pre-registered epoch, else
+  stop as "not learning".
+- **Canary:** CPM clean/distorted scored on the **full new vocabulary, with any new-token emission counted as an
+  insertion** (keeps it comparable with 0.0562-0.0926 and with Phase 2's own canary). Same hard-cap/soft-floor
+  style, with the margin from the measured seed noise, set before the run.
+- **Metrics (synthetic val, per font, chord and non-chord strips separate):** chordnote precision (hallucination,
+  the dangerous one) and recall, chord exact-match, seconds separately, tuplet recall/precision, a
+  monophonic-strip SER regression check against the Phase 2 checkpoint, and chordnote confidence calibration
+  (confidently-wrong rate; the BUG-011 class).
+- Not in the arm: a "continue Phase 2 without new tokens" control (user decision, 10.9). Without it the arm
+  makes no claim about monophonic gains.
+- Preconditions as before: deterministic flags, seeded DataLoader, device and hashes in the run manifest, and an
+  ml-cv-lead review of the training diff.
+
+### 10.6 Stage 3/4/5 changes (code after the arm passes; CM gives the music reasons)
+**Stage 3 (`infer_pitch`):**
+- `chordnote-<pos>`: pitch from the same clef/key/`measure_alterations` path. Same `tick_onset` and
+  `duration_ticks` as the base, and `current_tick` does not advance. Set `chord_id` explicitly on the base and the
+  members; this replaces the dead same-onset heuristic.
+- Accidentals: the pending accidentals since the last onset are kept by position and consumed by the member at
+  that position. An unmatched one keeps the BUG-033 `unanchored_accidental_dropped` flag.
+- Ties (CM fix A): `slur.start/end-<pos>` go to the nearest member by position. End marks are per member, not one
+  pending flag.
+- Tie-carried accidentals (CM fix B): a step-to-alteration map for the previous onset's members, replacing the
+  single `last_note_step` / `last_note_alteration`.
+- Dots (CM fix C): as 10.4, applied to every member; the cursor advances once.
+- Orphan chordnote (no base in the same onset: after a rest or barline, or on the base's own position, CM V3):
+  drop it, flag `review_needed`.
+- Confidence: each member's is the min of its own note and accidental tokens. The chord's is the min over its
+  members. Still not a trust signal (BUG-011).
+- Validators (CM V1, V2, V4): interval over an octave in S/A/T (over 12 in Bass), 3+ members, out of range.
+  Flag, still play.
+- `tuplet.<n>`: amendment 3 (scale durations, keep `suspected_tuplet` as the flagged fallback).
+
+**Stage 4:** already handles simultaneous notes. `_measure_ticks`/`_make_slots` count one slot per onset,
+`_rescale_slots` scales members together, the confidence drop skips shared onsets, clipping is per event with
+shared onsets, and `_resolve_ties` is keyed by pitch (CM section 6, verified in code). **One change is needed:**
+when a bar that contains a `chord_id` overflows, emit `divisi_rhythm_split_suspected` (`review_needed`) and do
+not run-scale or clip that bar (CM Q2). Out of chord scope but flagged as the highest impact: an 8-staff
+SSAATTBB system is silently re-chunked as two SATB systems in Stage 2 (CM item F).
+
+**Stage 5:** **no change is needed for "play both notes".** `voice_notes` collapses only identical
+(onset, pitch) pairs, so a divisi's second, different pitch is kept and both sound. A unison collapses to one note,
+which CM confirms is correct. Same-pitch clipping is per pitch, so it does not touch the other member. Optional,
+low priority: divisi bars are louder (two notes at velocity 100). Scale per member only if the user notices
+(CM H).
+
+### 10.7 Held-out (Phase 4) implications
+- The Phase 4 GT labels chords and divisi **explicitly**: member pitches, shared duration, same-stem vs
+  split-stem, plus seconds, two-voice (different rhythms) and triplets as their own kinds. No opaque `<OOV>` for
+  any of these.
+- **Pre-registered: the Phase 4 model (the Phase 2 checkpoint) has no chord or tuplet support.** Report its
+  chord/tuplet regions as a separate row, with expected failure and their own counts (missed members =
+  deletions, hallucinated notes = insertions), next to SER outside those regions, which stays comparable with
+  step 6. Never fold them into one number.
+- The arm's model gets a separate, pre-registered later look at the same held-out set (or a fresh one, 10.9).
+  The look is logged, and none of the arm's choices (mix, thresholds, flags) may use Phase 4 numbers.
+
+### 10.8 Order
+0. Phase 2 trained and frozen; Phase 4 GT written with explicit chord labels (10.7).
+1. Injection step, converter, SVG check and guard behind the off flag; check that Phase 2 data is unchanged with
+   the flag off.
+2. CPM G1 with the flag on, plus the G1b-style injected check.
+3. Column-collapse and feasibility gates (10.5).
+4. ml-cv-lead review of the training diff and the pre-registered thresholds.
+5. Arm, 2 seeds.
+6. Synthetic evaluation.
+7. Stage 3/4 changes (10.6) with senior-reviewer and choral-conductor review.
+8. Held-out look.
+
+### 10.9 Decisions for the user
+1. Injected-data share and the voice-weight prior (10.5). Proposal above; settled at the pre-training review.
+2. Add the "continue Phase 2 without new tokens" control run (one more run per seed)? Without it, no claim
+   about monophonic change can be attributed to the arm.
+3. Does the arm's held-out look reuse the Phase 4 set (a second logged look) or need a fresh set?
+4. DS2 chord labels: stay out of arm v1 (recommended) or join after its gates?
+5. Stage 2 extra-staves divisi (CM item F): open a separate ticket now? It is not chord work, but it is a silent
+   wrong-voice failure today.
+
+**User rulings (2026-10-01):**
+1. Injected chords: a large share, in ALL four voices. Soprano and Alto are weighted as much as Tenor and Bass,
+   because divisi is common in every SATB voice. This replaces the Bass/Tenor-leaning voice prior; the exact share is
+   still set at the pre-training review.
+2. Control run: YES (continue Phase 2 without new tokens, same 2 seeds).
+3. The chord model is tested on a FRESH held-out set, not a second look at the Phase 4 set.
+4. DS2 chord labels: OUT of arm v1.
+5. Extra-staves divisi is logged as BUG-042; the fix timing is under discussion with the user.
