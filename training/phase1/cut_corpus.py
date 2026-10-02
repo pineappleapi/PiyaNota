@@ -1655,7 +1655,7 @@ def cmd_manifest(a: argparse.Namespace) -> None:
 #     new amendment before any full run. 100d's own numbers are not evidence for it (it is where the lead came
 #     from); estimated replication power if real <= ~57% (winner's curse).
 #   - R4 full-run audit (written now, run after the full Bach run): R1-R3 on the full corpus (~160 drops, power
-#     ~1 for a 3x tertile). Remedy fixed now: a failing cell triggers a stratified top-up of new-variant renders
+#     ~1 for a 3x tertile; superseded 2026-10-02 by the R4 amendment's recomputed power: ~53 drops). Remedy fixed now: a failing cell triggers a stratified top-up of new-variant renders
 #     drawn inside the depleted parameter range until that cell's retention >= 0.95 of overall; inverse-retention
 #     sample weights are the fallback.
 #   - Every drop_by_param cell also reports retention = (1 - cell rate) / (1 - overall rate). The report records
@@ -1723,6 +1723,45 @@ def cmd_manifest(a: argparse.Namespace) -> None:
 # * User sign-off 2026-10-02 ("yes 1 - 4"): (1) accepts the ~0.25 false-fail rate and that a FAIL is final for
 #   option A; (2) the loosening sign-off covers line_mult C' as well as the tail interval checks; (3)
 #   tail_point_over_limit needs the user's acknowledgment before training; (4) commit, then run bach_smoke100f once.
+#
+# Result 2026-10-02, bach_smoke100f (seed 20261011, commit 21fddbc, code sha 7660ed0e in run and report): PASS under
+# gate v2, 29/29. tail_point_over_limit = [fwhm_above_p95]: share above camera p95 0.031 (90% interval 0.004-0.066).
+# Reported only: fwhm_above_p95 False, line_mult_survival_2x False (tertile 1 dot 2.18; C' p 0.187), noise 0.124.
+# Paper grey p5/50/95 172.8/221/236 vs camera 178/222/234.2. drop_by_param_cprime: R1 k=2 unevaluable, R2 p 0.39,
+# R3 ratio 0.91. ml-cv-lead post-results: the pass stands; a gate v2 pass means "no evidence of harm".
+# User decisions 2026-10-02 (pasted ruling, items 1-3):
+# 1. fwhm acknowledged as a whole-distribution shift, not a tail issue: share below camera p5 0.259 (CI95
+#    0.17-0.35, ~0.05 expected), at/above camera p50 0.286 (~0.50 expected). One-attempt rule kept: no retune, no
+#    re-run. The Phase 2 camera evaluation reports every result split by measured line FWHM (above vs below the
+#    camera median), and the write-up states that a gate v2 pass means "no evidence of harm", not "matches the
+#    camera". With 25 camera pages, p5/p95 rest on ~1 page each: median and IQR are the primary comparison, tails
+#    are indicative only. A large gap in that split justifies a new, separately logged decision (e.g. thickness
+#    augmentation), never a quiet re-run.
+# 2. R4 registers the line_mult tertile-1 cell (below; r4_line_mult_t1 in the report).
+# 3. Final systems: 100% of lost systems are final (36/36, 13.5% of labelled systems). Cause: this branch's Stage 1
+#    drops staves spanning < STAFF_MIN_SPAN_FRAC (0.3) of the page. The fix exists as BUG-043 (6b2f74d) on
+#    piya106/bug042-system-grouping, but taking it here changes Stage 1 (not edited in this worktree) and which strips
+#    are cut, so 100f's pass would no longer cover the run and a new smoke would be needed. Per the user's rule this
+#    is therefore a documented known bias: the corpus lacks final barlines and endings (final cadences, fermatas).
+#    Phase 2 adds an evaluation slice on final systems so the cost is measured. Note: once BUG-043 is merged, the
+#    deployed Stage 1 keeps short final systems that this corpus never shows the CRNN.
+#
+# R4 amendment (registered 2026-10-02, after bach_smoke100f and before the full run):
+# * New cell, motivated by bach_smoke100f (winner's curse: its 2.18 is upward-biased; p 0.187 there is a lead, not
+#   evidence): line_mult lowest tertile (edges from the full run's cut pages) x {strip feature drop, dot fail, tie
+#   fail} = 3 cells, tested together: T = max evaluated (>= 3 events) ratio to overall, family-wise p from
+#   R4_LM_REPS page shuffles (seed R4_LM_SEED). Fails iff T > TERTILE_DROP_MAX_RATIO and p < DROP_PERM_ALPHA. The
+#   multiplicity burden is these 3 cells only, beside R1-R3. Remedy as R1-R3: stratified top-up renders with
+#   line_mult in the depleted tertile until the cell's retention >= 0.95 of overall; inverse-retention weights as
+#   the fallback.
+# * Power, recomputed for the full run (3190 pages; ~2605 photographed non-band pages; simulation script
+#   r4_power.py, 200 sims): 100f's augmentation-induced page-drop rate is 2/98, so the expected R1 drop count is ~53
+#   (exact 95% range ~6-190), not the ~160 assumed from 100d. R1 power: true tertile ratio 2.5 -> 0.79 / 0.99 /
+#   0.995 at k = 15 / 30 / 53; at the 2.0 floor ~0.35-0.53 for any k (the > 2 floor makes 2.0 a coin flip); 0 false
+#   fails at ratio 1. If k < 15, R1 is underpowered and the audit says so; if k < 3 it is unevaluable. Registered
+#   line_mult cell (~2550 cut pages): true ratio 2.0 -> 0.35, 2.25 -> 0.975, 1.5 -> 0, null -> 0; 100f's observed
+#   pattern taken as true -> 0.80 (upper bound). So the audit detects a clear (>= 2.25x) thin-line loss, not one at
+#   the 2x floor.
 COVER_TOL = 0.10
 COVER_KEYS: tuple[str, ...] = ("interline_px", "line_depth", "head_depth", "line_head_ratio", "line_fwhm_il",
                                "paper_grey", "noise_rel")
@@ -1768,6 +1807,8 @@ BOOTSTRAP_CI = (2.5, 97.5)
 TAIL_CI = (5.0, 95.0)                   # gate v2: 90% page-bootstrap interval for the above-p95 tail decisions
 LM_PERM_REPS = 5000
 LM_PERM_SEED = 20261012
+R4_LM_REPS = 5000                       # R4 registered line_mult tertile-1 cell (3 cells: strip, dot, tie)
+R4_LM_SEED = 20261013
 STAVE_KEYS: tuple[str, ...] = ("interline_px", "line_depth", "head_depth", "line_head_ratio", "line_fwhm_il")
 PAGE_KEYS: tuple[str, ...] = ("paper_grey", "illum_ratio", "noise_rel", "paper_area_frac")
 CAMERA_PAGES = 25
@@ -1955,7 +1996,8 @@ def _share_with_ci(per_page: list[np.ndarray], pred: Callable[[np.ndarray], np.n
 LM_KINDS: tuple[str, ...] = ("strip", "dot", "tie")
 
 
-def line_mult_cprime(page_counts: np.ndarray, members: np.ndarray, names: list[str]) -> dict[str, Any]:
+def line_mult_cprime(page_counts: np.ndarray, members: np.ndarray, names: list[str], reps: int = 0,
+                     seed: int = LM_PERM_SEED) -> dict[str, Any]:
     """Gate v2 line_mult survival (see the recal4 + gate v2 amendment): family-wise page-shuffle test of the worst
     evaluated (>= 3 events) line_mult cell ratio.
 
@@ -1963,7 +2005,10 @@ def line_mult_cprime(page_counts: np.ndarray, members: np.ndarray, names: list[s
         page_counts: pages x 6, per cut page (strips, strip feature drops, dots, dot fails, ties, tie fails).
         members: groups x pages, 1.0 where the page's line_mult falls in the group.
         names: group names, aligned with `members`.
+        reps: permutation count; 0 means LM_PERM_REPS.
+        seed: permutation seed (the R4 cell uses its own).
     """
+    reps = reps or LM_PERM_REPS
     def ratios(pc: np.ndarray) -> np.ndarray:
         # pc: reps x pages x 6 -> reps x (groups * kinds); NaN where the cell has < 3 events.
         out = []
@@ -1979,19 +2024,19 @@ def line_mult_cprime(page_counts: np.ndarray, members: np.ndarray, names: list[s
     obs = ratios(page_counts[None])[0]
     if not np.isfinite(obs).any():
         return {"worst_ratio": None, "worst_cell": None, "p_value": None, "fail": False,
-                "flag": "no cell with >= 3 events", "reps": LM_PERM_REPS, "seed": LM_PERM_SEED}
+                "flag": "no cell with >= 3 events", "reps": reps, "seed": seed}
     worst = float(np.nanmax(obs))
     cell = int(np.nanargmax(obs))
-    rng = np.random.default_rng(LM_PERM_SEED)
-    perms = np.array([rng.permutation(len(page_counts)) for _ in range(LM_PERM_REPS)])
+    rng = np.random.default_rng(seed)
+    perms = np.array([rng.permutation(len(page_counts)) for _ in range(reps)])
     null = ratios(page_counts[perms])
     null_worst = np.where(np.isfinite(null).any(axis=1), np.nanmax(np.nan_to_num(null, nan=-1.0), axis=1), 0.0)
-    p = float((1 + np.sum(null_worst >= worst - 1e-12)) / (1 + LM_PERM_REPS))
+    p = float((1 + np.sum(null_worst >= worst - 1e-12)) / (1 + reps))
     return {"worst_ratio": round(worst, 3),
             "worst_cell": f"{names[cell % len(names)]}/{LM_KINDS[cell // len(names)]}",
             "p_value": round(p, 4), "null_p95_worst": round(float(np.percentile(null_worst, 95)), 3),
             "fail": bool(worst > TERTILE_DROP_MAX_RATIO and p < DROP_PERM_ALPHA),
-            "reps": LM_PERM_REPS, "seed": LM_PERM_SEED}
+            "reps": reps, "seed": seed}
 
 
 def band_only_page(renders: Path, font: str, piece: str, res: dict[str, Any]) -> bool:
@@ -2403,6 +2448,9 @@ def cmd_report(a: argparse.Namespace) -> None:
         rep["line_mult_survival_cprime"] = line_mult_cprime(np.array([v[1] for v in page_rows.values()]),
                                                             members, names)
         checks["line_mult_survival_cprime"] = not rep["line_mult_survival_cprime"]["fail"]
+        # R4 registered cell: an audit, not a smoke check (its remedy is a top-up, see the R4 amendment).
+        rep["r4_line_mult_t1"] = line_mult_cprime(np.array([v[1] for v in page_rows.values()]), members[:1],
+                                                  names[:1], reps=R4_LM_REPS, seed=R4_LM_SEED)
     else:
         checks["line_mult_survival_cprime"] = False
     rep["checks_reported_only"] = checks_reported_only
