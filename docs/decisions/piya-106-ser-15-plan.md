@@ -1363,8 +1363,9 @@ so freezing Stage 1/2 before this step would bake the thick strokes into the tra
        (`note.half-L3 dot-S3`), where the user expected `dot-L3`. That is the Camera-PrIMuS convention (the dot
        is drawn in the space above), not a converter error. The first 3,000 PrIMuS samples label all 1,988 dots
        after line notes `S`, and all 1,882 dots after space notes at the note's own position. So no fix was made
-       and no fresh sample is needed. The Palestrina page (`g1b_palestrina/`, 10 strips, 0 OOV) is still
-       unchecked.
+       and no fresh sample is needed. The Palestrina page (`g1b_palestrina/`, 10 strips, 0 OOV) was hand-checked by the user on
+       2026-10-01: 10/10 correct, no notes (`g1b_palestrina/g1b_results_user.json`). Palestrina strips are
+       cleared for training.
      - **CPM replay labels (Phase 2):** replace the final-barline and grace-order gold defects (about 7% of
        samples have the barline defect) with converter output, after checking a random 30 of them against their
        images. This way replay and synthetic strips agree on end-of-strip barlines. Keep the CPM canary scored on
