@@ -101,8 +101,9 @@ SHORT_SPAN_LO = 0.20
 SHORT_SPAN_HI = 0.60
 # Augmentation / smoke-selection seed. 20261001 was used by smoke50 / smoke50b and the stopped full run; the re-smoke
 # after the 2026-10-01 ml-cv-lead review uses a fresh one so its pages are not the ones the ranges were tuned on.
-# 20261002 ran bach_smoke100d (recal2) and was used to tune recal3, so recal3 smokes on 20261004.
-BASE_SEED = 20261004
+# 20261002 ran bach_smoke100d (recal2) and was used to tune recal3, so recal3 smokes on 20261004. 20261004 ran
+# bach_smoke100e and its pages informed recal4/gate v2, so recal4 smokes on 20261011 (20261005-07 are C' test seeds).
+BASE_SEED = 20261011
 SPLIT_SEED = 20261001         # train/val group order; unchanged so the split does not move with the augmentation
 VAL_FRACTION = 0.10           # of pieces, filled whole melody group at a time
 
@@ -203,9 +204,19 @@ LINE_INK_HIGH = (0.92, 1.0)            # recal2: was (0.85, 1.0)
 INK_LOW_P = 0.20                        # weighted toward low contrast (ml-cv-lead); 0.25 until ruling (c)
 INK_LOW = (0.55, 0.80)                  # (0.65, 0.85) until 2026-10-01: with sharpening no head fell below camera p5
 INK_HIGH = (0.88, 1.0)                  # was (0.85, 0.98): head depth reached camera p50 0.95 on too few staves
-PAPER_GREY_RANGE = (230.0, 255.0)       # recal2: was (205, 245), before that (165, 240). Paper-only camera
-                                        # p25/p50/p75 215/222/226; measured paper grey runs ~0.90-0.92 x sampled
-                                        # (illumination field and tint), not ~0.99 as this comment said before
+# Recal4 (option A, 2026-10-02): was (230, 255) in recal2, (205, 245) and (165, 240) before. Paper-only camera
+# p25/p50/p75 215/222/226. Measured paper grey runs 0.937 x sampled (bach_smoke100e p50; p5/p95 0.878/1.0, flat in
+# the sampled value, so no clipping), not the 0.90-0.92 recal2 assumed, so (230, 255) measured p50 227. Centre
+# 237 = 222 / 0.937; the measured/sampled spread alone already spans the camera's main group (207-235), so the
+# sampled range is narrow.
+PAPER_GREY_RANGE = (230.0, 244.0)
+# Recal4: global exposure gain on the whole frame (paper and background), drawn apart from the illumination field.
+# 3 of the 25 camera pages are dark overall (paper-only grey 170/176/186) while their paper-only illum (0.83-0.85)
+# is ordinary, so their darkness is exposure, not uneven light; the generator could darken paper only through the
+# illum field, and recal3 rightly removed the unrealistic deep-illum pages that had supplied 100d's dark tail.
+# P = 3/25 and the gain range covers 170/222-186/222 = 0.77-0.84 (camera pages only; no smoke result is the target).
+EXPOSURE_DARK_P = 0.12
+EXPOSURE_DARK = (0.75, 0.85)
 BG_GREY_RANGE = (40.0, 150.0)           # table / background visible past the sheet
 # Recal3 (ml-cv-lead, after bach_smoke100d): the old low band (0.35, 0.72) cited Honneur p3's frame-wide illum
 # (0.39, dark table included); its paper-only illum is 0.79 and no camera page has paper-only illum below 0.78, so
@@ -319,6 +330,7 @@ class AugParams:
     noise_corr_px: float
     tint_bgr: tuple[float, float, float]
     jpeg_q: int
+    exposure: float = 1.0               # recal4 global exposure gain; 1.0 for every pre-recal4 page
     sharpen_amount: float = 0.0
     sharpen_sigma_px: float = 0.0
     fit_attempts: int = 0
@@ -553,6 +565,7 @@ def sample_params(rng: np.random.Generator, seed: int, svg_interline_px_per_widt
         jpeg_q=int(rng.integers(JPEG_Q_RANGE[0], JPEG_Q_RANGE[1] + 1)),
         sharpen_amount=_u(SHARPEN_AMOUNT, rng) if rng.random() < SHARPEN_P else 0.0,
         sharpen_sigma_px=_u(SHARPEN_SIGMA_PX, rng),
+        exposure=_u(EXPOSURE_DARK, rng) if rng.random() < EXPOSURE_DARK_P else 1.0,
     )
 
 
@@ -849,7 +862,7 @@ def synthesize(render: np.ndarray, pl: Placement, p: AugParams, rng: np.random.G
     bg = (p.bg_grey / p.paper_grey) * (1.0 + 0.05 * _smooth_noise((FRAME_H, FRAME_W), 8.0, rng))
     img = alpha * paper + (1 - alpha) * bg
     del paper, alpha, bg
-    img *= illumination(p) * p.paper_grey
+    img *= illumination(p) * (p.paper_grey * p.exposure)
     img = cv2.GaussianBlur(img, (0, 0), max(0.3, p.blur_spacings * p.interline_px))
     out = np.empty((FRAME_H, FRAME_W, 3), np.float32)
     for c in range(3):
@@ -1669,6 +1682,47 @@ def cmd_manifest(a: argparse.Namespace) -> None:
 # Leakage flag (ml-cv-lead, 2026-10-02): the 25 camera calibration pages include Non Nobis Domine, Gaano, Handog,
 # Honneur and Don't Stop Me Now, i.e. the 2026-09-28 fresh-photo eval pieces. The augmentation is tuned to their
 # pixel statistics (not labels), so Phase 2 accuracy on those photos is not held-out evidence.
+#
+# Amendment recal4 + gate v2 (option A, written 2026-10-02 before any recal4 run; never applied to 100e). One attempt,
+# BASE_SEED 20261011; no threshold, COVER_TOL or band edge changes.
+# * recal4 (generator): global exposure gain (EXPOSURE_DARK_P 0.12, EXPOSURE_DARK 0.75-0.85) and PAPER_GREY_RANGE
+#   (230, 244); derivation at those constants. The targets are the 25 camera pages only. The transfer factor
+#   measured/sampled paper grey (0.937 p50) is a property of the recal3 lighting, read off 100e pages; that is the
+#   one use of 100e, and it estimates the generator, not the target. Predicted (5000 sims of 104 pages, 100e ratio
+#   bootstrap): paper grey p5/50/95 176/220/238 vs camera 178/222/234; P(iqr and cover:paper_grey) 0.986.
+# * gate v2, line_mult_survival_cprime replaces line_mult_survival_2x as the gate: cells are the 3 line_mult
+#   tertiles plus thick / not_thick x {strip feature drop, dot fail, tie fail}; a cell is evaluated with >=
+#   DROP_RATIO_MIN_EVENTS events; T = max evaluated ratio to overall; family-wise p from LM_PERM_REPS shuffles of
+#   whole pages' count vectors over the cut pages (seed LM_PERM_SEED; cell membership stays with the page slot, as
+#   in R2). Fails iff T > TERTILE_DROP_MAX_RATIO and p < DROP_PERM_ALPHA.
+# * gate v2, noise_above_p95_ci / fwhm_above_p95_ci replace the point checks: fail iff the TAIL_CI page-bootstrap
+#   interval lies wholly outside the limit (noise: lower bound > 0.15; fwhm: upper bound < 0.05 or lower bound >
+#   0.20). TAIL_CI = 90% (one-sided 5% per edge), chosen by simulation on pooled 100d+100e pages before this run
+#   (true share placed by moving the threshold, page clustering kept; 104 pages). Boundary false-fail: noise 0.05
+#   (legacy 0.53), fwhm low edge 0.10 (legacy 0.54; the bootstrap under-covers the skewed low-count tail), fwhm high
+#   edge 0.04 (legacy 0.50). Power: noise true share 0.20 / 0.25 / 0.30 fails 0.38 / 0.78 / 0.98; fwhm true 0.02 /
+#   0.035 fails 0.67 / 0.30. A 95% interval was simulated too (noise 0.20 fails 0.25) and rejected for power. The
+#   user signed off (2026-10-02) that this loosens the decision rule; the limits are unchanged.
+# * Overall false-fail (union bound, no harm present). Permutation checks fire at their nominal alpha whatever the
+#   generator does: drop_by_param C' R1 + R2 + R3 + line_mult C' = 4 x 0.05 = 0.20 (1 - 0.95^4 = 0.185 if
+#   independent). Tail checks add 0 to 0.15 depending on how close the true shares sit to the limits (0.15 if
+#   noise and fwhm both sit exactly at an edge); paper grey adds ~0.014. Worst case ~0.36, typical ~0.20-0.25.
+#   Budget declared: 0.25 for a generator whose true tails are inside the limits; the worst case is recorded, not
+#   hidden, and is for ml-cv-lead to accept or reject before the run.
+# * The legacy point checks stay reported in checks_reported_only (noise_above_p95, fwhm_above_p95,
+#   line_mult_survival_2x).
+# * ml-cv-lead pre-run review (2026-10-02): GO for one run. Loosening ledger: the tail interval checks and line_mult C'
+#   both turn a point check into a significance test (user sign-off needed for both); the 90% level (one-sided 5%,
+#   the gate's alpha), the 100e transfer ratio and the exposure term are not loosening. A pass on the tail checks
+#   means "no evidence of harm", not "tails within limits" (a true noise tail of 0.20 passes ~62% of the time).
+#   Pre-registered: (1) a pass whose tail point share is beyond its limit while the 90% interval does not exclude
+#   it is flagged tail_point_over_limit (report flags), and the user must acknowledge it before the corpus is used
+#   for training; (2) a FAIL on bach_smoke100f is final for option A: no re-run on a new seed, no "permutation
+#   false-fail" argument after the fact; the next step is a user decision. Known limit: real dark pages also carry
+#   higher sensor noise (low light, high ISO); the generator does not tie noise_sigma to exposure.
+# * User sign-off 2026-10-02 ("yes 1 - 4"): (1) accepts the ~0.25 false-fail rate and that a FAIL is final for
+#   option A; (2) the loosening sign-off covers line_mult C' as well as the tail interval checks; (3)
+#   tail_point_over_limit needs the user's acknowledgment before training; (4) commit, then run bach_smoke100f once.
 COVER_TOL = 0.10
 COVER_KEYS: tuple[str, ...] = ("interline_px", "line_depth", "head_depth", "line_head_ratio", "line_fwhm_il",
                                "paper_grey", "noise_rel")
@@ -1711,12 +1765,16 @@ CONFIRM_TERTILE = 0                     # lowest tertile
 BOOTSTRAP_REPS = 2000
 BOOTSTRAP_SEED = 20261001
 BOOTSTRAP_CI = (2.5, 97.5)
+TAIL_CI = (5.0, 95.0)                   # gate v2: 90% page-bootstrap interval for the above-p95 tail decisions
+LM_PERM_REPS = 5000
+LM_PERM_SEED = 20261012
 STAVE_KEYS: tuple[str, ...] = ("interline_px", "line_depth", "head_depth", "line_head_ratio", "line_fwhm_il")
 PAGE_KEYS: tuple[str, ...] = ("paper_grey", "illum_ratio", "noise_rel", "paper_area_frac")
 CAMERA_PAGES = 25
 
 
-def page_bootstrap_ci(hits: np.ndarray, n: np.ndarray) -> list[float] | None:
+def page_bootstrap_ci(hits: np.ndarray, n: np.ndarray, ci: tuple[float, float] = BOOTSTRAP_CI
+                      ) -> list[float] | None:
     """95% CI of a pooled share sum(hits) / sum(n), resampling pages (rows) with replacement.
 
     Why pages: staves on one page share every augmentation draw (within-page correlation ~0.99), so a stave-level
@@ -1725,6 +1783,7 @@ def page_bootstrap_ci(hits: np.ndarray, n: np.ndarray) -> list[float] | None:
     Args:
         hits: per page, the number of units (staves, strips, features) meeting the condition.
         n: per page, the number of units.
+        ci: lower and upper percentiles of the bootstrap distribution.
 
     Returns:
         [lo, hi] rounded, or None when there are no units.
@@ -1736,7 +1795,7 @@ def page_bootstrap_ci(hits: np.ndarray, n: np.ndarray) -> list[float] | None:
         return None
     idx = np.random.default_rng(BOOTSTRAP_SEED).integers(0, n.size, (BOOTSTRAP_REPS, n.size))
     shares = hits[idx].sum(axis=1) / n[idx].sum(axis=1)
-    return [round(float(np.percentile(shares, q)), 4) for q in BOOTSTRAP_CI]
+    return [round(float(np.percentile(shares, q)), 4) for q in ci]
 
 
 def _tertile_cells(pool_vals: np.ndarray, vals: np.ndarray) -> list[np.ndarray]:
@@ -1885,11 +1944,54 @@ def drop_param_permutation(aug_pool: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _share_with_ci(per_page: list[np.ndarray], pred: Callable[[np.ndarray], np.ndarray]) -> dict[str, Any]:
-    """Point share over all units plus its page-bootstrap CI; `per_page` holds each page's values."""
+    """Point share over all units plus its page-bootstrap CIs (95% report, TAIL_CI gate v2); `per_page` holds each
+    page's values."""
     hits = np.array([int(pred(v).sum()) for v in per_page])
     n = np.array([v.size for v in per_page])
     return {"share": round(float(hits.sum() / n.sum()), 4) if n.sum() else None,
-            "page_ci95": page_bootstrap_ci(hits, n)}
+            "page_ci95": page_bootstrap_ci(hits, n), "page_ci90": page_bootstrap_ci(hits, n, TAIL_CI)}
+
+
+LM_KINDS: tuple[str, ...] = ("strip", "dot", "tie")
+
+
+def line_mult_cprime(page_counts: np.ndarray, members: np.ndarray, names: list[str]) -> dict[str, Any]:
+    """Gate v2 line_mult survival (see the recal4 + gate v2 amendment): family-wise page-shuffle test of the worst
+    evaluated (>= 3 events) line_mult cell ratio.
+
+    Args:
+        page_counts: pages x 6, per cut page (strips, strip feature drops, dots, dot fails, ties, tie fails).
+        members: groups x pages, 1.0 where the page's line_mult falls in the group.
+        names: group names, aligned with `members`.
+    """
+    def ratios(pc: np.ndarray) -> np.ndarray:
+        # pc: reps x pages x 6 -> reps x (groups * kinds); NaN where the cell has < 3 events.
+        out = []
+        for j in range(len(LM_KINDS)):
+            n, f = pc[..., 2 * j], pc[..., 2 * j + 1]
+            overall = f.sum(axis=-1, keepdims=True) / np.maximum(n.sum(axis=-1, keepdims=True), 1.0)
+            cf, cn = f @ members.T, n @ members.T
+            with np.errstate(divide="ignore", invalid="ignore"):
+                r = np.where(overall > 0, (cf / np.maximum(cn, 1.0)) / overall, 0.0)
+            out.append(np.where(cf >= DROP_RATIO_MIN_EVENTS, r, np.nan))
+        return np.concatenate(out, axis=-1)
+
+    obs = ratios(page_counts[None])[0]
+    if not np.isfinite(obs).any():
+        return {"worst_ratio": None, "worst_cell": None, "p_value": None, "fail": False,
+                "flag": "no cell with >= 3 events", "reps": LM_PERM_REPS, "seed": LM_PERM_SEED}
+    worst = float(np.nanmax(obs))
+    cell = int(np.nanargmax(obs))
+    rng = np.random.default_rng(LM_PERM_SEED)
+    perms = np.array([rng.permutation(len(page_counts)) for _ in range(LM_PERM_REPS)])
+    null = ratios(page_counts[perms])
+    null_worst = np.where(np.isfinite(null).any(axis=1), np.nanmax(np.nan_to_num(null, nan=-1.0), axis=1), 0.0)
+    p = float((1 + np.sum(null_worst >= worst - 1e-12)) / (1 + LM_PERM_REPS))
+    return {"worst_ratio": round(worst, 3),
+            "worst_cell": f"{names[cell % len(names)]}/{LM_KINDS[cell // len(names)]}",
+            "p_value": round(p, 4), "null_p95_worst": round(float(np.percentile(null_worst, 95)), 3),
+            "fail": bool(worst > TERTILE_DROP_MAX_RATIO and p < DROP_PERM_ALPHA),
+            "reps": LM_PERM_REPS, "seed": LM_PERM_SEED}
 
 
 def band_only_page(renders: Path, font: str, piece: str, res: dict[str, Any]) -> bool:
@@ -2026,7 +2128,8 @@ def cmd_report(a: argparse.Namespace) -> None:
                    "share_below_cam_p5": _share_with_ci(per_page[k], lambda x, t=c5: x < t)["page_ci95"],
                    "share_at_or_above_cam_p50": _share_with_ci(per_page[k],
                                                                lambda x, t=cam[k][2]: x >= t)["page_ci95"],
-                   "share_above_cam_p95": _share_with_ci(per_page[k], lambda x, t=c95: x > t)["page_ci95"]}}
+                   "share_above_cam_p95": _share_with_ci(per_page[k], lambda x, t=c95: x > t)["page_ci95"]},
+               "page_ci90_share_above_cam_p95": _share_with_ci(per_page[k], lambda x, t=c95: x > t)["page_ci90"]}
         if k in AT_P50_MIN and v:
             checks[f"at_p50:{k}"] = row["share_at_or_above_cam_p50"] >= AT_P50_MIN[k]
         if k in IQR_KEYS and v:
@@ -2040,10 +2143,20 @@ def cmd_report(a: argparse.Namespace) -> None:
     for k in ("line_depth", "head_depth"):
         sh = rep["stats"][k]["share_below_cam_p5"]
         checks[f"low_share:{k}"] = sh is not None and LOW_SHARE_BAND[0] <= sh <= LOW_SHARE_BAND[1]
+    # Gate v2: the above-p95 tails are decided on the TAIL_CI page-bootstrap interval; the point checks are reported.
+    checks_reported_only: dict[str, bool] = {}
     sh = rep["stats"]["noise_rel"]["share_above_cam_p95"]
-    checks["noise_above_p95"] = sh is not None and sh <= NOISE_ABOVE_P95_MAX
+    checks_reported_only["noise_above_p95"] = sh is not None and sh <= NOISE_ABOVE_P95_MAX
+    ci90 = rep["stats"]["noise_rel"]["page_ci90_share_above_cam_p95"]
+    checks["noise_above_p95_ci"] = ci90 is not None and not ci90[0] > NOISE_ABOVE_P95_MAX
     sh = rep["stats"]["line_fwhm_il"]["share_above_cam_p95"]
-    checks["fwhm_above_p95"] = sh is not None and FWHM_ABOVE_P95_BAND[0] <= sh <= FWHM_ABOVE_P95_BAND[1]
+    checks_reported_only["fwhm_above_p95"] = sh is not None and FWHM_ABOVE_P95_BAND[0] <= sh <= FWHM_ABOVE_P95_BAND[1]
+    ci90 = rep["stats"]["line_fwhm_il"]["page_ci90_share_above_cam_p95"]
+    checks["fwhm_above_p95_ci"] = (ci90 is not None and not ci90[1] < FWHM_ABOVE_P95_BAND[0]
+                                   and not ci90[0] > FWHM_ABOVE_P95_BAND[1])
+    # Pre-registered (gate v2 review): a tail passing on its interval while its point share is over the limit needs
+    # the user's acknowledgment before training.
+    tail_over = [k for k in ("noise_above_p95", "fwhm_above_p95") if not checks_reported_only[k]]
     # Recal2 amendment: framing (paper fills the frame as in the camera pages).
     paf = per_page["paper_area_frac"]
     low_area = _share_with_ci(paf, lambda x: x < PAPER_AREA_LOW)
@@ -2273,7 +2386,27 @@ def cmd_report(a: argparse.Namespace) -> None:
             lm_bins[name] = row
     rep["feature_survival_by_line_mult"] = lm_bins
     rep["feature_survival_by_line_mult_worst_ratio"] = round(worst_lm, 2)
-    checks["line_mult_survival_2x"] = bool(lm_bins) and worst_lm <= TERTILE_DROP_MAX_RATIO
+    checks_reported_only["line_mult_survival_2x"] = bool(lm_bins) and worst_lm <= TERTILE_DROP_MAX_RATIO
+    if len(lm_vals):
+        page_rows: dict[int, tuple[float, list[float]]] = {}
+        for rr, sv in cut:
+            lm, c = page_rows.setdefault(id(rr), (float(rr["params"]["line_mult"]), [0.0] * 6))
+            c[0] += 1
+            c[1] += strip_verdict(sv, thresholds) is not None
+            for j, kind in enumerate(("dot", "tie"), start=1):
+                fs = [f for f in sv.get("features", []) if f["kind"] == kind]
+                c[2 * j] += len(fs)
+                c[2 * j + 1] += sum(1 for f in fs if f["z"] is None or f["z"] <= thresholds[kind])
+        page_lm = np.array([v[0] for v in page_rows.values()])
+        names = list(groups)
+        members = np.array([[float(groups[g](v)) for v in page_lm] for g in names])
+        rep["line_mult_survival_cprime"] = line_mult_cprime(np.array([v[1] for v in page_rows.values()]),
+                                                            members, names)
+        checks["line_mult_survival_cprime"] = not rep["line_mult_survival_cprime"]["fail"]
+    else:
+        checks["line_mult_survival_cprime"] = False
+    rep["checks_reported_only"] = checks_reported_only
+    rep["tail_point_over_limit"] = [k for k in tail_over if checks[f"{k}_ci"]]
     # Amendment C': the gate. The legacy 2x check and amendment C are reported only.
     rep["drop_by_param_cprime"] = drop_param_cprime(aug_pool, thresholds)
     checks["drop_by_param_cprime"] = not rep["drop_by_param_cprime"]["fail"]
@@ -2338,7 +2471,9 @@ def cmd_report(a: argparse.Namespace) -> None:
         rep["font_coverage"] = dict(per_font)
         flags["under_sampled_fonts"] = "no smoke_plan in run_info.json (not a --smoke run or pre-recal2 run)"
     rep["flags"] = flags
-    rep["decision_basis"] = "point estimates; page_ci95 values are reported only (amendment (c))"
+    rep["decision_basis"] = ("gate v2: point estimates, except the above-p95 tails (90% page-bootstrap interval) and "
+                             "the permutation tests (drop_by_param_cprime, line_mult_survival_cprime); page_ci95 "
+                             "values are reported only")
     rep["checks"] = checks
     rep["report_code_sha256"] = sha256_file(Path(__file__))
     (out / "report.json").write_text(json.dumps(rep, indent=1), encoding="utf-8")
