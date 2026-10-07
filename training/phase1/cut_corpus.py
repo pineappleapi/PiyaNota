@@ -47,6 +47,7 @@ import argparse
 import collections
 import contextlib
 import dataclasses
+import functools
 import gc
 import hashlib
 import html
@@ -55,11 +56,15 @@ import json
 import logging
 import math
 import multiprocessing
+import os
+import platform
 import subprocess
 import sys
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
+from datetime import datetime
+from importlib import metadata
 from multiprocessing.pool import AsyncResult
 from pathlib import Path
 from typing import Any, Callable
@@ -68,6 +73,7 @@ import cv2
 import numpy as np
 import psutil
 import resvg_py
+from fontTools.ttLib import TTFont
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
@@ -124,6 +130,19 @@ FEATURE_CSS: dict[str, str] = {
     # do, and the largest targeted class (ml-cv-lead review R2).
     "tie": "* {visibility:hidden} .tie, .tie *, .slur, .slur * {visibility:visible}",
 }
+# Text font pin (amendment 2026-10-07). The SVGs ask for "Times, serif"; with system fonts resvg drew whatever the
+# machine had, so the corpus depended on the host. Only the bundled Edwin files (MuseScore 4's text font, OFL) are
+# loaded and every generic family maps to Edwin, so a wrong family name cannot fall back to another font; it can only
+# drop the text, which TEXT_ONLY_CSS + process_page turn into a hard failure.
+TEXT_FONT_DIR = Path(__file__).with_name("fonts") / "edwin"
+TEXT_FONT_FAMILY = "Edwin"
+TEXT_FONT_SUFFIXES: tuple[str, ...] = (".otf", ".ttf")
+TEXT_ONLY_CSS = "* {visibility:hidden} text, text * {visibility:visible}"
+NAME_ID_FAMILY = 1                     # OpenType name table: font family
+NAME_ID_TYPOGRAPHIC_FAMILY = 16        # preferred family when styles are split across files
+# Stage 1 refills erased ink with a paper estimate, so an erased text pixel moves by far more than interpolation
+# noise between strip_gray (before the mask) and strip_source (after); 16 grey levels separates the two.
+TEXT_ERASED_MIN_DIFF = 16
 
 # ── camera frame ─────────────────────────────────────────────────────────────────────────────────────────────────
 FRAME_W, FRAME_H = 3024, 4032          # the dev phone's portrait frame (all 25 dev camera pages)
@@ -387,6 +406,7 @@ class PageResult:
     stats: dict[str, Any] | None = None
     rss_mb: float | None = None         # worker process RSS after the page (recal2 memory logging)
     peak_rss_mb: float | None = None    # worker peak working set so far (Windows only; None elsewhere)
+    text: dict[str, Any] | None = None  # amendment 2026-10-07: drawn text ink and glyphs missing from the text font
 
 
 def _u(lo_hi: tuple[float, float], rng: np.random.Generator) -> float:
@@ -491,8 +511,54 @@ def feature_kinds(svg_text: str) -> set[str]:
     return {k for k, classes in FEATURE_CLASSES.items() if present.intersection(classes)}
 
 
+@functools.lru_cache(maxsize=1)
+def text_font() -> dict[str, Any]:
+    """The pinned text font: files, sha256, family name and covered characters. Hard-fails if it is not Edwin."""
+    files = sorted(f for f in TEXT_FONT_DIR.glob("*") if f.suffix.lower() in TEXT_FONT_SUFFIXES)
+    if not files:
+        raise SystemExit(f"no text font files in {TEXT_FONT_DIR}")
+    chars: set[str] = set()
+    families: set[str] = set()
+    for f in files:
+        font = TTFont(str(f), lazy=True)
+        name = font["name"]
+        fam = name.getDebugName(NAME_ID_TYPOGRAPHIC_FAMILY) or name.getDebugName(NAME_ID_FAMILY)
+        if fam is None:
+            raise SystemExit(f"{f.name} has no family name")
+        families.add(fam)
+        chars |= {chr(c) for c in font.getBestCmap()}
+        font.close()
+    if families != {TEXT_FONT_FAMILY}:
+        raise SystemExit(f"text font families {sorted(families)} != {{{TEXT_FONT_FAMILY!r}}}")
+    return {"family": TEXT_FONT_FAMILY, "files": {f.name: sha256_file(f) for f in files},
+            "paths": [str(f) for f in files], "chars": frozenset(chars)}
+
+
+def visible_text(svg_text: str) -> str:
+    """Characters of every text run drawn at a non-zero size (Verovio wraps each run in a font-size="0px" <text>)."""
+    out: list[str] = []
+
+    def walk(el: ET.Element, size: float) -> None:
+        fs = el.get("font-size")
+        if fs is not None:
+            size = float(fs.removesuffix("px"))
+        if size > 0 and el.text:
+            out.append(el.text.strip())
+        for ch in el:
+            walk(ch, size)
+            if size > 0 and ch.tail:
+                out.append(ch.tail.strip())
+
+    for t in ET.fromstring(svg_text).iter(f"{{{SVG_NS}}}text"):
+        walk(t, 0.0)
+    return "".join(out)
+
+
 def rasterise(svg: str, width_px: int, css: str | None = None) -> np.ndarray:
-    png = resvg_py.svg_to_bytes(svg_string=svg, width=width_px, background="white", style_sheet=css)
+    tf = text_font()
+    png = resvg_py.svg_to_bytes(svg_string=svg, width=width_px, background="white", style_sheet=css,
+                                skip_system_fonts=True, font_files=tf["paths"], font_family=TEXT_FONT_FAMILY,
+                                serif_family=TEXT_FONT_FAMILY, sans_serif_family=TEXT_FONT_FAMILY)
     img = cv2.imdecode(np.frombuffer(bytes(png), np.uint8), cv2.IMREAD_GRAYSCALE)
     if img is None:
         raise ValueError("resvg returned an undecodable image")
@@ -1163,6 +1229,41 @@ def paper_noise(source: np.ndarray, gray: np.ndarray, ref_ink_w: np.ndarray, int
     return 1.4826 * mad / max(float(np.median(sb[sel])), 1.0)
 
 
+def strip_text_px(text_img: np.ndarray | None, pl: Placement, H: np.ndarray, strip_gray: np.ndarray,
+                  strip_source: np.ndarray, detect: np.ndarray, s2_manifest: list[dict[str, Any]],
+                  staff_left_src: dict[tuple[int, str], float]) -> dict[tuple[int, str], dict[str, int]]:
+    """Text ink per strip, before and after the Stage 1 mask (report only; amendment 2026-10-07, Q4).
+
+    The band is the strip's own rows: Stage 2's adaptive crop is recomputed with its own functions on the same
+    detect image and boxes (the manifest boxes are already full-width and in Stage 2's order), then mapped to the
+    source page as _crop_and_resize maps them. The label zone is the band left of the staff's first line.
+    """
+    if text_img is None:
+        return {}
+    src_h, src_w = strip_gray.shape[:2]
+    canvas = np.full((pl.canvas_h, pl.canvas_w), 255, np.uint8)
+    canvas[pl.page_y:pl.page_y + text_img.shape[0], pl.page_x:pl.page_x + text_img.shape[1]] = text_img
+    text_w = cv2.warpPerspective(canvas, H, (src_w, src_h), flags=cv2.INTER_LINEAR, borderValue=255) < INK_THRESHOLD
+    kept_w = text_w & (np.abs(strip_source.astype(np.int16) - strip_gray.astype(np.int16)) < TEXT_ERASED_MIN_DIFF)
+    out: dict[tuple[int, str], dict[str, int]] = {}
+    boxes = [m["box"] for m in s2_manifest]
+    det_h = detect.shape[0]
+    ky = src_h / det_h
+    for i, m in enumerate(s2_manifest):
+        key = (m["system"] - 1, m["voice"])
+        if key not in staff_left_src:
+            continue
+        y1, y2 = s2._content_extent(detect, boxes[i], s2._neighbor_limits(boxes, i, det_h))
+        r0, r1 = int(round(y1 * ky)), int(round(y2 * ky))
+        c = min(src_w, max(0, int(staff_left_src[key])))
+        out[key] = {"label_pre": int(np.count_nonzero(text_w[r0:r1, :c])),
+                    "label_kept": int(np.count_nonzero(kept_w[r0:r1, :c])),
+                    "band_pre": int(np.count_nonzero(text_w[r0:r1, c:])),
+                    "band_kept": int(np.count_nonzero(kept_w[r0:r1, c:])),
+                    "band_area": int((r1 - r0) * (src_w - c))}
+    return out
+
+
 # ── one page ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def process_page(job: PageJob, out: Path, yolo: Path, keep_photo: bool, want_stats: bool,
@@ -1192,6 +1293,16 @@ def process_page(job: PageJob, out: Path, yolo: Path, keep_photo: bool, want_sta
 
     edited = edit_svg(svg_text, p)
     render = rasterise(edited, p.render_width_px)
+    # Amendment 2026-10-07, condition 1: text that resolves to no font is skipped by resvg with only a log line, so
+    # a page whose text draws no ink stops the run rather than silently joining a text-free corpus.
+    chars = visible_text(edited)
+    text_img = rasterise(edited, p.render_width_px, TEXT_ONLY_CSS) if chars else None
+    text_ink = int(np.count_nonzero(text_img < INK_THRESHOLD)) if text_img is not None else 0
+    if chars and text_ink == 0:
+        raise RuntimeError(f"{job.key}: {len(chars)} text characters drew no ink with {TEXT_FONT_FAMILY}")
+    missing = sorted({c for c in chars if not c.isspace()} - text_font()["chars"])
+    text_info: dict[str, Any] = {"chars": len(chars), "ink_px": text_ink,
+                                 "missing_glyphs": [f"U+{ord(c):04X}" for c in missing]}
     photo = synthesize(render, pl, p, rng)
     photo_dir = out / "photos" / job.font / job.piece
     photo_dir.mkdir(parents=True, exist_ok=True)
@@ -1203,7 +1314,7 @@ def process_page(job: PageJob, out: Path, yolo: Path, keep_photo: bool, want_sta
     def done(status: str, reason: str | None, **kw: Any) -> PageResult:
         if not keep_photo:
             photo_path.unlink(missing_ok=True)
-        return PageResult(job.key, status, reason, time.perf_counter() - t0, params, **kw)
+        return PageResult(job.key, status, reason, time.perf_counter() - t0, params, text=text_info, **kw)
 
     # Serving: frozen Stage 1 (keep_unmasked as serving does with ClefKeyNet on; it only adds return fields).
     if spy is not None:
@@ -1248,6 +1359,7 @@ def process_page(job: PageJob, out: Path, yolo: Path, keep_photo: bool, want_sta
     # registration is a homography, so curl and the Stage 1 dewarp leave a residual of up to about one interline;
     # a wrong assignment is off by a whole staff gap (>= ~6 interlines), so the tolerance separates the two.
     mapped: dict[tuple[int, str], float] = {}
+    staff_left_src: dict[tuple[int, str], float] = {}
     for (sop, staff_n), (left, right, cy) in staff_c.items():
         voice = VOICES[int(staff_n) - 1]
         pts = cv2.perspectiveTransform(np.array([[[left, cy]], [[right, cy]], [[(left + right) / 2, cy]]],
@@ -1255,6 +1367,7 @@ def process_page(job: PageJob, out: Path, yolo: Path, keep_photo: bool, want_sta
         if pts[:, 0].min() < 0 or pts[:, 0].max() > src_w:
             return done("dropped", f"staff_truncated:{sop}:{voice}", stats=stats)
         mapped[(sop, voice)] = float(pts[2, 1]) * to_det
+        staff_left_src[(sop, voice)] = float(pts[0, 0])
     tol = STAFF_MATCH_MAX_SPACINGS * interline_native * to_det
     offsets: list[float] = []
     staff_dy: dict[tuple[int, str], float] = {}
@@ -1276,6 +1389,8 @@ def process_page(job: PageJob, out: Path, yolo: Path, keep_photo: bool, want_sta
         staff_dy[key] = d / to_det
 
     strips = {(s_idx - 1, voice): arr for voice, seq in voices.items() for arr, _, s_idx, _, _ in seq}
+    text_px = strip_text_px(text_img, pl, H, page.strip_gray, page.strip_source, page.detect, s2_manifest,
+                            staff_left_src)
     k_box = float(np.median([src_w / a.shape[1] for a in strips.values()]))
     ref_w = cv2.warpPerspective(ref_canvas, H, (src_w, src_h), flags=cv2.INTER_LINEAR, borderValue=255)
     ref_ink_w = ref_w < INK_THRESHOLD
@@ -1313,6 +1428,8 @@ def process_page(job: PageJob, out: Path, yolo: Path, keep_photo: bool, want_sta
         # Every labelled strip is written; whether its dots/flags/ties survived is decided in `manifest` with
         # the threshold calibrated on the null, so recalibrating never needs a re-cut.
         row["features"] = [f for f in fres if f["system_on_page"] == sop and f["staff_n"] == staff_n]
+        if (sop, voice) in text_px:
+            row["text_px"] = text_px[(sop, voice)]
         name = f"{tag}_s{sop}_{voice}.png"
         # Stage 2 returns the grey strip as 3 equal BGR channels; one channel is lossless.
         if not cv2.imwrite(str(sdir / name), arr[..., 0] if arr.ndim == 3 else arr):
@@ -1423,6 +1540,24 @@ def _run_page(job: PageJob, out: Path, yolo: Path, keep_photos: bool, want_stats
     return res.status, res.reason, kept, res.seconds, res.rss_mb
 
 
+def environment_fingerprint() -> dict[str, Any]:
+    """Everything that could change a strip's bytes between hosts; equal fingerprints are required to mix chunks."""
+    import torch  # noqa: PLC0415  (already loaded by Stage 2; imported here only to read the device)
+    return {"python": sys.version, "machine": platform.machine(),
+            "packages": sorted(f"{d.metadata['Name']}=={d.version}" for d in metadata.distributions()
+                               if d.metadata["Name"]),
+            "cuda_available": torch.cuda.is_available(),
+            "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES")}
+
+
+def launch_host() -> dict[str, Any]:
+    """Host facts that may legitimately differ between launches of one run (kernel build, session variables)."""
+    secret_words = ("TOKEN", "KEY", "SECRET", "PASSWORD")
+    return {"platform": platform.platform(), "cpu_count": os.cpu_count(), "opencv_threads": cv2.getNumThreads(),
+            "kaggle_env": {k: v for k, v in sorted(os.environ.items())
+                           if k.startswith("KAGGLE_") and not any(w in k for w in secret_words)}}
+
+
 def cmd_run(a: argparse.Namespace) -> None:
     head = check_frozen_code()
     if a.workers < 1:
@@ -1452,8 +1587,23 @@ def cmd_run(a: argparse.Namespace) -> None:
                 "camera_page_stats_py_sha256": sha256_file(Path(__file__).with_name("camera_page_stats.py")),
                 "camera_stats": str(a.camera), "camera_stats_sha256": sha256_file(a.camera),
                 "smoke_plan": plan, "job_order": "round_robin_by_font" if a.smoke else "load_order",
-                "workers": a.workers, "worker_max_tasks": WORKER_MAX_TASKS}
-    (out / "run_info.json").write_text(json.dumps(run_info, indent=1), encoding="utf-8")
+                "worker_max_tasks": WORKER_MAX_TASKS, "variant": a.variant,
+                "text_font": {k: v for k, v in text_font().items() if k in ("family", "files")},
+                "environment": environment_fingerprint()}
+    # Amendment 2026-10-07, condition 4: a run is assembled from several launches (Kaggle sessions), so run_info is
+    # written once and every later launch must match it exactly; per-launch settings go to the chunk log.
+    info_path = out / "run_info.json"
+    if info_path.exists():
+        old = json.loads(info_path.read_text(encoding="utf-8"))
+        diff = sorted(k for k in old.keys() | run_info.keys() if old.get(k) != run_info.get(k))
+        if diff:
+            raise SystemExit(f"{info_path} differs from this launch in {diff}; use a new --out")
+    else:
+        info_path.write_text(json.dumps(run_info, indent=1), encoding="utf-8")
+    with (out / "run_chunks.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"started": datetime.now().astimezone().isoformat(timespec="seconds"),
+                            "workers": a.workers, "limit": a.limit, "max_minutes": a.max_minutes,
+                            "force": a.force, "jobs": len(jobs), "host": launch_host()}) + "\n")
     pending: collections.deque[tuple[int, PageJob, Path]] = collections.deque()
     for i, job in enumerate(jobs):
         rp = result_path(out, job, a.variant)
@@ -1762,6 +1912,33 @@ def cmd_manifest(a: argparse.Namespace) -> None:
 #   line_mult cell (~2550 cut pages): true ratio 2.0 -> 0.35, 2.25 -> 0.975, 1.5 -> 0, null -> 0; 100f's observed
 #   pattern taken as true -> 0.80 (upper bound). So the audit detects a clear (>= 2.25x) thin-line loss, not one at
 #   the 2x floor.
+# Amendment 2026-10-07 (user decisions 2026-10-07; ml-cv-lead CONDITIONAL GO; written before any run of this code):
+# * The full corpus is re-cut from scratch on Kaggle CPU sessions. The local partial run (528 pages, system text
+#   font, CUDA crashes) and bach_smoke100f are not mixed in; Phase 2 must refuse strips whose run_info lacks
+#   text_font and environment (condition 7), which quarantines both.
+# * Text: lyrics, part labels and titles stay in the renders, drawn in Edwin only (MuseScore 4's default text font;
+#   the user's test scores are MuseScore output). Verovio lays text out with Times metrics and Edwin is wider, so
+#   syllable spacing and collisions differ from real MuseScore pages: a KNOWN BIAS, accepted by the user. A sample
+#   of ~20 smoke pages is checked by eye for syllable collisions and reported, not gated.
+# * Condition 1: a page whose visible text draws no ink stops the run; glyphs missing from Edwin are recorded per
+#   page (text.missing_glyphs) and reported. Edwin file sha256s and family are in run_info.
+# * Condition 3: before the smoke, 10 pages are cut on local CPU and on Kaggle with this code and their strip
+#   hashes compared; and 5 pages with workers=1 vs workers=N on Kaggle must give identical strip hashes.
+# * Condition 4: run_info.json is written by the first launch only; a later launch whose run_info (code shas,
+#   seeds, text font, environment fingerprint) differs exits. Each launch appends to run_chunks.jsonl.
+# * Condition 6: one new smoke, pre-registered now: smoke seed 20261011, the same smoke plan and gate v2 unchanged,
+#   one attempt, a FAIL is final. The 100f rulings do not carry over; they are re-decided on this smoke's report.
+#   camera_page_stats.json is reused unchanged (its sha256 is in run_info).
+# * Report only (Q4), in text_report_only: text_dropped_pages (must be 0), pages/glyphs missing from Edwin, and per
+#   cut strip the share with text ink left of the staff (label zone) and in the band right of it, before and after
+#   the Stage 1 mask. Band = the strip's own rows (Stage 2's adaptive crop, recomputed); a pixel counts as erased
+#   when Stage 1 moved it by >= TEXT_ERASED_MIN_DIFF grey levels.
+# * The corpus assumes Stage 2's full-width crop at FROZEN_COMMIT; a crop change (e.g. BUG-043) makes it stale.
+# * Pre-registered for Phase 4 (text only here; the code belongs to Phase 4): (a) confidence = per-token CTC max
+#   posterior, aligned to ground truth by edit-distance alignment, reported for strips with vs without label ink;
+#   (b) zone boundaries in interline units from the first staff line; (c) spurious tokens before the clef counted,
+#   and clef accuracy split by part-label length; (d) a paired synthetic ablation (same strip with and without
+#   text); (e) a non-Edwin text slice, since only Edwin is trained on.
 COVER_TOL = 0.10
 COVER_KEYS: tuple[str, ...] = ("interline_px", "line_depth", "head_depth", "line_head_ratio", "line_fwhm_il",
                                "paper_grey", "noise_rel")
@@ -2115,6 +2292,29 @@ def framing_bias(renders: Path, framed: list[tuple[str, str, dict[str, Any]]]) -
 
 def _pct(v: list[float]) -> list[float]:
     return [round(float(np.percentile(v, q)), 4) for q in (5, 50, 95)] if v else []
+
+
+def text_summary(results: list[tuple[str, str, dict[str, Any]]]) -> dict[str, Any]:
+    """Text reaching the strips (amendment 2026-10-07, Q4). Report only: no gate reads it."""
+    pages = [res["text"] for _, _, res in results if res.get("text") is not None]
+    rows = [r["text_px"] for _, _, res in results for r in res["strips"]
+            if r.get("status") == "cut" and "text_px" in r]
+    missing = collections.Counter(g for t in pages for g in t["missing_glyphs"])
+
+    def share(key: str) -> float | None:
+        return round(sum(1 for r in rows if r[key] > 0) / len(rows), 4) if rows else None
+
+    kept_frac = [r["band_kept"] / r["band_area"] for r in rows if r["band_area"]]
+    erased = [1 - r["band_kept"] / r["band_pre"] for r in rows if r["band_pre"]]
+    return {"pages_with_text_record": len(pages),
+            "text_dropped_pages": sum(1 for t in pages if t["chars"] and not t["ink_px"]),  # must be 0
+            "pages_with_missing_glyphs": sum(1 for t in pages if t["missing_glyphs"]),
+            "missing_glyphs": dict(missing.most_common()),
+            "cut_strips_measured": len(rows),
+            "share_label_ink_pre": share("label_pre"), "share_label_ink_kept": share("label_kept"),
+            "share_band_ink_pre": share("band_pre"), "share_band_ink_kept": share("band_kept"),
+            "band_kept_text_fraction_median": round(float(np.median(kept_frac)), 6) if kept_frac else None,
+            "band_text_erased_fraction_median": round(float(np.median(erased)), 4) if erased else None}
 
 
 def cmd_report(a: argparse.Namespace) -> None:
@@ -2522,6 +2722,7 @@ def cmd_report(a: argparse.Namespace) -> None:
     rep["decision_basis"] = ("gate v2: point estimates, except the above-p95 tails (90% page-bootstrap interval) and "
                              "the permutation tests (drop_by_param_cprime, line_mult_survival_cprime); page_ci95 "
                              "values are reported only")
+    rep["text_report_only"] = text_summary(results)
     rep["checks"] = checks
     rep["report_code_sha256"] = sha256_file(Path(__file__))
     (out / "report.json").write_text(json.dumps(rep, indent=1), encoding="utf-8")
