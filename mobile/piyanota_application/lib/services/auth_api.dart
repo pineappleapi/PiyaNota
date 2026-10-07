@@ -21,7 +21,15 @@ class EmailAlreadyRegisteredException extends AuthException {
   const EmailAlreadyRegisteredException();
 }
 
-/// 400 from either endpoint. [serverMessage] is shown as-is since the
+/// 410 `reset_token_expired_or_invalid` from Password Reset Confirm
+/// (PIYA-304 AC3) — the code is expired, already used, or never existed.
+/// The UI sends the user back to the code step rather than letting them
+/// resubmit the same new password against a dead code.
+class ResetCodeInvalidException extends AuthException {
+  const ResetCodeInvalidException();
+}
+
+/// 400 from any endpoint. [serverMessage] is shown as-is since the
 /// backend owns the validation policy wording (e.g. password strength).
 class AuthValidationException extends AuthException {
   const AuthValidationException(this.serverMessage);
@@ -48,10 +56,21 @@ abstract interface class AuthApi {
     required String password,
     required String passwordConfirmation,
   });
+
+  /// PIYA-303. Completes normally whether or not [email] is registered
+  /// (AC2: no account enumeration), so callers must not branch on it.
+  Future<void> requestPasswordReset({required String email});
+
+  /// PIYA-304. [resetToken] is the code the user received by email.
+  Future<void> confirmPasswordReset({
+    required String resetToken,
+    required String newPassword,
+    required String newPasswordConfirmation,
+  });
 }
 
 /// Talks to the Module 3 Flask API. Request/response shapes follow the
-/// PIYA-301/302 schemas; the error envelope (`message` on non-2xx) is an
+/// PIYA-301–304 schemas; the error envelope (`message` on non-2xx) is an
 /// assumption the tickets don't pin down, so it's only read opportunistically.
 class HttpAuthApi implements AuthApi {
   HttpAuthApi(this._dio);
@@ -61,13 +80,17 @@ class HttpAuthApi implements AuthApi {
   static const int _badRequest = 400;
   static const int _unauthorized = 401;
   static const int _conflict = 409;
+  static const int _gone = 410;
 
   @override
   Future<AuthSession> login({
     required String email,
     required String password,
   }) {
-    return _post(ApiConfig.loginPath, {'email': email, 'password': password});
+    return _postForSession(
+      ApiConfig.loginPath,
+      {'email': email, 'password': password},
+    );
   }
 
   @override
@@ -76,27 +99,56 @@ class HttpAuthApi implements AuthApi {
     required String password,
     required String passwordConfirmation,
   }) {
-    return _post(ApiConfig.signUpPath, {
+    return _postForSession(ApiConfig.signUpPath, {
       'email': email,
       'password': password,
       'passwordConfirmation': passwordConfirmation,
     });
   }
 
-  Future<AuthSession> _post(String path, Map<String, String> body) async {
-    final Response<Map<String, dynamic>> response;
-    try {
-      response = await _dio.post<Map<String, dynamic>>(path, data: body);
-    } on DioException catch (e) {
-      throw _mapDioError(e);
-    }
+  @override
+  Future<void> requestPasswordReset({required String email}) async {
+    // The 200 body's `message` is deliberately ignored: the UI owns the
+    // confirmation copy, which must read the same for registered and
+    // unregistered emails (PIYA-204 AC3) whatever the server says.
+    await _post(ApiConfig.passwordResetRequestPath, {'email': email});
+  }
 
+  @override
+  Future<void> confirmPasswordReset({
+    required String resetToken,
+    required String newPassword,
+    required String newPasswordConfirmation,
+  }) async {
+    await _post(ApiConfig.passwordResetConfirmPath, {
+      'resetToken': resetToken,
+      'newPassword': newPassword,
+      'newPasswordConfirmation': newPasswordConfirmation,
+    });
+  }
+
+  Future<AuthSession> _postForSession(
+    String path,
+    Map<String, String> body,
+  ) async {
+    final response = await _post(path, body);
     final data = response.data?['data'];
     if (data is! Map<String, dynamic>) throw const AuthServerException();
     try {
       return AuthSession.fromJson(data);
     } on FormatException {
       throw const AuthServerException();
+    }
+  }
+
+  Future<Response<Map<String, dynamic>>> _post(
+    String path,
+    Map<String, String> body,
+  ) async {
+    try {
+      return await _dio.post<Map<String, dynamic>>(path, data: body);
+    } on DioException catch (e) {
+      throw _mapDioError(e);
     }
   }
 
@@ -125,9 +177,13 @@ class HttpAuthApi implements AuthApi {
         ? body['message'] as String
         : null;
 
+    // 410 is mapped on status alone, not on the `reset_token_expired_or_
+    // invalid` error code, because the error-envelope field holding that
+    // code isn't pinned down by PIYA-304 (reconcile in PIYA-214).
     return switch (response?.statusCode) {
       _unauthorized => const InvalidCredentialsException(),
       _conflict => const EmailAlreadyRegisteredException(),
+      _gone => const ResetCodeInvalidException(),
       _badRequest => AuthValidationException(message),
       _ => const AuthServerException(),
     };

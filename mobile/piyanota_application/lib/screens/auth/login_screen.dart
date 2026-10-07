@@ -8,6 +8,7 @@ import '../../state/auth_providers.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/primary_pill_button.dart';
 import 'auth_messages.dart';
+import 'password_reset_screen.dart';
 import 'widgets/auth_error_banner.dart';
 import 'widgets/auth_scaffold.dart';
 import 'widgets/auth_switch_prompt.dart';
@@ -15,7 +16,13 @@ import 'widgets/auth_text_field.dart';
 
 /// PIYA-202 — Login UI.
 class LoginScreen extends ConsumerStatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({super.key, this.passwordReset});
+
+  /// Set when Login is (re)built as the landing page of a completed reset
+  /// that had no Login underneath to pop back to (PIYA-204 AC5). The usual
+  /// path — reset pushed from "Forgot Password?" — delivers the same result
+  /// via the route's pop value instead.
+  final PasswordResetSucceeded? passwordReset;
 
   @override
   ConsumerState<LoginScreen> createState() => _LoginScreenState();
@@ -27,6 +34,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   bool _isSubmitting = false;
   String? _errorMessage;
+  String? _noticeMessage;
 
   static const double _fieldGap = 16;
   static const double _sectionGap = 24;
@@ -34,6 +42,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   void initState() {
     super.initState();
+    final reset = widget.passwordReset;
+    // Applied before the listeners attach so the prefill isn't a rebuild
+    // request during initState.
+    if (reset != null) _applyPasswordReset(reset);
     // Rebuild on every keystroke so the Log In button's enabled state
     // tracks AC1 ("disabled until both non-empty") live.
     _emailController.addListener(_onFieldsChanged);
@@ -54,11 +66,28 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _emailController.text.trim().isNotEmpty &&
       _passwordController.text.isNotEmpty;
 
+  /// PIYA-204 AC5: success confirmation, plus the reset email prefilled and
+  /// any stale password cleared — the old one no longer works.
+  void _applyPasswordReset(PasswordResetSucceeded reset) {
+    _noticeMessage = AuthMessages.passwordResetSuccess;
+    _errorMessage = null;
+    if (reset.email.isNotEmpty) _emailController.text = reset.email;
+    _passwordController.clear();
+  }
+
+  Future<void> _openPasswordReset() async {
+    final result =
+        await Navigator.of(context).pushNamed(AppRoutes.passwordReset);
+    if (!mounted || result is! PasswordResetSucceeded) return;
+    setState(() => _applyPasswordReset(result));
+  }
+
   Future<void> _submit() async {
     if (!_canSubmit) return;
     setState(() {
       _isSubmitting = true;
       _errorMessage = null;
+      _noticeMessage = null;
     });
 
     String? error;
@@ -107,6 +136,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final error = _errorMessage;
+    final notice = _noticeMessage;
 
     return AuthScaffold(
       headline: 'Welcome back!',
@@ -122,6 +152,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             : () => Navigator.of(context).pushNamed(AppRoutes.signUp),
       ),
       children: [
+        if (notice != null) ...[
+          AuthNoticeBanner(message: notice),
+          const SizedBox(height: _fieldGap),
+        ],
         if (error != null) ...[
           AuthErrorBanner(message: error),
           const SizedBox(height: _fieldGap),
@@ -154,11 +188,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         Align(
           alignment: Alignment.centerRight,
           child: TextButton(
-            onPressed: _isSubmitting
-                ? null
-                : () => Navigator.of(context).pushNamed(
-                      AppRoutes.passwordReset,
-                    ),
+            onPressed: _isSubmitting ? null : _openPasswordReset,
             style: TextButton.styleFrom(
               foregroundColor: AppTheme.primaryBlue,
             ),

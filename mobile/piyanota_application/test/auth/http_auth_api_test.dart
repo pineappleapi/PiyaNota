@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:piyanota_application/config/api_config.dart';
 import 'package:piyanota_application/models/auth_session.dart';
 import 'package:piyanota_application/services/auth_api.dart';
 
@@ -144,5 +145,92 @@ void main() {
       }),
     );
     expect(_login(api), throwsA(isA<AuthServerException>()));
+  });
+
+  group('password reset', () {
+    const requestOk = {
+      'data': null,
+      'success': true,
+      'status': 200,
+      'message': 'If this email is registered, a reset link has been sent',
+    };
+    const confirmOk = {
+      'data': null,
+      'success': true,
+      'status': 200,
+      'message': 'Password reset successful',
+    };
+
+    Future<void> confirm(HttpAuthApi api) => api.confirmPasswordReset(
+      resetToken: '482913',
+      newPassword: 'choir2026',
+      newPasswordConfirmation: 'choir2026',
+    );
+
+    test('request posts email per PIYA-303 and accepts data: null', () async {
+      final adapter = _StubAdapter(body: requestOk);
+      await _apiWith(adapter).requestPasswordReset(email: 'maria@example.com');
+
+      expect(adapter.lastRequest?.path, ApiConfig.passwordResetRequestPath);
+      expect(adapter.lastRequest?.data, {'email': 'maria@example.com'});
+    });
+
+    test('request 400 carries the server message through', () async {
+      final api = _apiWith(
+        _StubAdapter(status: 400, body: {'message': 'Email is malformed'}),
+      );
+      await expectLater(
+        api.requestPasswordReset(email: 'x'),
+        throwsA(
+          isA<AuthValidationException>().having(
+            (e) => e.serverMessage,
+            'serverMessage',
+            'Email is malformed',
+          ),
+        ),
+      );
+    });
+
+    test('request connection failure maps to AuthNetworkException', () {
+      final api = _apiWith(_StubAdapter(connectionFails: true));
+      expect(
+        api.requestPasswordReset(email: 'maria@example.com'),
+        throwsA(isA<AuthNetworkException>()),
+      );
+    });
+
+    test('confirm posts PIYA-304 field names', () async {
+      final adapter = _StubAdapter(body: confirmOk);
+      await confirm(_apiWith(adapter));
+
+      expect(adapter.lastRequest?.path, ApiConfig.passwordResetConfirmPath);
+      expect(adapter.lastRequest?.data, {
+        'resetToken': '482913',
+        'newPassword': 'choir2026',
+        'newPasswordConfirmation': 'choir2026',
+      });
+    });
+
+    test('confirm 410 maps to ResetCodeInvalidException', () {
+      final api = _apiWith(
+        _StubAdapter(
+          status: 410,
+          body: {'error': 'reset_token_expired_or_invalid'},
+        ),
+      );
+      expect(confirm(api), throwsA(isA<ResetCodeInvalidException>()));
+    });
+
+    test('confirm 400 (weak password) maps to AuthValidationException', () {
+      final api = _apiWith(
+        _StubAdapter(status: 400, body: {'message': 'Password too weak'}),
+      );
+      expect(confirm(api), throwsA(isA<AuthValidationException>()));
+    });
+
+    test('confirm 500 maps to AuthServerException', () {
+      final api = _apiWith(_StubAdapter(status: 500, body: {}));
+      expect(confirm(api), throwsA(isA<AuthServerException>()));
+    });
   });
 }

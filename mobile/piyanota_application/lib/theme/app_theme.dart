@@ -82,6 +82,13 @@ class AppTheme {
   static final Color authHeadlineAccent =
       Color.lerp(gradientEnd, Colors.white, 0.55)!;
 
+  // Derived (not sampled — the auth reference has no success state): the
+  // non-error counterpart of errorBannerFill, a pale primaryBlue tint so
+  // confirmations (PIYA-204 AC2/AC5) read as brand, not as alarm. Body text
+  // on it uses onboardingHeadingDark for contrast.
+  static final Color noticeBannerFill =
+      Color.lerp(primaryBlue, Colors.white, 0.9)!;
+
   /// Darkens [color] for a pressed-state SOP (see frontend-piyanota.md
   /// "Interaction states") — reduces HSL lightness rather than overlaying
   /// opacity, so the result stays the same hue, just deeper.

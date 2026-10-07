@@ -13,13 +13,43 @@ import 'package:piyanota_application/state/auth_providers.dart';
 /// [AuthApi] whose responses each test scripts directly, with call counts
 /// so double-submission (PIYA-202 AC6 / PIYA-203 AC7) is observable.
 class ScriptedAuthApi implements AuthApi {
-  ScriptedAuthApi({this.onLogin, this.onSignUp});
+  ScriptedAuthApi({
+    this.onLogin,
+    this.onSignUp,
+    this.onRequestReset,
+    this.onConfirmReset,
+  });
 
   Future<AuthSession> Function()? onLogin;
   Future<AuthSession> Function()? onSignUp;
+  Future<void> Function()? onRequestReset;
+  Future<void> Function()? onConfirmReset;
   int loginCalls = 0;
   int signUpCalls = 0;
+  int requestResetCalls = 0;
+  int confirmResetCalls = 0;
   String? lastEmail;
+  String? lastResetToken;
+  String? lastNewPassword;
+
+  @override
+  Future<void> requestPasswordReset({required String email}) {
+    requestResetCalls++;
+    lastEmail = email;
+    return onRequestReset!();
+  }
+
+  @override
+  Future<void> confirmPasswordReset({
+    required String resetToken,
+    required String newPassword,
+    required String newPasswordConfirmation,
+  }) {
+    confirmResetCalls++;
+    lastResetToken = resetToken;
+    lastNewPassword = newPassword;
+    return onConfirmReset!();
+  }
 
   @override
   Future<AuthSession> login({

@@ -1,26 +1,48 @@
+import 'dart:math';
+
 import '../models/auth_session.dart';
 import 'auth_api.dart';
 import 'auth_validators.dart';
 
 /// In-memory stand-in for the Module 3 auth API until it's deployed, so the
-/// Login/Sign-Up screens can be demoed end to end. Behaves like the real
-/// contract (PIYA-301/302) for each error path the UI must distinguish:
+/// auth screens can be demoed end to end. Behaves like the real contract
+/// (PIYA-301–304) for each error path the UI must distinguish:
 ///
 /// - [demoEmail] / [demoPassword] logs in; any other pair is a 401.
 /// - Signing up with an already-registered email (incl. [demoEmail]) is a 409.
 /// - Any email on the [offlineDomain] simulates no connectivity.
+/// - A password reset request "emails" a 6-digit code only to registered
+///   addresses, but completes identically either way (PIYA-303 AC2/AC4).
+///   Since there is no real mailbox, [demoInboxCodeFor] stands in for one.
 class FakeAuthApi implements AuthApi {
-  FakeAuthApi({this.latency = defaultLatency});
+  FakeAuthApi({
+    this.latency = defaultLatency,
+    DateTime Function()? clock,
+    Random? random,
+  }) : _now = clock ?? DateTime.now,
+       _random = random ?? Random.secure();
 
   static const String demoEmail = 'demo@piyanota.app';
   static const String demoPassword = 'piyanota1';
   static const String offlineDomain = '@offline.test';
   static const Duration defaultLatency = Duration(milliseconds: 800);
+
+  /// PIYA-303 AC3 gives 30 minutes as its example expiry.
+  static const Duration resetCodeLifetime = Duration(minutes: 30);
+  static const int resetCodeLength = AuthValidators.resetCodeLength;
+
   static const Duration _sessionLifetime = Duration(days: 30);
   static const String _defaultRole = 'choir_member';
+  static const int _resetCodeSpace = 1000000;
 
   final Duration latency;
+  final DateTime Function() _now;
+  final Random _random;
   final Map<String, String> _passwordsByEmail = {demoEmail: demoPassword};
+
+  /// Outstanding codes, keyed by code because PIYA-304 identifies the
+  /// account by `resetToken` alone (no email in the confirm request).
+  final Map<String, _ResetGrant> _grantsByCode = {};
   int _nextUserId = 1;
 
   @override
@@ -46,7 +68,67 @@ class FakeAuthApi implements AuthApi {
     await Future<void>.delayed(latency);
     final normalized = _normalize(email);
     if (normalized.endsWith(offlineDomain)) throw const AuthNetworkException();
-    if (password != passwordConfirmation) {
+    _checkNewPassword(password, passwordConfirmation);
+    if (_passwordsByEmail.containsKey(normalized)) {
+      throw const EmailAlreadyRegisteredException();
+    }
+    _passwordsByEmail[normalized] = password;
+    return _issueSession(normalized);
+  }
+
+  @override
+  Future<void> requestPasswordReset({required String email}) async {
+    await Future<void>.delayed(latency);
+    final normalized = _normalize(email);
+    if (normalized.endsWith(offlineDomain)) throw const AuthNetworkException();
+    if (!AuthValidators.isValidEmail(normalized)) {
+      throw const AuthValidationException('Enter a valid email address');
+    }
+    // Unregistered: nothing is "sent", but the caller sees the same success.
+    if (!_passwordsByEmail.containsKey(normalized)) return;
+
+    // PIYA-303 AC5: a new request voids any earlier unused code.
+    _grantsByCode.removeWhere((_, grant) => grant.email == normalized);
+    _grantsByCode[_newCode()] = _ResetGrant(
+      email: normalized,
+      expiresAt: _now().add(resetCodeLifetime),
+    );
+  }
+
+  @override
+  Future<void> confirmPasswordReset({
+    required String resetToken,
+    required String newPassword,
+    required String newPasswordConfirmation,
+  }) async {
+    await Future<void>.delayed(latency);
+    final grant = _grantsByCode[resetToken.trim()];
+    if (grant == null || !_now().isBefore(grant.expiresAt)) {
+      throw const ResetCodeInvalidException();
+    }
+    _checkNewPassword(newPassword, newPasswordConfirmation);
+    // PIYA-304 AC4: single use — consumed only once the reset succeeds, so
+    // a weak-password 400 doesn't burn the user's code.
+    _grantsByCode.remove(resetToken.trim());
+    _passwordsByEmail[grant.email] = newPassword;
+  }
+
+  /// The code most recently "emailed" to [email], or null if nothing was
+  /// sent (unregistered address) or it expired. Debug demo aid only — the
+  /// real API never returns the code to the client.
+  String? demoInboxCodeFor(String email) {
+    final normalized = _normalize(email);
+    final now = _now();
+    for (final MapEntry(key: code, value: grant) in _grantsByCode.entries) {
+      if (grant.email == normalized && now.isBefore(grant.expiresAt)) {
+        return code;
+      }
+    }
+    return null;
+  }
+
+  void _checkNewPassword(String password, String confirmation) {
+    if (password != confirmation) {
       throw const AuthValidationException('Passwords do not match.');
     }
     if (!AuthValidators.meetsPasswordPolicy(password)) {
@@ -54,11 +136,17 @@ class FakeAuthApi implements AuthApi {
         AuthValidators.passwordPolicyDescription,
       );
     }
-    if (_passwordsByEmail.containsKey(normalized)) {
-      throw const EmailAlreadyRegisteredException();
-    }
-    _passwordsByEmail[normalized] = password;
-    return _issueSession(normalized);
+  }
+
+  String _newCode() {
+    String code;
+    do {
+      code = _random
+          .nextInt(_resetCodeSpace)
+          .toString()
+          .padLeft(resetCodeLength, '0');
+    } while (_grantsByCode.containsKey(code));
+    return code;
   }
 
   String _normalize(String email) => email.trim().toLowerCase();
@@ -73,4 +161,11 @@ class FakeAuthApi implements AuthApi {
       expiresAt: DateTime.now().toUtc().add(_sessionLifetime),
     );
   }
+}
+
+class _ResetGrant {
+  const _ResetGrant({required this.email, required this.expiresAt});
+
+  final String email;
+  final DateTime expiresAt;
 }
