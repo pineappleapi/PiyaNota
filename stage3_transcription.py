@@ -1973,24 +1973,30 @@ VIZ_CAPTION = ("Labels show sounding pitch; tenor parts in a plain G clef sound 
                "below written.")
 
 
-def _octave_lowered(clef: str, reference_pitch: int) -> bool:
-    """True if a G clef is played an octave below written.
+SEMITONES_PER_OCTAVE = 12
+OCTAVE_CLEF_LETTERS = ("G", "F")  # in-scope clefs; C clefs are labelled out of scope
 
-    Read from the reference pitch infer_pitch actually used rather than from the voice, because the
-    octave has two owners: Stage 3's voice rule (get_clef_reference) without ClefKeyNet, and the
-    decision's octave_shift with it (where the voice rule is off).
+
+def _octaves_below(clef: str, reference_pitch: int) -> int:
+    """Octaves a G or F clef is played below written (0 when it sounds as written).
+
+    Read from the reference pitch infer_pitch actually used rather than from the voice, so the label
+    follows the clef whatever voice it is on. The octave has two owners: Stage 3's voice rule
+    (get_clef_reference) without ClefKeyNet, and the decision's octave_shift with it (where the
+    voice rule is off).
     """
-    return clef.startswith("clef.G") and reference_pitch < CLEF_REFERENCE.get(clef, reference_pitch)
+    letter = clef.split(".", 1)[-1].split("-")[0]
+    if letter not in OCTAVE_CLEF_LETTERS or clef not in CLEF_REFERENCE:
+        return 0
+    return max(0, (CLEF_REFERENCE[clef] - reference_pitch) // SEMITONES_PER_OCTAVE)
 
 
 def _clef_name(clef: str, reference_pitch: int) -> str:
-    """Short clef name as a singer reads it; an octave-lowered G clef is G8vb."""
+    """Short clef name as a singer reads it; an octave-lowered G or F clef is G8vb / F8vb."""
     body = clef.split(".", 1)[1] if "." in clef else clef
     letter = body.split("-")[0]
-    if letter == "G":
-        return "G8vb" if _octave_lowered(clef, reference_pitch) else "G"
-    if letter == "F":
-        return "F"
+    if letter in OCTAVE_CLEF_LETTERS:
+        return f"{letter}8vb" if _octaves_below(clef, reference_pitch) else letter
     return f"{body} (out of scope)"
 
 
@@ -2162,8 +2168,9 @@ def build_strip_labels(
             step = _staff_step(ev["symbol"].split("-", 1)[1])
             pname, octave = _pitch_label(ev["pitch"], step, entry["active_clef"], entry["reference_pitch"])
             text = f"{pname}_{_duration_label(ev['duration_ticks'])}"
-            if _octave_lowered(entry["active_clef"], entry["reference_pitch"]):
-                sub = f"(written {pname[:-len(str(octave))]}{octave + 1})"
+            lowered = _octaves_below(entry["active_clef"], entry["reference_pitch"])
+            if lowered:
+                sub = f"(written {pname[:-len(str(octave))]}{octave + lowered})"
         elif role == "rest" and ev_idx:
             ev = events[ev_idx[0]]
             if ev["symbol"].startswith("multirest"):
@@ -2398,7 +2405,7 @@ def process_strip(
     device:     torch.device,
     img_height: int = 64,
     v_idx:      int = 0,
-    viz_dir:    str = None,
+    viz_dir:    Optional[str] = None,
     sys_idx:    int = 1,
     strip_id:   str = "",
     clef_key_decision: Optional["StripDecision"] = None,
@@ -2443,7 +2450,7 @@ def transcribe_voice_sequences(
     voice_sequences: dict,
     model_weights:   str = r"D:\PiyaNota (Code)\music_symbol_detection\crnn_cameraprimus_transcription.pt",
     img_height:      int = 64,
-    viz_dir:         str = r"D:\PiyaNota (Code)\data\symbol_detection_viz",
+    viz_dir:         Optional[str] = None,
     events_dir:      str = r"D:\PiyaNota (Code)\data\transcribed_symbols",   # ← add this
     clef_key_decisions: Optional[dict[str, "StripDecision"]] = None,
 ) -> dict:
@@ -2460,6 +2467,10 @@ def transcribe_voice_sequences(
           (page_index, tick_onset).
         model_weights:   Path to weights file trained on Kaggle.
         img_height:      Must match the height used during Kaggle training.
+        viz_dir:         Debug-only directory for per-strip visualizations; None (the default,
+          and the backend path) renders nothing. Opt-in rather than on-by-default because the
+          render costs time per strip and its internal checks raise, which must fail an eval run
+          loudly but must never abort a user's conversion (ml-cv-lead, 2026-09-30).
         clef_key_decisions: {strip_id: stage3_clefkey.StripDecision} from
           ``stage3_clefkey.decisions_for_pages``; None runs version (a) (CRNN clef/key), and every
           event is then flagged ``clef_key_disabled`` / ``review_needed`` (the CRNN clef collapses on
@@ -2474,6 +2485,8 @@ def transcribe_voice_sequences(
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[Stage 3] Using device: {device}")
+    if viz_dir:
+        print(f"[Stage 3] viz ON -> {os.path.abspath(viz_dir)} (debug only; not for production)")
  
     model = CRNN(VOCAB_SIZE).to(device)
     checkpoint = torch.load(model_weights, map_location=device)
@@ -2634,9 +2647,8 @@ if __name__ == "__main__":
     parser.add_argument("--yolo",       default="staff_detector_files/weights/best.pt")
     parser.add_argument("--img-height", type=int, default=64,
                         help="Must match Kaggle training height")
-    parser.add_argument("--viz-dir",
-                    default=r"D:\PiyaNota (Code)\data\symbol_detection_viz",
-                    help="Directory to save symbol visualizations")
+    parser.add_argument("--viz-dir", default=None,
+                    help="Opt-in debug dir for Stage 3 strip visualizations (off by default; not for production)")
     parser.add_argument("--events-dir",
                     default=r"D:\PiyaNota (Code)\data\transcribed_symbols",
                     help="Directory to save per-voice pitch event JSONs")

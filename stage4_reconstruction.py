@@ -1412,11 +1412,14 @@ if __name__ == "__main__":
     parser.add_argument("--weights", default="crnn_weights/best.pt")
     parser.add_argument("--yolo",    default="staff_detector_files/weights/best.pt")
     parser.add_argument("--img-height", type=int, default=64)
+    parser.add_argument("--viz-dir", default=None,
+                        help="Opt-in debug dir for Stage 3 strip visualizations (off by default; not for production)")
     stage3_clefkey.add_clef_key_args(parser)
     args = parser.parse_args()
 
     events = run_stages_1_to_3(args.input, args.prep, args.strips, args.yolo, args.weights,
-                               stage3_clefkey.clef_key_arg(args), img_height=args.img_height)
+                               stage3_clefkey.clef_key_arg(args), img_height=args.img_height,
+                               viz_dir=args.viz_dir)
     satb   = reconstruct_satb(events)
 
     print("\nStage 4 complete. SATB sequences ready for Stage 5 (MIDI synthesis).")

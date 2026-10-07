@@ -343,6 +343,7 @@ def run_full_pipeline(
     bpm:            int = DEFAULT_BPM,
     img_height:     int = 64,
     clef_key_weights: Optional[str] = str(stage3_clefkey.DEFAULT_CLEF_KEY_CHECKPOINT),
+    viz_dir:        Optional[str] = None,
 ) -> dict:
     """
     Runs the complete PiyaNota pipeline from raw images to MP3 files.
@@ -351,10 +352,12 @@ def run_full_pipeline(
     clef_key_weights: ClefKeyNet checkpoint for Stage 3's clef/key/octave (default: the pinned
     checkpoint; a missing file raises). None opts out: clef/key come from the CRNN (BUG-011) and every
     event is flagged clef_key_disabled / review_needed.
+    viz_dir: opt-in Stage 3 debug visualizations; None (default, and what the backend uses) renders
+    nothing.
     """
     return run_full_pipeline_with_report(input_dir, prep_dir, strips_dir, output_dir, crnn_weights,
                                          yolo_weights, soundfont_path, bpm, img_height,
-                                         clef_key_weights)["audio"]
+                                         clef_key_weights, viz_dir)["audio"]
 
 
 def run_full_pipeline_with_report(
@@ -368,6 +371,7 @@ def run_full_pipeline_with_report(
     bpm:            int = DEFAULT_BPM,
     img_height:     int = 64,
     clef_key_weights: Optional[str] = str(stage3_clefkey.DEFAULT_CLEF_KEY_CHECKPOINT),
+    viz_dir:        Optional[str] = None,
 ) -> dict[str, Any]:
     """Runs Stages 1-5 and returns the audio plus what the result API and job record need.
 
@@ -387,7 +391,7 @@ def run_full_pipeline_with_report(
 
     # Stages 1-3
     voice_events = run_stages_1_to_3(input_dir, prep_dir, strips_dir, yolo_weights, crnn_weights,
-                                     clef_key_weights, img_height=img_height)
+                                     clef_key_weights, img_height=img_height, viz_dir=viz_dir)
 
     # Stage 4
     satb, recon_report = reconstruct_satb_with_report(voice_events)
@@ -436,6 +440,8 @@ if __name__ == "__main__":
     parser.add_argument("--bpm",       type=int, default=DEFAULT_BPM,
                         help="Playback tempo in BPM")
     parser.add_argument("--img-height", type=int, default=64)
+    parser.add_argument("--viz-dir", default=None,
+                        help="Opt-in debug dir for Stage 3 strip visualizations (off by default; not for production)")
     stage3_clefkey.add_clef_key_args(parser)
     args = parser.parse_args()
 
@@ -450,6 +456,7 @@ if __name__ == "__main__":
         bpm            = args.bpm,
         img_height     = args.img_height,
         clef_key_weights = stage3_clefkey.clef_key_arg(args),
+        viz_dir        = args.viz_dir,
     )
 
     print(f"\nStage 5 complete. {len(mp3s)} audio file(s) ready.")
