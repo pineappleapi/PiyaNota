@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../models/library_entry.dart';
 import '../../models/score_summary.dart';
 import '../../routes/app_routes.dart';
 import '../../services/score_library_api.dart';
@@ -31,9 +32,15 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
   final _searchController = TextEditingController();
   String _query = '';
 
-  /// Scores with a delete request in flight. Their rows stay on screen
-  /// (PIYA-215 AC2: removed only after the server confirms).
+  /// Scores with a delete request in flight, or confirmed deleted and
+  /// animating out. Their rows stay on screen (PIYA-215 AC2: removed only
+  /// after the server confirms) with taps disabled.
   final Set<int> _deletingIds = {};
+
+  /// Trash-path deletions the server has confirmed, playing their exit
+  /// transition before leaving the list. (Swiped rows are animated out by
+  /// Dismissible itself.)
+  final Set<int> _leavingIds = {};
 
   // Mockup: 32 dp side margins at 412 dp wide, header content at 26 dp,
   // first card 32 dp under the header, 18 dp between cards. Margins scale
@@ -46,6 +53,13 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
   static const double _cardGap = 18;
   static const double _stateMessageTopGap = 16;
   static const double _snackBarSideMargin = 16;
+  static const double _swipeIconSize = 24;
+  static const double _swipeIconInset = 24;
+  static const double _swipeSpinnerSize = 20;
+  static const double _swipeSpinnerStroke = 2;
+  static const double _cardRadius = 12;
+  static const Duration _swipeMoveDuration = Duration(milliseconds: 200);
+  static const Duration _swipeResizeDuration = Duration(milliseconds: 220);
 
   @override
   void dispose() {
@@ -57,12 +71,18 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
   /// PIYA-308 call here; the screen only ever renders the filtered result.
   void _onSearchChanged(String value) => setState(() => _query = value);
 
-  void _openScore(ScoreSummary score) {
+  void _openScore(LibraryEntry entry) {
+    // Moves the score to the top of the library now; the real server
+    // records the open itself when Playback fetches it (PIYA-308 AC8).
+    ref.read(scoreLibraryProvider.notifier).markOpened(entry.scoreId);
     // AC7: the existing score's id only — Playback loads its stored audio;
     // nothing here triggers processing.
     Navigator.of(context).pushNamed(
       AppRoutes.playback,
-      arguments: PlaybackArguments(scoreId: score.scoreId, title: score.title),
+      arguments: PlaybackArguments(
+        scoreId: entry.scoreId,
+        title: entry.displayTitle,
+      ),
     );
   }
 
@@ -82,21 +102,30 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
     Navigator.of(context).pushNamedAndRemoveUntil(AppRoutes.login, (_) => false);
   }
 
-  Future<void> _confirmDelete(ScoreSummary score) async {
+  /// Confirm dialog, then the server delete. Shared by the trash icon and
+  /// swipe-to-delete so both behave identically. Returns true only when the
+  /// score is gone server-side — deleted (200), or already gone (404) — and
+  /// the row may leave; on cancel or any other failure the row stays (and a
+  /// swiped row snaps back).
+  Future<bool> _deleteScore(LibraryEntry entry) async {
+    final scoreId = entry.scoreId;
     // PIYA-309 AC5: the API deletes without asking, so confirmation is ours.
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => _DeleteScoreDialog(title: score.title),
+      builder: (context) => _DeleteScoreDialog(title: entry.displayTitle),
     );
-    if (confirmed != true || !mounted) return;
+    if (confirmed != true || !mounted) return false;
 
-    setState(() => _deletingIds.add(score.scoreId));
+    setState(() => _deletingIds.add(scoreId));
     String message;
+    var gone = false;
     try {
-      await ref.read(scoreLibraryProvider.notifier).delete(score.scoreId);
-      message = LibraryMessages.deleted(score.title);
+      await ref.read(scoreLibraryProvider.notifier).deleteOnServer(scoreId);
+      message = LibraryMessages.deleted(entry.displayTitle);
+      gone = true;
     } on ScoreNotFoundException {
       message = LibraryMessages.deleteAlreadyGone;
+      gone = true;
     } on SessionExpiredException {
       message = LibraryMessages.sessionExpired;
     } on ScoreLibraryNetworkException {
@@ -106,9 +135,25 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
       debugPrint('Score delete failed: $e\n$stack');
       message = LibraryMessages.deleteServerError;
     }
-    if (!mounted) return;
-    setState(() => _deletingIds.remove(score.scoreId));
+    if (!mounted) return gone;
+    // A gone row keeps its disabled state until it has left the list.
+    if (!gone) setState(() => _deletingIds.remove(scoreId));
     _showSnackBar(message);
+    return gone;
+  }
+
+  Future<void> _deleteViaTrash(LibraryEntry entry) async {
+    final gone = await _deleteScore(entry);
+    if (gone && mounted) setState(() => _leavingIds.add(entry.scoreId));
+  }
+
+  void _finishRemoval(int scoreId) {
+    if (!mounted) return;
+    setState(() {
+      _leavingIds.remove(scoreId);
+      _deletingIds.remove(scoreId);
+    });
+    ref.read(scoreLibraryProvider.notifier).removeLocally(scoreId);
   }
 
   void _showSnackBar(String message) {
@@ -213,24 +258,23 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
         // AC4: zero scores shows only the Add Score card, as in the mockup;
         // the header subtitle carries the empty-state message.
         if (value.isEmpty) return const [];
-        final visible = filterScoresByTitle(value, _query);
+        final visible =
+            filterLibraryEntries(buildLibraryEntries(value), _query);
         if (visible.isEmpty) {
           return [
             const SizedBox(height: _cardGap + _stateMessageTopGap),
-            _NoMatchesMessage(query: _query),
+            _NoResultsMessage(query: _query),
           ];
         }
+        final reduceMotion = MediaQuery.disableAnimationsOf(context);
         return [
-          for (final score in visible) ...[
-            const SizedBox(height: _cardGap),
-            ScoreCard(
-              key: ValueKey(score.scoreId),
-              score: score,
-              isDeleting: _deletingIds.contains(score.scoreId),
-              onTap: () => _openScore(score),
-              onDelete: () => _confirmDelete(score),
+          for (final entry in visible)
+            _RemovableRow(
+              key: ValueKey('row-${entry.scoreId}'),
+              leaving: _leavingIds.contains(entry.scoreId),
+              onRemoved: () => _finishRemoval(entry.scoreId),
+              child: _buildDismissibleCard(entry, reduceMotion: reduceMotion),
             ),
-          ],
         ];
       case AsyncError(:final error):
         final sessionExpired = error is SessionExpiredException;
@@ -252,6 +296,65 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
           _LoadingSkeletons(),
         ];
     }
+  }
+
+  Widget _buildDismissibleCard(
+    LibraryEntry entry, {
+    required bool reduceMotion,
+  }) {
+    final scoreId = entry.scoreId;
+    final isDeleting = _deletingIds.contains(scoreId);
+    // The gap sits inside the Dismissible so it collapses with the card.
+    const gap = EdgeInsets.only(top: _cardGap);
+    return Dismissible(
+      key: ValueKey('dismiss-$scoreId'),
+      direction:
+          isDeleting ? DismissDirection.none : DismissDirection.endToStart,
+      // Same dialog and same wait-for-the-server as the trash icon:
+      // returning false (cancel or failure) snaps the card back.
+      confirmDismiss: (_) => _deleteScore(entry),
+      onDismissed: (_) => _finishRemoval(scoreId),
+      movementDuration: reduceMotion ? Duration.zero : _swipeMoveDuration,
+      resizeDuration: reduceMotion ? null : _swipeResizeDuration,
+      background: Padding(
+        padding: gap,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: AppTheme.errorRed,
+            borderRadius: BorderRadius.circular(_cardRadius),
+          ),
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: Padding(
+              padding: const EdgeInsets.only(right: _swipeIconInset),
+              child: isDeleting
+                  ? const SizedBox.square(
+                      dimension: _swipeSpinnerSize,
+                      child: CircularProgressIndicator(
+                        strokeWidth: _swipeSpinnerStroke,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(
+                      Icons.delete_rounded,
+                      size: _swipeIconSize,
+                      color: Colors.white,
+                    ),
+            ),
+          ),
+        ),
+      ),
+      child: Padding(
+        padding: gap,
+        child: ScoreCard(
+          key: ValueKey(scoreId),
+          entry: entry,
+          isDeleting: isDeleting,
+          onTap: () => _openScore(entry),
+          onDelete: () => _deleteViaTrash(entry),
+        ),
+      ),
+    );
   }
 
   static String _loadErrorMessage(Object error) => switch (error) {
@@ -318,22 +421,105 @@ class _LoadErrorPanel extends StatelessWidget {
 
 /// Search returned nothing although the library isn't empty — kept visibly
 /// different from the AC4 empty state, which tells the user to capture.
-class _NoMatchesMessage extends StatelessWidget {
-  const _NoMatchesMessage({required this.query});
+class _NoResultsMessage extends StatelessWidget {
+  const _NoResultsMessage({required this.query});
 
   final String query;
 
+  static const double _headingToHintGap = 4;
+
   @override
   Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
     return Semantics(
+      key: const Key('library-no-results'),
       liveRegion: true,
-      child: Text(
-        LibraryMessages.noMatches(query),
-        textAlign: TextAlign.center,
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+      container: true,
+      child: Column(
+        children: [
+          Text(
+            LibraryMessages.noResultsTitle,
+            textAlign: TextAlign.center,
+            style: textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: AppTheme.libraryCardTitle,
+            ),
+          ),
+          const SizedBox(height: _headingToHintGap),
+          Text(
+            LibraryMessages.noResultsHint(query),
+            textAlign: TextAlign.center,
+            style: textTheme.bodyMedium?.copyWith(
               color: AppTheme.libraryScoreSubtitle,
             ),
+          ),
+        ],
       ),
+    );
+  }
+}
+
+/// A list row that can play a short collapse-and-fade exit once its score
+/// is confirmed deleted via the trash icon, then reports [onRemoved] so the
+/// caller drops it from the list. With reduce motion the exit is instant.
+class _RemovableRow extends StatefulWidget {
+  const _RemovableRow({
+    super.key,
+    required this.leaving,
+    required this.onRemoved,
+    required this.child,
+  });
+
+  final bool leaving;
+  final VoidCallback onRemoved;
+  final Widget child;
+
+  @override
+  State<_RemovableRow> createState() => _RemovableRowState();
+}
+
+class _RemovableRowState extends State<_RemovableRow>
+    with SingleTickerProviderStateMixin {
+  static const Duration _exitDuration = Duration(milliseconds: 220);
+
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: _exitDuration,
+    value: 1,
+  );
+  late final Animation<double> _curve = CurvedAnimation(
+    parent: _controller,
+    curve: Curves.easeInOut,
+  );
+
+  @override
+  void didUpdateWidget(_RemovableRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.leaving || oldWidget.leaving) return;
+    if (MediaQuery.disableAnimationsOf(context)) {
+      // Not during build: the callback changes the parent's state.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onRemoved();
+      });
+    } else {
+      _controller.reverse().then((_) {
+        if (mounted) widget.onRemoved();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizeTransition(
+      sizeFactor: _curve,
+      alignment: Alignment.topCenter,
+      child: FadeTransition(opacity: _curve, child: widget.child),
     );
   }
 }

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../../models/score_summary.dart';
+import '../../../models/library_entry.dart';
 import '../../../theme/app_theme.dart';
 import '../library_messages.dart';
 
@@ -169,13 +169,13 @@ class AddScoreCard extends StatelessWidget {
 class ScoreCard extends StatelessWidget {
   const ScoreCard({
     super.key,
-    required this.score,
+    required this.entry,
     required this.onTap,
     required this.onDelete,
     this.isDeleting = false,
   });
 
-  final ScoreSummary score;
+  final LibraryEntry entry;
   final VoidCallback onTap;
   final VoidCallback onDelete;
 
@@ -185,8 +185,12 @@ class ScoreCard extends StatelessWidget {
   final bool isDeleting;
 
   static const double _titleSize = 18;
-  static const double _subtitleSize = 13;
-  static const double _noteIconSize = 38;
+  // Slightly tighter than the mockup's 1.2 so a wrapped 2-line title reads
+  // as one block (round-2 design polish).
+  static const double _titleLineHeight = 1.15;
+  // 12 sp (was the mockup's 13) per the user's "smaller, modern" request;
+  // #575757 on the card fill is ~5.2:1, still WCAG AA for small text.
+  static const double _subtitleSize = 12;
   static const double _chevronSize = 18;
   static const double _chevronInset = 8;
   static const double _trashSize = 16;
@@ -205,6 +209,7 @@ class ScoreCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+    final score = entry.score;
     final subtitle = LibraryMessages.cardSubtitle(score);
 
     return _CardShell(
@@ -229,7 +234,7 @@ class ScoreCard extends StatelessWidget {
           height: _trashHitHeight,
           child: Semantics(
             button: true,
-            label: LibraryMessages.deleteSemantics(score.title),
+            label: LibraryMessages.deleteSemantics(entry.displayTitle),
             onTap: isDeleting ? null : onDelete,
             excludeSemantics: true,
             child: InkWell(
@@ -263,36 +268,35 @@ class ScoreCard extends StatelessWidget {
         button: true,
         child: _CardRow(
           tileColor: Colors.white,
-          tile: const Icon(
-            Icons.music_note_outlined,
-            size: _noteIconSize,
-            color: AppTheme.libraryIconBlue,
-          ),
+          tile: ScoreThumbnail(url: score.thumbnailUrl),
           text: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                score.title,
+                entry.displayTitle,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: textTheme.titleMedium?.copyWith(
                   fontSize: _titleSize,
                   fontWeight: FontWeight.w700,
-                  height: 1.2,
+                  height: _titleLineHeight,
                   color: AppTheme.libraryCardTitle,
                 ),
               ),
-              Text(
-                subtitle,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: textTheme.bodySmall?.copyWith(
-                  fontSize: _subtitleSize,
-                  height: 1.3,
-                  color: AppTheme.libraryScoreSubtitle,
+              // Left out entirely when every part is missing, rather than
+              // leaving an empty line under the title.
+              if (subtitle.isNotEmpty)
+                Text(
+                  subtitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: textTheme.bodySmall?.copyWith(
+                    fontSize: _subtitleSize,
+                    height: 1.3,
+                    color: AppTheme.libraryScoreSubtitle,
+                  ),
                 ),
-              ),
             ],
           ),
         ),
@@ -301,31 +305,151 @@ class ScoreCard extends StatelessWidget {
   }
 }
 
-/// Loading placeholder in the score-card style (AC5). Static rather than
-/// shimmering: a looping animation adds nothing on a sub-second fake fetch
-/// and would keep the frame scheduler busy for no benefit.
-class ScoreCardSkeleton extends StatelessWidget {
+/// The score's thumbnail when the API supplies one and it loads; otherwise
+/// (no URL, still loading, or a failed load) the mockup's music-note glyph,
+/// so a broken image never leaves an empty tile.
+class ScoreThumbnail extends StatelessWidget {
+  const ScoreThumbnail({super.key, required this.url});
+
+  final String? url;
+
+  static const double _noteIconSize = 38;
+
+  static const Widget _fallback = Icon(
+    Icons.music_note_outlined,
+    key: ValueKey('score-thumbnail-fallback'),
+    size: _noteIconSize,
+    color: AppTheme.libraryIconBlue,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final url = this.url;
+    if (url == null) return _fallback;
+    final cacheSize =
+        (_CardMetrics.tileSize * MediaQuery.devicePixelRatioOf(context))
+            .round();
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(_CardMetrics.tileRadius),
+      child: Image.network(
+        url,
+        width: _CardMetrics.tileSize,
+        height: _CardMetrics.tileSize,
+        fit: BoxFit.cover,
+        // Decode at tile size, not the source resolution, so a long library
+        // of page-sized thumbnails doesn't balloon memory.
+        cacheWidth: cacheSize,
+        excludeFromSemantics: true,
+        loadingBuilder: (context, child, progress) =>
+            progress == null ? child : _fallback,
+        errorBuilder: (context, error, stackTrace) => _fallback,
+      ),
+    );
+  }
+}
+
+/// Loading placeholder in the score-card style (AC5), with a light shimmer
+/// band sweeping across the bars.
+///
+/// The sweep is bounded to a few passes and then rests static, so a slow
+/// network doesn't keep the frame scheduler busy indefinitely (and widget
+/// tests' pumpAndSettle still settles). With reduce motion
+/// (MediaQuery.disableAnimations) it never starts.
+class ScoreCardSkeleton extends StatefulWidget {
   const ScoreCardSkeleton({super.key});
 
+  @override
+  State<ScoreCardSkeleton> createState() => ScoreCardSkeletonState();
+}
+
+@visibleForTesting
+class ScoreCardSkeletonState extends State<ScoreCardSkeleton>
+    with SingleTickerProviderStateMixin {
   static const double _barHeight = 12;
   static const double _titleBarFraction = 0.75;
   static const double _subtitleBarFraction = 0.5;
   static const double _barGap = 10;
   static const double _barRadius = 6;
-  static const double _barAlpha = 0.7;
+  static const Duration _sweepDuration = Duration(milliseconds: 1400);
+  static const int _maxSweeps = 5;
+  // Half-width of the highlight band, as a fraction of the bar's width.
+  static const double _bandHalfWidth = 0.15;
+
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: _sweepDuration,
+  );
+  int _sweeps = 0;
+  bool _started = false;
+
+  /// For tests: whether the shimmer is currently running.
+  bool get isShimmering => _controller.isAnimating;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addStatusListener((status) {
+      if (status != AnimationStatus.completed) return;
+      _sweeps++;
+      if (_sweeps < _maxSweeps) {
+        _controller.forward(from: 0);
+      } else {
+        // Rest with the band off-bar, i.e. the plain static skeleton.
+        _controller.value = 0;
+      }
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _controller.stop();
+      _controller.value = 0;
+    } else if (!_started) {
+      _started = true;
+      _controller.forward();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final barColor = Colors.white.withValues(alpha: _barAlpha);
+    final baseColor =
+        Colors.white.withValues(alpha: AppTheme.librarySkeletonBaseAlpha);
+    final highlightColor =
+        Colors.white.withValues(alpha: AppTheme.librarySkeletonHighlightAlpha);
+
     Widget bar(double fraction) => FractionallySizedBox(
           alignment: Alignment.centerLeft,
           widthFactor: fraction,
-          child: Container(
-            height: _barHeight,
-            decoration: BoxDecoration(
-              color: barColor,
-              borderRadius: BorderRadius.circular(_barRadius),
-            ),
+          child: AnimatedBuilder(
+            animation: _controller,
+            builder: (context, _) {
+              // At t = 0 (and when resting) the band sits fully left of the
+              // bar, so the bar is the plain base colour.
+              final centre = -_bandHalfWidth +
+                  _controller.value * (1 + 2 * _bandHalfWidth);
+              return Container(
+                height: _barHeight,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(_barRadius),
+                  gradient: LinearGradient(
+                    colors: [baseColor, highlightColor, baseColor],
+                    stops: [
+                      centre - _bandHalfWidth,
+                      centre,
+                      centre + _bandHalfWidth,
+                    ],
+                  ),
+                ),
+              );
+            },
           ),
         );
 

@@ -127,6 +127,18 @@ class AppTheme {
   // Capture button halo: the grey above the button deepens from #E2E2E2 to
   // #D0D0D0 at its edge, i.e. ~10% black at the rim of a soft blur.
   static const Color libraryCaptureShadow = Color(0x33000000);
+  // Round-2 polish (PIYA-205, 2026-10-08). Not in the mockups, so these are
+  // derived from the sampled colours above rather than dropper-sampled:
+  // - Header logo: the full-colour PNG at reduced opacity (user asked for it
+  //   faded, not flat white like the auth watermark), top-right.
+  static const double libraryHeaderLogoOpacity = 0.4;
+  // - Selected bottom-nav tab: a white pill behind the icon at this alpha,
+  //   visible on both nav gradient stops without competing with the labels.
+  static const double libraryNavIndicatorAlpha = 0.22;
+  // - Skeleton shimmer: the static bar is white at the base alpha; a band at
+  //   the highlight alpha sweeps across it.
+  static const double librarySkeletonBaseAlpha = 0.7;
+  static const double librarySkeletonHighlightAlpha = 0.95;
 
   /// Darkens [color] for a pressed-state SOP (see frontend-piyanota.md
   /// "Interaction states") — reduces HSL lightness rather than overlaying

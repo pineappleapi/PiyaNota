@@ -59,7 +59,7 @@ void main() {
     await tester.pump(FakeScoreLibraryApi.defaultLatency + settle);
 
     expect(find.text('My Scores'), findsOneWidget);
-    expect(find.text('3 Scores • Tap to Listen'), findsOneWidget);
+    expect(find.text('5 Scores • Tap to Listen'), findsOneWidget);
     expect(find.text('Bahay Kubo'), findsOneWidget);
 
     // Library is the root route: back has nowhere to go but out.

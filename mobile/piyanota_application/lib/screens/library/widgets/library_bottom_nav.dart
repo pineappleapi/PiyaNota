@@ -40,9 +40,10 @@ class LibraryBottomNav extends StatelessWidget {
   static const double _itemSpacing = 112;
   static const double _itemSpacingWidthFraction = 0.27;
 
-  // The mockup draws the button as a 74x65 ellipse, not a circle.
-  static const double _captureWidth = 74;
-  static const double _captureHeight = 65;
+  // A true circle (round-2 design polish; the mockup's 74x65 ellipse read as
+  // a squashed button). 66 dp keeps the mockup's height, so the label under
+  // it doesn't move.
+  static const double _captureDiameter = 66;
   static const double _captureShadowBlur = 24;
   static const double _captureFrameSize = 53;
   static const double _captureNoteSize = 22;
@@ -51,6 +52,10 @@ class LibraryBottomNav extends StatelessWidget {
   static const double _libraryIconSize = 36;
   static const double _settingsIconSize = 30;
   static const double _labelFontSize = 13;
+  // Selected-tab pill behind the icon, Material 3 NavigationBar-style but
+  // sized for the larger 36 dp icons.
+  static const double _indicatorWidth = 64;
+  static const double _indicatorHeight = 40;
 
   /// Total height this widget occupies for a given bottom inset; the list
   /// above pads by this so its last card can scroll clear of the bar.
@@ -179,6 +184,28 @@ class _NavItem extends StatelessWidget {
         highlightColor: Colors.black.withValues(alpha: _pressedAlpha),
         child: Stack(
           children: [
+            if (selected)
+              Positioned(
+                top: LibraryBottomNav._iconCenterFromBarTop -
+                    LibraryBottomNav._indicatorHeight / 2,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: Container(
+                    key: const ValueKey('library-nav-selected-indicator'),
+                    width: LibraryBottomNav._indicatorWidth,
+                    height: LibraryBottomNav._indicatorHeight,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(
+                        alpha: AppTheme.libraryNavIndicatorAlpha,
+                      ),
+                      borderRadius: BorderRadius.circular(
+                        LibraryBottomNav._indicatorHeight / 2,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             Positioned(
               top: LibraryBottomNav._iconCenterFromBarTop - iconSize / 2,
               left: 0,
@@ -212,7 +239,7 @@ class _CaptureButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const shape = OvalBorder();
+    const shape = CircleBorder();
 
     return Semantics(
       button: true,
@@ -229,8 +256,9 @@ class _CaptureButton extends StatelessWidget {
           alignment: Alignment.topCenter,
           children: [
             Container(
-              width: LibraryBottomNav._captureWidth,
-              height: LibraryBottomNav._captureHeight,
+              key: const ValueKey('library-capture-button'),
+              width: LibraryBottomNav._captureDiameter,
+              height: LibraryBottomNav._captureDiameter,
               decoration: const ShapeDecoration(
                 shape: shape,
                 shadows: [

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../config/api_config.dart';
@@ -22,7 +24,8 @@ final scoreLibraryApiProvider = Provider<ScoreLibraryApi>((ref) {
   return HttpScoreLibraryApi(ref.watch(dioProvider), sessionStorage);
 });
 
-/// The signed-in user's full library (PIYA-308 with no search term).
+/// The signed-in user's full library (PIYA-308 with no search term), in
+/// server order. The screen sorts and labels it with `buildLibraryEntries`.
 ///
 /// autoDispose so the list is dropped when the Library leaves the tree
 /// (e.g. on logout): a later login as a different account then fetches
@@ -57,15 +60,47 @@ class ScoreLibraryController extends AsyncNotifier<List<ScoreSummary>> {
   /// and rethrows.
   Future<void> delete(int scoreId) async {
     try {
-      await ref.read(scoreLibraryApiProvider).deleteScore(scoreId);
+      await deleteOnServer(scoreId);
     } on ScoreNotFoundException {
-      _removeLocally(scoreId);
+      removeLocally(scoreId);
       rethrow;
     }
-    _removeLocally(scoreId);
+    removeLocally(scoreId);
   }
 
-  void _removeLocally(int scoreId) {
+  /// The server half of [delete], for callers that animate the row out
+  /// before calling [removeLocally] themselves (the Library's swipe and
+  /// trash paths). Never touches local state.
+  Future<void> deleteOnServer(int scoreId) =>
+      ref.read(scoreLibraryApiProvider).deleteScore(scoreId);
+
+  /// Records that the user opened [scoreId] for playback, moving it to the
+  /// top of the library straight away.
+  ///
+  /// Local only for the real API: the server updates `last_accessed_at`
+  /// itself when Playback fetches the score (PIYA-308 AC8), so there is
+  /// deliberately no HTTP call here. The fake has no Playback fetch, so it
+  /// is told directly to keep a refetch consistent.
+  void markOpened(int scoreId) {
+    final now = DateTime.now().toUtc();
+    final api = ref.read(scoreLibraryApiProvider);
+    if (api is FakeScoreLibraryApi) {
+      unawaited(api.markOpened(scoreId, now));
+    }
+    final current = state.value;
+    if (current == null) return;
+    state = AsyncData([
+      for (final score in current)
+        if (score.scoreId == scoreId)
+          score.copyWith(lastActivityAt: now)
+        else
+          score,
+    ]);
+  }
+
+  /// Drops [scoreId] from the list. Only call this once the server has
+  /// confirmed the deletion (200) or reported the score gone (404).
+  void removeLocally(int scoreId) {
     if (!ref.mounted) return;
     final current = state.value;
     if (current == null) return;
@@ -74,19 +109,4 @@ class ScoreLibraryController extends AsyncNotifier<List<ScoreSummary>> {
         if (score.scoreId != scoreId) score,
     ]);
   }
-}
-
-/// Case-insensitive, partial title match (PIYA-205 AC3). Applied client-side
-/// to the already-fetched list for now; PIYA-215 AC1 moves search to a
-/// debounced PIYA-308 call, which must keep these same semantics.
-List<ScoreSummary> filterScoresByTitle(
-  List<ScoreSummary> scores,
-  String query,
-) {
-  final needle = query.trim().toLowerCase();
-  if (needle.isEmpty) return scores;
-  return [
-    for (final score in scores)
-      if (score.title.toLowerCase().contains(needle)) score,
-  ];
 }

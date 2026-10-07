@@ -1,3 +1,4 @@
+import '../../models/library_entry.dart';
 import '../../models/score_summary.dart';
 
 /// User-facing Score Library copy. [emptySubtitle] is quoted verbatim from
@@ -40,7 +41,10 @@ class LibraryMessages {
   static String scoreCountSubtitle(int count) =>
       '$count ${count == 1 ? 'Score' : 'Scores'} • Tap to Listen';
 
-  static String noMatches(String query) => 'No scores match "${query.trim()}"';
+  static const String noResultsTitle = 'No results';
+  static String noResultsHint(String query) =>
+      'Nothing matches "${query.trim()}". Try a title, composer or date.';
+  static const String clearSearch = 'Clear search';
 
   static String deleteDialogBody(String title) =>
       '"$title" and its audio will be permanently removed from your '
@@ -51,27 +55,15 @@ class LibraryMessages {
   static String deleteSemantics(String title) => 'Delete $title';
 
   /// Card subtitle. The date comes first so it is the part that survives
-  /// ellipsis — it is the one AC2 requires; composer and page count (the
-  /// mockup's subtitle) follow only when the API supplies them.
+  /// ellipsis; composer and page count follow when known. Missing parts are
+  /// left out entirely, so there is never a dangling "•".
   static String cardSubtitle(ScoreSummary score) {
     final pages = score.pageCount;
+    final when = score.lastActivityAt;
     return [
-      formatScoreDate(score.lastActivityAt),
+      if (when != null) formatScoreDate(when),
       ?score.composer,
       if (pages != null) '$pages ${pages == 1 ? 'page' : 'pages'}',
     ].join(' • ');
-  }
-
-  static const List<String> _months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-  ];
-
-  /// "Oct 3, 2026" in the device's local time zone — the API sends UTC, and
-  /// a late-evening access in Manila would otherwise show the previous day.
-  /// Hand-rolled to avoid pulling in `intl` for one format.
-  static String formatScoreDate(DateTime when) {
-    final local = when.toLocal();
-    return '${_months[local.month - 1]} ${local.day}, ${local.year}';
   }
 }

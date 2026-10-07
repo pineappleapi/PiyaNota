@@ -42,7 +42,8 @@ class _Harness {
 }
 
 void main() {
-  test('the demo account sees the three mockup scores (AC1)', () async {
+  test('the demo account sees the mockup scores plus two incomplete ones',
+      () async {
     final h = _Harness();
     await h.logIn(FakeAuthApi.demoEmail, FakeAuthApi.demoPassword);
 
@@ -51,7 +52,12 @@ void main() {
       'Bituin Walang Ningning',
       'Paraiso',
       'Bahay Kubo',
+      null,
+      'Pasko Na Naman',
     ]);
+    final noComposer = scores.last;
+    expect(noComposer.composer, isNull);
+    expect(noComposer.pageCount, isNull);
   });
 
   test('a fresh sign-up sees an empty library, not the demo data (AC1/AC4)',
@@ -69,7 +75,10 @@ void main() {
     expect(await h.library.fetchLibrary(), isEmpty);
 
     await h.logIn(FakeAuthApi.demoEmail, FakeAuthApi.demoPassword);
-    expect((await h.library.fetchLibrary()).map((s) => s.scoreId), [101, 103]);
+    expect(
+      (await h.library.fetchLibrary()).map((s) => s.scoreId),
+      [101, 103, 104, 105],
+    );
   });
 
   test('no or unknown token is a 401', () async {
@@ -92,6 +101,31 @@ void main() {
     expect(scores.map((s) => s.scoreId), [103]);
   });
 
+  test('search also matches composer and the displayed date (AC4)',
+      () async {
+    final h = _Harness();
+    await h.logIn(FakeAuthApi.demoEmail, FakeAuthApi.demoPassword);
+    Future<List<int>> ids(String q) async =>
+        (await h.library.fetchLibrary(query: q)).map((s) => s.scoreId).toList();
+
+    expect(await ids('cayabyab'), [102]);
+    expect(await ids('oct 3'), [101]);
+    expect(await ids('new score'), [104]);
+  });
+
+  test('markOpened moves the open time so a refetch agrees', () async {
+    final h = _Harness();
+    await h.logIn(FakeAuthApi.demoEmail, FakeAuthApi.demoPassword);
+    final when = DateTime.utc(2026, 10, 8, 9);
+    await h.library.markOpened(103, when);
+
+    final scores = await h.library.fetchLibrary();
+    expect(
+      scores.firstWhere((s) => s.scoreId == 103).lastActivityAt,
+      when,
+    );
+  });
+
   test('deleting an unknown id is a 404', () async {
     final h = _Harness();
     await h.logIn(FakeAuthApi.demoEmail, FakeAuthApi.demoPassword);
@@ -110,7 +144,10 @@ void main() {
       h.library.fetchLibrary(),
       throwsA(isA<ScoreLibraryServerException>()),
     );
-    expect(await h.library.fetchLibrary(), hasLength(3));
+    expect(
+      await h.library.fetchLibrary(),
+      hasLength(FakeScoreLibraryApi.demoScores.length),
+    );
 
     await expectLater(
       h.library.deleteScore(101),
@@ -122,6 +159,9 @@ void main() {
       h.library.fetchLibrary(),
       throwsA(isA<ScoreLibraryServerException>()),
     );
-    expect(await h.library.fetchLibrary(), hasLength(2));
+    expect(
+      await h.library.fetchLibrary(),
+      hasLength(FakeScoreLibraryApi.demoScores.length - 1),
+    );
   });
 }

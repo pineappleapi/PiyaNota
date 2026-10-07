@@ -198,10 +198,20 @@ Returns the list of saved scores belonging to the authenticated user, used by Sc
 **Acceptance Criteria:**
 1. Requires a valid session token; returns 401 if missing or invalid.
 2. Returns only scores owned by the authenticated `userId` (record-level access control) — no cross-user data returned under any query.
-3. Each score entry includes `scoreId`, `title`, `lastAccessedAt`/`lastProcessedAt`, thumbnail URL.
-4. Supports an optional search query parameter filtering by title, case-insensitive, partial match.
+3. Each score entry includes `scoreId`, `title`, `lastAccessedAt`, `composer`, `pageCount`, thumbnail URL. `lastAccessedAt` is the time the user most recently **opened** the score (amended 2026-10-08, user decision; replaces the earlier `lastAccessedAt`/`lastProcessedAt` either-or). `composer`, `pageCount` and `thumbnailUrl` may be `null` when unknown.
+4. Supports an optional search query parameter, case-insensitive, partial match, across title, composer and last-opened date (amended 2026-10-08, user decision; was title only). The date must match the way the app displays it (e.g. `Oct 3, 2026`, so `oct`, `2026` and `oct 3` all match). Confirm the exact date format with the client before implementing.
 5. Returns an empty array (not an error) when the user has zero saved scores.
 6. Responds within 1 second for libraries up to 200 scores.
+7. Scores are returned sorted by `lastAccessedAt`, newest first; scores never opened sort last (added 2026-10-08). The client also sorts, so this is defence in depth, not something the UI relies on.
+8. Opening a score for playback updates its `last_accessed_at` server-side, so the next library fetch shows it first (added 2026-10-08). Which endpoint does this is open: PIYA-308 itself is read-only, so it is most likely the playback/score-fetch call. backend-lead to decide.
+
+**Client handling of incomplete entries (PIYA-205, 2026-10-08, user decision):**
+- A missing or blank `title` displays as "New Score". When several entries are untitled, they are numbered "New Score (1)", "New Score (2)" and so on.
+- A missing `composer`, `pageCount`, date or thumbnail is simply left out of the card.
+- An entry without a valid `scoreId` is skipped, and the rest of the list still loads.
+- The server should still aim never to send these. PIYA-321 guarantees a non-null title.
+
+**Schema impact:** PIYA-311's `scores` table has no `composer` or `page_count` column. Both need adding (or `page_count` joined from `jobs`) before this endpoint can return them.
 
 **Response Schema:**
 ```json
@@ -212,6 +222,8 @@ Returns the list of saved scores belonging to the authenticated user, used by Sc
         "scoreId": 552,
         "title": "Bayan Ko",
         "lastAccessedAt": "2026-09-03T14:22:00Z",
+        "composer": "Constancio de Guzman",
+        "pageCount": 4,
         "thumbnailUrl": "https://cdn.piyanota.app/thumbs/552.png"
       }
     ]

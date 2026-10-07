@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:piyanota_application/models/library_entry.dart';
 import 'package:piyanota_application/models/score_summary.dart';
 import 'package:piyanota_application/screens/library/library_messages.dart';
-import 'package:piyanota_application/state/score_library_providers.dart';
 
 void main() {
   group('ScoreSummary.fromJson', () {
@@ -16,34 +16,60 @@ void main() {
       expect(score.lastActivityAt, DateTime.utc(2026, 10, 1));
     });
 
-    test('drops mistyped optional fields instead of rejecting the entry', () {
+    test('falls back to lastProcessedAt when lastAccessedAt is unusable', () {
       final score = ScoreSummary.fromJson({
         'scoreId': 7,
-        'title': 'Paraiso',
-        'lastAccessedAt': '2026-10-01T00:00:00Z',
+        'lastAccessedAt': 'yesterday',
+        'lastProcessedAt': '2026-09-01T00:00:00Z',
+      });
+      expect(score.lastActivityAt, DateTime.utc(2026, 9, 1));
+    });
+
+    test('reads composer and pageCount as contract fields', () {
+      final score = ScoreSummary.fromJson({
+        'scoreId': 552,
+        'title': 'Bayan Ko',
+        'lastAccessedAt': '2026-09-03T14:22:00Z',
+        'composer': 'Constancio de Guzman',
+        'pageCount': 4,
+        'thumbnailUrl': 'https://cdn.piyanota.app/thumbs/552.png',
+      });
+      expect(score.composer, 'Constancio de Guzman');
+      expect(score.pageCount, 4);
+      expect(score.thumbnailUrl, 'https://cdn.piyanota.app/thumbs/552.png');
+    });
+
+    test('drops missing, blank or mistyped fields instead of rejecting', () {
+      final score = ScoreSummary.fromJson({
+        'scoreId': 7,
+        'title': '   ',
+        'lastAccessedAt': 'yesterday',
         'thumbnailUrl': 42,
         'composer': '',
         'pageCount': '14',
       });
+      expect(score.title, isNull);
+      expect(score.lastActivityAt, isNull);
       expect(score.thumbnailUrl, isNull);
       expect(score.composer, isNull);
       expect(score.pageCount, isNull);
     });
 
+    test('a non-string title or zero pageCount is dropped', () {
+      final score = ScoreSummary.fromJson({
+        'scoreId': 7,
+        'title': 12,
+        'pageCount': 0,
+      });
+      expect(score.title, isNull);
+      expect(score.pageCount, isNull);
+    });
+
     for (final entry in <String, Map<String, dynamic>>{
       'missing scoreId': {'title': 'x', 'lastAccessedAt': '2026-10-01'},
-      'string scoreId': {
-        'scoreId': '7',
-        'title': 'x',
-        'lastAccessedAt': '2026-10-01',
-      },
-      'missing title': {'scoreId': 7, 'lastAccessedAt': '2026-10-01'},
-      'missing timestamp': {'scoreId': 7, 'title': 'x'},
-      'unparseable timestamp': {
-        'scoreId': 7,
-        'title': 'x',
-        'lastAccessedAt': 'yesterday',
-      },
+      'string scoreId': {'scoreId': '7', 'title': 'x'},
+      'null scoreId': {'scoreId': null, 'title': 'x'},
+      'zero scoreId': {'scoreId': 0, 'title': 'x'},
     }.entries) {
       test('rejects ${entry.key}', () {
         expect(
@@ -54,25 +80,117 @@ void main() {
     }
   });
 
-  group('filterScoresByTitle (AC3)', () {
-    final scores = [
-      ScoreSummary(scoreId: 1, title: 'Bahay Kubo', lastActivityAt: DateTime(2026)),
-      ScoreSummary(scoreId: 2, title: 'Paraiso', lastActivityAt: DateTime(2026)),
-    ];
-
-    test('blank query returns everything', () {
-      expect(filterScoresByTitle(scores, '  '), scores);
-    });
-
-    test('matches case-insensitively and partially', () {
-      expect(filterScoresByTitle(scores, 'AHAY k').map((s) => s.scoreId), [1]);
-      expect(filterScoresByTitle(scores, 'rai').map((s) => s.scoreId), [2]);
-      expect(filterScoresByTitle(scores, 'zzz'), isEmpty);
+  group('buildLibraryEntries: sort by last opened', () {
+    test('newest first regardless of input order; undated last by title', () {
+      final entries = buildLibraryEntries([
+        ScoreSummary(scoreId: 1, title: 'Old', lastActivityAt: DateTime.utc(2026, 9, 1)),
+        const ScoreSummary(scoreId: 2, title: 'Zebra'),
+        ScoreSummary(scoreId: 3, title: 'New', lastActivityAt: DateTime.utc(2026, 10, 3)),
+        const ScoreSummary(scoreId: 4, title: 'apple'),
+        ScoreSummary(scoreId: 5, title: 'Mid', lastActivityAt: DateTime.utc(2026, 9, 20)),
+      ]);
+      expect(entries.map((e) => e.scoreId), [3, 5, 1, 4, 2]);
     });
   });
 
-  group('LibraryMessages.cardSubtitle (AC2)', () {
-    test('always leads with the date; extras only when present', () {
+  group('buildLibraryEntries: untitled numbering', () {
+    test('untitled entries are numbered in display order', () {
+      final entries = buildLibraryEntries([
+        ScoreSummary(scoreId: 1, lastActivityAt: DateTime.utc(2026, 9, 1)),
+        ScoreSummary(scoreId: 2, title: 'Paraiso', lastActivityAt: DateTime.utc(2026, 9, 2)),
+        ScoreSummary(scoreId: 3, lastActivityAt: DateTime.utc(2026, 10, 1)),
+        const ScoreSummary(scoreId: 4),
+      ]);
+      expect(entries.map((e) => e.displayTitle), [
+        'New Score',
+        'Paraiso',
+        'New Score (1)',
+        'New Score (2)',
+      ]);
+      expect(entries.map((e) => e.scoreId), [3, 2, 1, 4]);
+    });
+
+    test('a single untitled entry is plain "New Score"', () {
+      final entries = buildLibraryEntries([const ScoreSummary(scoreId: 1)]);
+      expect(entries.single.displayTitle, 'New Score');
+    });
+
+    test('a real title "New Score" joins the numbered sequence', () {
+      final entries = buildLibraryEntries([
+        ScoreSummary(scoreId: 1, title: 'New Score', lastActivityAt: DateTime.utc(2026, 9, 1)),
+        ScoreSummary(scoreId: 2, lastActivityAt: DateTime.utc(2026, 10, 1)),
+      ]);
+      expect(entries.map((e) => e.displayTitle), ['New Score', 'New Score (1)']);
+      expect(entries.map((e) => e.scoreId), [2, 1]);
+    });
+
+    test('generated labels skip a real title that already uses them', () {
+      final entries = buildLibraryEntries([
+        ScoreSummary(scoreId: 1, lastActivityAt: DateTime.utc(2026, 10, 3)),
+        ScoreSummary(scoreId: 2, lastActivityAt: DateTime.utc(2026, 10, 2)),
+        // Sorts last, but its title is reserved before numbering starts.
+        ScoreSummary(scoreId: 3, title: 'new score (1)', lastActivityAt: DateTime.utc(2026, 9, 1)),
+      ]);
+      expect(entries.map((e) => e.displayTitle), [
+        'New Score',
+        'New Score (2)',
+        'new score (1)',
+      ]);
+    });
+  });
+
+  group('filterLibraryEntries (title, composer, date)', () {
+    final entries = buildLibraryEntries([
+      ScoreSummary(
+        scoreId: 1,
+        title: 'Bahay Kubo',
+        composer: 'A.O. Veneracion',
+        lastActivityAt: DateTime(2026, 9, 21, 12),
+      ),
+      ScoreSummary(
+        scoreId: 2,
+        title: 'Paraiso',
+        composer: 'Ryan Cayabyab',
+        lastActivityAt: DateTime(2026, 10, 3, 12),
+      ),
+      ScoreSummary(scoreId: 3, lastActivityAt: DateTime(2025, 1, 5, 12)),
+    ]);
+
+    List<int> ids(String q) =>
+        filterLibraryEntries(entries, q).map((e) => e.scoreId).toList();
+
+    test('blank query returns everything, newest first', () {
+      expect(ids('  '), [2, 1, 3]);
+    });
+
+    test('matches title case-insensitively and partially', () {
+      expect(ids('AHAY k'), [1]);
+      expect(ids('rai'), [2]);
+    });
+
+    test('matches composer', () {
+      expect(ids('cayab'), [2]);
+      expect(ids('veneracion'), [1]);
+    });
+
+    test('matches the displayed date', () {
+      expect(ids('oct'), [2]);
+      expect(ids('oct 3'), [2]);
+      expect(ids('2026'), [2, 1]);
+      expect(ids('sep 21, 2026'), [1]);
+    });
+
+    test('matches the display title of an untitled entry', () {
+      expect(ids('new score'), [3]);
+    });
+
+    test('no match is empty', () {
+      expect(ids('zzz'), isEmpty);
+    });
+  });
+
+  group('LibraryMessages.cardSubtitle', () {
+    test('leads with the date; extras only when present', () {
       final bare = ScoreSummary(
         scoreId: 1,
         title: 'x',
@@ -89,6 +207,25 @@ void main() {
       expect(
         LibraryMessages.cardSubtitle(full),
         'Sep 28, 2026 • Ryan Cayabyab • 1 page',
+      );
+    });
+
+    test('no stray separator when parts are missing', () {
+      expect(
+        LibraryMessages.cardSubtitle(
+          const ScoreSummary(scoreId: 1, composer: 'Ryan Cayabyab'),
+        ),
+        'Ryan Cayabyab',
+      );
+      expect(
+        LibraryMessages.cardSubtitle(
+          const ScoreSummary(scoreId: 1, pageCount: 3),
+        ),
+        '3 pages',
+      );
+      expect(
+        LibraryMessages.cardSubtitle(const ScoreSummary(scoreId: 1)),
+        isEmpty,
       );
     });
   });

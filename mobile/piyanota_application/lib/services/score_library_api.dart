@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 import '../config/api_config.dart';
 import '../models/score_summary.dart';
@@ -29,13 +30,15 @@ class ScoreLibraryNetworkException extends ScoreLibraryException {
   const ScoreLibraryNetworkException();
 }
 
-/// 5xx, unexpected status, or a body that breaks the PIYA-308 contract.
+/// 5xx, unexpected status, or a body without a `data.scores` list. (A single
+/// broken entry is skipped instead — see [HttpScoreLibraryApi.fetchLibrary].)
 class ScoreLibraryServerException extends ScoreLibraryException {
   const ScoreLibraryServerException();
 }
 
 abstract interface class ScoreLibraryApi {
-  /// PIYA-308. [query] filters by title server-side (AC4); null or blank
+  /// PIYA-308. [query] filters by title, composer and last-opened date
+  /// server-side (AC4); null or blank
   /// fetches the whole library. Returns an empty list, not an error, for a
   /// user with no scores (AC5).
   Future<List<ScoreSummary>> fetchLibrary({String? query});
@@ -73,17 +76,23 @@ class HttpScoreLibraryApi implements ScoreLibraryApi {
     final data = response.data?['data'];
     final scores = data is Map<String, dynamic> ? data['scores'] : null;
     if (scores is! List) throw const ScoreLibraryServerException();
-    try {
-      return [
-        for (final entry in scores)
-          if (entry is Map<String, dynamic>)
-            ScoreSummary.fromJson(entry)
-          else
-            throw const FormatException('Score entry is not an object'),
-      ];
-    } on FormatException {
-      throw const ScoreLibraryServerException();
+    // One entry without a valid scoreId can't be opened or deleted, but it
+    // must not take the rest of the library down with it (PIYA-308 client
+    // handling, user decision 2026-10-08). Other broken fields are already
+    // tolerated by ScoreSummary.fromJson.
+    final parsed = <ScoreSummary>[];
+    for (final entry in scores) {
+      if (entry is! Map<String, dynamic>) {
+        debugPrint('Score library: skipping non-object entry: $entry');
+        continue;
+      }
+      try {
+        parsed.add(ScoreSummary.fromJson(entry));
+      } on FormatException catch (e) {
+        debugPrint('Score library: skipping entry: ${e.message}');
+      }
     }
+    return parsed;
   }
 
   @override

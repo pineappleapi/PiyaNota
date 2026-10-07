@@ -90,6 +90,13 @@ These are separate values from the primary gradient, not reuses of its stops.
   score subtitle `libraryScoreSubtitle` `#575757`
 - Search field: no fill, white outline at `librarySearchBorderAlpha` 0.5, hint white at
   `librarySearchHintAlpha` 0.8; Capture button shadow `libraryCaptureShadow` `#33000000`
+- Round-2 polish (2026-10-08, not in the mockups, so derived rather than dropper-sampled):
+  header logo is the full-colour PNG at `libraryHeaderLogoOpacity` 0.4, top-right; selected nav
+  tab is a white pill at `libraryNavIndicatorAlpha` 0.22; skeleton bars are white at
+  `librarySkeletonBaseAlpha` 0.7 with a shimmer band at `librarySkeletonHighlightAlpha` 0.95
+  (static when `MediaQuery.disableAnimations` is on). Large text: the header title/subtitle
+  clamp at 1.5x text scale and the logo is hidden above 1.3x, so on a 320 dp phone at 2x the
+  heading doesn't fill the screen (search field and cards keep the full scale)
 
 ### Typography
 

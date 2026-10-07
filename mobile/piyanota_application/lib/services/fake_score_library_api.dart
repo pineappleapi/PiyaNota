@@ -1,3 +1,4 @@
+import '../models/library_entry.dart';
 import '../models/score_summary.dart';
 import 'fake_auth_api.dart';
 import 'score_library_api.dart';
@@ -28,8 +29,9 @@ class FakeScoreLibraryApi implements ScoreLibraryApi {
   static const String flakyDomain = '@flaky.test';
   static const Duration defaultLatency = Duration(milliseconds: 800);
 
-  /// The mockup's three scores. Composer/page count aren't in the PIYA-308
-  /// contract; they're included so the demo still reads like the mockup.
+  /// The mockup's three scores, plus two incomplete entries so the
+  /// broken-data handling (PIYA-308 client handling, 2026-10-08) is visible
+  /// in the demo: one untitled, one with no composer or page count.
   static final List<ScoreSummary> demoScores = List.unmodifiable([
     ScoreSummary(
       scoreId: 101,
@@ -52,6 +54,16 @@ class FakeScoreLibraryApi implements ScoreLibraryApi {
       composer: 'A.O. Veneracion/C.Borela',
       pageCount: 7,
     ),
+    ScoreSummary(
+      scoreId: 104,
+      lastActivityAt: DateTime.utc(2026, 9, 30, 11, 15),
+      pageCount: 2,
+    ),
+    ScoreSummary(
+      scoreId: 105,
+      title: 'Pasko Na Naman',
+      lastActivityAt: DateTime.utc(2026, 9, 14, 16, 30),
+    ),
   ]);
 
   final Duration latency;
@@ -72,8 +84,23 @@ class FakeScoreLibraryApi implements ScoreLibraryApi {
     // Same semantics the real search parameter must have (PIYA-308 AC4).
     return [
       for (final score in _scoresFor(account))
-        if (score.title.toLowerCase().contains(needle)) score,
+        if (needle.isEmpty || scoreMatchesQuery(score, needle)) score,
     ];
+  }
+
+  /// Stands in for the server-side `last_accessed_at` update that PIYA-308
+  /// AC8 puts on the real playback/score fetch, so a refetch of the fake
+  /// agrees with the client's local bump. Fake-only: the real API needs no
+  /// separate call. Silent for unknown ids or accounts.
+  Future<void> markOpened(int scoreId, DateTime when) async {
+    final token = await _sessionStorage.readToken();
+    final account = token == null ? null : _accountForToken(token);
+    if (account == null) return;
+    final scores = _scoresFor(account);
+    final index = scores.indexWhere((score) => score.scoreId == scoreId);
+    if (index != -1) {
+      scores[index] = scores[index].copyWith(lastActivityAt: when);
+    }
   }
 
   @override

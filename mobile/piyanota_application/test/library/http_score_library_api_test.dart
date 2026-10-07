@@ -161,18 +161,35 @@ void main() {
       );
     });
 
-    test('an entry missing a required field is a server error', () async {
+    test('entries without a valid scoreId are skipped; the rest load',
+        () async {
       final adapter = _StubAdapter(body: {
         'data': {
           'scores': [
-            {'scoreId': '101', 'title': 'x', 'lastAccessedAt': '2026-10-03'},
+            {'scoreId': '101', 'title': 'string id'},
+            {'title': 'no id'},
+            'not an object',
+            {'scoreId': 102, 'title': 'Paraiso'},
+            // Every other field broken: still loads, just bare.
+            {
+              'scoreId': 103,
+              'title': '',
+              'lastAccessedAt': 'yesterday',
+              'composer': 7,
+              'pageCount': 'many',
+              'thumbnailUrl': false,
+            },
           ],
         },
       });
-      await expectLater(
-        _apiWith(adapter).fetchLibrary(),
-        throwsA(isA<ScoreLibraryServerException>()),
-      );
+      final scores = await _apiWith(adapter).fetchLibrary();
+      expect(scores.map((s) => s.scoreId), [102, 103]);
+      final bare = scores.last;
+      expect(bare.title, isNull);
+      expect(bare.lastActivityAt, isNull);
+      expect(bare.composer, isNull);
+      expect(bare.pageCount, isNull);
+      expect(bare.thumbnailUrl, isNull);
     });
   });
 
