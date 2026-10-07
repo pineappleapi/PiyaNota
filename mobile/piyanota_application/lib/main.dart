@@ -2,10 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
-<<<<<<< HEAD
-
-void main() {
-=======
 import 'config/api_config.dart';
 
 void main() {
@@ -14,6 +10,5 @@ void main() {
   final configError = ApiConfig.configurationError();
   if (configError != null) throw StateError(configError);
 
->>>>>>> feature/piya202-login-ui
   runApp(const ProviderScope(child: PiyaNotaApp()));
 }
