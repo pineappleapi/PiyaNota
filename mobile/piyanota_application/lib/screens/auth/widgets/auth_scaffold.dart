@@ -115,10 +115,16 @@ class _AuthHeader extends StatelessWidget {
   final String accentHeadline;
 
   static const EdgeInsets _padding = EdgeInsets.fromLTRB(24, 32, 24, 40);
-  static const double _decorationSize = 140;
-  // Purely decorative stand-in for the reference's gear illustration — kept
-  // faint so it never competes with the headline for contrast.
-  static const double _decorationAlpha = 0.14;
+  static const String _logoAsset = 'assets/branding/Piyanota_App_Logo.png';
+  // The PNG's mark fills only the middle ~half of its canvas, so the box is
+  // oversized and pushed past the right edge to crop the mark partially.
+  static const double _decorationSize = 220;
+  static const double _decorationRight = -60;
+  static const double _decorationBottom = -40;
+  // Brand watermark in place of the reference's gear illustration. Tinted
+  // flat white (the logo's black keys would be too loud on the gradient) and
+  // kept faint so it never competes with the headline for contrast.
+  static const double _decorationAlpha = 0.12;
 
   @override
   Widget build(BuildContext context) {
@@ -132,13 +138,15 @@ class _AuthHeader extends StatelessWidget {
       clipBehavior: Clip.none,
       children: [
         Positioned(
-          right: -16,
-          bottom: -8,
+          right: _decorationRight,
+          bottom: _decorationBottom,
           child: ExcludeSemantics(
-            child: Icon(
-              Icons.music_note_rounded,
-              size: _decorationSize,
+            child: Image.asset(
+              _logoAsset,
+              width: _decorationSize,
+              height: _decorationSize,
               color: Colors.white.withValues(alpha: _decorationAlpha),
+              colorBlendMode: BlendMode.srcIn,
             ),
           ),
         ),
