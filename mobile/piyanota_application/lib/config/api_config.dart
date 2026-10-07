@@ -13,13 +13,13 @@ class ApiConfig {
   /// "no real backend configured"; only valid while [useFakeAuth] is true.
   static const String baseUrl = String.fromEnvironment('API_BASE_URL');
 
-  /// Defaults to true in debug/profile because the Module 3 API isn't
-  /// deployed yet; pass `--dart-define=USE_FAKE_AUTH=false` to hit [baseUrl]
-  /// instead. Release builds default to false so a choir-testing APK can't
-  /// silently ship accepting the fake demo credentials.
+  /// Defaults to true only in debug, because the Module 3 API isn't deployed
+  /// yet; pass `--dart-define=USE_FAKE_AUTH=false` to hit [baseUrl] instead.
+  /// Profile and release builds — the ones handed to choir testers — default
+  /// to false so they can't silently accept the fake demo credentials.
   static const bool useFakeAuth = bool.fromEnvironment(
     'USE_FAKE_AUTH',
-    defaultValue: !kReleaseMode,
+    defaultValue: kDebugMode,
   );
 
   static const String loginPath = '/api/auth/login';
@@ -30,4 +30,43 @@ class ApiConfig {
   // request a connectivity failure.
   static const Duration connectTimeout = Duration(seconds: 10);
   static const Duration receiveTimeout = Duration(seconds: 15);
+
+  static const String _requiredScheme = 'https';
+
+  /// Why this build's backend settings are unusable, or null if they're fine.
+  ///
+  /// Checked at startup so a misconfigured APK fails on launch, not on the
+  /// first Log In tap with a misleading "something went wrong" (dio uses
+  /// dart:io, so Android's cleartext policy would not block http either).
+  static String? configurationError() => configurationErrorFor(
+        useFakeAuth: useFakeAuth,
+        baseUrl: baseUrl,
+        allowCleartext: kDebugMode,
+      );
+
+  /// [configurationError] with its inputs exposed, since the real ones are
+  /// compile-time constants tests can't vary.
+  ///
+  /// [allowCleartext] keeps plain http usable for a local Flask server
+  /// (e.g. `http://10.0.2.2:5000` from the emulator) in debug only; any
+  /// build a tester receives must use TLS (FR-17 / NFR-7).
+  @visibleForTesting
+  static String? configurationErrorFor({
+    required bool useFakeAuth,
+    required String baseUrl,
+    required bool allowCleartext,
+  }) {
+    if (useFakeAuth) return null;
+    if (baseUrl.isEmpty) {
+      return 'USE_FAKE_AUTH=false requires --dart-define=API_BASE_URL=<url>';
+    }
+    final uri = Uri.tryParse(baseUrl);
+    if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
+      return 'API_BASE_URL is not an absolute URL: "$baseUrl"';
+    }
+    if (!allowCleartext && uri.scheme != _requiredScheme) {
+      return 'API_BASE_URL must use https outside debug builds: "$baseUrl"';
+    }
+    return null;
+  }
 }

@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:piyanota_application/models/auth_session.dart';
 import 'package:piyanota_application/routes/app_routes.dart';
 import 'package:piyanota_application/services/auth_api.dart';
+import 'package:piyanota_application/services/session_storage.dart';
 import 'package:piyanota_application/state/auth_providers.dart';
 
 /// [AuthApi] whose responses each test scripts directly, with call counts
@@ -40,6 +43,69 @@ class ScriptedAuthApi implements AuthApi {
   }
 }
 
+/// In-memory secure storage whose individual operations can be made to throw
+/// [PlatformException] — what flutter_secure_storage raises when the Keystore
+/// is unavailable or ciphertext can't be decrypted.
+class FaultySecureStorage extends FlutterSecureStorage {
+  FaultySecureStorage([Map<String, String>? initial])
+      : values = {...?initial};
+
+  final Map<String, String> values;
+  final Set<String> failWritesFor = {};
+  final Set<String> failReadsFor = {};
+  final Set<String> failDeletesFor = {};
+
+  static PlatformException _failure(String op, String key) =>
+      PlatformException(code: 'test-$op-failed', message: key);
+
+  @override
+  Future<void> write({
+    required String key,
+    required String? value,
+    AppleOptions? iOptions,
+    AndroidOptions? aOptions,
+    LinuxOptions? lOptions,
+    WebOptions? webOptions,
+    AppleOptions? mOptions,
+    WindowsOptions? wOptions,
+  }) async {
+    if (failWritesFor.contains(key)) throw _failure('write', key);
+    if (value == null) {
+      values.remove(key);
+    } else {
+      values[key] = value;
+    }
+  }
+
+  @override
+  Future<String?> read({
+    required String key,
+    AppleOptions? iOptions,
+    AndroidOptions? aOptions,
+    LinuxOptions? lOptions,
+    WebOptions? webOptions,
+    AppleOptions? mOptions,
+    WindowsOptions? wOptions,
+  }) async {
+    if (failReadsFor.contains(key)) throw _failure('read', key);
+    return values[key];
+  }
+
+  @override
+  Future<void> delete({
+    required String key,
+    AppleOptions? iOptions,
+    AndroidOptions? aOptions,
+    LinuxOptions? lOptions,
+    WebOptions? webOptions,
+    AppleOptions? mOptions,
+    WindowsOptions? wOptions,
+  }) async {
+    if (failDeletesFor.contains(key)) throw _failure('delete', key);
+    values.remove(key);
+  }
+}
+
 AuthSession testSession() => AuthSession(
       userId: 214,
       email: 'maria@example.com',
@@ -63,6 +129,8 @@ Future<void> pumpAuthScreen(
   bool stubSignUp = false,
   Size physicalSize = const Size(1080, 2340),
   double textScale = 1.0,
+  SessionStorage? storage,
+  Map<String, WidgetBuilder> extraRoutes = const {},
 }) async {
   // A phone-sized viewport (the test default is 800x600 landscape), so
   // layout/overflow behaviour matches a real device.
@@ -72,7 +140,10 @@ Future<void> pumpAuthScreen(
 
   await tester.pumpWidget(
     ProviderScope(
-      overrides: [authApiProvider.overrideWithValue(api)],
+      overrides: [
+        authApiProvider.overrideWithValue(api),
+        if (storage != null) sessionStorageProvider.overrideWithValue(storage),
+      ],
       child: MaterialApp(
         builder: (context, child) => MediaQuery(
           data: MediaQuery.of(context).copyWith(
@@ -89,6 +160,7 @@ Future<void> pumpAuthScreen(
             AppRoutes.login: (_) => const Scaffold(body: Text(loginMarker)),
           if (stubSignUp)
             AppRoutes.signUp: (_) => const Scaffold(body: Text(signUpMarker)),
+          ...extraRoutes,
         },
       ),
     ),

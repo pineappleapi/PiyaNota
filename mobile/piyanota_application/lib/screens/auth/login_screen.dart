@@ -115,11 +115,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       switchPrompt: AuthSwitchPrompt(
         prompt: "Don't have an account?",
         actionLabel: 'Sign Up',
+        // Pushed, not replaced, so Android back on Sign-Up returns here
+        // instead of exiting the app (Login is the root route).
         onPressed: _isSubmitting
             ? null
-            : () => Navigator.of(context).pushReplacementNamed(
-                  AppRoutes.signUp,
-                ),
+            : () => Navigator.of(context).pushNamed(AppRoutes.signUp),
       ),
       children: [
         if (error != null) ...[

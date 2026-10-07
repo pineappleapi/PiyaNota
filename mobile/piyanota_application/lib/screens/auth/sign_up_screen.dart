@@ -143,14 +143,34 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
     );
   }
 
+  /// Sign-Up is either pushed over Login, or the root route when reached
+  /// from onboarding's Get Started (PIYA-201 AC6). Pop back to the existing
+  /// Login in the first case rather than stacking a second one.
   void _goToLogin() {
-    Navigator.of(context).pushReplacementNamed(AppRoutes.login);
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) {
+      navigator.pop();
+    } else {
+      navigator.pushReplacementNamed(AppRoutes.login);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final error = _errorMessage;
 
+    // As the root route, system back would otherwise close the app — send
+    // the user to Login instead, which is where they'd expect to land.
+    return PopScope(
+      canPop: Navigator.of(context).canPop(),
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && !_isSubmitting) _goToLogin();
+      },
+      child: _buildScaffold(error),
+    );
+  }
+
+  Widget _buildScaffold(String? error) {
     return AuthScaffold(
       headline: 'Create your account',
       accentHeadline: 'and start rehearsing\nyour part.',

@@ -18,15 +18,12 @@ final dioProvider = Provider<Dio>((ref) {
 });
 
 /// Swapped to [FakeAuthApi] by default until the Module 3 API is deployed
-/// (see [ApiConfig.useFakeAuth]). Fails loudly rather than letting requests
-/// go to a relative URL if the real API is requested without a base URL.
+/// (see [ApiConfig.useFakeAuth]). Re-checks the startup validation so the
+/// provider can never hand out a client aimed at a relative or cleartext URL.
 final authApiProvider = Provider<AuthApi>((ref) {
   if (ApiConfig.useFakeAuth) return FakeAuthApi();
-  if (ApiConfig.baseUrl.isEmpty) {
-    throw StateError(
-      'USE_FAKE_AUTH=false requires --dart-define=API_BASE_URL=<url>',
-    );
-  }
+  final configError = ApiConfig.configurationError();
+  if (configError != null) throw StateError(configError);
   return HttpAuthApi(ref.watch(dioProvider));
 });
 

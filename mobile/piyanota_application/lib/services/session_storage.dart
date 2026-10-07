@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../models/auth_session.dart';
@@ -24,15 +26,47 @@ class SessionStorage {
       );
       await _storage.write(key: _tokenKey, value: session.sessionToken);
     } catch (_) {
-      await clear();
+      // A rollback failure must not mask the write failure the caller maps
+      // to a user-facing message.
+      try {
+        await clear();
+      } catch (clearError) {
+        debugPrint('Session rollback failed: $clearError');
+      }
       rethrow;
     }
   }
 
-  Future<String?> readToken() => _storage.read(key: _tokenKey);
+  /// Returns null, and wipes the entry, when the stored ciphertext can't be
+  /// decrypted — e.g. data carried to a new phone without its Keystore key.
+  /// Treating that as "logged out" beats crashing auto-login (PIYA-214).
+  Future<String?> readToken() async {
+    try {
+      return await _storage.read(key: _tokenKey);
+    } on PlatformException catch (e) {
+      debugPrint('Unreadable session token, clearing: ${e.code}');
+      try {
+        await clear();
+      } on PlatformException catch (clearError) {
+        debugPrint('Session clear failed: ${clearError.code}');
+      }
+      return null;
+    }
+  }
 
+  /// Deletes both keys even if the first delete fails, so a logout never
+  /// strands a token behind a failed expiry delete.
   Future<void> clear() async {
-    await _storage.delete(key: _tokenKey);
-    await _storage.delete(key: _expiresAtKey);
+    Object? firstError;
+    StackTrace? firstStack;
+    for (final key in const [_tokenKey, _expiresAtKey]) {
+      try {
+        await _storage.delete(key: key);
+      } catch (e, stack) {
+        firstError ??= e;
+        firstStack ??= stack;
+      }
+    }
+    if (firstError != null) Error.throwWithStackTrace(firstError, firstStack!);
   }
 }

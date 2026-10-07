@@ -5,9 +5,12 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:piyanota_application/models/auth_session.dart';
+import 'package:piyanota_application/routes/app_routes.dart';
 import 'package:piyanota_application/screens/auth/auth_messages.dart';
 import 'package:piyanota_application/screens/auth/login_screen.dart';
+import 'package:piyanota_application/screens/auth/sign_up_screen.dart';
 import 'package:piyanota_application/services/auth_api.dart';
+import 'package:piyanota_application/services/session_storage.dart';
 
 import 'auth_test_harness.dart';
 
@@ -162,5 +165,78 @@ void main() {
     expect(find.text(AuthMessages.serverError), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsNothing);
     expect(isButtonEnabled(tester, _logIn), isTrue);
+  });
+
+  testWidgets('secure-storage failure blocks entry with a distinct error',
+      (tester) async {
+    final backing = FaultySecureStorage()..failWritesFor.add('session_token');
+    await pumpAuthScreen(
+      tester,
+      screen: const LoginScreen(),
+      api: ScriptedAuthApi(onLogin: () async => testSession()),
+      storage: SessionStorage(backing),
+    );
+
+    await _fillAndSubmit(tester);
+    await tester.pumpAndSettle();
+
+    expect(find.text(AuthMessages.sessionSaveFailed), findsOneWidget);
+    expect(find.text(libraryMarker), findsNothing);
+    expect(backing.values, isEmpty);
+  });
+
+  testWidgets('back from Sign-Up returns to Login instead of exiting',
+      (tester) async {
+    await pumpAuthScreen(
+      tester,
+      screen: const LoginScreen(),
+      api: ScriptedAuthApi(),
+      extraRoutes: {AppRoutes.signUp: (_) => const SignUpScreen()},
+    );
+
+    await tester.tap(find.widgetWithText(TextButton, 'Sign Up'));
+    await tester.pumpAndSettle();
+    expect(find.byType(SignUpScreen), findsOneWidget);
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byType(SignUpScreen), findsNothing);
+    expect(find.byType(LoginScreen), findsOneWidget);
+
+    // Sign-Up's own "Log In" link pops too, rather than stacking a second
+    // Login on top of the first.
+    await tester.tap(find.widgetWithText(TextButton, 'Sign Up'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, 'Log In'));
+    await tester.pumpAndSettle();
+    expect(find.byType(LoginScreen), findsOneWidget);
+    expect(find.byType(SignUpScreen), findsNothing);
+  });
+
+  testWidgets('NFR-10: small screen at 2x text scale does not overflow',
+      (tester) async {
+    final api = ScriptedAuthApi(
+      onLogin: () async => throw const AuthNetworkException(),
+    );
+    // 320x568 dp — the smallest common Android phone class.
+    await pumpAuthScreen(
+      tester,
+      screen: const LoginScreen(),
+      api: api,
+      physicalSize: const Size(640, 1136),
+      textScale: 2.0,
+    );
+    tester.view.devicePixelRatio = 2.0;
+    await tester.pump();
+
+    await tester.enterText(_emailField, _email);
+    await tester.enterText(_passwordField, _password);
+    await tester.ensureVisible(buttonLabelled(_logIn));
+    await tester.pumpAndSettle();
+    await tester.tap(buttonLabelled(_logIn));
+    await tester.pumpAndSettle();
+
+    expect(find.text(AuthMessages.network), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 }

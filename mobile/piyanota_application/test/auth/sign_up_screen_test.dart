@@ -8,6 +8,7 @@ import 'package:piyanota_application/models/auth_session.dart';
 import 'package:piyanota_application/screens/auth/auth_messages.dart';
 import 'package:piyanota_application/screens/auth/sign_up_screen.dart';
 import 'package:piyanota_application/services/auth_api.dart';
+import 'package:piyanota_application/services/session_storage.dart';
 
 import 'auth_test_harness.dart';
 
@@ -242,5 +243,39 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text(AuthMessages.emailAlreadyRegistered), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('secure-storage failure blocks entry with a distinct error',
+      (tester) async {
+    final backing = FaultySecureStorage()..failWritesFor.add('session_token');
+    await pumpAuthScreen(
+      tester,
+      screen: const SignUpScreen(),
+      api: ScriptedAuthApi(onSignUp: () async => testSession()),
+      storage: SessionStorage(backing),
+    );
+
+    await _fill(tester);
+    await _tapCreate(tester);
+    await tester.pumpAndSettle();
+
+    expect(find.text(AuthMessages.sessionSaveFailed), findsOneWidget);
+    expect(find.text(libraryMarker), findsNothing);
+    expect(backing.values, isEmpty);
+  });
+
+  testWidgets('system back as root route (from onboarding) goes to Login',
+      (tester) async {
+    await pumpAuthScreen(
+      tester,
+      screen: const SignUpScreen(),
+      api: ScriptedAuthApi(),
+      stubLogin: true,
+    );
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+
+    expect(find.text(loginMarker), findsOneWidget);
   });
 }
