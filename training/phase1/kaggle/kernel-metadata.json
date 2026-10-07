@@ -1,0 +1,16 @@
+{
+  "id": "piamac/piyanota-recut-full-1",
+  "title": "piyanota-recut-full-1",
+  "code_file": "piyanota_recut_full.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": "true",
+  "enable_gpu": "false",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": ["piamac/piyanota-recut-code", "piamac/piyanota-recut-renders"],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": [],
+  "docker_image_pinning_type": "original"
+}
