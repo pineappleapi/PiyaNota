@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../config/api_config.dart';
@@ -33,19 +34,26 @@ final scoreLibraryApiProvider = Provider<ScoreLibraryApi>((ref) {
 /// Riverpod 3's automatic retry is disabled — a failed load must stay on
 /// the error state until the user taps Retry (AC6), not loop silently.
 final scoreLibraryProvider =
-    AsyncNotifierProvider.autoDispose<ScoreLibraryController, List<ScoreSummary>>(
-  ScoreLibraryController.new,
-  retry: (_, _) => null,
-);
+    AsyncNotifierProvider.autoDispose<
+      ScoreLibraryController,
+      List<ScoreSummary>
+    >(ScoreLibraryController.new, retry: (_, _) => null);
 
 class ScoreLibraryController extends AsyncNotifier<List<ScoreSummary>> {
   @override
   Future<List<ScoreSummary>> build() =>
       ref.watch(scoreLibraryApiProvider).fetchLibrary();
 
+  Future<void>? _reloading;
+
   /// AC6 retry. Resets to a plain loading state (no stale error kept
   /// alongside) so the screen shows the loading view, not the old error.
-  Future<void> reload() async {
+  /// A second call while one is running joins it instead of fetching twice.
+  Future<void> reload() => _reloading ??= _reload().whenComplete(() {
+    _reloading = null;
+  });
+
+  Future<void> _reload() async {
     state = const AsyncLoading();
     final result = await AsyncValue.guard(
       () => ref.read(scoreLibraryApiProvider).fetchLibrary(),
@@ -53,40 +61,28 @@ class ScoreLibraryController extends AsyncNotifier<List<ScoreSummary>> {
     if (ref.mounted) state = result;
   }
 
-  /// Deletes on the server first and removes the entry locally only once
-  /// that succeeds (PIYA-215 AC2: not optimistic). A 404 also removes it —
-  /// the server has confirmed it isn't in this library — then rethrows so
-  /// the screen can say so. Every other failure leaves the list untouched
-  /// and rethrows.
-  Future<void> delete(int scoreId) async {
-    try {
-      await deleteOnServer(scoreId);
-    } on ScoreNotFoundException {
-      removeLocally(scoreId);
-      rethrow;
-    }
-    removeLocally(scoreId);
-  }
-
-  /// The server half of [delete], for callers that animate the row out
-  /// before calling [removeLocally] themselves (the Library's swipe and
-  /// trash paths). Never touches local state.
+  /// Deletes [scoreId] on the server only. Callers remove the row with
+  /// [removeLocally] once this succeeds (PIYA-215 AC2: not optimistic),
+  /// after any exit animation.
   Future<void> deleteOnServer(int scoreId) =>
       ref.read(scoreLibraryApiProvider).deleteScore(scoreId);
 
   /// Records that the user opened [scoreId] for playback, moving it to the
   /// top of the library straight away.
   ///
-  /// Local only for the real API: the server updates `last_accessed_at`
-  /// itself when Playback fetches the score (PIYA-308 AC8), so there is
-  /// deliberately no HTTP call here. The fake has no Playback fetch, so it
-  /// is told directly to keep a refetch consistent.
+  /// [ScoreLibraryApi.recordOpened] is a no-op for the real API (the server
+  /// updates `last_accessed_at` on the Playback fetch, PIYA-308 AC8); the
+  /// fake uses it to keep a refetch consistent. Its failure only costs the
+  /// server-side date, never the open, so it is logged, not surfaced.
   void markOpened(int scoreId) {
     final now = DateTime.now().toUtc();
-    final api = ref.read(scoreLibraryApiProvider);
-    if (api is FakeScoreLibraryApi) {
-      unawaited(api.markOpened(scoreId, now));
-    }
+    unawaited(
+      ref.read(scoreLibraryApiProvider).recordOpened(scoreId).catchError((
+        Object e,
+      ) {
+        if (kDebugMode) debugPrint('Score open not recorded: $e');
+      }),
+    );
     final current = state.value;
     if (current == null) return;
     state = AsyncData([

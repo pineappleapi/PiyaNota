@@ -11,15 +11,19 @@ import '../auth/auth_test_harness.dart';
 /// do, so AC1's account scoping is tested end to end through the token.
 class _Harness {
   _Harness()
-      : auth = FakeAuthApi(latency: Duration.zero),
-        secure = FaultySecureStorage() {
+    : auth = FakeAuthApi(latency: Duration.zero),
+      secure = FaultySecureStorage() {
     storage = SessionStorage(secure);
     library = FakeScoreLibraryApi(
       sessionStorage: storage,
       accountForToken: auth.accountForToken,
       latency: Duration.zero,
+      clock: () => now,
     );
   }
+
+  /// What the fake's clock reads; tests move it.
+  DateTime now = DateTime.utc(2026, 10, 8, 9);
 
   final FakeAuthApi auth;
   final FaultySecureStorage secure;
@@ -42,30 +46,34 @@ class _Harness {
 }
 
 void main() {
-  test('the demo account sees the mockup scores plus two incomplete ones',
-      () async {
-    final h = _Harness();
-    await h.logIn(FakeAuthApi.demoEmail, FakeAuthApi.demoPassword);
+  test(
+    'the demo account sees the mockup scores plus two incomplete ones',
+    () async {
+      final h = _Harness();
+      await h.logIn(FakeAuthApi.demoEmail, FakeAuthApi.demoPassword);
 
-    final scores = await h.library.fetchLibrary();
-    expect(scores.map((s) => s.title), [
-      'Bituin Walang Ningning',
-      'Paraiso',
-      'Bahay Kubo',
-      null,
-      'Pasko Na Naman',
-    ]);
-    final noComposer = scores.last;
-    expect(noComposer.composer, isNull);
-    expect(noComposer.pageCount, isNull);
-  });
+      final scores = await h.library.fetchLibrary();
+      expect(scores.map((s) => s.title), [
+        'Bituin Walang Ningning',
+        'Paraiso',
+        'Bahay Kubo',
+        null,
+        'Pasko Na Naman',
+      ]);
+      final noComposer = scores.last;
+      expect(noComposer.composer, isNull);
+      expect(noComposer.pageCount, isNull);
+    },
+  );
 
-  test('a fresh sign-up sees an empty library, not the demo data (AC1/AC4)',
-      () async {
-    final h = _Harness();
-    await h.signUp('new.member@example.com');
-    expect(await h.library.fetchLibrary(), isEmpty);
-  });
+  test(
+    'a fresh sign-up sees an empty library, not the demo data (AC1/AC4)',
+    () async {
+      final h = _Harness();
+      await h.signUp('new.member@example.com');
+      expect(await h.library.fetchLibrary(), isEmpty);
+    },
+  );
 
   test('switching accounts switches libraries', () async {
     final h = _Harness();
@@ -75,10 +83,12 @@ void main() {
     expect(await h.library.fetchLibrary(), isEmpty);
 
     await h.logIn(FakeAuthApi.demoEmail, FakeAuthApi.demoPassword);
-    expect(
-      (await h.library.fetchLibrary()).map((s) => s.scoreId),
-      [101, 103, 104, 105],
-    );
+    expect((await h.library.fetchLibrary()).map((s) => s.scoreId), [
+      101,
+      103,
+      104,
+      105,
+    ]);
   });
 
   test('no or unknown token is a 401', () async {
@@ -101,8 +111,7 @@ void main() {
     expect(scores.map((s) => s.scoreId), [103]);
   });
 
-  test('search also matches composer and the displayed date (AC4)',
-      () async {
+  test('search also matches composer and the displayed date (AC4)', () async {
     final h = _Harness();
     await h.logIn(FakeAuthApi.demoEmail, FakeAuthApi.demoPassword);
     Future<List<int>> ids(String q) async =>
@@ -113,17 +122,15 @@ void main() {
     expect(await ids('new score'), [104]);
   });
 
-  test('markOpened moves the open time so a refetch agrees', () async {
+  test('recordOpened moves the open time so a refetch agrees', () async {
     final h = _Harness();
     await h.logIn(FakeAuthApi.demoEmail, FakeAuthApi.demoPassword);
-    final when = DateTime.utc(2026, 10, 8, 9);
-    await h.library.markOpened(103, when);
+    final when = DateTime.utc(2026, 10, 8, 9, 30);
+    h.now = when;
+    await h.library.recordOpened(103);
 
     final scores = await h.library.fetchLibrary();
-    expect(
-      scores.firstWhere((s) => s.scoreId == 103).lastActivityAt,
-      when,
-    );
+    expect(scores.firstWhere((s) => s.scoreId == 103).lastActivityAt, when);
   });
 
   test('deleting an unknown id is a 404', () async {
@@ -135,33 +142,35 @@ void main() {
     );
   });
 
-  test('flaky accounts fail every odd call so error states can be demoed',
-      () async {
-    final h = _Harness();
-    await h.signUp('tester${FakeScoreLibraryApi.flakyDomain}');
+  test(
+    'flaky accounts fail every odd call so error states can be demoed',
+    () async {
+      final h = _Harness();
+      await h.signUp('tester${FakeScoreLibraryApi.flakyDomain}');
 
-    await expectLater(
-      h.library.fetchLibrary(),
-      throwsA(isA<ScoreLibraryServerException>()),
-    );
-    expect(
-      await h.library.fetchLibrary(),
-      hasLength(FakeScoreLibraryApi.demoScores.length),
-    );
+      await expectLater(
+        h.library.fetchLibrary(),
+        throwsA(isA<ScoreLibraryServerException>()),
+      );
+      expect(
+        await h.library.fetchLibrary(),
+        hasLength(FakeScoreLibraryApi.demoScores.length),
+      );
 
-    await expectLater(
-      h.library.deleteScore(101),
-      throwsA(isA<ScoreLibraryServerException>()),
-    );
-    await h.library.deleteScore(101);
-    // Third fetch fails again; the fourth shows the delete stuck.
-    await expectLater(
-      h.library.fetchLibrary(),
-      throwsA(isA<ScoreLibraryServerException>()),
-    );
-    expect(
-      await h.library.fetchLibrary(),
-      hasLength(FakeScoreLibraryApi.demoScores.length - 1),
-    );
-  });
+      await expectLater(
+        h.library.deleteScore(101),
+        throwsA(isA<ScoreLibraryServerException>()),
+      );
+      await h.library.deleteScore(101);
+      // Third fetch fails again; the fourth shows the delete stuck.
+      await expectLater(
+        h.library.fetchLibrary(),
+        throwsA(isA<ScoreLibraryServerException>()),
+      );
+      expect(
+        await h.library.fetchLibrary(),
+        hasLength(FakeScoreLibraryApi.demoScores.length - 1),
+      );
+    },
+  );
 }

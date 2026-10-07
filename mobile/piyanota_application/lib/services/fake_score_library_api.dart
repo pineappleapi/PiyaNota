@@ -23,7 +23,10 @@ class FakeScoreLibraryApi implements ScoreLibraryApi {
     required this._sessionStorage,
     required this._accountForToken,
     this.latency = defaultLatency,
-  });
+    DateTime Function()? clock,
+  }) : _clock = clock ?? DateTime.now;
+
+  final DateTime Function() _clock;
 
   static const String demoEmail = FakeAuthApi.demoEmail;
   static const String flakyDomain = '@flaky.test';
@@ -90,9 +93,11 @@ class FakeScoreLibraryApi implements ScoreLibraryApi {
 
   /// Stands in for the server-side `last_accessed_at` update that PIYA-308
   /// AC8 puts on the real playback/score fetch, so a refetch of the fake
-  /// agrees with the client's local bump. Fake-only: the real API needs no
-  /// separate call. Silent for unknown ids or accounts.
-  Future<void> markOpened(int scoreId, DateTime when) async {
+  /// agrees with the client's local bump. Silent for unknown ids or
+  /// accounts.
+  @override
+  Future<void> recordOpened(int scoreId) async {
+    final when = _clock().toUtc();
     final token = await _sessionStorage.readToken();
     final account = token == null ? null : _accountForToken(token);
     if (account == null) return;

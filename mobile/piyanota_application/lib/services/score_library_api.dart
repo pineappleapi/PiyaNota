@@ -46,6 +46,11 @@ abstract interface class ScoreLibraryApi {
   /// PIYA-309. Completes only once the server confirms the deletion (200);
   /// callers must not remove the entry before this resolves (PIYA-215 AC2).
   Future<void> deleteScore(int scoreId);
+
+  /// The user opened [scoreId] for playback, so its last-opened date should
+  /// move to now. Callers update their local list themselves and treat a
+  /// failure here as non-fatal.
+  Future<void> recordOpened(int scoreId);
 }
 
 /// Talks to the Module 3 Flask API with the stored session as a Bearer
@@ -82,18 +87,36 @@ class HttpScoreLibraryApi implements ScoreLibraryApi {
     // tolerated by ScoreSummary.fromJson.
     final parsed = <ScoreSummary>[];
     for (final entry in scores) {
+      // Logs the type or id only: entries carry user content (titles,
+      // composers) that has no place in device logs.
       if (entry is! Map<String, dynamic>) {
-        debugPrint('Score library: skipping non-object entry: $entry');
+        if (kDebugMode) {
+          debugPrint(
+            'Score library: skipping non-object entry '
+            '(${entry.runtimeType})',
+          );
+        }
         continue;
       }
       try {
         parsed.add(ScoreSummary.fromJson(entry));
-      } on FormatException catch (e) {
-        debugPrint('Score library: skipping entry: ${e.message}');
+      } on FormatException {
+        if (kDebugMode) {
+          debugPrint(
+            'Score library: skipping entry with invalid scoreId '
+            '(${entry['scoreId'].runtimeType})',
+          );
+        }
       }
     }
     return parsed;
   }
+
+  /// Deliberately a no-op: the server updates `last_accessed_at` itself
+  /// when Playback fetches the score (PIYA-308 AC8), so a separate request
+  /// here would only double-count the open.
+  @override
+  Future<void> recordOpened(int scoreId) async {}
 
   @override
   Future<void> deleteScore(int scoreId) async {

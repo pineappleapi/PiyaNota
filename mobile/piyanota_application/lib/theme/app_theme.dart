@@ -79,30 +79,48 @@ class AppTheme {
 
   // Derived (not sampled): a light tint of gradientEnd for the second
   // headline line, standing in for the reference's lighter accent words.
-  static final Color authHeadlineAccent =
-      Color.lerp(gradientEnd, Colors.white, 0.55)!;
+  static final Color authHeadlineAccent = Color.lerp(
+    gradientEnd,
+    Colors.white,
+    0.55,
+  )!;
 
   // Derived (not sampled — the auth reference has no success state): the
   // non-error counterpart of errorBannerFill, a pale primaryBlue tint so
   // confirmations (PIYA-204 AC2/AC5) read as brand, not as alarm. Body text
   // on it uses onboardingHeadingDark for contrast.
-  static final Color noticeBannerFill =
-      Color.lerp(primaryBlue, Colors.white, 0.9)!;
+  static final Color noticeBannerFill = Color.lerp(
+    primaryBlue,
+    Colors.white,
+    0.9,
+  )!;
 
   // Score Library (PIYA-205), dropper-sampled from
   // references/PIYA203_Home Page_ListScores.png / _NewScores.png
   // (2026-10-08). The mockup's header and nav gradients are vertical and use
   // their own stops — measurably not primaryGradient's #1B7DCE/#01DCBA — so
   // they get separate tokens rather than reusing the brand pair.
-  static const Color libraryHeaderTop = Color(0xFF05CDBD);
-  static const Color libraryHeaderBottom = Color(0xFF178BCB);
+  //
+  // Darkened for AA, user decision 2026-10-08 (same hue, lower HSL
+  // lightness, the smallest step that passes; the sampled value is kept in
+  // each comment). White text must reach 4.5:1 (3:1 for the 34 sp title)
+  // wherever it sits on a gradient, for any status-bar inset and text
+  // scale; the subtitle and the search text land near the bottom stop, so
+  // both header stops had to move.
+  // Sampled #05CDBD (white 2.0:1). Now white 4.5:1.
+  static const Color libraryHeaderTop = Color(0xFF03857B);
+  // Sampled #178BCB (white 3.8:1). Now white 4.5:1.
+  static const Color libraryHeaderBottom = Color(0xFF157DB7);
   static const LinearGradient libraryHeaderGradient = LinearGradient(
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,
     colors: [libraryHeaderTop, libraryHeaderBottom],
   );
-  static const Color libraryNavTop = Color(0xFF168ECA);
-  static const Color libraryNavBottom = Color(0xFF0BB9C2);
+  // Darkened for AA, user decision 2026-10-08: both stops lowered by the
+  // same lightness step so the 13 sp white labels (lower half of the bar)
+  // reach 4.5:1 for any bottom inset. Sampled #168ECA / #0BB9C2.
+  static const Color libraryNavTop = Color(0xFF106A97);
+  static const Color libraryNavBottom = Color(0xFF08868D);
   static const LinearGradient libraryNavGradient = LinearGradient(
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,
@@ -116,9 +134,13 @@ class AppTheme {
   static const Color libraryCardTitle = Color(0xFF3D3D3D);
   // Darkest anti-aliased pixel of each subtitle — small text never renders a
   // fully solid pixel, so this is the closest sample to the source colour.
-  static const Color libraryAddSubtitle = Color(0xFF8D8585);
+  // Darkened for AA, user decision 2026-10-08: sampled #8D8585 (3.6:1 on
+  // the white card), now 4.6:1.
+  static const Color libraryAddSubtitle = Color(0xFF7C7474);
   static const Color libraryScoreSubtitle = Color(0xFF575757);
-  static const Color libraryTrash = Color(0xFF4B8CAD);
+  // Darkened for AA, user decision 2026-10-08: sampled #4B8CAD (2.7:1 on
+  // libraryScoreCardFill), now 3.0:1, the non-text minimum.
+  static const Color libraryTrash = Color(0xFF4683A2);
   // Search field: no fill (inside == surrounding gradient pixels); border and
   // hint are white at the alpha that reproduces the sampled #89CAE4 / #D0EAF4
   // over the header blue.

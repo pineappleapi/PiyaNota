@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -9,6 +10,8 @@ import 'package:piyanota_application/models/score_summary.dart';
 import 'package:piyanota_application/routes/app_routes.dart';
 import 'package:piyanota_application/screens/library/library_messages.dart';
 import 'package:piyanota_application/screens/library/score_library_screen.dart';
+import 'package:piyanota_application/screens/library/widgets/library_bottom_nav.dart';
+import 'package:piyanota_application/screens/library/widgets/library_header.dart';
 import 'package:piyanota_application/screens/library/widgets/score_cards.dart';
 import 'package:piyanota_application/services/score_library_api.dart';
 import 'package:piyanota_application/state/score_library_providers.dart';
@@ -21,8 +24,10 @@ class ScriptedScoreLibraryApi implements ScoreLibraryApi {
 
   Future<List<ScoreSummary>> Function() onFetch;
   Future<void> Function(int scoreId)? onDelete;
+  Future<void> Function(int scoreId)? onRecordOpened;
   int fetchCalls = 0;
   final List<int> deletedIds = [];
+  final List<int> openedIds = [];
 
   @override
   Future<List<ScoreSummary>> fetchLibrary({String? query}) {
@@ -34,6 +39,12 @@ class ScriptedScoreLibraryApi implements ScoreLibraryApi {
   Future<void> deleteScore(int scoreId) {
     deletedIds.add(scoreId);
     return onDelete!(scoreId);
+  }
+
+  @override
+  Future<void> recordOpened(int scoreId) async {
+    openedIds.add(scoreId);
+    await onRecordOpened?.call(scoreId);
   }
 }
 
@@ -593,7 +604,7 @@ void main() {
   });
 
   group('broken entries', () {
-    testWidgets('untitled scores read "New Score", numbered in order', (
+    testWidgets('untitled scores read "New Score", numbered by scoreId', (
       tester,
     ) async {
       await _pumpLibrary(
@@ -971,6 +982,369 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('senior-review round 3', () {
+    Future<void> confirmTrashDelete(WidgetTester tester, String title) async {
+      await _tapDelete(tester, title);
+      await tester.tap(find.text(LibraryMessages.deleteConfirm));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+    }
+
+    Future<void> confirmSwipeDelete(WidgetTester tester, String title) async {
+      await tester.drag(find.text(title), const Offset(-600, 0));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(LibraryMessages.deleteConfirm));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+    }
+
+    Future<void> expectParaisoGoneCleanly(WidgetTester tester) async {
+      await tester.enterText(find.byType(TextField), '');
+      await tester.pumpAndSettle();
+      expect(find.text('Paraiso'), findsNothing);
+      // No row is left disabled behind a spinner (_deletingIds is empty).
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.text('2 Scores • Tap to Listen'), findsOneWidget);
+      expect(_visibleTitleOrder(tester), [
+        'Bituin Walang Ningning',
+        'Bahay Kubo',
+      ]);
+      expect(tester.takeException(), isNull);
+    }
+
+    for (final viaSwipe in [false, true]) {
+      final path = viaSwipe ? 'swipe' : 'trash';
+      testWidgets('$path delete hidden by a search mid-request still removes '
+          'the row', (tester) async {
+        final server = Completer<void>();
+        final api = _apiReturning(_scores)..onDelete = (_) => server.future;
+        await _pumpLibrary(tester, api);
+        await tester.pumpAndSettle();
+
+        if (viaSwipe) {
+          await confirmSwipeDelete(tester, 'Paraiso');
+        } else {
+          await confirmTrashDelete(tester, 'Paraiso');
+        }
+        await tester.enterText(find.byType(TextField), 'zzz');
+        await tester.pump();
+        expect(find.text('Paraiso'), findsNothing);
+
+        server.complete();
+        await tester.pumpAndSettle();
+        await expectParaisoGoneCleanly(tester);
+      });
+    }
+
+    testWidgets('a row hidden during its exit animation is still removed', (
+      tester,
+    ) async {
+      final api = _apiReturning(_scores)..onDelete = (_) async {};
+      await _pumpLibrary(tester, api);
+      await tester.pumpAndSettle();
+
+      await _tapDelete(tester, 'Paraiso');
+      await tester.tap(find.text(LibraryMessages.deleteConfirm));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('Paraiso'), findsOneWidget, reason: 'mid-exit');
+
+      await tester.enterText(find.byType(TextField), 'zzz');
+      await tester.pump();
+      await expectParaisoGoneCleanly(tester);
+    });
+
+    testWidgets('a deleting row is disabled and announces "Deleting…"', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      final server = Completer<void>();
+      final api = _apiReturning(_scores)..onDelete = (_) => server.future;
+      await _pumpLibrary(tester, api);
+      await tester.pumpAndSettle();
+
+      await confirmTrashDelete(tester, 'Paraiso');
+      final deleting = find.bySemanticsLabel(LibraryMessages.deleting);
+      expect(deleting, findsWidgets);
+      expect(_deleteButtonFor('Paraiso'), findsNothing);
+      expect(
+        tester.getSemantics(deleting.first),
+        isSemantics(hasEnabledState: true, isEnabled: false),
+      );
+      expect(
+        tester.getSemantics(find.text('Paraiso')),
+        isSemantics(hasEnabledState: true, isEnabled: false),
+      );
+
+      server.complete();
+      await tester.pumpAndSettle();
+      handle.dispose();
+    });
+
+    for (final viaSwipe in [false, true]) {
+      final path = viaSwipe ? 'swipe' : 'trash';
+      testWidgets('401 on $path delete keeps the row and offers Log In', (
+        tester,
+      ) async {
+        final api = _apiReturning(_scores)
+          ..onDelete = (_) async => throw const SessionExpiredException();
+        await _pumpLibrary(tester, api);
+        await tester.pumpAndSettle();
+
+        if (viaSwipe) {
+          await confirmSwipeDelete(tester, 'Paraiso');
+        } else {
+          await confirmTrashDelete(tester, 'Paraiso');
+        }
+        await tester.pumpAndSettle();
+
+        expect(find.text('Paraiso'), findsOneWidget);
+        expect(find.text(LibraryMessages.sessionExpired), findsOneWidget);
+        expect(find.byType(CircularProgressIndicator), findsNothing);
+        final action = find.widgetWithText(
+          SnackBarAction,
+          LibraryMessages.logInAgain,
+        );
+        expect(action, findsOneWidget);
+        await tester.tap(action);
+        await tester.pumpAndSettle();
+        expect(find.text(_loginMarker), findsOneWidget);
+      });
+    }
+
+    testWidgets('404 on swipe delete removes the row', (tester) async {
+      final api = _apiReturning(_scores)
+        ..onDelete = (_) async => throw const ScoreNotFoundException();
+      await _pumpLibrary(tester, api);
+      await tester.pumpAndSettle();
+
+      await confirmSwipeDelete(tester, 'Paraiso');
+      await tester.pumpAndSettle();
+
+      expect(find.text('Paraiso'), findsNothing);
+      expect(find.text(LibraryMessages.deleteAlreadyGone), findsOneWidget);
+      expect(find.text('2 Scores • Tap to Listen'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('double tap on a card opens Playback once', (tester) async {
+      final api = _apiReturning(_scores);
+      await _pumpLibrary(tester, api);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Paraiso'));
+      await tester.tap(find.text('Paraiso'));
+      await tester.pumpAndSettle();
+      expect(find.text(_playbackMarker), findsOneWidget);
+      expect(api.openedIds, [102]);
+
+      Navigator.of(tester.element(find.text(_playbackMarker))).pop();
+      await tester.pumpAndSettle();
+      expect(find.text(_playbackMarker), findsNothing);
+      expect(find.text(LibraryMessages.title), findsOneWidget);
+
+      // The guard resets once Playback is closed.
+      await tester.tap(find.text('Paraiso'));
+      await tester.pumpAndSettle();
+      expect(find.text(_playbackMarker), findsOneWidget);
+    });
+
+    testWidgets('double tap on the trash opens one dialog', (tester) async {
+      final api = _apiReturning(_scores)..onDelete = (_) async {};
+      await _pumpLibrary(tester, api);
+      await tester.pumpAndSettle();
+
+      final trash = find.descendant(
+        of: find
+            .ancestor(of: find.text('Paraiso'), matching: find.byType(Material))
+            .first,
+        matching: find.byIcon(Icons.delete_rounded),
+      );
+      await tester.tap(trash);
+      await tester.tap(trash);
+      await tester.pumpAndSettle();
+      expect(find.text(LibraryMessages.deleteDialogTitle), findsOneWidget);
+
+      await tester.tap(find.text(LibraryMessages.deleteCancel));
+      await tester.pumpAndSettle();
+      expect(find.text(LibraryMessages.deleteDialogTitle), findsNothing);
+    });
+
+    testWidgets('concurrent reloads share one fetch', (tester) async {
+      var first = true;
+      final pending = Completer<List<ScoreSummary>>();
+      final api = ScriptedScoreLibraryApi(
+        onFetch: () {
+          if (first) {
+            first = false;
+            return Future.value(_scores);
+          }
+          return pending.future;
+        },
+      );
+      await _pumpLibrary(tester, api);
+      await tester.pumpAndSettle();
+      expect(api.fetchCalls, 1);
+
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(ScoreLibraryScreen)),
+      );
+      final notifier = container.read(scoreLibraryProvider.notifier);
+      final a = notifier.reload();
+      final b = notifier.reload();
+      expect(api.fetchCalls, 2);
+      pending.complete(_scores);
+      await Future.wait([a, b]);
+      await tester.pumpAndSettle();
+
+      // A later reload fetches again.
+      unawaited(notifier.reload());
+      expect(api.fetchCalls, 3);
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('opening a score records it through the API', (tester) async {
+      final api = _apiReturning(_scores);
+      await _pumpLibrary(tester, api);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Bahay Kubo'));
+      await tester.pumpAndSettle();
+      expect(api.openedIds, [103]);
+    });
+
+    testWidgets('a failed open record still opens the score', (tester) async {
+      final api = _apiReturning(_scores)
+        ..onRecordOpened = (_) async =>
+            throw const ScoreLibraryNetworkException();
+      await _pumpLibrary(tester, api);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Bahay Kubo'));
+      await tester.pumpAndSettle();
+      expect(find.text(_playbackMarker), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('Add Score card is hidden while searching', (tester) async {
+      await _pumpLibrary(tester, _apiReturning(_scores));
+      await tester.pumpAndSettle();
+      expect(find.text(LibraryMessages.addScoreTitle), findsOneWidget);
+
+      await tester.enterText(find.byType(TextField), 'para');
+      await tester.pump();
+      expect(find.text(LibraryMessages.addScoreTitle), findsNothing);
+      // AC8 stays reachable from the nav bar.
+      expect(find.bySemanticsLabel('Capture'), findsOneWidget);
+
+      await tester.enterText(find.byType(TextField), '');
+      await tester.pump();
+      expect(find.text(LibraryMessages.addScoreTitle), findsOneWidget);
+    });
+
+    testWidgets('320x568 at 2x: the first result is visible while typing', (
+      tester,
+    ) async {
+      await _pumpLibrary(
+        tester,
+        _apiReturning(_scores),
+        physicalSize: const Size(640, 1136),
+        devicePixelRatio: 2.0,
+        textScale: 2.0,
+        topInset: 24,
+      );
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField), 'kubo');
+      await tester.pump();
+
+      final card = tester.getRect(
+        find.ancestor(
+          of: find.text('Bahay Kubo'),
+          matching: find.byType(ScoreCard),
+        ),
+      );
+      final visibleTop = tester.getRect(find.byType(LibraryHeader)).bottom;
+      final visibleBottom = tester.getRect(find.byType(LibraryBottomNav)).top;
+      expect(visibleBottom, greaterThan(visibleTop));
+      expect(card.top, lessThan(visibleBottom));
+      expect(card.bottom, greaterThan(visibleTop));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('320 dp at 2x: "Settings" is shown whole, not ellipsized', (
+      tester,
+    ) async {
+      await _pumpLibrary(
+        tester,
+        _apiReturning(_scores),
+        physicalSize: const Size(640, 1136),
+        devicePixelRatio: 2.0,
+        textScale: 2.0,
+      );
+      await tester.pumpAndSettle();
+
+      for (final label in ['Library', 'Capture', 'Settings']) {
+        final paragraph = tester.renderObject<RenderParagraph>(
+          find.text(label),
+        );
+        expect(paragraph.didExceedMaxLines, isFalse, reason: label);
+        expect(paragraph.text.toPlainText(), label);
+        final rect = tester.getRect(find.text(label));
+        expect(rect.left, greaterThanOrEqualTo(0), reason: label);
+        expect(rect.right, lessThanOrEqualTo(320), reason: label);
+      }
+      // Settings fits inside its own slot (27% of the width), so it can't
+      // run under the Capture label.
+      final settings = tester.getRect(find.text('Settings'));
+      expect(settings.width, lessThanOrEqualTo(320 * 0.27 + 0.5));
+      expect(
+        settings.left,
+        greaterThanOrEqualTo(tester.getRect(find.text('Capture')).right),
+      );
+    });
+  });
+
+  group('accessibility guidelines', () {
+    Future<void> expectGuidelines(WidgetTester tester) async {
+      await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(textContrastGuideline));
+    }
+
+    testWidgets('list state', (tester) async {
+      final handle = tester.ensureSemantics();
+      await _pumpLibrary(tester, _apiReturning(_scores));
+      await tester.pumpAndSettle();
+      await expectGuidelines(tester);
+      handle.dispose();
+    });
+
+    testWidgets('error state', (tester) async {
+      final handle = tester.ensureSemantics();
+      await _pumpLibrary(
+        tester,
+        ScriptedScoreLibraryApi(
+          onFetch: () async => throw const ScoreLibraryServerException(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await expectGuidelines(tester);
+      handle.dispose();
+    });
+
+    testWidgets('no-results state', (tester) async {
+      final handle = tester.ensureSemantics();
+      await _pumpLibrary(tester, _apiReturning(_scores));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'zzz');
+      await tester.pump();
+      // Dismiss the keyboard focus so the caret isn't mid-blink.
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pumpAndSettle();
+      await expectGuidelines(tester);
+      handle.dispose();
     });
   });
 }

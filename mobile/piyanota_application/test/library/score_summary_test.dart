@@ -72,10 +72,7 @@ void main() {
       'zero scoreId': {'scoreId': 0, 'title': 'x'},
     }.entries) {
       test('rejects ${entry.key}', () {
-        expect(
-          () => ScoreSummary.fromJson(entry.value),
-          throwsFormatException,
-        );
+        expect(() => ScoreSummary.fromJson(entry.value), throwsFormatException);
       });
     }
   });
@@ -83,31 +80,75 @@ void main() {
   group('buildLibraryEntries: sort by last opened', () {
     test('newest first regardless of input order; undated last by title', () {
       final entries = buildLibraryEntries([
-        ScoreSummary(scoreId: 1, title: 'Old', lastActivityAt: DateTime.utc(2026, 9, 1)),
+        ScoreSummary(
+          scoreId: 1,
+          title: 'Old',
+          lastActivityAt: DateTime.utc(2026, 9, 1),
+        ),
         const ScoreSummary(scoreId: 2, title: 'Zebra'),
-        ScoreSummary(scoreId: 3, title: 'New', lastActivityAt: DateTime.utc(2026, 10, 3)),
+        ScoreSummary(
+          scoreId: 3,
+          title: 'New',
+          lastActivityAt: DateTime.utc(2026, 10, 3),
+        ),
         const ScoreSummary(scoreId: 4, title: 'apple'),
-        ScoreSummary(scoreId: 5, title: 'Mid', lastActivityAt: DateTime.utc(2026, 9, 20)),
+        ScoreSummary(
+          scoreId: 5,
+          title: 'Mid',
+          lastActivityAt: DateTime.utc(2026, 9, 20),
+        ),
       ]);
       expect(entries.map((e) => e.scoreId), [3, 5, 1, 4, 2]);
     });
   });
 
   group('buildLibraryEntries: untitled numbering', () {
-    test('untitled entries are numbered in display order', () {
+    test('untitled entries are numbered by scoreId, not display order', () {
       final entries = buildLibraryEntries([
         ScoreSummary(scoreId: 1, lastActivityAt: DateTime.utc(2026, 9, 1)),
-        ScoreSummary(scoreId: 2, title: 'Paraiso', lastActivityAt: DateTime.utc(2026, 9, 2)),
+        ScoreSummary(
+          scoreId: 2,
+          title: 'Paraiso',
+          lastActivityAt: DateTime.utc(2026, 9, 2),
+        ),
         ScoreSummary(scoreId: 3, lastActivityAt: DateTime.utc(2026, 10, 1)),
         const ScoreSummary(scoreId: 4),
       ]);
+      expect(entries.map((e) => e.scoreId), [3, 2, 1, 4]);
       expect(entries.map((e) => e.displayTitle), [
-        'New Score',
-        'Paraiso',
         'New Score (1)',
+        'Paraiso',
+        'New Score',
         'New Score (2)',
       ]);
-      expect(entries.map((e) => e.scoreId), [3, 2, 1, 4]);
+    });
+
+    test('opening a score never renumbers any untitled row', () {
+      final scores = [
+        ScoreSummary(scoreId: 1, lastActivityAt: DateTime.utc(2026, 9, 1)),
+        ScoreSummary(scoreId: 2, lastActivityAt: DateTime.utc(2026, 9, 2)),
+        ScoreSummary(scoreId: 3, lastActivityAt: DateTime.utc(2026, 9, 3)),
+      ];
+      Map<int, String> labels(List<ScoreSummary> list) => {
+        for (final e in buildLibraryEntries(list)) e.scoreId: e.displayTitle,
+      };
+      final before = labels(scores);
+      // Score 1 is opened and jumps from last to first.
+      final after = labels([
+        scores[0].copyWith(lastActivityAt: DateTime.utc(2026, 10, 8)),
+        scores[1],
+        scores[2],
+      ]);
+      expect(after, before);
+      expect(before, {1: 'New Score', 2: 'New Score (1)', 3: 'New Score (2)'});
+    });
+
+    test('identical real titles are shown as they are', () {
+      final entries = buildLibraryEntries([
+        const ScoreSummary(scoreId: 1, title: 'Paraiso'),
+        const ScoreSummary(scoreId: 2, title: 'Paraiso'),
+      ]);
+      expect(entries.map((e) => e.displayTitle), ['Paraiso', 'Paraiso']);
     });
 
     test('a single untitled entry is plain "New Score"', () {
@@ -117,11 +158,20 @@ void main() {
 
     test('a real title "New Score" joins the numbered sequence', () {
       final entries = buildLibraryEntries([
-        ScoreSummary(scoreId: 1, title: 'New Score', lastActivityAt: DateTime.utc(2026, 9, 1)),
+        ScoreSummary(
+          scoreId: 1,
+          title: 'New Score',
+          lastActivityAt: DateTime.utc(2026, 9, 1),
+        ),
         ScoreSummary(scoreId: 2, lastActivityAt: DateTime.utc(2026, 10, 1)),
       ]);
-      expect(entries.map((e) => e.displayTitle), ['New Score', 'New Score (1)']);
+      // Score 1 (the literal title) was created first, so it keeps the
+      // plain label even though score 2 sorts above it.
       expect(entries.map((e) => e.scoreId), [2, 1]);
+      expect(entries.map((e) => e.displayTitle), [
+        'New Score (1)',
+        'New Score',
+      ]);
     });
 
     test('generated labels skip a real title that already uses them', () {
@@ -129,7 +179,11 @@ void main() {
         ScoreSummary(scoreId: 1, lastActivityAt: DateTime.utc(2026, 10, 3)),
         ScoreSummary(scoreId: 2, lastActivityAt: DateTime.utc(2026, 10, 2)),
         // Sorts last, but its title is reserved before numbering starts.
-        ScoreSummary(scoreId: 3, title: 'new score (1)', lastActivityAt: DateTime.utc(2026, 9, 1)),
+        ScoreSummary(
+          scoreId: 3,
+          title: 'new score (1)',
+          lastActivityAt: DateTime.utc(2026, 9, 1),
+        ),
       ]);
       expect(entries.map((e) => e.displayTitle), [
         'New Score',

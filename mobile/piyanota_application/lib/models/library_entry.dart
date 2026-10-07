@@ -16,8 +16,18 @@ class LibraryEntry {
 const String untitledScoreLabel = 'New Score';
 
 const List<String> _months = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
 ];
 
 /// "Oct 3, 2026" in the device's local time zone — the API sends UTC, and a
@@ -35,26 +45,41 @@ String formatScoreDate(DateTime when) {
 /// opened scores go last, by title, then by id so the order is stable.
 ///
 /// Then assigns display titles: untitled entries, and real titles that are
-/// literally "New Score", share one numbered sequence in display order —
-/// "New Score", "New Score (1)", "New Score (2)"… — skipping any label a
-/// real title already uses, so no two rows ever read the same.
+/// literally "New Score", share one numbered sequence - "New Score",
+/// "New Score (1)", "New Score (2)"... - skipping any label a real title
+/// already uses, so a generated label never repeats a real title. Two
+/// identical real titles are still shown as they are.
+///
+/// The sequence follows scoreId ascending (creation order), not display
+/// order, so opening a score (which moves it to the top) never renumbers
+/// it or any other row, and the title handed to Playback stays the one the
+/// row showed.
 List<LibraryEntry> buildLibraryEntries(List<ScoreSummary> scores) {
   final sorted = [...scores]..sort(_compareForLibrary);
 
   final reserved = <String>{
-    for (final score in sorted)
+    for (final score in scores)
       if (score.title != null && !_isUntitledLabel(score.title!))
         score.title!.toLowerCase(),
   };
 
+  final untitledByCreation = [
+    for (final score in scores)
+      if (score.title == null || _isUntitledLabel(score.title!)) score.scoreId,
+  ]..sort();
+
+  final generated = <int, String>{};
   var nextNumber = 0;
-  String nextUntitledLabel() {
+  for (final scoreId in untitledByCreation) {
     while (true) {
       final label = nextNumber == 0
           ? untitledScoreLabel
           : '$untitledScoreLabel ($nextNumber)';
       nextNumber++;
-      if (!reserved.contains(label.toLowerCase())) return label;
+      if (!reserved.contains(label.toLowerCase())) {
+        generated[scoreId] = label;
+        break;
+      }
     }
   }
 
@@ -62,9 +87,7 @@ List<LibraryEntry> buildLibraryEntries(List<ScoreSummary> scores) {
     for (final score in sorted)
       LibraryEntry(
         score: score,
-        displayTitle: score.title == null || _isUntitledLabel(score.title!)
-            ? nextUntitledLabel()
-            : score.title!,
+        displayTitle: generated[score.scoreId] ?? score.title!,
       ),
   ];
 }
@@ -83,9 +106,9 @@ int _compareForLibrary(ScoreSummary a, ScoreSummary b) {
   } else if (bWhen != null) {
     return 1;
   }
-  final byTitle = (a.title ?? untitledScoreLabel)
-      .toLowerCase()
-      .compareTo((b.title ?? untitledScoreLabel).toLowerCase());
+  final byTitle = (a.title ?? untitledScoreLabel).toLowerCase().compareTo(
+    (b.title ?? untitledScoreLabel).toLowerCase(),
+  );
   if (byTitle != 0) return byTitle;
   return a.scoreId.compareTo(b.scoreId);
 }

@@ -15,7 +15,8 @@ class ApiConfig {
 
   /// Defaults to true only in debug, because the Module 3 API isn't deployed
   /// yet. Despite the name it gates every fake (auth and Score Library),
-  /// since the fake library can only resolve tokens the fake auth issued; pass `--dart-define=USE_FAKE_AUTH=false` to hit [baseUrl] instead.
+  /// since the fake library can only resolve tokens the fake auth issued;
+  /// pass `--dart-define=USE_FAKE_AUTH=false` to hit [baseUrl] instead.
   /// Profile and release builds — the ones handed to choir testers — default
   /// to false so they can't silently accept the fake demo credentials.
   static const bool useFakeAuth = bool.fromEnvironment(
@@ -51,10 +52,10 @@ class ApiConfig {
   /// first Log In tap with a misleading "something went wrong" (dio uses
   /// dart:io, so Android's cleartext policy would not block http either).
   static String? configurationError() => configurationErrorFor(
-        useFakeAuth: useFakeAuth,
-        baseUrl: baseUrl,
-        allowCleartext: kDebugMode,
-      );
+    useFakeAuth: useFakeAuth,
+    baseUrl: baseUrl,
+    allowCleartext: kDebugMode,
+  );
 
   /// [configurationError] with its inputs exposed, since the real ones are
   /// compile-time constants tests can't vary.

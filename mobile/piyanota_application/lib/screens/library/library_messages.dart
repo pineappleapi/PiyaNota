@@ -54,6 +54,9 @@ class LibraryMessages {
 
   static String deleteSemantics(String title) => 'Delete $title';
 
+  /// Read out for the trash/swipe spinner while the delete is in flight.
+  static const String deleting = 'Deleting…';
+
   /// Card subtitle. The date comes first so it is the part that survives
   /// ellipsis; composer and page count follow when known. Missing parts are
   /// left out entirely, so there is never a dangling "•".

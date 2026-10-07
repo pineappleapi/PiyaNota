@@ -69,10 +69,10 @@ class LibraryBottomNav extends StatelessWidget {
   Widget build(BuildContext context) {
     final bottomPadding = _bottomPadding(MediaQuery.paddingOf(context).bottom);
     final labelStyle = Theme.of(context).textTheme.labelLarge?.copyWith(
-          fontSize: _labelFontSize,
-          fontWeight: FontWeight.w400,
-          color: Colors.white,
-        );
+      fontSize: _labelFontSize,
+      fontWeight: FontWeight.w400,
+      color: Colors.white,
+    );
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -80,10 +80,7 @@ class LibraryBottomNav extends StatelessWidget {
             .clamp(0.0, _itemSpacing);
         final center = constraints.maxWidth / 2;
 
-        Widget item({
-          required double centerX,
-          required Widget child,
-        }) {
+        Widget item({required double centerX, required Widget child}) {
           return Positioned(
             top: protrusion,
             bottom: 0,
@@ -136,10 +133,7 @@ class LibraryBottomNav extends StatelessWidget {
                 bottom: 0,
                 left: center - spacing / 2,
                 width: spacing,
-                child: _CaptureButton(
-                  labelStyle: labelStyle,
-                  onTap: onCapture,
-                ),
+                child: _CaptureButton(labelStyle: labelStyle, onTap: onCapture),
               ),
             ],
           ),
@@ -166,10 +160,6 @@ class _NavItem extends StatelessWidget {
   final VoidCallback onTap;
   final bool selected;
 
-  // Press feedback on the gradient: a darker wash rather than a ripple,
-  // per the darken-on-press SOP.
-  static const double _pressedAlpha = 0.12;
-
   @override
   Widget build(BuildContext context) {
     return Semantics(
@@ -181,12 +171,16 @@ class _NavItem extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         splashFactory: NoSplash.splashFactory,
-        highlightColor: Colors.black.withValues(alpha: _pressedAlpha),
+        // Darken-on-press SOP (frontend-piyanota.md "Interaction states"):
+        // a darker shade of the gradient's dominant stop, the blue that
+        // fills the icon/label band, not a black wash.
+        highlightColor: AppTheme.darken(AppTheme.libraryNavTop),
         child: Stack(
           children: [
             if (selected)
               Positioned(
-                top: LibraryBottomNav._iconCenterFromBarTop -
+                top:
+                    LibraryBottomNav._iconCenterFromBarTop -
                     LibraryBottomNav._indicatorHeight / 2,
                 left: 0,
                 right: 0,
@@ -216,13 +210,7 @@ class _NavItem extends StatelessWidget {
               top: LibraryBottomNav._labelTop,
               left: 0,
               right: 0,
-              child: Text(
-                label,
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: labelStyle,
-              ),
+              child: _NavLabel(label, style: labelStyle),
             ),
           ],
         ),
@@ -298,15 +286,39 @@ class _CaptureButton extends StatelessWidget {
               top: LibraryBottomNav.protrusion + LibraryBottomNav._labelTop,
               left: 0,
               right: 0,
-              child: Text(
-                'Capture',
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: labelStyle,
-              ),
+              child: _NavLabel('Capture', style: labelStyle),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A nav label that is never cut off. On a narrow phone at large text the
+/// item slot (~86 dp at 320 dp wide) is narrower than "Settings" at 2x, and
+/// an ellipsized "Setti…" hides which tab it is. The label grows with the
+/// system text scale up to [_maxTextScale], then shrinks to fit its slot.
+class _NavLabel extends StatelessWidget {
+  const _NavLabel(this.label, {required this.style});
+
+  final String label;
+  final TextStyle? style;
+
+  static const double _maxTextScale = 1.5;
+
+  @override
+  Widget build(BuildContext context) {
+    return MediaQuery.withClampedTextScaling(
+      maxScaleFactor: _maxTextScale,
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          softWrap: false,
+          style: style,
         ),
       ),
     );

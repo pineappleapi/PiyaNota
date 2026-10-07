@@ -18,8 +18,10 @@ class _CardMetrics {
   static const double leftInset = 20;
   static const double tileToText = 14;
   static const double verticalPadding = 12;
-  // Keeps titles clear of the chevron (top-right) and trash (bottom-right).
-  static const double rightReserve = 40;
+  // Keeps titles and subtitles clear of the chevron (top-right) and the
+  // 48 dp trash target (bottom-right), so a tap on the text can never land
+  // on Delete.
+  static const double rightReserve = 48;
 }
 
 /// Outlined, rounded card body with the project's darken-on-press SOP
@@ -196,11 +198,11 @@ class ScoreCard extends StatelessWidget {
   static const double _trashSize = 16;
   static const double _spinnerSize = 14;
   static const double _spinnerStroke = 2;
-  // A 48x41 dp hit area (the card's lower-right half) around a 16 dp glyph
-  // placed where the mockup draws it: 10 dp from the right, 7 from the
-  // bottom.
-  static const double _trashHitWidth = 48;
-  static const double _trashHitHeight = 41;
+  // A 48x48 dp hit area (Android's minimum tap target) in the card's
+  // lower-right corner, around a 16 dp glyph placed where the mockup draws
+  // it: 10 dp from the right, 7 from the bottom. On the 82 dp card it ends
+  // well below the chevron.
+  static const double _trashHitSize = 48;
   static const EdgeInsets _trashGlyphInset = EdgeInsets.only(
     right: 10,
     bottom: 7,
@@ -230,11 +232,14 @@ class ScoreCard extends StatelessWidget {
         Positioned(
           right: 0,
           bottom: 0,
-          width: _trashHitWidth,
-          height: _trashHitHeight,
+          width: _trashHitSize,
+          height: _trashHitSize,
           child: Semantics(
             button: true,
-            label: LibraryMessages.deleteSemantics(entry.displayTitle),
+            enabled: !isDeleting,
+            label: isDeleting
+                ? LibraryMessages.deleting
+                : LibraryMessages.deleteSemantics(entry.displayTitle),
             onTap: isDeleting ? null : onDelete,
             excludeSemantics: true,
             child: InkWell(
@@ -251,6 +256,7 @@ class ScoreCard extends StatelessWidget {
                           child: CircularProgressIndicator(
                             strokeWidth: _spinnerStroke,
                             color: AppTheme.libraryTrash,
+                            semanticsLabel: LibraryMessages.deleting,
                           ),
                         )
                       : const Icon(
@@ -266,6 +272,7 @@ class ScoreCard extends StatelessWidget {
       ],
       child: Semantics(
         button: true,
+        enabled: !isDeleting,
         child: _CardRow(
           tileColor: Colors.white,
           tile: ScoreThumbnail(url: score.thumbnailUrl),
@@ -420,38 +427,40 @@ class ScoreCardSkeletonState extends State<ScoreCardSkeleton>
 
   @override
   Widget build(BuildContext context) {
-    final baseColor =
-        Colors.white.withValues(alpha: AppTheme.librarySkeletonBaseAlpha);
-    final highlightColor =
-        Colors.white.withValues(alpha: AppTheme.librarySkeletonHighlightAlpha);
+    final baseColor = Colors.white.withValues(
+      alpha: AppTheme.librarySkeletonBaseAlpha,
+    );
+    final highlightColor = Colors.white.withValues(
+      alpha: AppTheme.librarySkeletonHighlightAlpha,
+    );
 
     Widget bar(double fraction) => FractionallySizedBox(
-          alignment: Alignment.centerLeft,
-          widthFactor: fraction,
-          child: AnimatedBuilder(
-            animation: _controller,
-            builder: (context, _) {
-              // At t = 0 (and when resting) the band sits fully left of the
-              // bar, so the bar is the plain base colour.
-              final centre = -_bandHalfWidth +
-                  _controller.value * (1 + 2 * _bandHalfWidth);
-              return Container(
-                height: _barHeight,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(_barRadius),
-                  gradient: LinearGradient(
-                    colors: [baseColor, highlightColor, baseColor],
-                    stops: [
-                      centre - _bandHalfWidth,
-                      centre,
-                      centre + _bandHalfWidth,
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        );
+      alignment: Alignment.centerLeft,
+      widthFactor: fraction,
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) {
+          // At t = 0 (and when resting) the band sits fully left of the
+          // bar, so the bar is the plain base colour.
+          final centre =
+              -_bandHalfWidth + _controller.value * (1 + 2 * _bandHalfWidth);
+          return Container(
+            height: _barHeight,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(_barRadius),
+              gradient: LinearGradient(
+                colors: [baseColor, highlightColor, baseColor],
+                stops: [
+                  centre - _bandHalfWidth,
+                  centre,
+                  centre + _bandHalfWidth,
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
 
     return _CardShell(
       fill: AppTheme.libraryScoreCardFill,
@@ -502,7 +511,11 @@ class _PlusPainter extends CustomPainter {
     // Inset by half the stroke so the round caps end exactly at the span.
     const inset = _stroke / 2;
     final mid = size.width / 2;
-    canvas.drawLine(Offset(mid, inset), Offset(mid, size.height - inset), paint);
+    canvas.drawLine(
+      Offset(mid, inset),
+      Offset(mid, size.height - inset),
+      paint,
+    );
     canvas.drawLine(Offset(inset, mid), Offset(size.width - inset, mid), paint);
   }
 
