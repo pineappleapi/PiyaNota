@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -66,13 +68,25 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
   String _requestedEmail = '';
 
   /// Last-seen text per controller. Listeners also fire on cursor moves,
-  /// so only a real text change may clear a stale error banner.
-  late final Map<TextEditingController, String> _lastTexts = {
-    for (final c in _controllers) c: c.text,
-  };
+  /// so only a real text change may clear a stale error banner. Filled in
+  /// initState, before any listener fires — a lazy initializer would first
+  /// run inside the first listener call, after the text already changed,
+  /// and miss that edit.
+  final Map<TextEditingController, String> _lastTexts = {};
+
+  /// Seconds until "Resend code" unlocks again; 0 means available.
+  int _resendCooldownLeft = 0;
+  Timer? _resendCooldownTimer;
 
   static const double _fieldGap = 16;
   static const double _sectionGap = 24;
+
+  /// Each send invalidates the previous code (PIYA-303 AC5), so rapid
+  /// resends let an older email arrive last and carry a dead code. The
+  /// cooldown also stops one device spamming reset emails; server-side
+  /// rate limiting is still needed (BUG-049).
+  static const int _resendCooldownSeconds = 30;
+  static const Duration _cooldownTick = Duration(seconds: 1);
 
   List<TextEditingController> get _controllers => [
     _emailController,
@@ -85,12 +99,14 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
   void initState() {
     super.initState();
     for (final controller in _controllers) {
+      _lastTexts[controller] = controller.text;
       controller.addListener(() => _onFieldChanged(controller));
     }
   }
 
   @override
   void dispose() {
+    _resendCooldownTimer?.cancel();
     for (final controller in _controllers) {
       controller.dispose();
     }
@@ -105,6 +121,26 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
       // user edits, it's stale and would contradict what they now see.
       if (textChanged && !_isSubmitting) _errorMessage = null;
     });
+  }
+
+  void _startResendCooldown() {
+    _resendCooldownTimer?.cancel();
+    _resendCooldownLeft = _resendCooldownSeconds;
+    _resendCooldownTimer = Timer.periodic(_cooldownTick, (timer) {
+      if (!mounted) return;
+      setState(() {
+        _resendCooldownLeft--;
+        if (_resendCooldownLeft <= 0) {
+          _resendCooldownLeft = 0;
+          timer.cancel();
+        }
+      });
+    });
+  }
+
+  void _stopResendCooldown() {
+    _resendCooldownTimer?.cancel();
+    _resendCooldownLeft = 0;
   }
 
   String get _code => _codeController.text.trim();
@@ -189,6 +225,7 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
       _requestedEmail = email;
       _noticeMessage = AuthMessages.resetCodeSent;
       _step = _ResetStep.code;
+      _startResendCooldown();
     });
   }
 
@@ -249,7 +286,11 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
     if (codeRejected) _codeController.clear();
     setState(() {
       _isSubmitting = false;
-      if (codeRejected) _step = _ResetStep.code;
+      if (codeRejected) {
+        _step = _ResetStep.code;
+        // The code is dead either way; a new one is the only way forward.
+        _stopResendCooldown();
+      }
       _errorMessage = error;
     });
   }
@@ -411,8 +452,12 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
             onPressed: _isSubmitting ? null : _goBackAStep,
           ),
           _LinkButton(
-            label: 'Resend code',
-            onPressed: _isSubmitting ? null : _requestCode,
+            label: _resendCooldownLeft > 0
+                ? 'Resend code (${_resendCooldownLeft}s)'
+                : 'Resend code',
+            onPressed: _isSubmitting || _resendCooldownLeft > 0
+                ? null
+                : _requestCode,
           ),
         ],
       ),
@@ -486,9 +531,10 @@ class _LinkButton extends StatelessWidget {
 }
 
 /// Stands in for the user's mailbox while the fake backend is active, since
-/// no real email is sent. Only ever built when [ApiConfig.useFakeAuth] is
-/// true (debug builds by default), so release builds — and therefore choir
-/// testers — never see a reset code on screen.
+/// no real email is sent. Built whenever [ApiConfig.useFakeAuth] is true —
+/// debug builds by default, or a release demo APK built with
+/// `--dart-define=USE_FAKE_AUTH=true`. A build talking to the real backend
+/// never shows it, so choir testers on real accounts never see a code.
 class _DemoInbox extends ConsumerWidget {
   const _DemoInbox({required this.email});
 
@@ -520,7 +566,7 @@ class _DemoInbox extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Demo inbox (debug build only)',
+                  'Demo inbox (test backend only)',
                   style: textTheme.labelMedium?.copyWith(
                     color: AppTheme.authSubtitle,
                   ),

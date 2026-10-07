@@ -263,6 +263,77 @@ void main() {
     expect(find.text(AuthMessages.resetCodeSent), findsOneWidget);
   });
 
+  testWidgets('Resend code is locked for 30 seconds after each send', (
+    tester,
+  ) async {
+    final api = _happyApi();
+    await pumpAuthScreen(tester, screen: const PasswordResetScreen(), api: api);
+    await _requestCode(tester);
+
+    Finder resend() => find.widgetWithText(TextButton, 'Resend code');
+    TextButton lockedButton() => tester.widget<TextButton>(
+      find.ancestor(
+        of: find.textContaining('Resend code ('),
+        matching: find.byType(TextButton),
+      ),
+    );
+
+    expect(find.text('Resend code (30s)'), findsOneWidget);
+    expect(lockedButton().onPressed, isNull);
+
+    await tester.pump(const Duration(seconds: 29));
+    expect(find.text('Resend code (1s)'), findsOneWidget);
+    expect(lockedButton().onPressed, isNull);
+
+    await tester.pump(const Duration(seconds: 1));
+    expect(tester.widget<TextButton>(resend()).onPressed, isNotNull);
+
+    await tester.ensureVisible(resend());
+    await tester.pumpAndSettle();
+    await tester.tap(resend());
+    await tester.pump();
+    expect(api.requestResetCalls, 2);
+    expect(find.text('Resend code (30s)'), findsOneWidget);
+  });
+
+  testWidgets('server rejection of the new password keeps the user on it', (
+    tester,
+  ) async {
+    const serverMessage = 'Password too common.';
+    final api = ScriptedAuthApi(
+      onRequestReset: () async {},
+      onConfirmReset: () async =>
+          throw const AuthValidationException(serverMessage),
+    );
+    await pumpAuthScreen(tester, screen: const PasswordResetScreen(), api: api);
+    await _requestCode(tester);
+    await _enterCode(tester);
+    await _enterNewPassword(tester);
+    await tester.pumpAndSettle();
+
+    expect(find.text(serverMessage), findsOneWidget);
+    expect(find.text('New Password'), findsOneWidget);
+    expect(isButtonEnabled(tester, _resetPassword), isTrue);
+  });
+
+  testWidgets('server error on confirm shows the generic error, no hang', (
+    tester,
+  ) async {
+    final api = ScriptedAuthApi(
+      onRequestReset: () async {},
+      onConfirmReset: () async => throw const AuthServerException(),
+    );
+    await pumpAuthScreen(tester, screen: const PasswordResetScreen(), api: api);
+    await _requestCode(tester);
+    await _enterCode(tester);
+    await _enterNewPassword(tester);
+    await tester.pumpAndSettle();
+
+    expect(find.text(AuthMessages.serverError), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.text('New Password'), findsOneWidget);
+  });
+
   testWidgets('network failure is distinct and recoverable on both requests', (
     tester,
   ) async {
