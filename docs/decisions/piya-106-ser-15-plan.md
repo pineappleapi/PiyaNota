@@ -1457,6 +1457,32 @@ so freezing Stage 1/2 before this step would bake the thick strokes into the tra
 6. **Optional, highest fidelity (A5):** print about 20 rendered pages and photograph them with the user's phone.
    This gives true camera images with exact labels, at a cost of about 1 hour of the user's time.
 
+#### Kaggle smoke result and full-run conditions (2026-10-08; ml-cv-lead CONDITIONAL GO)
+
+**Smoke (Kaggle CPU, commit 2d3c896, amendment 2026-10-07b):**
+- Worker check: 1 vs 4 workers on 5 pages, 49/49 files identical.
+- 120 pages: gate v2 29/29 PASS. `feature_registration` 0.036. `platform_noise_report_only` passes both ways
+  (pessimistic 0.065 / optimistic 0.008), so the result is not inside platform noise.
+- Page drops 17.2%, of which augmentation-induced 1.7% of photographed pages. Feature drops 2.2%.
+- Label loss: 36/267 systems (13.5%), all final systems (short_system_untracked).
+- Eyeball, seeded 20 pages: no lyric collides with notation. On 5/20 pages, off-sheet background fills the left
+  10-30% of every strip; headers were intact (BUG-047).
+
+**Conditions for the full run and for its use:**
+1. Each strip records `off_paper_left_frac` / `off_paper_right_frac` (`off_paper_report_only` in the report), so
+   BUG-047 strips can be filtered or down-weighted without a re-cut.
+2. Report token-class coverage before vs after the cut. A token whose surviving share is below about 50% of its
+   source frequency (likely final barline, fermata) is a known Phase 1 gap; the short-system fix is the remedy.
+3. Evaluate the gate per launch (`launch_pages_k.txt`) as well as in aggregate, and report page drops per font.
+4. Log the augmentation-parameter histograms of surviving pages (drop_by_param worst ratio 1.73, line-thickness
+   survival worst ratio 2.4 in the smoke), so a skew toward thin strokes is visible.
+5. Leakage: the corpus is Bach chorales only (`bach_` prefix). Checked 2026-10-08: none of the 18 pieces in
+   `data/piyanota_dataset` (which also holds the eval_fresh, eval_prelim and ClefKeyNet validation pieces) is a Bach
+   chorale. **Phase 4 held-out pieces must not be chosen from the music21 Bach chorale corpus.** G1b used a Bach
+   page; it checks labels, not accuracy, so it is not affected.
+6. The canary byte-match hard-aborts a launch.
+7. A gate pass shows the corpus is consistent with camera statistics. It is not accuracy evidence.
+
 ### Phase 2: retraining (Kaggle GPU; Oct 4 - Oct 12)
 
 **ml-cv-lead reviews the training code before any run** (CLAUDE.md). The DataLoader seeding fix (notebook cell 12,

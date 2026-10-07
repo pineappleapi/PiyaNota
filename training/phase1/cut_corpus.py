@@ -1265,6 +1265,36 @@ def strip_text_px(text_img: np.ndarray | None, pl: Placement, H: np.ndarray, str
     return out
 
 
+OFF_PAPER_EDGE_SAMPLES = 64             # points per sheet side; the projected edge is near straight, so 64 is ample
+OFF_PAPER_FLAG_FRAC = 0.05              # report: a strip with more than 5% of its width off the sheet
+
+
+def strip_off_paper(pl: Placement, H: np.ndarray, src_w: int, detect_h: int, src_h: int,
+                    s2_manifest: list[dict[str, Any]]) -> dict[tuple[int, str], tuple[float, float]]:
+    """Share of each strip's width left and right of the paper sheet, along the strip's centre row.
+
+    Report and filter only (smoke 2026-10-07 review, condition 1): on framings where the sheet does not reach the
+    frame edge, Stage 1 leaves the off-sheet background in `strip_source` and Stage 2's full-width boxes carry it into
+    the strip. Recording it lets those strips be filtered or down-weighted later without a re-cut. The sheet edge is
+    mapped with the registration homography, which ignores curl, so the value is approximate (about one interline).
+    """
+    ys = np.linspace(0.0, float(pl.canvas_h), OFF_PAPER_EDGE_SAMPLES)
+    edges = []
+    for x in (0.0, float(pl.canvas_w)):
+        pts = cv2.perspectiveTransform(np.stack([np.full_like(ys, x), ys], 1).reshape(-1, 1, 2), H).reshape(-1, 2)
+        order = np.argsort(pts[:, 1])
+        edges.append((pts[order, 1], pts[order, 0]))
+    ky = src_h / detect_h
+    out: dict[tuple[int, str], tuple[float, float]] = {}
+    for m in s2_manifest:
+        row = (m["box"]["y1"] + m["box"]["y2"]) / 2 * ky
+        x_left = float(np.interp(row, *edges[0]))
+        x_right = float(np.interp(row, *edges[1]))
+        out[(m["system"] - 1, m["voice"])] = (round(min(max(x_left / src_w, 0.0), 1.0), 4),
+                                              round(min(max((src_w - x_right) / src_w, 0.0), 1.0), 4))
+    return out
+
+
 # ── one page ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def process_page(job: PageJob, out: Path, yolo: Path, keep_photo: bool, want_stats: bool,
@@ -1394,6 +1424,7 @@ def process_page(job: PageJob, out: Path, yolo: Path, keep_photo: bool, want_sta
     strips = {(s_idx - 1, voice): arr for voice, seq in voices.items() for arr, _, s_idx, _, _ in seq}
     text_px = strip_text_px(text_img, pl, H, page.strip_gray, page.strip_source, page.detect, s2_manifest,
                             staff_left_src)
+    off_paper = strip_off_paper(pl, H, src_w, det_h, src_h, s2_manifest)
     k_box = float(np.median([src_w / a.shape[1] for a in strips.values()]))
     ref_w = cv2.warpPerspective(ref_canvas, H, (src_w, src_h), flags=cv2.INTER_LINEAR, borderValue=255)
     ref_ink_w = ref_w < INK_THRESHOLD
@@ -1416,6 +1447,8 @@ def process_page(job: PageJob, out: Path, yolo: Path, keep_photo: bool, want_sta
         lab = labels.get((sop, voice))
         row: dict[str, Any] = {"page": job.page, "system_on_page": sop, "voice": voice,
                                "strip_w": int(arr.shape[1]), "k_box": round(src_w / arr.shape[1], 3)}
+        if (sop, voice) in off_paper:
+            row["off_paper_left_frac"], row["off_paper_right_frac"] = off_paper[(sop, voice)]
         if lab is None:
             rows.append({**row, "status": "dropped", "reason": "no_label"})
             continue
@@ -2810,6 +2843,16 @@ def cmd_report(a: argparse.Namespace) -> None:
         1 for _, _, r in results if r["status"] == "ok" for s in r["strips"]
         if str(s.get("reason")).startswith("identity_margin") and lo <= s.get("identity_margin_il", -1.0))
     rep["platform_noise_report_only"] = noise
+    # Smoke 2026-10-07 review, condition 1: off-sheet background in cut strips (report only; feeds a later filter).
+    offs = [(s["off_paper_left_frac"], s["off_paper_right_frac"]) for _, _, r in results if r["status"] == "ok"
+            for s in r["strips"] if s.get("status") == "cut" and "off_paper_left_frac" in s]
+    if offs:
+        left, right = np.array([o[0] for o in offs]), np.array([o[1] for o in offs])
+        rep["off_paper_report_only"] = {
+            "cut_strips": len(offs),
+            f"share_over_{OFF_PAPER_FLAG_FRAC}": round(float(np.mean(np.maximum(left, right) > OFF_PAPER_FLAG_FRAC)), 4),
+            "left_p50_p95_max": [round(float(v), 4) for v in (*np.percentile(left, [50, 95]), left.max())],
+            "right_p50_p95_max": [round(float(v), 4) for v in (*np.percentile(right, [50, 95]), right.max())]}
     rep["structural_label_loss"] = structural_label_loss(a.renders, results)
     secs = [r["seconds"] for _, _, r in results]
     rep["seconds_per_page_p50_mean"] = [round(float(np.median(secs)), 1), round(float(np.mean(secs)), 1)]
