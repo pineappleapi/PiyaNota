@@ -57,6 +57,31 @@ class AppTheme {
     VoicePart.bass: Color(0xFFB6D5EC),
   };
 
+  // Auth screens (PIYA-202/203) neutrals, dropper-sampled from
+  // references/PIYA202-LogIn_SignUp_Inspo.webp (2026-10-07). Only the
+  // reference's neutrals are taken — its teal accents are replaced by the
+  // brand gradient/blue so auth matches onboarding.
+  static const Color authFieldFill = Color(0xFFF8F8F8);
+  static const Color authHintText = Color(0xFF8F8F8F);
+  static const Color authSubtitle = Color(0xFF7D7D7D);
+  static const Color authFieldIcon = Color(0xFF7F7F7F);
+  static const Color errorRed = Color(0xFFB3261E);
+  static const Color errorBannerFill = Color(0xFFFDECEA);
+
+  // Same brand stops as primaryGradient, reoriented top-left -> bottom-right
+  // so the auth headline (top-left) sits on the blue end. White on the
+  // gradient's teal midpoint falls below the 3:1 large-text contrast floor.
+  static const LinearGradient authHeaderGradient = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [gradientStart, gradientEnd],
+  );
+
+  // Derived (not sampled): a light tint of gradientEnd for the second
+  // headline line, standing in for the reference's lighter accent words.
+  static final Color authHeadlineAccent =
+      Color.lerp(gradientEnd, Colors.white, 0.55)!;
+
   /// Darkens [color] for a pressed-state SOP (see frontend-piyanota.md
   /// "Interaction states") — reduces HSL lightness rather than overlaying
   /// opacity, so the result stays the same hue, just deeper.
@@ -78,7 +103,7 @@ class AppTheme {
         onSecondary: Colors.white,
         surface: Colors.white,
         onSurface: Color(0xFF1F2937),
-        error: Color(0xFFB3261E),
+        error: errorRed,
         onError: Colors.white,
       ),
       scaffoldBackgroundColor: Colors.white,

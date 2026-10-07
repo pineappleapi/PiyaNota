@@ -9,7 +9,7 @@ import '../../theme/app_theme.dart';
 import 'steps/purpose_step.dart';
 import 'steps/voice_selection_step.dart';
 import 'steps/workflow_step.dart';
-import 'widgets/primary_pill_button.dart';
+import '../../widgets/primary_pill_button.dart';
 import 'widgets/progress_dots.dart';
 
 const _stepCount = 3;
