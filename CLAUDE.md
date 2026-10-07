@@ -210,6 +210,25 @@ failed position anchoring carries `unanchored_accidental_dropped` (the dropped t
 (`ground_truth/build_ground_truth.py`) additionally carries `note_id`, `written_pitch`, `chord_tail`
 and `source_image`.
 
+## Mobile client (Module 2)
+
+Lives at `mobile/piyanota_application/` — Flutter, **Android only** (no iOS requirement; see
+`docs/decisions/module2-flutter-framework.md` for why Flutter was chosen over native). State
+management is Riverpod (`flutter_riverpod`); note the pinned `^3.4.3` removed the legacy
+`StateProvider` — see that decision doc's 2026-09-17 addendum before reaching for it in new code.
+
+- **Design system:** `.claude/agents/frontend-piyanota.md` is the source of truth for palette,
+  typography, spacing, and layout-adaptivity — every screen's styling should trace to a token there,
+  not be improvised inline. It in turn always cross-checks the framework decision doc above and the
+  Figma exports in `docs/design/figma/` (reference-only, not shipped in the app).
+- **Brand assets:** shipped logos/gradients live in
+  `mobile/piyanota_application/assets/branding/` and are declared in `pubspec.yaml`.
+- **Verify before reporting done:** `flutter analyze` and `flutter test`, run from
+  `mobile/piyanota_application/`; both must be clean. `flutter run -d <device-id>` /
+  `flutter build apk --release` to check on a physical device (`flutter devices` to list).
+- Session tokens use `flutter_secure_storage` (Keystore-backed), never `shared_preferences` — the
+  latter is reserved for non-secret flags (e.g. onboarding-completed).
+
 ## Role
 
 Act as a senior full-stack developer (10+ years), with production computer-vision-systems experience.

@@ -261,7 +261,7 @@ Wires Login (PIYA-202), Sign-Up (PIYA-203), and Password Reset (PIYA-204) screen
 
 **Acceptance Criteria:**
 1. Each screen constructs requests matching PIYA-301–304's exact field names, handles every documented response code (200/201/400/401/409/410) with the specific UI state defined in PIYA-202–204.
-2. On successful login/sign-up, returned session token is stored using Android's secure storage mechanism (Keystore-backed EncryptedSharedPreferences, not plain SharedPreferences), satisfying FR-21.
+2. On successful login/sign-up, returned session token is stored using Android's secure storage mechanism (Keystore-backed secure storage via flutter_secure_storage, not plain SharedPreferences), satisfying FR-21.
 3. Every subsequent authenticated request automatically attaches the stored token; a 401 response anywhere in the app triggers automatic routing to Login.
 
 ---

@@ -40,6 +40,9 @@ instance/
 .DS_Store
 .vscode/
 
+# Nested git clones (skills etc.) - not folded into this repo's history
+.claude/skills/video-analyzer/
+
 #Training Data
 data/
 datasets/
