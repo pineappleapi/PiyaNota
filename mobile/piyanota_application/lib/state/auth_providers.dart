@@ -21,11 +21,16 @@ final dioProvider = Provider<Dio>((ref) {
 /// (see [ApiConfig.useFakeAuth]). Re-checks the startup validation so the
 /// provider can never hand out a client aimed at a relative or cleartext URL.
 final authApiProvider = Provider<AuthApi>((ref) {
-  if (ApiConfig.useFakeAuth) return FakeAuthApi();
+  if (ApiConfig.useFakeAuth) return ref.watch(fakeAuthApiProvider);
   final configError = ApiConfig.configurationError();
   if (configError != null) throw StateError(configError);
   return HttpAuthApi(ref.watch(dioProvider));
 });
+
+/// The single fake auth backend, exposed on its own so other fakes (the
+/// Score Library) can resolve the tokens it issued to accounts. Only read
+/// while [ApiConfig.useFakeAuth] is true.
+final fakeAuthApiProvider = Provider<FakeAuthApi>((ref) => FakeAuthApi());
 
 final sessionStorageProvider = Provider<SessionStorage>((ref) {
   return SessionStorage();

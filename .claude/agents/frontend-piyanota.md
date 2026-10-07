@@ -78,6 +78,19 @@ eyedropper/color-picker read on the actual exported PNGs, don't estimate from de
   no dedicated dot color was ever sampled from Figma — current values are a reasonable guess
   (`#1F2937` / `#D9D9D9`), not a confirmed brand token.
 
+**Score Library tokens (PIYA-205, dropper-sampled from `references/PIYA203_Home Page_ListScores.png`
+and `..._NewScores.png`, 412x917 px = dp):** all `AppTheme.library*` in `lib/theme/app_theme.dart`.
+These are separate values from the primary gradient, not reuses of its stops.
+- Header gradient (vertical): `libraryHeaderTop` `#05CDBD` → `libraryHeaderBottom` `#178BCB`
+- Bottom-nav gradient (vertical): `libraryNavTop` `#168ECA` → `libraryNavBottom` `#0BB9C2`
+- Body background `libraryBackground` `#E8E8E8`; card outline `libraryCardOutline` `#8D8585` (1 dp)
+- Score card fill `libraryScoreCardFill` `#C2DFEF`; Add Score tile `libraryAddTileFill` `#D9EAF3`
+- Icon blue (plus, music note) `libraryIconBlue` `#1894D5`; trash `libraryTrash` `#4B8CAD`
+- Text: card title `libraryCardTitle` `#3D3D3D`, Add Score subtitle `libraryAddSubtitle` `#8D8585`,
+  score subtitle `libraryScoreSubtitle` `#575757`
+- Search field: no fill, white outline at `librarySearchBorderAlpha` 0.5, hint white at
+  `librarySearchHintAlpha` 0.8; Capture button shadow `libraryCaptureShadow` `#33000000`
+
 ### Typography
 
 **Font family: Plus Jakarta Sans**, for all text (confirmed — not just headings). Bundling approach:

@@ -89,6 +89,45 @@ class AppTheme {
   static final Color noticeBannerFill =
       Color.lerp(primaryBlue, Colors.white, 0.9)!;
 
+  // Score Library (PIYA-205), dropper-sampled from
+  // references/PIYA203_Home Page_ListScores.png / _NewScores.png
+  // (2026-10-08). The mockup's header and nav gradients are vertical and use
+  // their own stops — measurably not primaryGradient's #1B7DCE/#01DCBA — so
+  // they get separate tokens rather than reusing the brand pair.
+  static const Color libraryHeaderTop = Color(0xFF05CDBD);
+  static const Color libraryHeaderBottom = Color(0xFF178BCB);
+  static const LinearGradient libraryHeaderGradient = LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [libraryHeaderTop, libraryHeaderBottom],
+  );
+  static const Color libraryNavTop = Color(0xFF168ECA);
+  static const Color libraryNavBottom = Color(0xFF0BB9C2);
+  static const LinearGradient libraryNavGradient = LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [libraryNavTop, libraryNavBottom],
+  );
+  static const Color libraryBackground = Color(0xFFE8E8E8);
+  static const Color libraryCardOutline = Color(0xFF8D8585);
+  static const Color libraryScoreCardFill = Color(0xFFC2DFEF);
+  static const Color libraryAddTileFill = Color(0xFFD9EAF3);
+  static const Color libraryIconBlue = Color(0xFF1894D5);
+  static const Color libraryCardTitle = Color(0xFF3D3D3D);
+  // Darkest anti-aliased pixel of each subtitle — small text never renders a
+  // fully solid pixel, so this is the closest sample to the source colour.
+  static const Color libraryAddSubtitle = Color(0xFF8D8585);
+  static const Color libraryScoreSubtitle = Color(0xFF575757);
+  static const Color libraryTrash = Color(0xFF4B8CAD);
+  // Search field: no fill (inside == surrounding gradient pixels); border and
+  // hint are white at the alpha that reproduces the sampled #89CAE4 / #D0EAF4
+  // over the header blue.
+  static const double librarySearchBorderAlpha = 0.5;
+  static const double librarySearchHintAlpha = 0.8;
+  // Capture button halo: the grey above the button deepens from #E2E2E2 to
+  // #D0D0D0 at its edge, i.e. ~10% black at the rim of a soft blur.
+  static const Color libraryCaptureShadow = Color(0x33000000);
+
   /// Darkens [color] for a pressed-state SOP (see frontend-piyanota.md
   /// "Interaction states") — reduces HSL lightness rather than overlaying
   /// opacity, so the result stays the same hue, just deeper.

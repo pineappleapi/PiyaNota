@@ -14,7 +14,8 @@ class ApiConfig {
   static const String baseUrl = String.fromEnvironment('API_BASE_URL');
 
   /// Defaults to true only in debug, because the Module 3 API isn't deployed
-  /// yet; pass `--dart-define=USE_FAKE_AUTH=false` to hit [baseUrl] instead.
+  /// yet. Despite the name it gates every fake (auth and Score Library),
+  /// since the fake library can only resolve tokens the fake auth issued; pass `--dart-define=USE_FAKE_AUTH=false` to hit [baseUrl] instead.
   /// Profile and release builds — the ones handed to choir testers — default
   /// to false so they can't silently accept the fake demo credentials.
   static const bool useFakeAuth = bool.fromEnvironment(
@@ -29,6 +30,12 @@ class ApiConfig {
       '/api/auth/password-reset/request';
   static const String passwordResetConfirmPath =
       '/api/auth/password-reset/confirm';
+
+  // PIYA-308/309 define methods and schemas but not paths or the search
+  // parameter name — all three are assumed; reconcile in PIYA-215.
+  static const String scoreLibraryPath = '/api/scores';
+  static const String scoreLibrarySearchParam = 'search';
+  static String scorePath(int scoreId) => '$scoreLibraryPath/$scoreId';
 
   // PIYA-301/302 AC: endpoint responds within 2s under normal load. The
   // client allows headroom for slow mobile networks before declaring the

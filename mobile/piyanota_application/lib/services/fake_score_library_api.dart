@@ -1,0 +1,112 @@
+import '../models/score_summary.dart';
+import 'fake_auth_api.dart';
+import 'score_library_api.dart';
+import 'session_storage.dart';
+
+/// Resolves a session token to the account it was issued to, or null when
+/// the token is unknown. Satisfied by `FakeAuthApi.accountForToken`.
+typedef AccountForToken = String? Function(String token);
+
+/// In-memory stand-in for PIYA-308/309 until Module 3 is deployed. Scopes
+/// data by the account behind the stored session token, exactly as the real
+/// API scopes by `userId` (PIYA-205 AC1):
+///
+/// - [demoEmail] starts with the three scores from the PIYA-205 mockup.
+/// - Any other account (e.g. a fresh sign-up) starts empty — the AC4 state.
+/// - Accounts on [flakyDomain] also start with the demo scores, but every
+///   odd-numbered fetch and delete fails, so the error/retry state (AC6) and
+///   the non-optimistic delete failure (PIYA-215 AC2) can be demoed.
+/// - An unknown or missing token is a 401 ([SessionExpiredException]).
+class FakeScoreLibraryApi implements ScoreLibraryApi {
+  FakeScoreLibraryApi({
+    required this._sessionStorage,
+    required this._accountForToken,
+    this.latency = defaultLatency,
+  });
+
+  static const String demoEmail = FakeAuthApi.demoEmail;
+  static const String flakyDomain = '@flaky.test';
+  static const Duration defaultLatency = Duration(milliseconds: 800);
+
+  /// The mockup's three scores. Composer/page count aren't in the PIYA-308
+  /// contract; they're included so the demo still reads like the mockup.
+  static final List<ScoreSummary> demoScores = List.unmodifiable([
+    ScoreSummary(
+      scoreId: 101,
+      title: 'Bituin Walang Ningning',
+      lastActivityAt: DateTime.utc(2026, 10, 3, 14, 22),
+      composer: 'Robert Delgado',
+      pageCount: 10,
+    ),
+    ScoreSummary(
+      scoreId: 102,
+      title: 'Paraiso',
+      lastActivityAt: DateTime.utc(2026, 9, 28, 9, 5),
+      composer: 'Ryan Cayabyab',
+      pageCount: 14,
+    ),
+    ScoreSummary(
+      scoreId: 103,
+      title: 'Bahay Kubo',
+      lastActivityAt: DateTime.utc(2026, 9, 21, 18, 40),
+      composer: 'A.O. Veneracion/C.Borela',
+      pageCount: 7,
+    ),
+  ]);
+
+  final Duration latency;
+  final SessionStorage _sessionStorage;
+  final AccountForToken _accountForToken;
+  final Map<String, List<ScoreSummary>> _scoresByAccount = {};
+  final Map<String, int> _fetchCallsByAccount = {};
+  final Map<String, int> _deleteCallsByAccount = {};
+
+  @override
+  Future<List<ScoreSummary>> fetchLibrary({String? query}) async {
+    await Future<void>.delayed(latency);
+    final account = await _currentAccount();
+    if (_shouldFail(_fetchCallsByAccount, account)) {
+      throw const ScoreLibraryServerException();
+    }
+    final needle = query?.trim().toLowerCase() ?? '';
+    // Same semantics the real search parameter must have (PIYA-308 AC4).
+    return [
+      for (final score in _scoresFor(account))
+        if (score.title.toLowerCase().contains(needle)) score,
+    ];
+  }
+
+  @override
+  Future<void> deleteScore(int scoreId) async {
+    await Future<void>.delayed(latency);
+    final account = await _currentAccount();
+    if (_shouldFail(_deleteCallsByAccount, account)) {
+      throw const ScoreLibraryServerException();
+    }
+    final scores = _scoresFor(account);
+    final before = scores.length;
+    scores.removeWhere((score) => score.scoreId == scoreId);
+    if (scores.length == before) throw const ScoreNotFoundException();
+  }
+
+  Future<String> _currentAccount() async {
+    final token = await _sessionStorage.readToken();
+    final account = token == null ? null : _accountForToken(token);
+    if (account == null) throw const SessionExpiredException();
+    return account;
+  }
+
+  List<ScoreSummary> _scoresFor(String account) {
+    return _scoresByAccount.putIfAbsent(account, () {
+      final seeded = account == demoEmail || account.endsWith(flakyDomain);
+      return seeded ? [...demoScores] : <ScoreSummary>[];
+    });
+  }
+
+  bool _shouldFail(Map<String, int> calls, String account) {
+    if (!account.endsWith(flakyDomain)) return false;
+    final count = (calls[account] ?? 0) + 1;
+    calls[account] = count;
+    return count.isOdd;
+  }
+}

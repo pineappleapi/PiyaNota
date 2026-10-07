@@ -1,0 +1,286 @@
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart';
+
+import '../../../theme/app_theme.dart';
+
+/// The mockup's bottom bar: Library and Settings on a vertical blue→teal
+/// gradient, with a raised white Capture button breaking its top edge.
+///
+/// The widget's own box includes the [protrusion] above the bar, left
+/// transparent, so the Capture button's raised part is inside the hit-test
+/// area (a child painted outside its parent's bounds can't be tapped).
+/// Transparent areas aren't hit-testable, so the list scrolling behind that
+/// strip stays tappable.
+class LibraryBottomNav extends StatelessWidget {
+  const LibraryBottomNav({
+    super.key,
+    required this.onLibrary,
+    required this.onCapture,
+    required this.onSettings,
+  });
+
+  final VoidCallback onLibrary;
+  final VoidCallback onCapture;
+  final VoidCallback onSettings;
+
+  /// How far the Capture button rises above the bar (801 → 819 in the
+  /// mockup).
+  static const double protrusion = 18;
+
+  /// Bar height above the bottom safe area / padding: bar top to the
+  /// bottom of the labels in the mockup (819 → 893).
+  static const double barHeight = 74;
+
+  /// Space under the labels when the system reserves less (the mockup's
+  /// 24 dp, which also matches a typical gesture-nav inset).
+  static const double minBottomPadding = 24;
+
+  // Item centres sit 112 dp either side of the Capture button (mockup:
+  // 96 / 206 / 322 at 412 dp), shrinking proportionally on narrow phones.
+  static const double _itemSpacing = 112;
+  static const double _itemSpacingWidthFraction = 0.27;
+
+  // The mockup draws the button as a 74x65 ellipse, not a circle.
+  static const double _captureWidth = 74;
+  static const double _captureHeight = 65;
+  static const double _captureShadowBlur = 24;
+  static const double _captureFrameSize = 53;
+  static const double _captureNoteSize = 22;
+  static const double _labelTop = 60;
+  static const double _iconCenterFromBarTop = 34;
+  static const double _libraryIconSize = 36;
+  static const double _settingsIconSize = 30;
+  static const double _labelFontSize = 13;
+
+  /// Total height this widget occupies for a given bottom inset; the list
+  /// above pads by this so its last card can scroll clear of the bar.
+  static double heightFor(double bottomInset) =>
+      protrusion + barHeight + _bottomPadding(bottomInset);
+
+  static double _bottomPadding(double bottomInset) =>
+      bottomInset > minBottomPadding ? bottomInset : minBottomPadding;
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomPadding = _bottomPadding(MediaQuery.paddingOf(context).bottom);
+    final labelStyle = Theme.of(context).textTheme.labelLarge?.copyWith(
+          fontSize: _labelFontSize,
+          fontWeight: FontWeight.w400,
+          color: Colors.white,
+        );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final spacing = (constraints.maxWidth * _itemSpacingWidthFraction)
+            .clamp(0.0, _itemSpacing);
+        final center = constraints.maxWidth / 2;
+
+        Widget item({
+          required double centerX,
+          required Widget child,
+        }) {
+          return Positioned(
+            top: protrusion,
+            bottom: 0,
+            left: centerX - spacing / 2,
+            width: spacing,
+            child: child,
+          );
+        }
+
+        return SizedBox(
+          height: protrusion + barHeight + bottomPadding,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              const Positioned(
+                top: protrusion,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: AppTheme.libraryNavGradient,
+                  ),
+                ),
+              ),
+              item(
+                centerX: center - spacing,
+                child: _NavItem(
+                  label: 'Library',
+                  icon: CupertinoIcons.book_fill,
+                  iconSize: _libraryIconSize,
+                  labelStyle: labelStyle,
+                  selected: true,
+                  onTap: onLibrary,
+                ),
+              ),
+              item(
+                centerX: center + spacing,
+                child: _NavItem(
+                  label: 'Settings',
+                  icon: Icons.settings,
+                  iconSize: _settingsIconSize,
+                  labelStyle: labelStyle,
+                  onTap: onSettings,
+                ),
+              ),
+              // Capture: the raised button plus its label under it.
+              Positioned(
+                top: 0,
+                bottom: 0,
+                left: center - spacing / 2,
+                width: spacing,
+                child: _CaptureButton(
+                  labelStyle: labelStyle,
+                  onTap: onCapture,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _NavItem extends StatelessWidget {
+  const _NavItem({
+    required this.label,
+    required this.icon,
+    required this.iconSize,
+    required this.labelStyle,
+    required this.onTap,
+    this.selected = false,
+  });
+
+  final String label;
+  final IconData icon;
+  final double iconSize;
+  final TextStyle? labelStyle;
+  final VoidCallback onTap;
+  final bool selected;
+
+  // Press feedback on the gradient: a darker wash rather than a ripple,
+  // per the darken-on-press SOP.
+  static const double _pressedAlpha = 0.12;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      onTap: onTap,
+      excludeSemantics: true,
+      child: InkWell(
+        onTap: onTap,
+        splashFactory: NoSplash.splashFactory,
+        highlightColor: Colors.black.withValues(alpha: _pressedAlpha),
+        child: Stack(
+          children: [
+            Positioned(
+              top: LibraryBottomNav._iconCenterFromBarTop - iconSize / 2,
+              left: 0,
+              right: 0,
+              child: Icon(icon, size: iconSize, color: Colors.white),
+            ),
+            Positioned(
+              top: LibraryBottomNav._labelTop,
+              left: 0,
+              right: 0,
+              child: Text(
+                label,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: labelStyle,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CaptureButton extends StatelessWidget {
+  const _CaptureButton({required this.labelStyle, required this.onTap});
+
+  final TextStyle? labelStyle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    const shape = OvalBorder();
+
+    return Semantics(
+      button: true,
+      label: 'Capture',
+      onTap: onTap,
+      excludeSemantics: true,
+      child: GestureDetector(
+        // The label under the button is part of the same target, like the
+        // other two items.
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Stack(
+          clipBehavior: Clip.none,
+          alignment: Alignment.topCenter,
+          children: [
+            Container(
+              width: LibraryBottomNav._captureWidth,
+              height: LibraryBottomNav._captureHeight,
+              decoration: const ShapeDecoration(
+                shape: shape,
+                shadows: [
+                  BoxShadow(
+                    color: AppTheme.libraryCaptureShadow,
+                    blurRadius: LibraryBottomNav._captureShadowBlur,
+                  ),
+                ],
+              ),
+              child: Material(
+                color: Colors.white,
+                shape: shape,
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: onTap,
+                  splashFactory: NoSplash.splashFactory,
+                  highlightColor: AppTheme.darken(Colors.white),
+                  child: const Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Icon(
+                        Icons.crop_free_rounded,
+                        size: LibraryBottomNav._captureFrameSize,
+                        color: AppTheme.libraryCardTitle,
+                      ),
+                      Icon(
+                        Icons.music_note_rounded,
+                        size: LibraryBottomNav._captureNoteSize,
+                        color: AppTheme.libraryCardTitle,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: LibraryBottomNav.protrusion + LibraryBottomNav._labelTop,
+              left: 0,
+              right: 0,
+              child: Text(
+                'Capture',
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: labelStyle,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

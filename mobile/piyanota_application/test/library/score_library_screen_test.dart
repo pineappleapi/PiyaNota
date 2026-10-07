@@ -1,0 +1,535 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import 'package:piyanota_application/models/score_summary.dart';
+import 'package:piyanota_application/routes/app_routes.dart';
+import 'package:piyanota_application/screens/library/library_messages.dart';
+import 'package:piyanota_application/screens/library/score_library_screen.dart';
+import 'package:piyanota_application/services/score_library_api.dart';
+import 'package:piyanota_application/state/score_library_providers.dart';
+
+/// [ScoreLibraryApi] whose every call is answered by the test, either
+/// immediately or via a [Completer] so in-flight states are observable.
+class ScriptedScoreLibraryApi implements ScoreLibraryApi {
+  ScriptedScoreLibraryApi({required this.onFetch, this.onDelete});
+
+  Future<List<ScoreSummary>> Function() onFetch;
+  Future<void> Function(int scoreId)? onDelete;
+  int fetchCalls = 0;
+  final List<int> deletedIds = [];
+
+  @override
+  Future<List<ScoreSummary>> fetchLibrary({String? query}) {
+    fetchCalls++;
+    return onFetch();
+  }
+
+  @override
+  Future<void> deleteScore(int scoreId) {
+    deletedIds.add(scoreId);
+    return onDelete!(scoreId);
+  }
+}
+
+final _scores = [
+  ScoreSummary(
+    scoreId: 101,
+    title: 'Bituin Walang Ningning',
+    lastActivityAt: DateTime(2026, 10, 3, 12),
+    composer: 'Robert Delgado',
+    pageCount: 10,
+  ),
+  ScoreSummary(
+    scoreId: 102,
+    title: 'Paraiso',
+    lastActivityAt: DateTime(2026, 9, 28, 12),
+  ),
+  ScoreSummary(
+    scoreId: 103,
+    title: 'Bahay Kubo',
+    lastActivityAt: DateTime(2026, 9, 21, 12),
+    pageCount: 7,
+  ),
+];
+
+const _playbackMarker = 'ROUTE:playback';
+const _captureMarker = 'ROUTE:capture';
+const _settingsMarker = 'ROUTE:settings';
+const _loginMarker = 'ROUTE:login';
+
+/// Arguments the stub Playback route received, for AC7.
+Object? _lastPlaybackArguments;
+
+Future<void> _pumpLibrary(
+  WidgetTester tester,
+  ScoreLibraryApi api, {
+  Size physicalSize = const Size(1080, 2340),
+  double devicePixelRatio = 2.75,
+  double textScale = 1.0,
+}) async {
+  FlutterSecureStorage.setMockInitialValues({});
+  _lastPlaybackArguments = null;
+  tester.view.physicalSize = physicalSize;
+  tester.view.devicePixelRatio = devicePixelRatio;
+  addTearDown(tester.view.reset);
+
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [scoreLibraryApiProvider.overrideWithValue(api)],
+      child: MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(
+            textScaler: TextScaler.linear(textScale),
+          ),
+          child: child!,
+        ),
+        home: const ScoreLibraryScreen(),
+        routes: {
+          AppRoutes.playback: (context) {
+            _lastPlaybackArguments =
+                ModalRoute.of(context)?.settings.arguments;
+            return const Scaffold(body: Text(_playbackMarker));
+          },
+          AppRoutes.capture: (_) => const Scaffold(body: Text(_captureMarker)),
+          AppRoutes.settings: (_) =>
+              const Scaffold(body: Text(_settingsMarker)),
+          AppRoutes.login: (_) => const Scaffold(body: Text(_loginMarker)),
+        },
+      ),
+    ),
+  );
+}
+
+ScriptedScoreLibraryApi _apiReturning(List<ScoreSummary> scores) =>
+    ScriptedScoreLibraryApi(onFetch: () async => [...scores]);
+
+Finder _deleteButtonFor(String title) =>
+    find.bySemanticsLabel(LibraryMessages.deleteSemantics(title));
+
+Future<void> _tapDelete(WidgetTester tester, String title) async {
+  await tester.tap(
+    find.descendant(
+      of: find.ancestor(
+        of: find.text(title),
+        matching: find.byType(Material),
+      ).first,
+      matching: find.byIcon(Icons.delete_rounded),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+void main() {
+  group('AC5 loading', () {
+    testWidgets('shows skeletons and a loading subtitle while fetching',
+        (tester) async {
+      final pending = Completer<List<ScoreSummary>>();
+      await _pumpLibrary(
+        tester,
+        ScriptedScoreLibraryApi(onFetch: () => pending.future),
+      );
+      await tester.pump();
+
+      expect(find.byKey(const Key('library-loading')), findsOneWidget);
+      expect(find.text(LibraryMessages.loadingSubtitle), findsOneWidget);
+      // Header, search and nav stay usable during the load.
+      expect(find.text(LibraryMessages.title), findsOneWidget);
+      expect(find.byType(TextField), findsOneWidget);
+      expect(find.text('Capture'), findsOneWidget);
+
+      pending.complete(_scores);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('library-loading')), findsNothing);
+    });
+  });
+
+  group('AC6 error + retry', () {
+    testWidgets('server failure shows an error with Retry that refetches',
+        (tester) async {
+      var fail = true;
+      final api = ScriptedScoreLibraryApi(
+        onFetch: () async {
+          if (fail) throw const ScoreLibraryServerException();
+          return _scores;
+        },
+      );
+      await _pumpLibrary(tester, api);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('library-error')), findsOneWidget);
+      expect(find.text(LibraryMessages.loadServerError), findsOneWidget);
+      expect(find.text(LibraryMessages.errorSubtitle), findsOneWidget);
+      // No silent automatic retry loop (Riverpod 3 default disabled).
+      await tester.pump(const Duration(seconds: 5));
+      expect(api.fetchCalls, 1);
+
+      fail = false;
+      await tester.tap(find.text(LibraryMessages.retry));
+      await tester.pumpAndSettle();
+
+      expect(api.fetchCalls, 2);
+      expect(find.byKey(const Key('library-error')), findsNothing);
+      expect(find.text('Paraiso'), findsOneWidget);
+    });
+
+    testWidgets('Retry shows the loading state while the refetch runs',
+        (tester) async {
+      var attempt = 0;
+      final second = Completer<List<ScoreSummary>>();
+      await _pumpLibrary(
+        tester,
+        ScriptedScoreLibraryApi(
+          onFetch: () {
+            attempt++;
+            if (attempt == 1) {
+              return Future.error(const ScoreLibraryServerException());
+            }
+            return second.future;
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(LibraryMessages.retry));
+      await tester.pump();
+
+      expect(find.byKey(const Key('library-loading')), findsOneWidget);
+      expect(find.byKey(const Key('library-error')), findsNothing);
+      second.complete(_scores);
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('network failure says to check the connection',
+        (tester) async {
+      await _pumpLibrary(
+        tester,
+        ScriptedScoreLibraryApi(
+          onFetch: () async => throw const ScoreLibraryNetworkException(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text(LibraryMessages.loadNetworkError), findsOneWidget);
+    });
+
+    testWidgets('an unexpected exception still ends in the error state',
+        (tester) async {
+      await _pumpLibrary(
+        tester,
+        ScriptedScoreLibraryApi(onFetch: () async => throw StateError('x')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text(LibraryMessages.loadServerError), findsOneWidget);
+    });
+
+    testWidgets('401 offers Log In instead of Retry and returns to Login',
+        (tester) async {
+      await _pumpLibrary(
+        tester,
+        ScriptedScoreLibraryApi(
+          onFetch: () async => throw const SessionExpiredException(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text(LibraryMessages.sessionExpired), findsOneWidget);
+      expect(find.text(LibraryMessages.retry), findsNothing);
+      await tester.tap(find.text(LibraryMessages.logInAgain));
+      await tester.pumpAndSettle();
+      expect(find.text(_loginMarker), findsOneWidget);
+    });
+  });
+
+  group('AC4 empty', () {
+    testWidgets('zero scores shows the mockup empty subtitle and Add Score',
+        (tester) async {
+      await _pumpLibrary(tester, _apiReturning(const []));
+      await tester.pumpAndSettle();
+
+      expect(find.text('No Scores • Tap Capture Button'), findsOneWidget);
+      expect(find.text(LibraryMessages.addScoreTitle), findsOneWidget);
+      expect(find.byIcon(Icons.delete_rounded), findsNothing);
+    });
+  });
+
+  group('AC2 list', () {
+    testWidgets('each entry shows its title and last-activity date',
+        (tester) async {
+      await _pumpLibrary(tester, _apiReturning(_scores));
+      await tester.pumpAndSettle();
+
+      expect(find.text('3 Scores • Tap to Listen'), findsOneWidget);
+      expect(find.text('Bituin Walang Ningning'), findsOneWidget);
+      expect(
+        find.text('Oct 3, 2026 • Robert Delgado • 10 pages'),
+        findsOneWidget,
+      );
+      expect(find.text('Sep 28, 2026'), findsOneWidget);
+      expect(find.text('Sep 21, 2026 • 7 pages'), findsOneWidget);
+    });
+
+    testWidgets('one score uses the singular subtitle', (tester) async {
+      await _pumpLibrary(tester, _apiReturning(_scores.take(1).toList()));
+      await tester.pumpAndSettle();
+      expect(find.text('1 Score • Tap to Listen'), findsOneWidget);
+    });
+  });
+
+  group('AC3 search', () {
+    testWidgets('filters case-insensitively by partial title as you type',
+        (tester) async {
+      await _pumpLibrary(tester, _apiReturning(_scores));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField), 'B');
+      await tester.pump();
+      expect(find.text('Bituin Walang Ningning'), findsOneWidget);
+      expect(find.text('Bahay Kubo'), findsOneWidget);
+      expect(find.text('Paraiso'), findsNothing);
+
+      await tester.enterText(find.byType(TextField), 'kUb');
+      await tester.pump();
+      expect(find.text('Bahay Kubo'), findsOneWidget);
+      expect(find.text('Bituin Walang Ningning'), findsNothing);
+
+      await tester.enterText(find.byType(TextField), '  ningning ');
+      await tester.pump();
+      expect(find.text('Bituin Walang Ningning'), findsOneWidget);
+      expect(find.text('Bahay Kubo'), findsNothing);
+
+      await tester.enterText(find.byType(TextField), '');
+      await tester.pump();
+      expect(find.byIcon(Icons.delete_rounded), findsNWidgets(3));
+    });
+
+    testWidgets('zero matches shows a distinct message, not the empty state',
+        (tester) async {
+      await _pumpLibrary(tester, _apiReturning(_scores));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField), 'zzz');
+      await tester.pump();
+
+      expect(find.text(LibraryMessages.noMatches('zzz')), findsOneWidget);
+      expect(find.text(LibraryMessages.emptySubtitle), findsNothing);
+      // The subtitle keeps describing the whole library.
+      expect(find.text('3 Scores • Tap to Listen'), findsOneWidget);
+    });
+  });
+
+  group('AC7 / AC8 navigation', () {
+    testWidgets('tapping a score opens Playback with its scoreId',
+        (tester) async {
+      final api = _apiReturning(_scores);
+      await _pumpLibrary(tester, api);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Paraiso'));
+      await tester.pumpAndSettle();
+
+      expect(find.text(_playbackMarker), findsOneWidget);
+      expect(_lastPlaybackArguments, isA<PlaybackArguments>());
+      final arguments = _lastPlaybackArguments! as PlaybackArguments;
+      expect(arguments.scoreId, 102);
+      expect(arguments.title, 'Paraiso');
+      // Nothing re-fetched or re-processed on the way.
+      expect(api.fetchCalls, 1);
+    });
+
+    testWidgets('Add Score card routes to Capture', (tester) async {
+      await _pumpLibrary(tester, _apiReturning(_scores));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(LibraryMessages.addScoreTitle));
+      await tester.pumpAndSettle();
+      expect(find.text(_captureMarker), findsOneWidget);
+    });
+
+    testWidgets('nav Capture button routes to Capture', (tester) async {
+      await _pumpLibrary(tester, _apiReturning(_scores));
+      await tester.pumpAndSettle();
+      await tester.tap(find.bySemanticsLabel('Capture'));
+      await tester.pumpAndSettle();
+      expect(find.text(_captureMarker), findsOneWidget);
+    });
+
+    testWidgets('raised part of the Capture button is tappable',
+        (tester) async {
+      await _pumpLibrary(tester, _apiReturning(_scores));
+      await tester.pumpAndSettle();
+      final glyph = tester.getCenter(find.byIcon(Icons.crop_free_rounded));
+      // Top of the ellipse, above the gradient bar.
+      await tester.tapAt(glyph.translate(0, -24));
+      await tester.pumpAndSettle();
+      expect(find.text(_captureMarker), findsOneWidget);
+    });
+
+    testWidgets('nav Settings routes to Settings', (tester) async {
+      await _pumpLibrary(tester, _apiReturning(_scores));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Settings'));
+      await tester.pumpAndSettle();
+      expect(find.text(_settingsMarker), findsOneWidget);
+    });
+
+    testWidgets('Capture is reachable from the empty and error states',
+        (tester) async {
+      await _pumpLibrary(
+        tester,
+        ScriptedScoreLibraryApi(
+          onFetch: () async => throw const ScoreLibraryServerException(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(LibraryMessages.addScoreTitle));
+      await tester.pumpAndSettle();
+      expect(find.text(_captureMarker), findsOneWidget);
+    });
+  });
+
+  group('delete (PIYA-215 AC2, PIYA-309)', () {
+    testWidgets('trash asks for confirmation and never opens Playback',
+        (tester) async {
+      final api = _apiReturning(_scores)..onDelete = (_) async {};
+      await _pumpLibrary(tester, api);
+      await tester.pumpAndSettle();
+
+      await _tapDelete(tester, 'Paraiso');
+
+      expect(find.text(LibraryMessages.deleteDialogTitle), findsOneWidget);
+      expect(find.text(_playbackMarker), findsNothing);
+      expect(api.deletedIds, isEmpty);
+    });
+
+    testWidgets('cancel leaves the score and sends nothing', (tester) async {
+      final api = _apiReturning(_scores)..onDelete = (_) async {};
+      await _pumpLibrary(tester, api);
+      await tester.pumpAndSettle();
+
+      await _tapDelete(tester, 'Paraiso');
+      await tester.tap(find.text(LibraryMessages.deleteCancel));
+      await tester.pumpAndSettle();
+
+      expect(api.deletedIds, isEmpty);
+      expect(find.text('Paraiso'), findsOneWidget);
+    });
+
+    testWidgets('confirm keeps the row until the server says 200',
+        (tester) async {
+      final server = Completer<void>();
+      final api = _apiReturning(_scores)..onDelete = (_) => server.future;
+      await _pumpLibrary(tester, api);
+      await tester.pumpAndSettle();
+
+      await _tapDelete(tester, 'Paraiso');
+      await tester.tap(find.text(LibraryMessages.deleteConfirm));
+      await tester.pump();
+
+      expect(api.deletedIds, [102]);
+      expect(find.text('Paraiso'), findsOneWidget, reason: 'not optimistic');
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      // The deleting row can't be opened.
+      await tester.tap(find.text('Paraiso'));
+      await tester.pump();
+      expect(find.text(_playbackMarker), findsNothing);
+
+      server.complete();
+      await tester.pumpAndSettle();
+
+      expect(find.text('Paraiso'), findsNothing);
+      expect(find.text(LibraryMessages.deleted('Paraiso')), findsOneWidget);
+      expect(find.text('2 Scores • Tap to Listen'), findsOneWidget);
+    });
+
+    testWidgets('server failure keeps the row and shows an error',
+        (tester) async {
+      final api = _apiReturning(_scores)
+        ..onDelete = (_) async => throw const ScoreLibraryServerException();
+      await _pumpLibrary(tester, api);
+      await tester.pumpAndSettle();
+
+      await _tapDelete(tester, 'Paraiso');
+      await tester.tap(find.text(LibraryMessages.deleteConfirm));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Paraiso'), findsOneWidget);
+      expect(find.text(LibraryMessages.deleteServerError), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.text('3 Scores • Tap to Listen'), findsOneWidget);
+    });
+
+    testWidgets('network failure keeps the row with a connection message',
+        (tester) async {
+      final api = _apiReturning(_scores)
+        ..onDelete = (_) async => throw const ScoreLibraryNetworkException();
+      await _pumpLibrary(tester, api);
+      await tester.pumpAndSettle();
+
+      await _tapDelete(tester, 'Paraiso');
+      await tester.tap(find.text(LibraryMessages.deleteConfirm));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Paraiso'), findsOneWidget);
+      expect(find.text(LibraryMessages.deleteNetworkError), findsOneWidget);
+    });
+
+    testWidgets('404 removes the row and says it was already gone',
+        (tester) async {
+      final api = _apiReturning(_scores)
+        ..onDelete = (_) async => throw const ScoreNotFoundException();
+      await _pumpLibrary(tester, api);
+      await tester.pumpAndSettle();
+
+      await _tapDelete(tester, 'Paraiso');
+      await tester.tap(find.text(LibraryMessages.deleteConfirm));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Paraiso'), findsNothing);
+      expect(find.text(LibraryMessages.deleteAlreadyGone), findsOneWidget);
+    });
+
+    testWidgets('trash exposes an accessible "Delete <title>" action',
+        (tester) async {
+      final handle = tester.ensureSemantics();
+      await _pumpLibrary(tester, _apiReturning(_scores));
+      await tester.pumpAndSettle();
+      expect(_deleteButtonFor('Paraiso'), findsOneWidget);
+      handle.dispose();
+    });
+  });
+
+  group('NFR-10 layout', () {
+    testWidgets('320x568 dp at 2x text scale renders without overflow',
+        (tester) async {
+      await _pumpLibrary(
+        tester,
+        _apiReturning(_scores),
+        physicalSize: const Size(640, 1136),
+        devicePixelRatio: 2.0,
+        textScale: 2.0,
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      await tester.enterText(find.byType(TextField), 'zzz');
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('320x568 dp error state renders without overflow',
+        (tester) async {
+      await _pumpLibrary(
+        tester,
+        ScriptedScoreLibraryApi(
+          onFetch: () async => throw const ScoreLibraryNetworkException(),
+        ),
+        physicalSize: const Size(640, 1136),
+        devicePixelRatio: 2.0,
+        textScale: 2.0,
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
+  });
+}
