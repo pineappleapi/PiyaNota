@@ -1553,10 +1553,28 @@ def environment_fingerprint() -> dict[str, Any]:
             "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES")}
 
 
+def cpu_identity() -> dict[str, Any]:
+    """CPU model and flags (amendment 2026-10-07b): opencv picks SIMD paths at run time, so registration may differ
+    between Kaggle sessions on different CPUs (BUG-046); the per-launch canary pages are what catch it."""
+    model, flags = platform.processor(), ""
+    cpuinfo = Path("/proc/cpuinfo")
+    if cpuinfo.exists():
+        for line in cpuinfo.read_text(encoding="utf-8", errors="replace").splitlines():
+            key, _, val = line.partition(":")
+            if key.strip() == "model name" and not model.strip():
+                model = val.strip()
+            elif key.strip() == "flags" and not flags:
+                flags = val.strip()
+    return {"cpu_model": model, "cpu_flags_sha256": hashlib.sha256(flags.encode()).hexdigest() if flags else None,
+            "cpu_simd_flags": sorted(f for f in flags.split() if f.startswith(("avx", "sse", "fma"))),
+            "opencv_build_sha256": hashlib.sha256(cv2.getBuildInformation().encode()).hexdigest()}
+
+
 def launch_host() -> dict[str, Any]:
     """Host facts that may legitimately differ between launches of one run (kernel build, session variables)."""
     secret_words = ("TOKEN", "KEY", "SECRET", "PASSWORD")
     return {"platform": platform.platform(), "cpu_count": os.cpu_count(), "opencv_threads": cv2.getNumThreads(),
+            **cpu_identity(),
             "kaggle_env": {k: v for k, v in sorted(os.environ.items())
                            if k.startswith("KAGGLE_") and not any(w in k for w in secret_words)}}
 
@@ -1674,6 +1692,68 @@ def strip_verdict(strip: dict[str, Any], thresholds: dict[str, float]) -> str | 
         if f["z"] <= thresholds[f["kind"]]:
             return f"{f['kind']}_erased"
     return None
+
+
+BORDER_NEAR_PX = 2                      # amendment 2026-10-07b: "near the search border" for the noise report
+MARGIN_NEAR_BAND_SPACINGS = 0.4         # margins within this of IDENTITY_MARGIN_MIN_SPACINGS count as borderline
+
+
+def _near_border(f: dict[str, Any], interline: float) -> bool:
+    """A registered feature whose offset is within BORDER_NEAR_PX of the edge rule in measure_features."""
+    sx = int(round(REFINE_SEARCH_X_SPACINGS * interline))
+    sy = int(round(REFINE_SEARCH_Y_SPACINGS * interline))
+    near_y = abs(f["dy"]) >= sy - BORDER_NEAR_PX
+    near_x = f["kind"] not in HORIZONTAL_KINDS and abs(f["dx"]) >= sx - BORDER_NEAR_PX
+    return near_y or near_x
+
+
+def platform_noise_sensitivity(cut: list[tuple[dict[str, Any], dict[str, Any]]], thresholds: dict[str, float]
+                               ) -> dict[str, Any]:
+    """Report only (amendment 2026-10-07b, ml-cv-lead condition): would the registration checks flip inside the
+    platform noise of BUG-046 (offsets moved up to 2 px, identity margins up to 0.36 between opencv builds)?
+
+    Pessimistic: every registered feature near the search border fails as unregistered_edge. Optimistic: every
+    unregistered_edge feature counts as registered and not erased. A check that differs between the two lies inside
+    platform noise and is reported as such; the gate itself is unchanged.
+    """
+    feats: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    no_interline = 0
+    for r, s in cut:
+        il = (r.get("stats") or {}).get("interline_native")
+        for f in s.get("features", []):
+            if il is None:
+                no_interline += 1
+            feats.append((f, {"il": il, "strip": id(s)}))
+    near = [f for f, m in feats if f.get("z") is not None and "dy" in f and m["il"] is not None
+            and _near_border(f, m["il"])]
+    edge = [f for f, _ in feats if f.get("why") == "unregistered_edge"]
+    near_ids, edge_ids = {id(f) for f in near}, {id(f) for f in edge}
+
+    def strip_dropped(s: dict[str, Any], mode: str) -> bool:
+        for f in s.get("features", []):
+            if mode == "pess" and id(f) in near_ids:
+                return True
+            if mode == "opt" and id(f) in edge_ids:
+                continue
+            if f["z"] is None or f["z"] <= thresholds[f["kind"]]:
+                return True
+        return False
+
+    n_feat = max(len(feats), 1)
+    reg_fail = sum(1 for f, _ in feats if f.get("why") in REGISTRATION_FAIL_WHY)
+    out: dict[str, Any] = {"features": len(feats), "features_without_interline": no_interline,
+                           "registered_near_border": len(near), "unregistered_edge": len(edge)}
+    for mode, reg in (("pess", reg_fail + len(near)), ("opt", reg_fail - len(edge))):
+        drops = sum(strip_dropped(s, mode) for _, s in cut) / max(len(cut), 1)
+        out[mode] = {"feature_registration_share": round(reg / n_feat, 4),
+                     "feature_registration_pass": reg / n_feat <= FEATURE_DROP_MAX,
+                     "feature_drop_rate": round(drops, 4), "feature_drops_pass": drops <= FEATURE_DROP_MAX}
+    for check in ("feature_registration_pass", "feature_drops_pass"):
+        out[f"{check.removesuffix('_pass')}_inside_platform_noise"] = out["pess"][check] != out["opt"][check]
+    hi = IDENTITY_MARGIN_MIN_SPACINGS + MARGIN_NEAR_BAND_SPACINGS
+    margins = [s["identity_margin_il"] for _, s in cut if "identity_margin_il" in s]
+    out["cut_strips_margin_near_min"] = sum(1 for m in margins if IDENTITY_MARGIN_MIN_SPACINGS <= m < hi)
+    return out
 
 
 def cmd_manifest(a: argparse.Namespace) -> None:
@@ -1942,6 +2022,29 @@ def cmd_manifest(a: argparse.Namespace) -> None:
 #   (b) zone boundaries in interline units from the first staff line; (c) spurious tokens before the clef counted,
 #   and clef accuracy split by part-label length; (d) a paired synthetic ablation (same strip with and without
 #   text); (e) a non-Edwin text slice, since only Edwin is trained on.
+# Amendment 2026-10-07b, condition 3 result and single platform (user decision 2026-10-07, after the parity run and
+# before any smoke page was cut):
+# * Result: local CPU vs Kaggle, first 10 smoke pages: all 44 strip PNGs and every page/strip status identical, so
+#   condition 3 as written (strip hashes) passed; workers=1 vs 4 on Kaggle identical on all 49 files. The stricter
+#   all-file check differed: register() (ORB + RANSAC) is not bit-portable between the Windows and Linux opencv
+#   builds (BUG-046), so the registration-derived page JSON fields differ (feature z up to 2.1, dx/dy up to 2 px,
+#   identity margins, inliers, text px; one feature flipped unregistered_edge <-> registered). Renders, photo,
+#   JPEG and all Stage 1 outputs are byte-identical (stage hashes, 2 pages).
+# * Rule: Kaggle CPU is the single platform for this re-cut. The smoke and every chunk of the full run are cut
+#   there; gate inputs from different platforms are never pooled (condition 4's environment fingerprint already
+#   refuses a mixed run_info). Gate v2 thresholds, the smoke seed and the one-attempt rule are unchanged.
+# * Before the smoke, the same Kaggle session re-checks workers=1 vs workers=4 on 5 pages, all files identical;
+#   a difference stops the session without cutting any smoke page. This is a PRECONDITION, not a gate result.
+# * ml-cv-lead review 2026-10-07: CONDITIONAL GO, with these conditions:
+#   - Kaggle sessions can land on different CPUs and opencv picks SIMD paths at run time, so each launch records
+#     the CPU model, SIMD flags and an opencv build hash in run_chunks.jsonl (launch_host). The workers=4 output of
+#     those 5 pages in the smoke session is the CANARY: every later launch of the run re-cuts them first, and every
+#     file must match the smoke session's copy before it cuts anything else.
+#   - Report only, in platform_noise_report_only: registered features within BORDER_NEAR_PX of the search border,
+#     unregistered_edge features, and strips with an identity margin within MARGIN_NEAR_BAND_SPACINGS of the minimum.
+#     feature_registration and feature_drops are also recomputed with the borderline items counted the other way
+#     (pessimistic and optimistic). If a check differs between the two, the write-up says its pass or fail lies
+#     inside platform noise. A pass there still only means "no evidence of harm".
 COVER_TOL = 0.10
 COVER_KEYS: tuple[str, ...] = ("interline_px", "line_depth", "head_depth", "line_head_ratio", "line_fwhm_il",
                                "paper_grey", "noise_rel")
@@ -2701,6 +2804,12 @@ def cmd_report(a: argparse.Namespace) -> None:
                                                                      lambda x: x)["page_ci95"],
                                    "by_why": dict(collections.Counter(str(f.get("why")) for f in feats))}
     checks["feature_registration"] = reg_fail / max(len(feats), 1) <= FEATURE_DROP_MAX
+    noise = platform_noise_sensitivity(cut, thresholds)
+    lo = IDENTITY_MARGIN_MIN_SPACINGS - MARGIN_NEAR_BAND_SPACINGS
+    noise["margin_dropped_strips_near_min"] = sum(
+        1 for _, _, r in results if r["status"] == "ok" for s in r["strips"]
+        if str(s.get("reason")).startswith("identity_margin") and lo <= s.get("identity_margin_il", -1.0))
+    rep["platform_noise_report_only"] = noise
     rep["structural_label_loss"] = structural_label_loss(a.renders, results)
     secs = [r["seconds"] for _, _, r in results]
     rep["seconds_per_page_p50_mean"] = [round(float(np.median(secs)), 1), round(float(np.mean(secs)), 1)]
