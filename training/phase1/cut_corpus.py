@@ -60,6 +60,7 @@ import os
 import platform
 import subprocess
 import sys
+import tempfile
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -1329,14 +1330,16 @@ def process_page(job: PageJob, out: Path, yolo: Path, keep_photo: bool, want_sta
     if want_stats and spy is not None and spy.args is not None:
         from camera_page_stats import page_stats  # noqa: PLC0415  (smoke-only dependency)
         stats = page_stats(spy.args, [b.spacing for b in spy.args[4]])
-    tmp = out / "tmp"
-    try:
-        voices = s2.detect_staff_regions([(page.detect, 1, page.strip_source)], model_weights=str(yolo),
-                                         output_dir=str(tmp), save_strips=False,
-                                         manifest_path=str(tmp / "manifest.json"))
-    except ValueError as e:
-        return done("dropped", f"stage2_error:{e}", stats=stats)
-    s2_manifest = json.loads((tmp / "manifest.json").read_text(encoding="utf-8"))
+    # BUG-045: a private directory per page. A shared out/tmp let concurrent workers read each other's manifest.
+    with tempfile.TemporaryDirectory(prefix="s2_") as tmp_dir:
+        tmp = Path(tmp_dir)
+        try:
+            voices = s2.detect_staff_regions([(page.detect, 1, page.strip_source)], model_weights=str(yolo),
+                                             output_dir=str(tmp), save_strips=False,
+                                             manifest_path=str(tmp / "manifest.json"))
+        except ValueError as e:
+            return done("dropped", f"stage2_error:{e}", stats=stats)
+        s2_manifest = json.loads((tmp / "manifest.json").read_text(encoding="utf-8"))
     n_found = len(s2_manifest)
     if n_found not in {k * STAFFS_PER_SYSTEM for k in allowed_systems}:
         want = "|".join(str(k * STAFFS_PER_SYSTEM) for k in allowed_systems)
