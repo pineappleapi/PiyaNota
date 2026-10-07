@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../theme/app_theme.dart';
 
@@ -20,6 +21,7 @@ class AuthTextField extends StatelessWidget {
     this.onFieldSubmitted,
     this.helperText,
     this.suffixIcon,
+    this.inputFormatters,
   });
 
   final TextEditingController controller;
@@ -34,6 +36,7 @@ class AuthTextField extends StatelessWidget {
   final ValueChanged<String>? onFieldSubmitted;
   final String? helperText;
   final Widget? suffixIcon;
+  final List<TextInputFormatter>? inputFormatters;
 
   static const double _focusBorderWidth = 1.5;
   static const EdgeInsets _contentPadding = EdgeInsets.symmetric(
@@ -60,6 +63,7 @@ class AuthTextField extends StatelessWidget {
       enabled: enabled,
       validator: validator,
       onFieldSubmitted: onFieldSubmitted,
+      inputFormatters: inputFormatters,
       autocorrect: false,
       enableSuggestions: !obscureText,
       decoration: InputDecoration(

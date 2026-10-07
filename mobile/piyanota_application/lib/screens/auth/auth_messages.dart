@@ -25,4 +25,17 @@ class AuthMessages {
   // same sentence turning red.
   static const String passwordTooWeak =
       'Password is too weak — it needs 8+ characters, a letter and a number.';
+
+  // PIYA-204. AC2/AC3 quote "...a reset link has been sent"; the flow uses
+  // an emailed code instead (process step 4 allows "link/code"), so only
+  // that noun differs. Shown verbatim for registered and unregistered
+  // emails alike — never vary it on the request's outcome.
+  static const String resetCodeSent =
+      'If this email is registered, a reset code has been sent';
+  static const String resetCodeInvalid =
+      'That code is invalid or has expired. Request a new code and try again.';
+  static const String resetCodeIncomplete =
+      'Enter the 6-digit code from your email';
+  static const String passwordResetSuccess =
+      'Your password has been reset. Log in with your new password.';
 }

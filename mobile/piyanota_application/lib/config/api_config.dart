@@ -24,6 +24,11 @@ class ApiConfig {
 
   static const String loginPath = '/api/auth/login';
   static const String signUpPath = '/api/auth/signup';
+  // PIYA-303/304 — same caveat: assumed paths, reconcile in PIYA-214.
+  static const String passwordResetRequestPath =
+      '/api/auth/password-reset/request';
+  static const String passwordResetConfirmPath =
+      '/api/auth/password-reset/confirm';
 
   // PIYA-301/302 AC: endpoint responds within 2s under normal load. The
   // client allows headroom for slow mobile networks before declaring the

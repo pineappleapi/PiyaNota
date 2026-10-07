@@ -23,4 +23,13 @@ class AuthValidators {
       password.length >= minPasswordLength &&
       _letter.hasMatch(password) &&
       _digit.hasMatch(password);
+
+  /// PIYA-204 emailed reset code. PIYA-303 says "link/code" without fixing
+  /// a format — 6 digits is this app's assumption and must be reconciled
+  /// with the backend (PIYA-214) alongside the endpoint paths.
+  static const int resetCodeLength = 6;
+  static final RegExp _resetCodePattern = RegExp('^[0-9]{$resetCodeLength}\$');
+
+  static bool isWellFormedResetCode(String code) =>
+      _resetCodePattern.hasMatch(code.trim());
 }

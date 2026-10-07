@@ -72,4 +72,124 @@ void main() {
       throwsA(isA<AuthValidationException>()),
     );
   });
+
+  group('password reset (PIYA-303/304)', () {
+    const newPassword = 'choir2026';
+
+    Future<void> confirm(FakeAuthApi api, String code) =>
+        api.confirmPasswordReset(
+          resetToken: code,
+          newPassword: newPassword,
+          newPasswordConfirmation: newPassword,
+        );
+
+    test(
+      'registered email gets a 6-digit code that resets the password',
+      () async {
+        final api = _api();
+        await api.requestPasswordReset(email: ' Demo@PiyaNota.app ');
+        final code = api.demoInboxCodeFor(FakeAuthApi.demoEmail)!;
+        expect(code, matches(RegExp(r'^\d{6}$')));
+
+        await confirm(api, code);
+
+        final session = await api.login(
+          email: FakeAuthApi.demoEmail,
+          password: newPassword,
+        );
+        expect(session.email, FakeAuthApi.demoEmail);
+        await expectLater(
+          api.login(
+            email: FakeAuthApi.demoEmail,
+            password: FakeAuthApi.demoPassword,
+          ),
+          throwsA(isA<InvalidCredentialsException>()),
+        );
+      },
+    );
+
+    test(
+      'unregistered email completes the same way but receives no code',
+      () async {
+        final api = _api();
+        await api.requestPasswordReset(email: 'nobody@example.com');
+        expect(api.demoInboxCodeFor('nobody@example.com'), isNull);
+      },
+    );
+
+    test('malformed email is a 400; offline domain is a network failure', () {
+      final api = _api();
+      expect(
+        api.requestPasswordReset(email: 'not-an-email'),
+        throwsA(isA<AuthValidationException>()),
+      );
+      expect(
+        api.requestPasswordReset(email: 'a@offline.test'),
+        throwsA(isA<AuthNetworkException>()),
+      );
+    });
+
+    test('code is single use (410 on reuse)', () async {
+      final api = _api();
+      await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
+      final code = api.demoInboxCodeFor(FakeAuthApi.demoEmail)!;
+      await confirm(api, code);
+      await expectLater(
+        confirm(api, code),
+        throwsA(isA<ResetCodeInvalidException>()),
+      );
+    });
+
+    test('unknown code is a 410', () {
+      expect(
+        confirm(_api(), '000000'),
+        throwsA(isA<ResetCodeInvalidException>()),
+      );
+    });
+
+    test('code expires after resetCodeLifetime', () async {
+      var now = DateTime.utc(2026, 10, 8, 9);
+      final api = FakeAuthApi(latency: Duration.zero, clock: () => now);
+      await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
+      final code = api.demoInboxCodeFor(FakeAuthApi.demoEmail)!;
+
+      now = now.add(FakeAuthApi.resetCodeLifetime);
+      expect(api.demoInboxCodeFor(FakeAuthApi.demoEmail), isNull);
+      await expectLater(
+        confirm(api, code),
+        throwsA(isA<ResetCodeInvalidException>()),
+      );
+    });
+
+    test('a new request invalidates the previous unused code', () async {
+      final api = _api();
+      await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
+      final first = api.demoInboxCodeFor(FakeAuthApi.demoEmail)!;
+      await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
+      final second = api.demoInboxCodeFor(FakeAuthApi.demoEmail)!;
+
+      expect(second, isNot(first));
+      await expectLater(
+        confirm(api, first),
+        throwsA(isA<ResetCodeInvalidException>()),
+      );
+      await confirm(api, second);
+    });
+
+    test('weak password is a 400 and does not consume the code', () async {
+      final api = _api();
+      await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
+      final code = api.demoInboxCodeFor(FakeAuthApi.demoEmail)!;
+
+      await expectLater(
+        api.confirmPasswordReset(
+          resetToken: code,
+          newPassword: 'short',
+          newPasswordConfirmation: 'short',
+        ),
+        throwsA(isA<AuthValidationException>()),
+      );
+      await confirm(api, code);
+    });
+  });
 }

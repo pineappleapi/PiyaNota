@@ -18,6 +18,61 @@ class AuthErrorBanner extends StatelessWidget {
   final String? actionLabel;
   final VoidCallback? onAction;
 
+  @override
+  Widget build(BuildContext context) {
+    return _AuthBanner(
+      message: message,
+      icon: Icons.error_outline_rounded,
+      iconColor: AppTheme.errorRed,
+      textColor: AppTheme.errorRed,
+      fill: AppTheme.errorBannerFill,
+      actionLabel: actionLabel,
+      onAction: onAction,
+    );
+  }
+}
+
+/// Non-error counterpart of [AuthErrorBanner] — same shape and live-region
+/// behaviour, brand-tinted — for confirmations such as "reset code sent"
+/// (PIYA-204 AC2) or "password reset" on Login (PIYA-204 AC5). Kept a
+/// separate widget so a success can never be styled as a failure by a
+/// mistyped flag.
+class AuthNoticeBanner extends StatelessWidget {
+  const AuthNoticeBanner({super.key, required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return _AuthBanner(
+      message: message,
+      icon: Icons.check_circle_outline_rounded,
+      iconColor: AppTheme.primaryBlue,
+      textColor: AppTheme.onboardingHeadingDark,
+      fill: AppTheme.noticeBannerFill,
+    );
+  }
+}
+
+class _AuthBanner extends StatelessWidget {
+  const _AuthBanner({
+    required this.message,
+    required this.icon,
+    required this.iconColor,
+    required this.textColor,
+    required this.fill,
+    this.actionLabel,
+    this.onAction,
+  });
+
+  final String message;
+  final IconData icon;
+  final Color iconColor;
+  final Color textColor;
+  final Color fill;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+
   static const EdgeInsets _padding = EdgeInsets.fromLTRB(16, 12, 16, 12);
   static const double _radius = 16;
   static const double _iconGap = 12;
@@ -33,13 +88,13 @@ class AuthErrorBanner extends StatelessWidget {
       child: Container(
         padding: _padding,
         decoration: BoxDecoration(
-          color: AppTheme.errorBannerFill,
+          color: fill,
           borderRadius: BorderRadius.circular(_radius),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Icon(Icons.error_outline_rounded, color: AppTheme.errorRed),
+            Icon(icon, color: iconColor),
             const SizedBox(width: _iconGap),
             Expanded(
               child: Column(
@@ -47,9 +102,7 @@ class AuthErrorBanner extends StatelessWidget {
                 children: [
                   Text(
                     message,
-                    style: textTheme.bodyMedium?.copyWith(
-                      color: AppTheme.errorRed,
-                    ),
+                    style: textTheme.bodyMedium?.copyWith(color: textColor),
                   ),
                   if (action != null)
                     TextButton(
