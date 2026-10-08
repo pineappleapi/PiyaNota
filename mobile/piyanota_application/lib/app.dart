@@ -11,6 +11,7 @@ import 'screens/capture/score_details_screen.dart';
 import 'screens/library/score_library_screen.dart';
 import 'screens/onboarding/onboarding_flow_screen.dart';
 import 'screens/placeholder/coming_soon_screen.dart';
+import 'screens/playback/playback_screen.dart';
 import 'screens/processing/processing_screen.dart';
 import 'state/onboarding_providers.dart';
 import 'theme/app_theme.dart';
@@ -37,15 +38,16 @@ class PiyaNotaApp extends StatelessWidget {
         AppRoutes.signUp: (_) => const SignUpScreen(),
         AppRoutes.passwordReset: (_) => const PasswordResetScreen(),
         AppRoutes.scoreLibrary: (_) => const ScoreLibraryScreen(),
-        // Playback and Settings land in later PIYA-2xx tickets; the
-        // placeholders keep the library's navigation testable now.
         AppRoutes.playback: (context) {
           final arguments = ModalRoute.of(context)?.settings.arguments;
-          return ComingSoonScreen(
-            title: 'Playback',
-            detail: arguments is PlaybackArguments
-                ? '${arguments.title} (score #${arguments.scoreId})'
-                : null,
+          if (arguments is! PlaybackArguments) {
+            // Only reachable from the library and Processing, which always
+            // pass these.
+            return const ScoreLibraryScreen();
+          }
+          return PlaybackScreen(
+            scoreId: arguments.scoreId,
+            title: arguments.title,
           );
         },
         AppRoutes.capture: (_) => const ScoreDetailsScreen(),
@@ -79,6 +81,7 @@ class PiyaNotaApp extends StatelessWidget {
             retake: arguments,
           );
         },
+        // Settings lands in a later PIYA-2xx ticket.
         AppRoutes.settings: (_) => const ComingSoonScreen(title: 'Settings'),
       },
     );

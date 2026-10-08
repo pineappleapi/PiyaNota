@@ -160,6 +160,21 @@ class FakeProcessingApi implements ProcessingApi {
     );
   }
 
+  /// Whether [account] has a job for [scoreId] and none of its jobs
+  /// (original or retake replacement) has completed: the fake PIYA-103's
+  /// 409. Scores with no fake job (the demo library) count as finished.
+  bool hasUnfinishedJob({required String account, required int scoreId}) {
+    var any = false;
+    for (final job in _jobs.values) {
+      if (job.account != account || job.scoreId != scoreId) continue;
+      any = true;
+      if (_statusAt(job, _stepOf(job)).stage == ProcessingStage.complete) {
+        return false;
+      }
+    }
+    return any;
+  }
+
   Future<_FakeJob> _ownedJob(String jobId) async {
     final token = await _sessionStorage.readToken();
     final account = token == null ? null : _accountForToken(token);

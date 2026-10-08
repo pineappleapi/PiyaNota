@@ -8,6 +8,9 @@ import 'package:piyanota_application/app.dart';
 import 'package:piyanota_application/services/fake_auth_api.dart';
 import 'package:piyanota_application/services/fake_score_library_api.dart';
 import 'package:piyanota_application/state/auth_providers.dart';
+import 'package:piyanota_application/state/playback_providers.dart';
+
+import '../playback/playback_fakes.dart';
 
 /// Full app with the real fakes: logging in lands on the real library, the
 /// demo account sees its scores, and back does not return to Login.
@@ -28,6 +31,11 @@ void main() {
         overrides: [
           fakeAuthApiProvider.overrideWithValue(
             FakeAuthApi(latency: Duration.zero),
+          ),
+          // No platform audio in widget tests; the real fake result API
+          // still runs.
+          playbackEngineFactoryProvider.overrideWithValue(
+            FakePlaybackEngine.new,
           ),
         ],
         child: const PiyaNotaApp(),
@@ -67,11 +75,13 @@ void main() {
     final navigator = tester.state<NavigatorState>(find.byType(Navigator));
     expect(navigator.canPop(), isFalse);
 
-    // AC7 through the real route table: the placeholder shows the id.
+    // AC7 through the real route table: Playback (PIYA-208) opens the
+    // tapped score, composer from the fake result.
     await tester.tap(find.text('Paraiso'));
     await tester.pump();
     await tester.pump(settle);
-    expect(find.text('Playback — coming soon'), findsOneWidget);
-    expect(find.text('Paraiso (score #102)'), findsOneWidget);
+    expect(find.text('Paraiso'), findsOneWidget);
+    expect(find.text('arr. by Ryan Cayabyab'), findsOneWidget);
+    expect(find.byKey(const ValueKey('play-pause')), findsOneWidget);
   });
 }

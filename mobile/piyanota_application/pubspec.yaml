@@ -77,6 +77,9 @@ flutter:
 
   assets:
     - assets/branding/
+    # Offline Playback demo served by the fake PIYA-103 result
+    # (tool/generate_playback_demo.py).
+    - assets/demo/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

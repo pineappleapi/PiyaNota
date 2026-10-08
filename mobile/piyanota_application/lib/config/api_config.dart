@@ -56,6 +56,12 @@ class ApiConfig {
   static String resubmitPagePath(String jobId) =>
       '${jobStatusPath(jobId)}/resubmit';
 
+  /// PIYA-103 (Playback's result: audio, page images, timing, review).
+  /// Assumed path, reconcile in PIYA-216. PIYA-103 is written per job, but
+  /// the library (PIYA-308) only gives Playback a `scoreId`, so this
+  /// assumes a by-score route exists.
+  static String scoreResultPath(int scoreId) => '${scorePath(scoreId)}/result';
+
   /// PIYA-310 rasterises the whole PDF (up to 15 s for 20 pages, AC6)
   /// before it replies, on top of the upload itself.
   static const Duration pdfReceiveTimeout = Duration(seconds: 90);

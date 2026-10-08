@@ -155,6 +155,16 @@ class FakeScoreLibraryApi implements ScoreLibraryApi {
     _scoresFor(account).removeWhere((score) => score.scoreId == scoreId);
   }
 
+  /// [scoreId] as [account] sees it, or null if that account has no such
+  /// score. Lets the fake PIYA-103 result scope by account like the real
+  /// one and reuse the entry's composer.
+  ScoreSummary? scoreFor({required String account, required int scoreId}) {
+    for (final score in _scoresFor(account)) {
+      if (score.scoreId == scoreId) return score;
+    }
+    return null;
+  }
+
   Future<String> _currentAccount() async {
     final token = await _sessionStorage.readToken();
     final account = token == null ? null : _accountForToken(token);

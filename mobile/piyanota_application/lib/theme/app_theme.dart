@@ -221,6 +221,50 @@ class AppTheme {
   // would fail at this size.
   static const Color processingSecondary = libraryHeaderBottom;
 
+  // Playback (PIYA-208), dropper-sampled from
+  // references/PIYA208_ScorePlayback UI.png (2026-10-09).
+  // Back/download discs and the play glyph. Sampled #272960 (white icon on
+  // it 13.4:1; on playbackPlayFill 11.4:1).
+  static const Color playbackNavy = Color(0xFF272960);
+  // Title. Sampled #3D3D3D, same as the library card title (10.9:1).
+  static const Color playbackTitle = libraryCardTitle;
+  // Adjusted for AA, 2026-10-09: "arr. by …" and "Select voice/s to hear."
+  // sampled #898989 is 3.5:1 on white; HSL lightness −0.075, the smallest
+  // 0.005 step that reaches 4.5:1, gives #767676 (4.54:1).
+  static const Color playbackSubtle = Color(0xFF767676);
+  // Unselected chip fill. Sampled #D7E4E9.
+  static const Color playbackChipFill = Color(0xFFD7E4E9);
+  // Adjusted for AA, 2026-10-09: chip text sampled #7993A5 is 2.5:1 on the
+  // chip fill; HSL lightness −0.17 (smallest 0.005 step) gives #506777
+  // (4.56:1 on the fill).
+  static const Color playbackChipText = Color(0xFF506777);
+  // Derived (no selected chip in the mockup): the unselected text colour as
+  // the fill, so both states come from one sampled family. White text and
+  // check on it 5.9:1.
+  static const Color playbackChipSelectedFill = playbackChipText;
+  // Indicator band. The mockup's band is an opaque #CDE7F5 behind the notes;
+  // this blue at ~30% alpha composites to exactly #CDE7F5 over white paper
+  // while black notes under it stay at ~10:1, so it can sit on top of the
+  // image.
+  static const Color playbackBand = Color(0x4D58AFDE);
+  // Bottom panel gradient. Sampled #019EB0 → #116490. White text on it is
+  // 3.2:1 at the very top but ≥4.85:1 from 60% down, where the times and
+  // the Voice Mixer/Speed labels sit (≥5.0:1 there); the cyan skip icons sit
+  // ~20% down at ≥3.16:1 (icons, 3:1 floor).
+  static const Color playbackPanelTop = Color(0xFF019EB0);
+  static const Color playbackPanelBottom = Color(0xFF116490);
+  static const LinearGradient playbackPanelGradient = LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [playbackPanelTop, playbackPanelBottom],
+  );
+  // Play disc and skip icons. Sampled #98FFF8 (= captureAccent).
+  static const Color playbackAccent = captureAccent;
+  // Derived (not in the mockup): the review banner. Dark amber on pale
+  // amber, 8.4:1, so it reads as a caution, not an error (errorRed).
+  static const Color playbackReviewFill = Color(0xFFFFF4D6);
+  static const Color playbackReviewText = Color(0xFF5C4400);
+
   /// Darkens [color] for a pressed-state SOP (see frontend-piyanota.md
   /// "Interaction states") — reduces HSL lightness rather than overlaying
   /// opacity, so the result stays the same hue, just deeper.
