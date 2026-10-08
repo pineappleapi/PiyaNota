@@ -146,7 +146,7 @@ _Covers: UI tickets (Onboarding, Account, Score Library, Playback, Settings, Sys
 8. On successful completion, automatically routes to Playback for the newly processed score within 2 seconds of receiving the `complete` status.
 9. **Run in the background** *(added 2026-10-08, user decision)*:
    - A "Convert in Background" button sits below Cancel Scan. A back arrow in the top-left corner and the Android system back do the same thing: return to the Score Library without cancelling the scan.
-   - The scan keeps running and its status keeps being polled after the user leaves this screen. Polling belongs to one app-level progress source, not to this screen's lifecycle, and it stops only when the job reaches a terminal state (`complete`/`failed`/`cancelled`).
+   - The scan keeps running and its status keeps being polled after the user leaves this screen. Polling belongs to one app-level progress source, not to this screen's lifecycle. Polling stops when the job reaches a terminal state (`complete`/`failed`/`cancelled`), when the job is gone (404) or the session has expired (401), or when it pauses after 30 s of continuous poll failures. Resuming a paused background job without opening Processing is PIYA-218 AC10.
    - Reopening Processing for a job that is still running shows its current progress immediately, without restarting from 0%. Reopening it for a job that has already completed routes straight to Playback.
    - The library card and notification bell that show this background progress are specified in PIYA-218 and read the same progress source, so the three never disagree.
 
@@ -274,7 +274,7 @@ _Covers: UI tickets (Onboarding, Account, Score Library, Playback, Settings, Sys
 **Acceptance Criteria:**
 1. **One source of truth:** the library card, the bell panel and the Processing screen all read the same app-level progress source as PIYA-207 AC9. Percent, page and stage are identical in all three at any moment. UI updates are throttled to at most once every 1–2 seconds.
 2. **Score states:** every score has exactly one status: `processing`, `completed`, `failed` or `cancelled`. A score shows in the library as `processing` from the moment its scan is submitted. A `cancelled` score is removed from the library.
-3. **Navigation rule (every tap handler):** `processing` opens Processing (PIYA-207); `completed` opens Playback (PIYA-208); `failed` opens the PIYA-207 failure view, with Retake page (where PIYA-207 AC7 allows it) and Delete. A score that completed while the user was elsewhere routes to Playback, never to a stale Processing screen.
+3. **Navigation rule (every tap handler):** `processing` opens Processing (PIYA-207); `completed` opens Playback (PIYA-208); `failed` opens the PIYA-207 failure view. PIYA-207 offers Retake page (where its AC7 allows it) and Back to library; this ticket adds a Delete action to that view, which calls PIYA-309 and confirms first. A score that completed while the user was elsewhere routes to Playback, never to a stale Processing screen.
 4. **Library processing card:** shows the title, a small progress bar or ring, and the label "Converting… N%", with a dimmed thumbnail or the scanned page. Tap follows AC3. Long-press offers "Cancel scan", using the same confirm dialog and PIYA-114 call as PIYA-207 AC4. On completion the card turns into a normal score card in place, without reloading the whole list.
 5. **Bell states (library header):**
    - Idle: a plain bell.
@@ -290,7 +290,7 @@ _Covers: UI tickets (Onboarding, Account, Score Library, Playback, Settings, Sys
 8. **Survives app restarts:** job status and notification items persist on the device. On reopen the app restores processing cards and bell rows, re-polls PIYA-102 for every job that isn't terminal, and reflects anything that finished while the app was closed. The scan itself keeps running server-side regardless of the app.
 9. **Multiple scans:** several scans can run at once, each with its own card and its own bell row. The bell's active ring shows while any scan is running.
 10. **No endless progress:**
-    - With no connection, or after repeated failed polls, cards and rows show a "Paused" state with Retry instead of a frozen bar.
+    - With no connection, or after repeated failed polls, cards and rows show a "Paused" state with Retry instead of a frozen bar. Paused background jobs resume polling by themselves when connectivity returns (`connectivity_plus`), without the user opening Processing.
     - A scan whose percent hasn't changed for 90 s shows "Still working, this one's a long piece."
 11. **Notification permission:** Android 13+ `POST_NOTIFICATIONS` is requested once, in context: the first time a scan is sent to the background, with a one-line reason. If it is denied, the bell and in-app banners still work and the app doesn't ask again on every scan.
 12. **Copy:** user-facing text says "scan" and "piano guide", matching the spec's §9 copy table. It doesn't mix in "process"/"convert" except in the spec's own row and card labels.
@@ -298,6 +298,8 @@ _Covers: UI tickets (Onboarding, Account, Score Library, Playback, Settings, Sys
 **Backend dependencies (to confirm with backend-lead before build):**
 - PIYA-308 must return in-progress scans (status, percent, jobId) alongside completed ones. Alternatively the client merges its locally tracked jobs, but then a reinstalled app loses them.
 - `docs/tickets/module3-backend.md` currently inserts the `scores` row only when the job completes (PIYA-321 AC4), which conflicts with AC2.
+- PIYA-101/310's submit response needs `scoreId` too, so a processing card can be linked to its job before completion. The client tracker stores `jobId`, the title, and `scoreId` once known.
+- Interim gap until this ticket lands: after "Convert in Background", tapping that score in the library opens Playback for an unfinished score.
 - PIYA-102 needs `scoreId` in the `complete` payload to open Playback (also an open gap for PIYA-207 AC8).
 - Push notifications when the app is closed need a server-side push sender (e.g. FCM) and device-token registration. Neither is in Module 3's tickets yet. Until they exist, AC7's background half can only be met while the OS keeps the app's background poll alive.
 
