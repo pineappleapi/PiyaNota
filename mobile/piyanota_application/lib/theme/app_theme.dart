@@ -199,6 +199,28 @@ class AppTheme {
   // captureInk disc so the cyan icon keeps 14.7:1 over white paper (cyan on
   // white is 1.1:1). The mockup's trash sits on its dark placeholder art.
 
+  // Processing (PIYA-207), dropper-sampled from
+  // references/PIYA207_ProcessingScreen_{1,2,3}.png (2026-10-08).
+  // User decision 2026-10-08: kept as sampled despite white-text AA
+  // shortfall (~2:1 on the teal top). The card's stops differ from
+  // captureBackgroundTop/Bottom by one unit in the top stop's green, a
+  // sampling difference, so the capture gradient is reused.
+  static const Color processingCardTop = captureBackgroundTop;
+  static const Color processingCardBottom = captureBackgroundBottom;
+  static const LinearGradient processingCardGradient =
+      captureBackgroundGradient;
+  // Unfilled progress track. Sampled #125178.
+  static const Color processingTrack = Color(0xFF125178);
+  // "page 2/3". Sampled #99F7F5.
+  static const Color processingPageText = Color(0xFF99F7F5);
+  // "✕ Cancel Scan". Sampled #DF5757 (3.7:1 on white; 18 sp bold counts
+  // as large text, 3:1 floor).
+  static const Color processingCancel = Color(0xFFDF5757);
+  // Derived (not in the mockup): "Convert in Background" outline and text.
+  // libraryHeaderBottom is 4.52:1 on white; the brand blue #1B7DCE (4.3:1)
+  // would fail at this size.
+  static const Color processingSecondary = libraryHeaderBottom;
+
   /// Darkens [color] for a pressed-state SOP (see frontend-piyanota.md
   /// "Interaction states") — reduces HSL lightness rather than overlaying
   /// opacity, so the result stays the same hue, just deeper.

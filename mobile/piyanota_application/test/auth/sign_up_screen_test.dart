@@ -10,6 +10,10 @@ import 'package:piyanota_application/screens/auth/sign_up_screen.dart';
 import 'package:piyanota_application/services/auth_api.dart';
 import 'package:piyanota_application/services/session_storage.dart';
 
+import 'package:piyanota_application/state/processing_providers.dart';
+
+import '../processing/processing_fakes.dart'
+    show ScriptedProcessingApi, expectTrackerCleared, running, seedOldJob;
 import 'auth_test_harness.dart';
 
 const _createAccount = 'Create Account';
@@ -39,6 +43,25 @@ Future<void> _tapCreate(WidgetTester tester) async {
 
 void main() {
   setUp(() => FlutterSecureStorage.setMockInitialValues({}));
+
+  testWidgets('a new account drops jobs followed for the last one', (
+    tester,
+  ) async {
+    final processing = ScriptedProcessingApi([running(10)]);
+    await pumpAuthScreen(
+      tester,
+      screen: const SignUpScreen(),
+      api: ScriptedAuthApi(onSignUp: () async => testSession()),
+      extraOverrides: [processingApiProvider.overrideWithValue(processing)],
+    );
+    await seedOldJob(tester, processing);
+
+    await _fill(tester);
+    await _tapCreate(tester);
+    await tester.pumpAndSettle();
+    expect(find.text(libraryMarker), findsOneWidget);
+    await expectTrackerCleared(tester, processing);
+  });
 
   testWidgets('AC1: Create Account disabled until all three fields filled', (
     tester,

@@ -12,6 +12,10 @@ import 'package:piyanota_application/screens/auth/sign_up_screen.dart';
 import 'package:piyanota_application/services/auth_api.dart';
 import 'package:piyanota_application/services/session_storage.dart';
 
+import 'package:piyanota_application/state/processing_providers.dart';
+
+import '../processing/processing_fakes.dart'
+    show ScriptedProcessingApi, expectTrackerCleared, running, seedOldJob;
 import 'auth_test_harness.dart';
 
 const _logIn = 'Log In';
@@ -31,6 +35,24 @@ Future<void> _fillAndSubmit(WidgetTester tester) async {
 
 void main() {
   setUp(() => FlutterSecureStorage.setMockInitialValues({}));
+
+  testWidgets('a new login drops jobs followed for the last account', (
+    tester,
+  ) async {
+    final processing = ScriptedProcessingApi([running(10)]);
+    await pumpAuthScreen(
+      tester,
+      screen: const LoginScreen(),
+      api: ScriptedAuthApi(onLogin: () async => testSession()),
+      extraOverrides: [processingApiProvider.overrideWithValue(processing)],
+    );
+    await seedOldJob(tester, processing);
+
+    await _fillAndSubmit(tester);
+    await tester.pumpAndSettle();
+    expect(find.text(libraryMarker), findsOneWidget);
+    await expectTrackerCleared(tester, processing);
+  });
 
   testWidgets('AC1: Log In disabled until email and password both non-empty', (
     tester,

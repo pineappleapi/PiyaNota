@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../routes/app_routes.dart';
 import '../../services/auth_api.dart';
 import '../../state/auth_providers.dart';
+import '../../state/session_actions.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/primary_pill_button.dart';
 import 'auth_messages.dart';
@@ -98,7 +99,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             email: _emailController.text.trim(),
             password: _passwordController.text,
           );
-      await ref.read(sessionStorageProvider).save(session);
+      await startSession(ref, session);
     } on InvalidCredentialsException {
       error = AuthMessages.incorrectCredentials;
     } on AuthNetworkException {

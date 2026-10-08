@@ -14,9 +14,10 @@ import '../../services/capture/device_channel.dart';
 import '../../services/capture/page_image_processor.dart';
 import '../../services/capture/page_picker.dart';
 import '../../services/score_upload_api.dart';
-import '../../state/auth_providers.dart';
 import '../../state/capture_providers.dart';
+import '../../state/processing_providers.dart';
 import '../../state/score_library_providers.dart';
+import '../../state/session_actions.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/primary_pill_button.dart';
 import 'capture_messages.dart';
@@ -29,10 +30,14 @@ import 'widgets/page_strip.dart';
 /// Step 2 of Add Score (PIYA-206): photograph pages, or add them from the
 /// gallery or a PDF, arrange them, and send. Capture-then-process only —
 /// nothing is recognised live (SOW §4).
+///
+/// With [retake] set (PIYA-207 AC7) it replaces one page of a failed job
+/// instead: one photo at most, no PDF, and the page goes to PIYA-116.
 class CaptureScreen extends ConsumerStatefulWidget {
-  const CaptureScreen({super.key, required this.details});
+  const CaptureScreen({super.key, required this.details, this.retake});
 
   final ScoreDetails details;
+  final CaptureRetakeArguments? retake;
 
   @override
   ConsumerState<CaptureScreen> createState() => _CaptureScreenState();
@@ -211,6 +216,11 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
 
   bool get _canAct => _busy == 0 && !_submitting;
 
+  /// A retake replaces exactly one page.
+  int get _photoRoom => widget.retake == null
+      ? _session.photoRoom
+      : (1 - _session.pageCount).clamp(0, 1);
+
   /// Decides whether photos can be added: offers to replace a PDF, refuses
   /// when full. Changes nothing yet: a PDF is only replaced once photos
   /// actually arrive, so cancelling the picker or a failed shot keeps it.
@@ -224,8 +234,12 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
       );
       return replace && mounted ? _PhotoRoom.replacePdf : _PhotoRoom.none;
     }
-    if (_session.photoRoom <= 0) {
-      _snack(CaptureMessages.scoreFull);
+    if (_photoRoom <= 0) {
+      _snack(
+        widget.retake == null
+            ? CaptureMessages.scoreFull
+            : CaptureMessages.retakeFull,
+      );
       return _PhotoRoom.none;
     }
     return _PhotoRoom.add;
@@ -283,9 +297,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     try {
       final processor = ref.read(pageImageProcessorProvider);
       for (final path in picked) {
-        final photoRoom = replacePdf
-            ? CaptureSession.maxPages
-            : _session.photoRoom;
+        final photoRoom = replacePdf ? CaptureSession.maxPages : _photoRoom;
         try {
           if (prepared.length >= photoRoom) {
             skipped++;
@@ -422,11 +434,12 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                 Icons.photo_library_outlined,
                 CaptureMessages.gallery,
               ),
-              (
-                PageSource.pdf,
-                Icons.picture_as_pdf_outlined,
-                CaptureMessages.pdf,
-              ),
+              if (widget.retake == null)
+                (
+                  PageSource.pdf,
+                  Icons.picture_as_pdf_outlined,
+                  CaptureMessages.pdf,
+                ),
             ])
               ListTile(
                 leading: Icon(icon, color: AppTheme.captureInk),
@@ -547,7 +560,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     // photos or push a score past the page limit.
     final fits = switch (item) {
       PdfDocument() => _session.isEmpty,
-      PhotoPage() => !_session.hasPdf && _session.photoRoom > 0,
+      PhotoPage() => !_session.hasPdf && _photoRoom > 0,
     };
     if (!fits || _session.indexOf(item.id) >= 0) {
       _sweepFiles();
@@ -622,6 +635,32 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     });
   }
 
+  /// A retake the server refused for good (job gone, or page no longer
+  /// replaceable). Closing would land back on the failure view, which
+  /// offers this same retake again, so go past it to the library. The
+  /// library reloads to show where the scan really stands.
+  void _abandonRetake() {
+    final retake = widget.retake;
+    if (retake == null || _submitting) return;
+    _pendingUndo = null;
+    _files.deleteAll();
+    final error = _uploadError;
+    if (error is UploadRejectedException && error.code == jobNotFoundCode) {
+      ref.read(processingJobsProvider.notifier).forget(retake.jobId);
+    }
+    ref.invalidate(scoreLibraryProvider);
+    final navigator = Navigator.of(context);
+    var found = false;
+    navigator.popUntil((route) {
+      if (route.settings.name == AppRoutes.scoreLibrary) {
+        found = true;
+        return true;
+      }
+      return route.isFirst;
+    });
+    if (!found) navigator.pushReplacementNamed(AppRoutes.scoreLibrary);
+  }
+
   void _cancelSubmit() => _cancelToken?.cancel();
 
   Future<void> _submit() async {
@@ -636,6 +675,30 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     var sent = false;
     try {
       final api = ref.read(scoreUploadApiProvider);
+      if (widget.retake case final retake?) {
+        final replaced = await api.resubmitPage(
+          jobId: retake.jobId,
+          pageIndex: retake.pageIndex,
+          imagePath: _session.photos.first.path,
+          cancelToken: cancelToken,
+        );
+        if (!mounted) return;
+        sent = true;
+        _pendingUndo = null;
+        _files.deleteAll();
+        // The failed job is finished with; only the replacement is polled.
+        ref.read(processingJobsProvider.notifier).forget(retake.jobId);
+        Navigator.of(context).pushNamedAndRemoveUntil(
+          AppRoutes.processing,
+          (route) =>
+              route.settings.name == AppRoutes.scoreLibrary || route.isFirst,
+          arguments: ProcessingArguments(
+            jobId: replaced.replacementJobId,
+            title: retake.title,
+          ),
+        );
+        return;
+      }
       // AC8: a PDF goes to PIYA-310, camera/gallery photos to PIYA-101.
       final pdf = _session.pdf;
       final job = pdf != null
@@ -687,13 +750,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   }
 
   Future<void> _returnToLogin() async {
-    try {
-      await ref.read(sessionStorageProvider).clear();
-    } catch (e) {
-      // The server already rejected the token; failing to wipe it locally
-      // must not trap the user here.
-      debugPrint('Session clear failed: $e');
-    }
+    await endLocalSession(ref);
     if (!mounted) return;
     Navigator.of(context)
         .pushNamedAndRemoveUntil(AppRoutes.login, (_) => false);
@@ -785,6 +842,11 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         _TopBar(
+                          title: widget.retake == null
+                              ? CaptureMessages.alignInFrame
+                              : CaptureMessages.retakeTitle(
+                                  widget.retake!.pageIndex + 1,
+                                ),
                           onClose: _submitting ? null : _close,
                           torchOn: _torchOn,
                           onTorch: _camera == null ? null : _toggleTorch,
@@ -808,7 +870,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                           onShutter: _camera != null && _canAct
                               ? _takePhoto
                               : null,
-                          onPdf: _canAct ? _pickPdf : null,
+                          onPdf: _canAct && widget.retake == null
+                              ? _pickPdf
+                              : null,
                         ),
                         const SizedBox(height: 12),
                         _StripHeading(session: _session, focusId: _focusId),
@@ -833,6 +897,10 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                                 CaptureMessages.logIn,
                                 _returnToLogin,
                               ),
+                              _
+                                  when widget.retake != null &&
+                                      CaptureMessages.isDeadRetake(error) =>
+                                (CaptureMessages.backToLibrary, _abandonRetake),
                               _ when CaptureMessages.isDetailsError(error) => (
                                 CaptureMessages.editDetails,
                                 _editDetails,
@@ -843,9 +911,13 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                         ],
                         const SizedBox(height: 12),
                         PrimaryPillButton(
-                          label: count == 0
-                              ? CaptureMessages.createScore
-                              : CaptureMessages.createScoreWith(count),
+                          label: switch (widget.retake) {
+                            final retake? => CaptureMessages.sendRetake(
+                              retake.pageIndex + 1,
+                            ),
+                            null when count == 0 => CaptureMessages.createScore,
+                            null => CaptureMessages.createScoreWith(count),
+                          },
                           onPressed: count == 0 || _busy > 0 ? null : _submit,
                           isLoading: _submitting,
                           backgroundColor: AppTheme.captureAccent,
@@ -923,11 +995,13 @@ class _RenderMinIntrinsicHeight extends RenderProxyBox {
 
 class _TopBar extends StatelessWidget {
   const _TopBar({
+    required this.title,
     required this.onClose,
     required this.torchOn,
     required this.onTorch,
   });
 
+  final String title;
   final VoidCallback? onClose;
   final bool torchOn;
   final VoidCallback? onTorch;
@@ -951,7 +1025,7 @@ class _TopBar extends StatelessWidget {
           child: Semantics(
             header: true,
             child: Text(
-              CaptureMessages.alignInFrame,
+              title,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                 color: AppTheme.captureInk,

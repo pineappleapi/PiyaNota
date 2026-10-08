@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -157,6 +158,7 @@ Future<void> pumpAuthScreen(
   double textScale = 1.0,
   SessionStorage? storage,
   Map<String, WidgetBuilder> extraRoutes = const {},
+  List<Override> extraOverrides = const [],
 }) async {
   // A phone-sized viewport (the test default is 800x600 landscape), so
   // layout/overflow behaviour matches a real device.
@@ -169,6 +171,7 @@ Future<void> pumpAuthScreen(
       overrides: [
         authApiProvider.overrideWithValue(api),
         if (storage != null) sessionStorageProvider.overrideWithValue(storage),
+        ...extraOverrides,
       ],
       child: MaterialApp(
         builder: (context, child) => MediaQuery(

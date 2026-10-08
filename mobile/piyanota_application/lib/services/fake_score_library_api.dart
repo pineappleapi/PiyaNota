@@ -123,27 +123,36 @@ class FakeScoreLibraryApi implements ScoreLibraryApi {
 
   /// Stands in for the score row PIYA-101/310 creates with the job, so a
   /// fake submit (PIYA-206) shows up in the library. The new score gets the
-  /// next free id and today's date.
-  void addSubmittedScore({
+  /// next free id and today's date, which is returned so the fake job can
+  /// hand it back on `complete` (PIYA-207 AC8).
+  int addSubmittedScore({
     required String account,
     required String title,
     required int? pageCount,
     String? composer,
   }) {
     final scores = _scoresFor(account);
-    final nextId = scores.fold<int>(
+    final highest = scores.fold<int>(
       demoScores.last.scoreId,
       (highest, score) => score.scoreId > highest ? score.scoreId : highest,
     );
+    final scoreId = highest + 1;
     scores.add(
       ScoreSummary(
-        scoreId: nextId + 1,
+        scoreId: scoreId,
         title: title,
         lastActivityAt: _clock().toUtc(),
         composer: composer,
         pageCount: pageCount,
       ),
     );
+    return scoreId;
+  }
+
+  /// Stands in for the placeholder score a cancelled scan leaves behind
+  /// being removed (scan-status spec §3). Silent if it's already gone.
+  void removeSubmittedScore({required String account, required int scoreId}) {
+    _scoresFor(account).removeWhere((score) => score.scoreId == scoreId);
   }
 
   Future<String> _currentAccount() async {

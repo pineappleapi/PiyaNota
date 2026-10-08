@@ -13,6 +13,8 @@ import 'package:piyanota_application/services/capture/device_channel.dart';
 import 'package:piyanota_application/services/capture/page_picker.dart';
 import 'package:piyanota_application/services/score_upload_api.dart';
 
+import '../processing/processing_fakes.dart'
+    show expectTrackerCleared, seedOldJob;
 import 'capture_fakes.dart';
 
 Finder _label(String label) => find.bySemanticsLabel(label);
@@ -529,6 +531,7 @@ void main() {
       h.upload.onSubmit = () =>
           Future.error(const UploadSessionExpiredException());
       await pumpCapture(tester, h);
+      await seedOldJob(tester, h.processing);
       await _shoot(tester);
       await tester.tap(find.text(CaptureMessages.createScoreWith(1)));
       await tester.pumpAndSettle();
@@ -537,6 +540,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text(kLoginMarker), findsOneWidget);
       expect(h.secureStorage.values, isEmpty);
+      await expectTrackerCleared(tester, h.processing);
     });
   });
 

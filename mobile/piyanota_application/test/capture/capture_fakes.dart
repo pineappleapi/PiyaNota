@@ -24,8 +24,11 @@ import 'package:piyanota_application/services/score_upload_api.dart';
 import 'package:piyanota_application/services/session_storage.dart';
 import 'package:piyanota_application/state/auth_providers.dart';
 import 'package:piyanota_application/state/capture_providers.dart';
+import 'package:piyanota_application/state/processing_providers.dart';
 
 import '../auth/auth_test_harness.dart';
+import '../processing/processing_fakes.dart'
+    show ScriptedProcessingApi, running;
 
 /// A real 1x1 PNG, so thumbnails decode without touching disk.
 final Uint8List kTinyPng = img.encodePng(img.Image(width: 1, height: 1));
@@ -233,6 +236,29 @@ class ScriptedScoreUploadApi implements ScoreUploadApi {
     pdfCalls.add(pdfPath);
     return _answer(cancelToken);
   }
+
+  /// PIYA-116 calls as (jobId, pageIndex, imagePath).
+  final List<(String, int, String)> resubmitCalls = [];
+  Future<ResubmittedJob> Function()? onResubmit;
+
+  @override
+  Future<ResubmittedJob> resubmitPage({
+    required String jobId,
+    required int pageIndex,
+    required String imagePath,
+    CancelToken? cancelToken,
+  }) {
+    lastCancelToken = cancelToken;
+    resubmitCalls.add((jobId, pageIndex, imagePath));
+    return onResubmit?.call() ??
+        Future.value(
+          ResubmittedJob(
+            originalJobId: jobId,
+            replacementJobId: '$jobId-retake',
+            pageIndex: pageIndex,
+          ),
+        );
+  }
 }
 
 /// Everything Capture talks to, faked, plus the overrides that install it.
@@ -248,6 +274,9 @@ class CaptureHarness {
   final picker = FakePagePicker();
   final processor = FakePageImageProcessor();
   final upload = ScriptedScoreUploadApi();
+
+  /// Answers polls for jobs a test seeds into the tracker.
+  final processing = ScriptedProcessingApi([running(10)]);
   final files = FakeCaptureFileStore();
   final secureStorage = FaultySecureStorage({'session_token': 'sess_t'});
   final List<FakeCaptureCamera> cameras = [];
@@ -267,6 +296,7 @@ class CaptureHarness {
       return camera;
     }),
     scoreUploadApiProvider.overrideWithValue(upload),
+    processingApiProvider.overrideWithValue(processing),
     captureFileStoreProvider.overrideWithValue(files),
     sessionStorageProvider.overrideWithValue(SessionStorage(secureStorage)),
   ];
@@ -285,6 +315,7 @@ Future<void> pumpCapture(
   Size size = const Size(400, 800),
   double textScale = 1,
   bool startOnDetails = false,
+  CaptureRetakeArguments? retake,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -310,6 +341,15 @@ Future<void> pumpCapture(
                     as CapturePagesArguments;
             return CaptureScreen(details: args.details);
           },
+          AppRoutes.captureRetake: (context) {
+            final args =
+                ModalRoute.of(context)!.settings.arguments!
+                    as CaptureRetakeArguments;
+            return CaptureScreen(
+              details: ScoreDetails(title: args.title),
+              retake: args,
+            );
+          },
           AppRoutes.processing: (context) {
             final args =
                 ModalRoute.of(context)!.settings.arguments!
@@ -323,7 +363,9 @@ Future<void> pumpCapture(
     ),
   );
   final navigator = tester.state<NavigatorState>(find.byType(Navigator));
-  if (startOnDetails) {
+  if (retake != null) {
+    navigator.pushNamed(AppRoutes.captureRetake, arguments: retake);
+  } else if (startOnDetails) {
     navigator.pushNamed(AppRoutes.capture);
   } else {
     navigator.pushNamed(
