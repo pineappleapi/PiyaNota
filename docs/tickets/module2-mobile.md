@@ -144,6 +144,11 @@ _Covers: UI tickets (Onboarding, Account, Score Library, Playback, Settings, Sys
    - On `no_staff_detected` → offers a direct action to recapture only the affected page, rather than requiring the user to restart the entire submission.
    - On `unsupported_staff_layout` → **no recapture-this-page action is offered**, since recapturing won't change the underlying score's layout. The user is instead directed back to the Score Library with the error message displayed.
 8. On successful completion, automatically routes to Playback for the newly processed score within 2 seconds of receiving the `complete` status.
+9. **Run in the background** *(added 2026-10-08, user decision)*:
+   - A "Convert in Background" button sits below Cancel Scan. A back arrow in the top-left corner and the Android system back do the same thing: return to the Score Library without cancelling the scan.
+   - The scan keeps running and its status keeps being polled after the user leaves this screen. Polling belongs to one app-level progress source, not to this screen's lifecycle, and it stops only when the job reaches a terminal state (`complete`/`failed`/`cancelled`).
+   - Reopening Processing for a job that is still running shows its current progress immediately, without restarting from 0%. Reopening it for a job that has already completed routes straight to Playback.
+   - The library card and notification bell that show this background progress are specified in PIYA-218 and read the same progress source, so the three never disagree.
 
 ---
 
@@ -252,6 +257,49 @@ _Covers: UI tickets (Onboarding, Account, Score Library, Playback, Settings, Sys
 3. Actions requiring connectivity (Capture submission, Login, Sign-Up) are disabled while offline, with offline notice shown instead of allowing a failed submission attempt.
 4. Previously downloaded audio tracks (via Export) remain playable while offline.
 5. Offline state automatically clears and normal functionality resumes within 5 seconds of connectivity restoration, without requiring an app restart.
+
+---
+
+### PIYA-218 — Scan Status in Library & Notification Bell UI
+*(Added 2026-10-08, user request. Full design spec: `mobile/piyanota_application/references/scan-status-and-notifications-spec.md`. Depends on PIYA-207 AC9.)*
+
+**User Story:** As a choir member who sent a scan to convert in the background, I want to see its progress from the Score Library and be told when it's ready or has failed, so that I can keep using the app instead of waiting on the Processing screen.
+
+**Process:**
+1. User submits a score, then taps Convert in Background (or Back) on Processing (PIYA-207).
+2. The Score Library shows the score as a processing card with live progress, and the header's notification bell shows that a scan is active.
+3. When the scan finishes, the card and the bell update in place, and the user is notified (an in-app toast, or a push notification if the app is in the background).
+4. User taps the card, the bell row, or the notification and lands on Processing, Playback, or the failure view, depending on status.
+
+**Acceptance Criteria:**
+1. **One source of truth:** the library card, the bell panel and the Processing screen all read the same app-level progress source as PIYA-207 AC9. Percent, page and stage are identical in all three at any moment. UI updates are throttled to at most once every 1–2 seconds.
+2. **Score states:** every score has exactly one status: `processing`, `completed`, `failed` or `cancelled`. A score shows in the library as `processing` from the moment its scan is submitted. A `cancelled` score is removed from the library.
+3. **Navigation rule (every tap handler):** `processing` opens Processing (PIYA-207); `completed` opens Playback (PIYA-208); `failed` opens the PIYA-207 failure view, with Retake page (where PIYA-207 AC7 allows it) and Delete. A score that completed while the user was elsewhere routes to Playback, never to a stale Processing screen.
+4. **Library processing card:** shows the title, a small progress bar or ring, and the label "Converting… N%", with a dimmed thumbnail or the scanned page. Tap follows AC3. Long-press offers "Cancel scan", using the same confirm dialog and PIYA-114 call as PIYA-207 AC4. On completion the card turns into a normal score card in place, without reloading the whole list.
+5. **Bell states (library header):**
+   - Idle: a plain bell.
+   - Any scan active: a subtle animated ring or spinner on the bell.
+   - Unread items: a red dot or count badge, for completed and failed items only. In-progress scans never add to the badge.
+6. **Bell panel:** tapping the bell opens a panel or modal listing recent items newest first, with the following rows:
+   - **Processing:** "[Score] is still being converted. Hang on tight!" plus a live progress bar. Tap opens Processing. Not dismissible while active.
+   - **Completed:** "[Score] is ready to play" plus a relative time ("Just now"). Unread rows have a dot or bold title. Tap opens Playback and marks the row read.
+   - **Failed:** "[Score] couldn't be converted" / "Tap to see what happened". Tap opens the failure view (AC3).
+   - A processing row turns into its completed or failed row **in place**. A score never has two rows.
+   - "Mark all as read". Swipe to dismiss completed and failed rows. Keep the latest 20 items or 7 days, whichever is fewer. Empty state: "No notifications yet."
+7. **Completion feedback:** when a scan completes or fails while the app is in the foreground (and the user isn't on that scan's Processing screen), show an in-app banner or toast: "[Score] is ready. [Open]" (or its failure equivalent). When the app is in the background or closed, send a system push notification, "Your piano guide for [Score] is ready.", and tapping it opens Playback for that score directly.
+8. **Survives app restarts:** job status and notification items persist on the device. On reopen the app restores processing cards and bell rows, re-polls PIYA-102 for every job that isn't terminal, and reflects anything that finished while the app was closed. The scan itself keeps running server-side regardless of the app.
+9. **Multiple scans:** several scans can run at once, each with its own card and its own bell row. The bell's active ring shows while any scan is running.
+10. **No endless progress:**
+    - With no connection, or after repeated failed polls, cards and rows show a "Paused" state with Retry instead of a frozen bar.
+    - A scan whose percent hasn't changed for 90 s shows "Still working, this one's a long piece."
+11. **Notification permission:** Android 13+ `POST_NOTIFICATIONS` is requested once, in context: the first time a scan is sent to the background, with a one-line reason. If it is denied, the bell and in-app banners still work and the app doesn't ask again on every scan.
+12. **Copy:** user-facing text says "scan" and "piano guide", matching the spec's §9 copy table. It doesn't mix in "process"/"convert" except in the spec's own row and card labels.
+
+**Backend dependencies (to confirm with backend-lead before build):**
+- PIYA-308 must return in-progress scans (status, percent, jobId) alongside completed ones. Alternatively the client merges its locally tracked jobs, but then a reinstalled app loses them.
+- `docs/tickets/module3-backend.md` currently inserts the `scores` row only when the job completes (PIYA-321 AC4), which conflicts with AC2.
+- PIYA-102 needs `scoreId` in the `complete` payload to open Playback (also an open gap for PIYA-207 AC8).
+- Push notifications when the app is closed need a server-side push sender (e.g. FCM) and device-token registration. Neither is in Module 3's tickets yet. Until they exist, AC7's background half can only be met while the OS keeps the app's background poll alive.
 
 ## Integration Tickets
 
