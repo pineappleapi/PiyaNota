@@ -1,3 +1,5 @@
+import '../models/score_details.dart';
+
 /// Named route constants. Onboarding itself is the app's `home` (not a
 /// named route) since it's a one-time gate, not something re-navigated to.
 class AppRoutes {
@@ -14,6 +16,28 @@ class AppRoutes {
   static const playback = '/playback';
   static const capture = '/capture';
   static const settings = '/settings';
+
+  // PIYA-206: [capture] opens step 1 (score details); step 2 takes the
+  // pages. Processing is a placeholder until PIYA-207 lands.
+  static const capturePages = '/capture/pages';
+  static const processing = '/processing';
+}
+
+/// Arguments for [AppRoutes.capturePages]: the step-1 answers that travel
+/// with the pages at submit.
+class CapturePagesArguments {
+  const CapturePagesArguments({required this.details});
+
+  final ScoreDetails details;
+}
+
+/// Arguments for [AppRoutes.processing]. [jobId] is what Processing
+/// (PIYA-207) polls; [title] is for its header while it loads.
+class ProcessingArguments {
+  const ProcessingArguments({required this.jobId, required this.title});
+
+  final String jobId;
+  final String title;
 }
 
 /// Arguments for [AppRoutes.playback]. Carries the id of an already

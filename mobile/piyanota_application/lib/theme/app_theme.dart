@@ -162,6 +162,43 @@ class AppTheme {
   static const double librarySkeletonBaseAlpha = 0.7;
   static const double librarySkeletonHighlightAlpha = 0.95;
 
+  // Capture / Add Score (PIYA-206), dropper-sampled from
+  // references/PIYA206_CaptureScreen_MultipleImage.png (2026-10-08).
+  // Unlike the library header these stops are kept as sampled: everything
+  // on the gradient is navy (captureInk), which passes 4.5:1 down to the
+  // bottom stop (4.57:1); the mockup's white text would not (3.8:1), so no
+  // white text is placed on it.
+  // Sampled #05CEBD (navy 8.2:1).
+  static const Color captureBackgroundTop = Color(0xFF05CEBD);
+  // Sampled #178BCB (navy 4.57:1).
+  static const Color captureBackgroundBottom = Color(0xFF178BCB);
+  static const LinearGradient captureBackgroundGradient = LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [captureBackgroundTop, captureBackgroundBottom],
+  );
+  // Title text, camera frame fill, page labels, button text. Sampled #091D2C.
+  static const Color captureInk = Color(0xFF091D2C);
+  // ✕ button fill; white ✕ on it is 3.3:1 (icon, 3:1 floor). Sampled
+  // #0F9F95.
+  static const Color captureCloseFill = Color(0xFF0F9F95);
+  // Corner brackets, thumbnail border, page action icons, submit fill.
+  // Sampled #98FFF8 (on captureInk 14.7:1).
+  static const Color captureAccent = Color(0xFF98FFF8);
+  // Frame placeholder art when the camera isn't live. Decorative. Sampled
+  // #2C4652.
+  static const Color capturePlaceholderGlyph = Color(0xFF2C4652);
+  // Thumbnail placeholder art. Decorative. Sampled #97C3C6.
+  static const Color captureThumbGlyph = Color(0xFF97C3C6);
+  // Adjusted for AA, 2026-10-08: the mockup's dotted "+" tile has no fill,
+  // and its cyan plus on the gradient is 2.7:1 (3:1 floor). A captureInk
+  // fill at this alpha lifts the plus to at least 3.35:1 on any part of
+  // the gradient (4.7:1 where the strip actually sits).
+  static const double captureAddTileFillAlpha = 0.35;
+  // Derived (not in the mockup): a page thumbnail's ✎ and 🗑 sit on a solid
+  // captureInk disc so the cyan icon keeps 14.7:1 over white paper (cyan on
+  // white is 1.1:1). The mockup's trash sits on its dark placeholder art.
+
   /// Darkens [color] for a pressed-state SOP (see frontend-piyanota.md
   /// "Interaction states") — reduces HSL lightness rather than overlaying
   /// opacity, so the result stays the same hue, just deeper.
