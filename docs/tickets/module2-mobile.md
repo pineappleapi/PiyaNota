@@ -170,6 +170,13 @@ _Covers: UI tickets (Onboarding, Account, Score Library, Playback, Settings, Sys
 7. Tapping/dragging the seek bar updates the playback indicator's position within 200ms.
 8. Voice Mixer and Speed controls accessible from this screen without navigating away.
 
+**Design decisions (2026-10-09, user):** these refine the ACs above without replacing them.
+- Transport: ±5 s buttons (Netflix-style), plus ⏮, which jumps to the start of the first measure (m.1), and ⏭, which jumps to the **start** of the last measure (e.g. m.15 of 15). This needs `bar` on every timing event (PIYA-117 AC7). When the piece opens with a pickup (`bar: 0`), ⏮ goes to the very start (t=0) so the pickup is heard. When no event has a `bar`, ⏮ goes to t=0 and ⏭ to the last event.
+- The playback indicator band spans the whole system (all four staves), not a single staff (see PIYA-117 AC8).
+- Grey text and chip text are darkened just enough to meet WCAG AA contrast.
+- A dismissible "automatic transcription — some notes may be wrong" banner appears when PIYA-103 `review.reviewNeeded` is true (see PIYA-216 AC4).
+- Mixer, Speed and Download open placeholder sheets until PIYA-209, PIYA-210 and PIYA-211 land.
+
 ---
 
 ### PIYA-209 — Voice Mixer Modal UI
@@ -335,6 +342,9 @@ Wires Processing Status (PIYA-207) and Score Playback (PIYA-208) to PIYA-102 and
 1. Processing Status polls PIYA-102 at the fixed interval defined in PIYA-207, maps status/percentComplete/failureReason directly to the UI states already specified there.
 2. On `status: complete`, Playback calls PIYA-103 and binds `audioTracks`, `scoreImages`, `timingMetadataUrl` to the player, seek bar, and playback-indicator overlay as defined in PIYA-208.
 3. A 409 response from PIYA-103 (job not yet complete) is handled defensively even though the UI shouldn't normally trigger it before `complete` status.
+4. Playback shows its dismissible review banner (PIYA-208 design decisions) exactly when PIYA-103 returns `review.reviewNeeded: true`. While BUG-021 is open, that is every score. *(Added 2026-10-09.)*
+
+*(2026-10-09: opening a saved score from the library is blocked on the open gap that PIYA-103 is keyed by `job_id`, while the library has only `scoreId`. See PIYA-308 AC8 in `module3-backend.md`. Until that is resolved, Playback runs against a fake keyed by score.)*
 
 ---
 

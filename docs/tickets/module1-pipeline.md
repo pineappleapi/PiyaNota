@@ -129,6 +129,8 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
 5. Repeated calls return cached results and do not re-trigger pipeline computation.
 6. Once complete, the response includes a `review` object. `reviewNeeded` is true whenever any Stage 3 strip flag or Stage 4 reconstruction flag carries `review_needed`, or the clef/key classifier was disabled. `reasons` lists the distinct flag codes. `items` holds at most 200 entries, each with `code`, `voice`, `pageIndex`, `systemIndex`, `bar`, and `truncated` is set when entries were left out. `reviewNeeded: false` means no flag was raised, not that the transcription is verified correct. Model provenance (checkpoint hash, gate status) is never included in the response. *(Added 2026-09-29, backend-lead review. While the clef/key classifier has not passed its real-photo gate (BUG-021), every job carries the reason `clef_key_unvalidated`, so `reviewNeeded` is always true. The pipeline side is `stage5_synthesis.run_full_pipeline_with_report()` / `build_review()`; flag codes stay snake_case, voice is lowercase.)*
 
+*(2026-10-09: open gap. This endpoint is keyed by `job_id`, but the library opens scores by `scoreId`. See PIYA-308 AC8 in `module3-backend.md`. Playback (PIYA-208) is currently built against a fake keyed by score. `review.items[].pageIndex` / `systemIndex` are also affected by the index-base question under PIYA-117.)*
+
 **Response Schema:**
 ```json
 {
@@ -513,11 +515,18 @@ the base training run finishing so AC4's fine-tune can proceed with explicit mul
 4. Stores metadata as JSON; produces exactly one metadata file per completed score.
 5. Metadata generation adds less than 5 seconds to total processing time.
 6. Output is accessible through PIYA-103.
+7. Every event carries `bar`, the 1-based measure number taken from Stage 4's `global_bar`. A pickup (anacrusis) measure is `bar: 0`, so the first full measure is always `bar: 1` and the numbers match the printed score. `bar` is `null` for events in a voice-strip that Stage 4 could not anchor to the bar grid (its `placed_by_local_ticks` flag), and the client must accept `null`. Rest events are included, so a measure that starts on a rest still has an event on its downbeat. A note tied across a barline is one event (Stage 4 merges ties) and keeps the bar it starts in. *(Added 2026-10-09, for PIYA-208's ⏮ first-measure / ⏭ last-measure-start buttons. Depends on Stage 4 bar tracking in `stage4_reconstruction.py`; when bars are not anchored, those buttons can only approximate.)*
+8. Every event also carries `systemIndex` (Stage 2's `sys_idx`, already on every Stage 3/4 event) and `systemTopY` / `systemBottomY` (the top of the system's first staff and the bottom of its last staff, in the same pixel space as `y`). The Playback band spans the whole system. Without these fields the client has to guess the band's height from the four voices' note `y` values near one timestamp, which shrinks when the voices sit close together and breaks when a voice is resting. Stage 2 already has these staff boxes, so the cost is three integers per event. *(Added 2026-10-09, backend-lead; adopted by the user the same day. The client still falls back to note `y` values when the fields are absent.)*
+
+**Record shape (2026-10-09):** PIYA-117 and PIYA-118 describe the **same file**: one JSON array per score (AC4), each element one event holding both the timing fields above and PIYA-118's `x`/`y` (PIYA-118 AC6). PIYA-118's example below is the subset it adds, not a second record type. `timingMetadataUrl` in PIYA-103 serves this array.
+
+**Index bases (0-based API indices decided by the user 2026-10-09; `voice` casing still open):** no ticket fixes whether `pageIndex` counts from 0 or 1. The pipeline counts from 1 (Stage 1 `page_index`, Stage 2 `sys_idx`), and PIYA-103's `review.items` pass those values through unchanged (`stage5_synthesis.build_review()`). The app counts pages from 0 (PIYA-116 retake, PIYA-207 failure page). Decision: in every API response, `pageIndex` counts from 0 and indexes `scoreImages` directly, and `systemIndex` counts from 0 within its page. The serializer converts from the pipeline's 1-based values at that boundary. `bar` stays 1-based because it is a printed measure number, not an index. This applies to PIYA-101/102/103/116 as well, not only this file. `voice` here is `"Soprano"`, while PIYA-103 uses lowercase (`audioTracks` keys and `review.items`). The two should match.
 
 **Example Record:**
 ```json
-{ "timestampMs": 12500, "pageIndex": 1, "voice": "Soprano", "tick": 960, "eventId": 45 }
+{ "timestampMs": 12500, "pageIndex": 0, "voice": "Soprano", "tick": 960, "eventId": 45, "x": 1432, "y": 528, "bar": 3 }
 ```
+With the optional AC8 fields: `"systemIndex": 0, "systemTopY": 410, "systemBottomY": 1190`.
 
 ---
 
@@ -531,10 +540,11 @@ the base training run finishing so AC4's fine-tune can proceed with explicit mul
 4. Coordinates remain aligned after image scaling performed by the mobile client.
 5. Position accuracy is visually validated against evaluation scores.
 6. Generated coordinates are stored within the timing metadata file.
+7. Each event carries the `bar` defined in PIYA-117 AC7 alongside its coordinates (and PIYA-117 AC8's `systemIndex` / `systemTopY` / `systemBottomY`). `x`/`y` are pixels in `scoreImages[pageIndex]` at its served resolution. *(Added 2026-10-09; see PIYA-117 "Record shape" and "Index bases".)*
 
-**Example Entry:**
+**Example Entry** (the fields this ticket adds to the PIYA-117 event; the full merged event is shown under PIYA-117):
 ```json
-{ "timestampMs": 12500, "pageIndex": 1, "x": 1432, "y": 528 }
+{ "timestampMs": 12500, "pageIndex": 0, "voice": "Soprano", "tick": 960, "eventId": 45, "x": 1432, "y": 528, "bar": 3 }
 ```
 
 ---
