@@ -70,6 +70,12 @@ class CaptureMessages {
   static String pdfSemantics(String name, int n) =>
       'PDF $name, ${pagesLabel(n)}. Double tap to view details.';
   static String editPage(int x) => 'Edit page $x';
+
+  // Retaking one page (PIYA-207 AC7, PIYA-116). [x] counts from 1.
+  static String retakeTitle(int x) => 'Retake page $x';
+  static String sendRetake(int x) => 'Send page $x';
+  static const String retakeFull =
+      'You\'re replacing one page. Remove this photo to take another.';
   static String removePage(int x) => 'Remove page $x';
   static const String removePdf = 'Remove PDF';
   static const String moveEarlier = 'Move earlier';
@@ -253,6 +259,13 @@ class CaptureMessages {
       'queue_full' =>
         'PiyaNota is busy with other scores right now. Please try again in '
             '$wait.',
+      // PIYA-116 retakes (PIYA-207 AC7).
+      jobNotFoundCode =>
+        'This scan no longer exists, so the page can\'t be replaced. Go '
+            'back to your library and add the score again.',
+      pageNotRetakeableCode =>
+        'This page can\'t be replaced any more. Go back to your library '
+            'to see where the scan stands.',
       _ => generic,
     };
   }

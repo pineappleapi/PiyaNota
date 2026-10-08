@@ -43,6 +43,19 @@ class ApiConfig {
   static const String submitImagesPath = '/api/jobs';
   static const String submitPdfPath = '/api/jobs/pdf';
 
+  // PIYA-102/114/116 give methods and schemas but no paths; all three are
+  // assumed under the PIYA-101 jobs path. Reconcile in PIYA-216. PIYA-102's
+  // `complete` response must also carry `scoreId` for Processing to open
+  // Playback (see ProcessingStatus.scoreId).
+  static String jobStatusPath(String jobId) =>
+      '$submitImagesPath/${Uri.encodeComponent(jobId)}';
+  static String cancelJobPath(String jobId) => '${jobStatusPath(jobId)}/cancel';
+
+  /// PIYA-116: multipart with a `pageIndex` field (0-based, as PIYA-101)
+  /// and one `page` JPEG part — part names assumed too.
+  static String resubmitPagePath(String jobId) =>
+      '${jobStatusPath(jobId)}/resubmit';
+
   /// PIYA-310 rasterises the whole PDF (up to 15 s for 20 pages, AC6)
   /// before it replies, on top of the upload itself.
   static const Duration pdfReceiveTimeout = Duration(seconds: 90);

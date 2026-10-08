@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'models/score_details.dart';
 import 'routes/app_routes.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/password_reset_screen.dart';
@@ -10,6 +11,7 @@ import 'screens/capture/score_details_screen.dart';
 import 'screens/library/score_library_screen.dart';
 import 'screens/onboarding/onboarding_flow_screen.dart';
 import 'screens/placeholder/coming_soon_screen.dart';
+import 'screens/processing/processing_screen.dart';
 import 'state/onboarding_providers.dart';
 import 'theme/app_theme.dart';
 
@@ -55,15 +57,26 @@ class PiyaNotaApp extends StatelessWidget {
           }
           return CaptureScreen(details: arguments.details);
         },
-        // Processing (PIYA-207) replaces this placeholder; the job id is
-        // what it will poll.
         AppRoutes.processing: (context) {
           final arguments = ModalRoute.of(context)?.settings.arguments;
-          return ComingSoonScreen(
-            title: 'Processing',
-            detail: arguments is ProcessingArguments
-                ? '${arguments.title} (job ${arguments.jobId})'
-                : null,
+          if (arguments is! ProcessingArguments) {
+            // Only reachable from Capture, which always passes these.
+            return const ScoreLibraryScreen();
+          }
+          return ProcessingScreen(
+            jobId: arguments.jobId,
+            title: arguments.title,
+          );
+        },
+        AppRoutes.captureRetake: (context) {
+          final arguments = ModalRoute.of(context)?.settings.arguments;
+          if (arguments is! CaptureRetakeArguments) {
+            // Only reachable from Processing, which always passes these.
+            return const ScoreLibraryScreen();
+          }
+          return CaptureScreen(
+            details: ScoreDetails(title: arguments.title),
+            retake: arguments,
           );
         },
         AppRoutes.settings: (_) => const ComingSoonScreen(title: 'Settings'),

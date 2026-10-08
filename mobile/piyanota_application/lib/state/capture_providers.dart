@@ -15,6 +15,7 @@ import '../services/fake_score_library_api.dart';
 import '../services/fake_score_upload_api.dart';
 import '../services/score_upload_api.dart';
 import 'auth_providers.dart';
+import 'processing_providers.dart';
 import 'score_library_providers.dart';
 
 /// Capture's working files (prepared pages, edits, copied PDFs) live in
@@ -68,6 +69,8 @@ final scoreUploadApiProvider = Provider<ScoreUploadApi>((ref) {
       library: library is FakeScoreLibraryApi
           ? library
           : throw StateError('Fake upload needs the fake library'),
+      // Registers each job so Processing (PIYA-207) can poll it.
+      jobs: ref.watch(fakeProcessingApiProvider),
     );
   }
   final configError = ApiConfig.configurationError();

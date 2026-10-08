@@ -233,6 +233,29 @@ class ScriptedScoreUploadApi implements ScoreUploadApi {
     pdfCalls.add(pdfPath);
     return _answer(cancelToken);
   }
+
+  /// PIYA-116 calls as (jobId, pageIndex, imagePath).
+  final List<(String, int, String)> resubmitCalls = [];
+  Future<ResubmittedJob> Function()? onResubmit;
+
+  @override
+  Future<ResubmittedJob> resubmitPage({
+    required String jobId,
+    required int pageIndex,
+    required String imagePath,
+    CancelToken? cancelToken,
+  }) {
+    lastCancelToken = cancelToken;
+    resubmitCalls.add((jobId, pageIndex, imagePath));
+    return onResubmit?.call() ??
+        Future.value(
+          ResubmittedJob(
+            originalJobId: jobId,
+            replacementJobId: '$jobId-retake',
+            pageIndex: pageIndex,
+          ),
+        );
+  }
 }
 
 /// Everything Capture talks to, faked, plus the overrides that install it.
@@ -285,6 +308,7 @@ Future<void> pumpCapture(
   Size size = const Size(400, 800),
   double textScale = 1,
   bool startOnDetails = false,
+  CaptureRetakeArguments? retake,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -310,6 +334,15 @@ Future<void> pumpCapture(
                     as CapturePagesArguments;
             return CaptureScreen(details: args.details);
           },
+          AppRoutes.captureRetake: (context) {
+            final args =
+                ModalRoute.of(context)!.settings.arguments!
+                    as CaptureRetakeArguments;
+            return CaptureScreen(
+              details: ScoreDetails(title: args.title),
+              retake: args,
+            );
+          },
           AppRoutes.processing: (context) {
             final args =
                 ModalRoute.of(context)!.settings.arguments!
@@ -323,7 +356,9 @@ Future<void> pumpCapture(
     ),
   );
   final navigator = tester.state<NavigatorState>(find.byType(Navigator));
-  if (startOnDetails) {
+  if (retake != null) {
+    navigator.pushNamed(AppRoutes.captureRetake, arguments: retake);
+  } else if (startOnDetails) {
     navigator.pushNamed(AppRoutes.capture);
   } else {
     navigator.pushNamed(

@@ -358,6 +358,65 @@ void main() {
     });
   });
 
+  group('resubmitPage (PIYA-116, PIYA-207 AC7)', () {
+    const replaced = {
+      'data': {'replacementJobId': 'job-8', 'jobId': 'job-7'},
+      'success': true,
+      'status': 202,
+    };
+
+    test('sends one "page" part and a 0-based pageIndex', () async {
+      final adapter = _StubAdapter(body: replaced);
+      final job = await _apiWith(adapter)
+          .resubmitPage(jobId: 'job-7', pageIndex: 1, imagePath: page1);
+      expect(job.replacementJobId, 'job-8');
+      expect(job.originalJobId, 'job-7');
+      expect(job.pageIndex, 1);
+      final request = adapter.lastRequest!;
+      expect(request.path, ApiConfig.resubmitPagePath('job-7'));
+      expect(request.method, 'POST');
+      final form = request.data as FormData;
+      expect(form.fields.map((e) => '${e.key}=${e.value}'), ['pageIndex=1']);
+      expect(form.files.single.key, 'page');
+      expect(form.files.single.value.filename, 'page-2.jpg');
+    });
+
+    test('404 and 409 without a code get the retake codes', () async {
+      for (final (status, code) in [
+        (404, jobNotFoundCode),
+        (409, pageNotRetakeableCode),
+      ]) {
+        await expectLater(
+          _apiWith(_StubAdapter(status: status, body: {}))
+              .resubmitPage(jobId: 'j', pageIndex: 0, imagePath: page1),
+          throwsA(
+            isA<UploadRejectedException>().having((e) => e.code, 'code', code),
+          ),
+        );
+      }
+    });
+
+    test('a server code is kept as sent', () {
+      final kept = HttpScoreUploadApi.resubmitRejection(
+        const UploadRejectedException(statusCode: 409, code: 'queue_full'),
+      );
+      expect(kept.code, 'queue_full');
+    });
+
+    test('an answer without replacementJobId is a rejection', () {
+      expect(
+        () => HttpScoreUploadApi.parseResubmittedJob(
+          {
+            'data': {'jobId': 'j'},
+          },
+          'j',
+          0,
+        ),
+        throwsA(isA<UploadRejectedException>()),
+      );
+    });
+  });
+
   group('parseSubmittedJob / rejectionFrom', () {
     test('missing pageCount and status get safe defaults', () {
       final job = HttpScoreUploadApi.parseSubmittedJob({

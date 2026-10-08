@@ -1,14 +1,17 @@
 import 'package:dio/dio.dart' show CancelToken;
 
 import '../models/score_details.dart';
+import 'fake_processing_api.dart';
 import 'fake_score_library_api.dart';
 import 'score_upload_api.dart';
 import 'session_storage.dart';
 
-/// In-memory stand-in for PIYA-101/310 until Module 3 is deployed.
+/// In-memory stand-in for PIYA-101/310/116 until Module 3 is deployed.
 ///
 /// - Returns a job id after [latency] and adds the score to the fake
-///   library, as the real submit creates the score row.
+///   library, as the real submit creates the score row. With a
+///   [FakeProcessingApi] given, the job is also registered there so
+///   Processing (PIYA-207) can poll it and open the right score.
 /// - Accounts on [FakeScoreLibraryApi.flakyDomain] cycle through the error
 ///   states the Capture screen must word: a 429 with a wait, a network
 ///   failure, a 415 naming a page, then success.
@@ -18,6 +21,7 @@ class FakeScoreUploadApi implements ScoreUploadApi {
     required this._sessionStorage,
     required this._accountForToken,
     required this._library,
+    this._jobs,
     this.latency = defaultLatency,
   });
 
@@ -28,6 +32,7 @@ class FakeScoreUploadApi implements ScoreUploadApi {
   final SessionStorage _sessionStorage;
   final AccountForToken _accountForToken;
   final FakeScoreLibraryApi _library;
+  final FakeProcessingApi? _jobs;
   final Map<String, int> _callsByAccount = {};
   int _nextJob = 1;
 
@@ -48,11 +53,27 @@ class FakeScoreUploadApi implements ScoreUploadApi {
       // parser, so the library card shows no page count.
       _submit(details, null, cancelToken);
 
-  Future<SubmittedJob> _submit(
-    ScoreDetails details,
-    int? pageCount,
+  /// Retakes never fail on the flaky accounts: the job they replace has
+  /// already demoed a failure.
+  @override
+  Future<ResubmittedJob> resubmitPage({
+    required String jobId,
+    required int pageIndex,
+    required String imagePath,
     CancelToken? cancelToken,
-  ) async {
+  }) async {
+    final account = await _accountAfterLatency(cancelToken);
+    final jobs = _jobs;
+    if (jobs == null) {
+      throw const UploadRejectedException(
+        statusCode: 404,
+        code: jobNotFoundCode,
+      );
+    }
+    return jobs.resubmit(account: account, jobId: jobId, pageIndex: pageIndex);
+  }
+
+  Future<String> _accountAfterLatency(CancelToken? cancelToken) async {
     await Future.any<void>([
       Future<void>.delayed(latency),
       if (cancelToken != null) cancelToken.whenCancel,
@@ -63,6 +84,15 @@ class FakeScoreUploadApi implements ScoreUploadApi {
     final token = await _sessionStorage.readToken();
     final account = token == null ? null : _accountForToken(token);
     if (account == null) throw const UploadSessionExpiredException();
+    return account;
+  }
+
+  Future<SubmittedJob> _submit(
+    ScoreDetails details,
+    int? pageCount,
+    CancelToken? cancelToken,
+  ) async {
+    final account = await _accountAfterLatency(cancelToken);
     if (account.endsWith(FakeScoreLibraryApi.flakyDomain)) {
       final call = (_callsByAccount[account] ?? 0) + 1;
       _callsByAccount[account] = call;
@@ -84,16 +114,19 @@ class FakeScoreUploadApi implements ScoreUploadApi {
       }
     }
     final composer = details.composer.trim();
-    _library.addSubmittedScore(
+    final scoreId = _library.addSubmittedScore(
       account: account,
       title: details.title.trim(),
       composer: composer.isEmpty ? null : composer,
       pageCount: pageCount,
     );
-    return SubmittedJob(
-      jobId: 'fake-job-${_nextJob++}',
+    final jobId = 'fake-job-${_nextJob++}';
+    _jobs?.registerJob(
+      jobId: jobId,
+      account: account,
+      scoreId: scoreId,
       pageCount: pageCount,
-      status: 'queued',
     );
+    return SubmittedJob(jobId: jobId, pageCount: pageCount, status: 'queued');
   }
 }
