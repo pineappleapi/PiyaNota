@@ -5,15 +5,19 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:piyanota_application/app.dart';
 
 void main() {
-  testWidgets('First launch shows onboarding, ending on Skip (PIYA-201 AC1/AC4)',
-      (WidgetTester tester) async {
-    SharedPreferences.setMockInitialValues({});
+  testWidgets(
+    'First launch shows onboarding, ending on Skip (PIYA-201 AC1/AC4)',
+    (WidgetTester tester) async {
+      SharedPreferences.setMockInitialValues({});
 
-    await tester.pumpWidget(const ProviderScope(child: PiyaNotaApp()));
-    await tester.pump(); // resolve onboardingCompletedProvider
-    await tester.pump(const Duration(milliseconds: 4600)); // splash animation
-    await tester.pump(const Duration(milliseconds: 300)); // post-splash settle
+      await tester.pumpWidget(const ProviderScope(child: PiyaNotaApp()));
+      await tester.pump(); // resolve onboardingCompletedProvider
+      await tester.pump(const Duration(milliseconds: 4600)); // splash animation
+      await tester.pump(
+        const Duration(milliseconds: 300),
+      ); // post-splash settle
 
-    expect(find.text('Skip'), findsOneWidget);
-  });
+      expect(find.text('Skip'), findsOneWidget);
+    },
+  );
 }

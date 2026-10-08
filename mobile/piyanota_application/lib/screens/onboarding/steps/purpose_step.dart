@@ -31,11 +31,7 @@ class PurposeStep extends StatelessWidget {
             child: const Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                Icon(
-                  Icons.description_outlined,
-                  color: Colors.white,
-                  size: 56,
-                ),
+                Icon(Icons.description_outlined, color: Colors.white, size: 56),
                 Icon(Icons.arrow_forward, color: Colors.white, size: 28),
                 Icon(Icons.headphones, color: Colors.white, size: 56),
               ],
@@ -63,7 +59,8 @@ class PurposeStep extends StatelessWidget {
                   style: TextStyle(fontWeight: FontWeight.w700),
                 ),
                 TextSpan(
-                  text: ' turns your printed choir sheet music into playable '
+                  text:
+                      ' turns your printed choir sheet music into playable '
                       'audio — perfect for beginners and seasoned singers '
                       'alike.',
                 ),

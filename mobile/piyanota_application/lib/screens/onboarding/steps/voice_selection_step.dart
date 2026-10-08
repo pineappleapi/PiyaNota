@@ -44,7 +44,8 @@ class VoiceSelectionStep extends ConsumerWidget {
                   ),
                   const TextSpan(text: '?'),
                 ],
-                subtitle: "We'll remember your part so it's the first thing "
+                subtitle:
+                    "We'll remember your part so it's the first thing "
                     'you hear.',
               ),
               const SizedBox(height: 24),
@@ -141,11 +142,7 @@ class _VoiceCard extends StatelessWidget {
                       color: badgeColor,
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(
-                      Icons.mic,
-                      color: Colors.white,
-                      size: 22,
-                    ),
+                    child: const Icon(Icons.mic, color: Colors.white, size: 22),
                   ),
                   Container(
                     width: 18,
@@ -153,9 +150,7 @@ class _VoiceCard extends StatelessWidget {
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: isSelected
-                            ? AppTheme.primaryBlue
-                            : _cardBorder,
+                        color: isSelected ? AppTheme.primaryBlue : _cardBorder,
                         width: 2,
                       ),
                       color: isSelected ? AppTheme.primaryBlue : null,
@@ -167,9 +162,9 @@ class _VoiceCard extends StatelessWidget {
               Text(
                 label,
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: AppTheme.onboardingHeadingDark,
-                      fontWeight: FontWeight.w700,
-                    ),
+                  color: AppTheme.onboardingHeadingDark,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ],
           ),

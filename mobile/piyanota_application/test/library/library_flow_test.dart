@@ -37,8 +37,9 @@ void main() {
     await tester.pump(settle);
   }
 
-  testWidgets('demo login lands on the library with the demo scores',
-      (tester) async {
+  testWidgets('demo login lands on the library with the demo scores', (
+    tester,
+  ) async {
     await pumpApp(tester);
 
     await tester.enterText(

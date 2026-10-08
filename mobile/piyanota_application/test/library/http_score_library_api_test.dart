@@ -82,23 +82,25 @@ const _listBody = {
 
 void main() {
   group('fetchLibrary (PIYA-308)', () {
-    test('GETs the library path with the Bearer token and maps entries',
-        () async {
-      final adapter = _StubAdapter(body: _listBody);
-      final scores = await _apiWith(adapter).fetchLibrary();
+    test(
+      'GETs the library path with the Bearer token and maps entries',
+      () async {
+        final adapter = _StubAdapter(body: _listBody);
+        final scores = await _apiWith(adapter).fetchLibrary();
 
-      expect(adapter.lastRequest?.method, 'GET');
-      expect(adapter.lastRequest?.path, ApiConfig.scoreLibraryPath);
-      expect(adapter.lastRequest?.headers['Authorization'], 'Bearer $_token');
-      expect(adapter.lastRequest?.queryParameters, isEmpty);
+        expect(adapter.lastRequest?.method, 'GET');
+        expect(adapter.lastRequest?.path, ApiConfig.scoreLibraryPath);
+        expect(adapter.lastRequest?.headers['Authorization'], 'Bearer $_token');
+        expect(adapter.lastRequest?.queryParameters, isEmpty);
 
-      expect(scores.map((s) => s.scoreId), [101, 102]);
-      expect(scores.first.title, 'Bituin Walang Ningning');
-      expect(scores.first.lastActivityAt, DateTime.utc(2026, 10, 3, 14, 22));
-      expect(scores.first.thumbnailUrl, 'https://cdn.test/101.png');
-      // lastProcessedAt is accepted when lastAccessedAt is absent.
-      expect(scores.last.lastActivityAt, DateTime.utc(2026, 9, 28, 9, 5));
-    });
+        expect(scores.map((s) => s.scoreId), [101, 102]);
+        expect(scores.first.title, 'Bituin Walang Ningning');
+        expect(scores.first.lastActivityAt, DateTime.utc(2026, 10, 3, 14, 22));
+        expect(scores.first.thumbnailUrl, 'https://cdn.test/101.png');
+        // lastProcessedAt is accepted when lastAccessedAt is absent.
+        expect(scores.last.lastActivityAt, DateTime.utc(2026, 9, 28, 9, 5));
+      },
+    );
 
     test('sends a trimmed search parameter only when non-blank', () async {
       final adapter = _StubAdapter(body: _listBody);
@@ -114,9 +116,11 @@ void main() {
     });
 
     test('an empty scores array is an empty list, not an error', () async {
-      final adapter = _StubAdapter(body: {
-        'data': {'scores': <Object>[]},
-      });
+      final adapter = _StubAdapter(
+        body: {
+          'data': {'scores': <Object>[]},
+        },
+      );
       expect(await _apiWith(adapter).fetchLibrary(), isEmpty);
     });
 
@@ -154,43 +158,51 @@ void main() {
     });
 
     test('a body without data.scores is a server error', () async {
-      final adapter = _StubAdapter(body: {'data': {'items': <Object>[]}});
+      final adapter = _StubAdapter(
+        body: {
+          'data': {'items': <Object>[]},
+        },
+      );
       await expectLater(
         _apiWith(adapter).fetchLibrary(),
         throwsA(isA<ScoreLibraryServerException>()),
       );
     });
 
-    test('entries without a valid scoreId are skipped; the rest load',
-        () async {
-      final adapter = _StubAdapter(body: {
-        'data': {
-          'scores': [
-            {'scoreId': '101', 'title': 'string id'},
-            {'title': 'no id'},
-            'not an object',
-            {'scoreId': 102, 'title': 'Paraiso'},
-            // Every other field broken: still loads, just bare.
-            {
-              'scoreId': 103,
-              'title': '',
-              'lastAccessedAt': 'yesterday',
-              'composer': 7,
-              'pageCount': 'many',
-              'thumbnailUrl': false,
+    test(
+      'entries without a valid scoreId are skipped; the rest load',
+      () async {
+        final adapter = _StubAdapter(
+          body: {
+            'data': {
+              'scores': [
+                {'scoreId': '101', 'title': 'string id'},
+                {'title': 'no id'},
+                'not an object',
+                {'scoreId': 102, 'title': 'Paraiso'},
+                // Every other field broken: still loads, just bare.
+                {
+                  'scoreId': 103,
+                  'title': '',
+                  'lastAccessedAt': 'yesterday',
+                  'composer': 7,
+                  'pageCount': 'many',
+                  'thumbnailUrl': false,
+                },
+              ],
             },
-          ],
-        },
-      });
-      final scores = await _apiWith(adapter).fetchLibrary();
-      expect(scores.map((s) => s.scoreId), [102, 103]);
-      final bare = scores.last;
-      expect(bare.title, isNull);
-      expect(bare.lastActivityAt, isNull);
-      expect(bare.composer, isNull);
-      expect(bare.pageCount, isNull);
-      expect(bare.thumbnailUrl, isNull);
-    });
+          },
+        );
+        final scores = await _apiWith(adapter).fetchLibrary();
+        expect(scores.map((s) => s.scoreId), [102, 103]);
+        final bare = scores.last;
+        expect(bare.title, isNull);
+        expect(bare.lastActivityAt, isNull);
+        expect(bare.composer, isNull);
+        expect(bare.pageCount, isNull);
+        expect(bare.thumbnailUrl, isNull);
+      },
+    );
   });
 
   group('deleteScore (PIYA-309)', () {

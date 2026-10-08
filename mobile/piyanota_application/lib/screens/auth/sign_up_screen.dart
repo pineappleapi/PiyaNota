@@ -53,8 +53,11 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
     super.dispose();
   }
 
-  List<TextEditingController> get _controllers =>
-      [_emailController, _passwordController, _confirmController];
+  List<TextEditingController> get _controllers => [
+    _emailController,
+    _passwordController,
+    _confirmController,
+  ];
 
   void _onFieldsChanged() => setState(() {});
 
@@ -103,7 +106,9 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
     String? error;
     var offerLogin = false;
     try {
-      final session = await ref.read(authApiProvider).signUp(
+      final session = await ref
+          .read(authApiProvider)
+          .signUp(
             email: _emailController.text.trim(),
             password: _passwordController.text,
             passwordConfirmation: _confirmController.text,
@@ -137,10 +142,8 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
       });
       return;
     }
-    Navigator.of(context).pushNamedAndRemoveUntil(
-      AppRoutes.scoreLibrary,
-      (_) => false,
-    );
+    Navigator.of(context)
+        .pushNamedAndRemoveUntil(AppRoutes.scoreLibrary, (_) => false);
   }
 
   /// Sign-Up is either pushed over Login, or the root route when reached

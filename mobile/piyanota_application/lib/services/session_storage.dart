@@ -8,7 +8,7 @@ import '../models/auth_session.dart';
 /// PIYA-202 AC3) — never shared_preferences, which is plaintext on disk.
 class SessionStorage {
   SessionStorage([FlutterSecureStorage? storage])
-      : _storage = storage ?? const FlutterSecureStorage();
+    : _storage = storage ?? const FlutterSecureStorage();
 
   static const String _tokenKey = 'session_token';
   static const String _expiresAtKey = 'session_expires_at';

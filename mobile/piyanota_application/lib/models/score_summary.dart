@@ -33,13 +33,13 @@ class ScoreSummary {
   final int? pageCount;
 
   ScoreSummary copyWith({DateTime? lastActivityAt}) => ScoreSummary(
-        scoreId: scoreId,
-        title: title,
-        lastActivityAt: lastActivityAt ?? this.lastActivityAt,
-        thumbnailUrl: thumbnailUrl,
-        composer: composer,
-        pageCount: pageCount,
-      );
+    scoreId: scoreId,
+    title: title,
+    lastActivityAt: lastActivityAt ?? this.lastActivityAt,
+    thumbnailUrl: thumbnailUrl,
+    composer: composer,
+    pageCount: pageCount,
+  );
 
   /// Throws [FormatException] only for a missing or invalid `scoreId` — the
   /// caller skips that entry and keeps the rest. Any other broken field is
@@ -47,14 +47,17 @@ class ScoreSummary {
   factory ScoreSummary.fromJson(Map<String, dynamic> json) {
     final scoreId = json['scoreId'];
     if (scoreId is! int || scoreId <= 0) {
-      throw FormatException('Score library entry without a valid scoreId: '
-          '$scoreId');
+      throw FormatException(
+        'Score library entry without a valid scoreId: '
+        '$scoreId',
+      );
     }
 
     return ScoreSummary(
       scoreId: scoreId,
       title: _nonBlankString(json['title']),
-      lastActivityAt: _parseDate(json['lastAccessedAt']) ??
+      lastActivityAt:
+          _parseDate(json['lastAccessedAt']) ??
           _parseDate(json['lastProcessedAt']),
       thumbnailUrl: _nonBlankString(json['thumbnailUrl']),
       composer: _nonBlankString(json['composer']),

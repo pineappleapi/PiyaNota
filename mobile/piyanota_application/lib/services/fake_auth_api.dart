@@ -162,7 +162,8 @@ class FakeAuthApi implements AuthApi {
 
   AuthSession _issueSession(String email) {
     final userId = _nextUserId++;
-    final token = 'fake_sess_${userId}_${DateTime.now().microsecondsSinceEpoch}';
+    final token =
+        'fake_sess_${userId}_${DateTime.now().microsecondsSinceEpoch}';
     _emailsByToken[token] = email;
     return AuthSession(
       userId: userId,

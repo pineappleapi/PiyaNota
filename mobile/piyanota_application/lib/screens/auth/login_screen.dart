@@ -76,8 +76,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   Future<void> _openPasswordReset() async {
-    final result =
-        await Navigator.of(context).pushNamed(AppRoutes.passwordReset);
+    final result = await Navigator.of(context)
+        .pushNamed(AppRoutes.passwordReset);
     if (!mounted || result is! PasswordResetSucceeded) return;
     setState(() => _applyPasswordReset(result));
   }
@@ -92,7 +92,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     String? error;
     try {
-      final session = await ref.read(authApiProvider).login(
+      final session = await ref
+          .read(authApiProvider)
+          .login(
             email: _emailController.text.trim(),
             password: _passwordController.text,
           );
@@ -127,10 +129,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       });
       return;
     }
-    Navigator.of(context).pushNamedAndRemoveUntil(
-      AppRoutes.scoreLibrary,
-      (_) => false,
-    );
+    Navigator.of(context)
+        .pushNamedAndRemoveUntil(AppRoutes.scoreLibrary, (_) => false);
   }
 
   @override
@@ -189,9 +189,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           alignment: Alignment.centerRight,
           child: TextButton(
             onPressed: _isSubmitting ? null : _openPasswordReset,
-            style: TextButton.styleFrom(
-              foregroundColor: AppTheme.primaryBlue,
-            ),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.primaryBlue),
             child: const Text('Forgot Password?'),
           ),
         ),

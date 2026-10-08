@@ -25,8 +25,9 @@ class PiyaNotaApp extends StatelessWidget {
         AppRoutes.login: (context) {
           final arguments = ModalRoute.of(context)?.settings.arguments;
           return LoginScreen(
-            passwordReset:
-                arguments is PasswordResetSucceeded ? arguments : null,
+            passwordReset: arguments is PasswordResetSucceeded
+                ? arguments
+                : null,
           );
         },
         AppRoutes.signUp: (_) => const SignUpScreen(),

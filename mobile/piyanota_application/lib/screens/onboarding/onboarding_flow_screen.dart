@@ -43,7 +43,7 @@ const _logoAnchorFraction = 0.30;
 /// Orchestrates PIYA-201: a single continuous intro (icon fade-in -> joins
 /// wordmark text -> whole splash layer fades away) followed by the 3-step
 /// swipeable guide (purpose -> workflow -> voice selection) -> Login (Skip)
-/// or Sign-Up (Get Started, final step only). 
+/// or Sign-Up (Get Started, final step only).
 ///
 /// The intro used to be a separate `OnboardingSplash` screen that got
 /// swapped out entirely once finished; it now lives in this screen's own

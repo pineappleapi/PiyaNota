@@ -40,8 +40,9 @@ Future<void> _tapCreate(WidgetTester tester) async {
 void main() {
   setUp(() => FlutterSecureStorage.setMockInitialValues({}));
 
-  testWidgets('AC1: Create Account disabled until all three fields filled',
-      (tester) async {
+  testWidgets('AC1: Create Account disabled until all three fields filled', (
+    tester,
+  ) async {
     await pumpAuthScreen(
       tester,
       screen: const SignUpScreen(),
@@ -58,8 +59,9 @@ void main() {
     expect(isButtonEnabled(tester, _createAccount), isTrue);
   });
 
-  testWidgets('AC2: invalid email format flagged without submitting',
-      (tester) async {
+  testWidgets('AC2: invalid email format flagged without submitting', (
+    tester,
+  ) async {
     final api = ScriptedAuthApi(onSignUp: () async => testSession());
     await pumpAuthScreen(tester, screen: const SignUpScreen(), api: api);
 
@@ -70,8 +72,9 @@ void main() {
     expect(api.signUpCalls, 0);
   });
 
-  testWidgets('AC3: mismatched confirmation flagged without submitting',
-      (tester) async {
+  testWidgets('AC3: mismatched confirmation flagged without submitting', (
+    tester,
+  ) async {
     final api = ScriptedAuthApi(onSignUp: () async => testSession());
     await pumpAuthScreen(tester, screen: const SignUpScreen(), api: api);
 
@@ -82,8 +85,7 @@ void main() {
     expect(api.signUpCalls, 0);
   });
 
-  testWidgets('AC4: weak password flagged without submitting',
-      (tester) async {
+  testWidgets('AC4: weak password flagged without submitting', (tester) async {
     final api = ScriptedAuthApi(onSignUp: () async => testSession());
     await pumpAuthScreen(tester, screen: const SignUpScreen(), api: api);
 
@@ -95,12 +97,12 @@ void main() {
     expect(api.signUpCalls, 0);
   });
 
-  testWidgets('AC4: server-side strength rejection is surfaced',
-      (tester) async {
+  testWidgets('AC4: server-side strength rejection is surfaced', (
+    tester,
+  ) async {
     const serverMessage = 'Password too common.';
     final api = ScriptedAuthApi(
-      onSignUp: () async =>
-          throw const AuthValidationException(serverMessage),
+      onSignUp: () async => throw const AuthValidationException(serverMessage),
     );
     await pumpAuthScreen(tester, screen: const SignUpScreen(), api: api);
 
@@ -111,8 +113,9 @@ void main() {
     expect(find.text(serverMessage), findsOneWidget);
   });
 
-  testWidgets('AC5: already-registered email shows error with Login link',
-      (tester) async {
+  testWidgets('AC5: already-registered email shows error with Login link', (
+    tester,
+  ) async {
     final api = ScriptedAuthApi(
       onSignUp: () async => throw const EmailAlreadyRegisteredException(),
     );
@@ -133,8 +136,9 @@ void main() {
     expect(find.text(loginMarker), findsOneWidget);
   });
 
-  testWidgets('AC6: success stores token and lands in library, no Login step',
-      (tester) async {
+  testWidgets('AC6: success stores token and lands in library, no Login step', (
+    tester,
+  ) async {
     final api = ScriptedAuthApi(
       onSignUp: () async => testSession(),
       onLogin: () async => fail('Sign-Up must not call Login'),
@@ -154,8 +158,9 @@ void main() {
     expect(find.text(libraryMarker), findsOneWidget);
   });
 
-  testWidgets('AC7: loading state shown and repeat submission blocked',
-      (tester) async {
+  testWidgets('AC7: loading state shown and repeat submission blocked', (
+    tester,
+  ) async {
     final pending = Completer<AuthSession>();
     final api = ScriptedAuthApi(onSignUp: () => pending.future);
     await pumpAuthScreen(tester, screen: const SignUpScreen(), api: api);
@@ -173,8 +178,9 @@ void main() {
     expect(find.text(libraryMarker), findsOneWidget);
   });
 
-  testWidgets('"Already have an account? Log In" routes to Login',
-      (tester) async {
+  testWidgets('"Already have an account? Log In" routes to Login', (
+    tester,
+  ) async {
     await pumpAuthScreen(
       tester,
       screen: const SignUpScreen(),
@@ -203,8 +209,9 @@ void main() {
     expect(isButtonEnabled(tester, _createAccount), isTrue);
   });
 
-  testWidgets('NFR-10: small screen at 2x text scale does not overflow',
-      (tester) async {
+  testWidgets('NFR-10: small screen at 2x text scale does not overflow', (
+    tester,
+  ) async {
     final api = ScriptedAuthApi(
       onSignUp: () async => throw const EmailAlreadyRegisteredException(),
     );
@@ -245,8 +252,9 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('secure-storage failure blocks entry with a distinct error',
-      (tester) async {
+  testWidgets('secure-storage failure blocks entry with a distinct error', (
+    tester,
+  ) async {
     final backing = FaultySecureStorage()..failWritesFor.add('session_token');
     await pumpAuthScreen(
       tester,
@@ -264,8 +272,9 @@ void main() {
     expect(backing.values, isEmpty);
   });
 
-  testWidgets('system back as root route (from onboarding) goes to Login',
-      (tester) async {
+  testWidgets('system back as root route (from onboarding) goes to Login', (
+    tester,
+  ) async {
     await pumpAuthScreen(
       tester,
       screen: const SignUpScreen(),
