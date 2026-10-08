@@ -121,6 +121,31 @@ class FakeScoreLibraryApi implements ScoreLibraryApi {
     if (scores.length == before) throw const ScoreNotFoundException();
   }
 
+  /// Stands in for the score row PIYA-101/310 creates with the job, so a
+  /// fake submit (PIYA-206) shows up in the library. The new score gets the
+  /// next free id and today's date.
+  void addSubmittedScore({
+    required String account,
+    required String title,
+    required int? pageCount,
+    String? composer,
+  }) {
+    final scores = _scoresFor(account);
+    final nextId = scores.fold<int>(
+      demoScores.last.scoreId,
+      (highest, score) => score.scoreId > highest ? score.scoreId : highest,
+    );
+    scores.add(
+      ScoreSummary(
+        scoreId: nextId + 1,
+        title: title,
+        lastActivityAt: _clock().toUtc(),
+        composer: composer,
+        pageCount: pageCount,
+      ),
+    );
+  }
+
   Future<String> _currentAccount() async {
     final token = await _sessionStorage.readToken();
     final account = token == null ? null : _accountForToken(token);

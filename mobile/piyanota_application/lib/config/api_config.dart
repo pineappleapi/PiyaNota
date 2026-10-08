@@ -38,6 +38,20 @@ class ApiConfig {
   static const String scoreLibrarySearchParam = 'search';
   static String scorePath(int scoreId) => '$scoreLibraryPath/$scoreId';
 
+  // PIYA-101/310 define multipart parts, fields and error codes but not
+  // paths — both are assumed; reconcile in PIYA-215.
+  static const String submitImagesPath = '/api/jobs';
+  static const String submitPdfPath = '/api/jobs/pdf';
+
+  /// PIYA-310 rasterises the whole PDF (up to 15 s for 20 pages, AC6)
+  /// before it replies, on top of the upload itself.
+  static const Duration pdfReceiveTimeout = Duration(seconds: 90);
+
+  /// Upload body time limit. Up to 20 pages at ~1-3 MB each (PIYA-101
+  /// AC10) is tens of MB; 120 s still allows a slow (~2-3 Mbit/s) mobile
+  /// link, while a stalled upload no longer hangs forever.
+  static const Duration uploadSendTimeout = Duration(seconds: 120);
+
   // PIYA-301/302 AC: endpoint responds within 2s under normal load. The
   // client allows headroom for slow mobile networks before declaring the
   // request a connectivity failure.

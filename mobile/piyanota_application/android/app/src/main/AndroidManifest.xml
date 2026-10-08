@@ -2,6 +2,16 @@
     <!-- Needed for API calls (Module 3) and runtime Google Fonts fetching until
          Plus Jakarta Sans is bundled as a static asset. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- PIYA-206 AC2: in-app camera capture, requested at first use. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- PIYA-206 AC3: only Android 12L and older need a storage permission
+         for the gallery; from Android 13 the system photo picker grants
+         access to the chosen photos without one. -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32"/>
+    <!-- Optional so devices without a camera can still use gallery and PDF. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <application
         android:label="piyanota_application"
         android:name="${applicationName}"

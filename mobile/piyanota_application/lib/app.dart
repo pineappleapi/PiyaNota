@@ -5,6 +5,8 @@ import 'routes/app_routes.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/password_reset_screen.dart';
 import 'screens/auth/sign_up_screen.dart';
+import 'screens/capture/capture_screen.dart';
+import 'screens/capture/score_details_screen.dart';
 import 'screens/library/score_library_screen.dart';
 import 'screens/onboarding/onboarding_flow_screen.dart';
 import 'screens/placeholder/coming_soon_screen.dart';
@@ -33,7 +35,7 @@ class PiyaNotaApp extends StatelessWidget {
         AppRoutes.signUp: (_) => const SignUpScreen(),
         AppRoutes.passwordReset: (_) => const PasswordResetScreen(),
         AppRoutes.scoreLibrary: (_) => const ScoreLibraryScreen(),
-        // Playback, Capture and Settings land in later PIYA-2xx tickets; the
+        // Playback and Settings land in later PIYA-2xx tickets; the
         // placeholders keep the library's navigation testable now.
         AppRoutes.playback: (context) {
           final arguments = ModalRoute.of(context)?.settings.arguments;
@@ -44,7 +46,26 @@ class PiyaNotaApp extends StatelessWidget {
                 : null,
           );
         },
-        AppRoutes.capture: (_) => const ComingSoonScreen(title: 'Capture'),
+        AppRoutes.capture: (_) => const ScoreDetailsScreen(),
+        AppRoutes.capturePages: (context) {
+          final arguments = ModalRoute.of(context)?.settings.arguments;
+          if (arguments is! CapturePagesArguments) {
+            // Only reachable through Details, which always passes these.
+            return const ScoreDetailsScreen();
+          }
+          return CaptureScreen(details: arguments.details);
+        },
+        // Processing (PIYA-207) replaces this placeholder; the job id is
+        // what it will poll.
+        AppRoutes.processing: (context) {
+          final arguments = ModalRoute.of(context)?.settings.arguments;
+          return ComingSoonScreen(
+            title: 'Processing',
+            detail: arguments is ProcessingArguments
+                ? '${arguments.title} (job ${arguments.jobId})'
+                : null,
+          );
+        },
         AppRoutes.settings: (_) => const ComingSoonScreen(title: 'Settings'),
       },
     );

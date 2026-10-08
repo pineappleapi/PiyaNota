@@ -45,6 +45,8 @@ dependencies:
   path_provider: ^2.1.6
   shared_preferences: ^2.5.5
   google_fonts: ^8.2.1
+  camera: ^0.12.1
+  image: ^4.10.1
 
 dev_dependencies:
   flutter_test:

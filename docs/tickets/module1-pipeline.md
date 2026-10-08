@@ -6,18 +6,65 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
 
 ### PIYA-101 — Submit Score for Processing API
 **Method:** POST
-**Context:** Accepts image arrays only, in reading order. PDF pages must already be rasterized by the upload-handling layer (PIYA-310) before reaching this endpoint.
+**Context:** Accepts image arrays only, in reading order. PDF pages must already be rasterized by the upload-handling layer (PIYA-310) before reaching this endpoint. *(Amended 2026-10-08, PIYA-206, backend-lead: the request is `multipart/form-data`. Each page image is one file part named `pages`, sent in reading order; part order is page order. The score metadata fields in AC8 travel as text parts in the same request.)*
 
 **Acceptance Criteria:**
 1. Accepts an ordered array of page images (JPEG/PNG) and creates a new processing job scoped to the authenticated user's account.
-2. Returns 400 if the array is empty or exceeds 20 pages.
-3. Returns 415 if any submitted file is not JPEG or PNG.
+2. Returns 400 if the array is empty or exceeds 20 pages. *(2026-10-08: error codes `no_pages` and `too_many_pages`, per AC9.)*
+3. Returns 415 if any submitted file is not JPEG or PNG. *(2026-10-08: error code `unsupported_file_type`, with the offending `pageIndex`. The type is decided from the file's magic bytes, not from the part's `Content-Type` or filename. HEIC and WebP are rejected; the client re-encodes every page after its edits (AC10), so it sends JPEG or PNG.)*
 4. Returns a `job_id` and status `"queued"` within 1 second of submission; does not block until processing completes.
 5. Each page is tagged internally with its `page_index`, reflecting submission order, preserved through every downstream stage.
-6. If the processing queue is at capacity, returns 429 with an estimated wait time instead of silently dropping the request.
+6. If the processing queue is at capacity, returns 429 with an estimated wait time instead of silently dropping the request. *(2026-10-08: error code `queue_full`. The wait is sent both as a `Retry-After` header and as `error.retryAfterSeconds`. A per-user submission limit is a separate 429, `rate_limited`, per AC9.)*
 7. The submission is logged with `job_id`, `user_id`, `page_count`, and timestamp.
+8. **Score metadata fields** (added 2026-10-08, PIYA-206, user decision; canonical values chosen by backend-lead). Sent as text parts next to the files:
 
-**Response Schema:**
+   | Field | Required | Rule | Stored in `jobs` (PIYA-311) | 400 error code |
+   |---|---|---|---|---|
+   | `title` | yes | 1–120 characters after trimming | `title` | `title_required` (missing or blank), `title_too_long`, `title_invalid` |
+   | `composer` | no | at most 120 characters after trimming | `composer`, NULL when absent | `composer_too_long`, `composer_invalid` |
+   | `tempoBpm` | no | ASCII digits only, integer 30–240; absent means 90 | `tempo_bpm`, always stored (90 when absent) | `invalid_tempo` |
+   | `keySignature` | no | one of the 15 values below, exact case | `key_signature`, NULL when absent | `invalid_key_signature` |
+   | `timeSignature` | no | one of `4/4`, `3/4`, `2/4`, `6/8`, `2/2` | `time_signature`, NULL when absent | `invalid_time_signature` |
+
+   `keySignature` values (major key named by accidental count; ASCII `#` and lowercase `b`, never `♯`/`♭`):
+
+   | Sharps | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+   |---|---|---|---|---|---|---|---|---|
+   | value | `C` | `G` | `D` | `A` | `E` | `B` | `F#` | `C#` |
+
+   | Flats | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+   |---|---|---|---|---|---|---|---|
+   | value | `F` | `Bb` | `Eb` | `Ab` | `Db` | `Gb` | `Cb` |
+
+   - **Absent values.** "Not sure" (key) and "Other" (time signature) are both expressed by omitting the field, and the server stores NULL. Multipart cannot carry `null`; an optional field sent with an empty or whitespace-only value is treated as absent. The literal string `"null"` gets no special handling: it is an invalid enumerated value (400), and as `composer` it would be stored as text, so the client must omit the field as agreed.
+   - **Character counting.** Values are trimmed and NFC-normalized, then counted in Unicode code points (Python `len()`, PostgreSQL `char_length()`). Text containing control characters (Unicode category Cc, including newlines and tabs) is rejected with `title_invalid` / `composer_invalid`.
+   - A field sent more than once returns 400 `duplicate_field`. Unrecognized field names are ignored and not stored, so a newer client still works against an older server.
+   - **Meaning.** `keySignature` and `timeSignature` are display labels only. They are never passed to the pipeline; Stages 3–4 use their own clef/key/time-signature detection. `tempoBpm` is the default playback speed, and the four tracks are rendered at it (Stage 5 `bpm`). It counts **quarter notes per minute whatever the time signature** (Stage 5 writes a quarter-note MIDI tempo at 480 PPQ), so `6/8` at dotted-quarter = 60 is `tempoBpm` 90, and `2/2` at half = 60 is `tempoBpm` 120. The submitted (or default) tempo takes precedence over any detected tempo marking. *(PIYA-109 AC2 still reads "unless a detected tempo marking overrides it" and needs the matching edit; flagged to the user.)*
+9. **Errors** (added 2026-10-08, PIYA-206 / PIYA-215 AC3). Every error uses the standard envelope with an `error` object, so the app can map `error.code` to its own message. `message` is English text for logs, not for display:
+   ```json
+   { "data": null, "success": false, "status": 400, "message": "Title is required",
+     "error": { "code": "title_required", "field": "title" } }
+   ```
+   `field` is set for field errors, `pageIndex` (numbered as in AC5) for errors about one file, and `retryAfterSeconds` for 429.
+
+   | Status | Codes |
+   |---|---|
+   | 400 | `no_pages`, `too_many_pages`, `mixed_input_types`, `duplicate_field`, plus the AC8 field codes |
+   | 401 | session rule shared by every authenticated endpoint |
+   | 413 | `file_too_large` (one image over 10 MB), `request_too_large` (body over 100 MB), `image_pixels_too_large` (a page decodes to more than 50 megapixels) |
+   | 415 | `unsupported_file_type` |
+   | 422 | `corrupt_image` (passes the magic-byte check but cannot be decoded) |
+   | 429 | `rate_limited` (per-user submission limit; starting value 10 per user per rolling hour, set in config), `queue_full` (AC6) |
+
+   - Only one error is returned. If several apply, the first in this order wins: 401, 429 `rate_limited`, 413, 400 field errors, 400 `mixed_input_types` / `no_pages`, 415, 422, 400 `too_many_pages`, 429 `queue_full`.
+   - A PDF part sent here together with images returns 400 `mixed_input_types`. A PDF sent alone returns 415; PDFs go to PIYA-310.
+   - The reverse proxy may answer an oversized body with its own 413 and no JSON. Its body limit and Flask's `MAX_CONTENT_LENGTH` must both be 100 MB, and the client treats any 413 without a readable `error.code` as `request_too_large`.
+10. **EXIF and orientation** (added 2026-10-08, PIYA-206, user decision). The client strips EXIF and applies rotation and crop to the pixels before upload, so the server receives final, already-edited images:
+    - The server decodes every page **ignoring** the EXIF Orientation tag and re-encodes it during standardization (PIYA-320) with no metadata (no EXIF, XMP, IPTC or comments). Only the re-encoded image is written to storage; the bytes as uploaded are never persisted. GPS and other EXIF values are never stored or logged.
+    - OpenCV's `cv2.imread` / `cv2.imdecode` apply EXIF orientation by default, so decode with `cv2.IMREAD_IGNORE_ORIENTATION` (or use Pillow without `ImageOps.exif_transpose`). Test: a JPEG carrying Orientation = 6 comes out of standardization with its pixels unrotated, in the orientation in which they were submitted.
+11. **No partial state** (added 2026-10-08). The job row and its stored page images are committed together. On any error, no job row is left behind, and page images already written for that request are deleted.
+
+**Response Schema:** *(2026-10-08: the response echoes the stored `title` and `tempoBpm`, the latter with the default applied. `composer`, `keySignature` and `timeSignature` are echoed only when present and omitted otherwise, never `null`.)*
 ```json
 {
   "data": {
@@ -25,7 +72,12 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
     "userId": 214,
     "pageCount": 3,
     "status": "queued",
-    "submittedAt": "2026-09-10T09:15:00Z"
+    "submittedAt": "2026-09-10T09:15:00Z",
+    "title": "Bayan Ko",
+    "composer": "Constancio de Guzman",
+    "tempoBpm": 90,
+    "keySignature": "Eb",
+    "timeSignature": "4/4"
   },
   "success": true,
   "status": 202,
