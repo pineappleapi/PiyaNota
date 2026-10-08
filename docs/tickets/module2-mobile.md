@@ -271,7 +271,7 @@ Wires Login (PIYA-202), Sign-Up (PIYA-203), and Password Reset (PIYA-204) screen
 Wires Score Library (PIYA-205) and Capture/Add Score (PIYA-206) to PIYA-101, PIYA-308, PIYA-309, PIYA-310.
 
 **Acceptance Criteria:**
-1. Score Library calls PIYA-308 on load and on each search-bar keystroke (debounced), rendering loading/empty/error states exactly as defined in PIYA-205.
+1. Score Library calls PIYA-308 on load, rendering loading/empty/error states exactly as defined in PIYA-205. The search bar filters the already-fetched list on the phone (title, composer, displayed last-opened date and "New Score (n)" label) and does not call PIYA-308 per keystroke. PIYA-308's server-side `search` matches title and composer only (PIYA-308 AC4). *(Amended 2026-10-08, backend-lead; replaces "calls PIYA-308 on load and on each search-bar keystroke (debounced)".)*
 2. Score deletion calls PIYA-309 and removes the entry from the displayed list only after a 200 response, not optimistically before confirmation.
 3. Capture/Add Score routes to PIYA-101 or PIYA-310 per PIYA-206's logic, surfaces PIYA-101/310's 400/415/429 responses as the specific UI errors PIYA-206 defines.
 
