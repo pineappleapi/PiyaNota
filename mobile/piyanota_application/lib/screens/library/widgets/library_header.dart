@@ -40,9 +40,17 @@ class LibraryHeader extends StatelessWidget {
   /// content, so neither the logo nor the title touches the top edge.
   static const double topGap = 12;
   static const double _titleToLogoGap = 12;
-  static const double _subtitleToSearchGap = 14;
+
+  /// Title top below the safe area, as in round 1 (61f5583): its 2 dp top
+  /// gap + the 49 dp centred mark + a 10 dp gap. The mark has since moved
+  /// to the corner, but the user asked to keep the text where it was
+  /// (2026-10-08), so the offset stays even though the space is now empty.
+  static const double _titleTop = 61;
+  static const double _subtitleToSearchGap = 10;
   static const double _bottomGap = 16;
   static const double _titleFontSize = 34;
+  static const double _titleLineHeight = 1.2;
+  static const double _subtitleLineHeight = 1.25;
 
   /// The 34 sp heading and its subtitle stop growing past 1.5x. Android 14+
   /// already scales large text nonlinearly (a 34 sp title at 200% renders
@@ -75,55 +83,63 @@ class LibraryHeader extends StatelessWidget {
             horizontalPadding,
             _bottomGap,
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          // The mark is laid out on its own layer so it can never move the
+          // title or the search field.
+          child: Stack(
             children: [
-              Row(
-                // The title block is centred against the mark so the row
-                // reads as one balanced band rather than text hanging off
-                // the top of a taller logo.
-                crossAxisAlignment: CrossAxisAlignment.center,
+              if (showLogo)
+                const Positioned(top: 0, right: 0, child: _HeaderLogo()),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(
-                    child: MediaQuery.withClampedTextScaling(
-                      maxScaleFactor: _headingMaxTextScale,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Semantics(
+                  // Round-1 position at normal sizes. At large text the
+                  // mark is hidden and its band is dropped too, so on a
+                  // 320 dp phone at 2x the results stay in view (NFR-10).
+                  SizedBox(height: showLogo ? _titleTop - topGap : 0),
+                  MediaQuery.withClampedTextScaling(
+                    maxScaleFactor: _headingMaxTextScale,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          // Only the title shares a band with the mark (it
+                          // ends 72 dp down); the subtitle is below it and
+                          // keeps the full width.
+                          padding: EdgeInsets.only(
+                            right: showLogo
+                                ? _logoMarkWidth + _titleToLogoGap
+                                : 0,
+                          ),
+                          child: Semantics(
                             header: true,
                             child: Text(
                               LibraryMessages.title,
                               style: textTheme.headlineLarge?.copyWith(
                                 fontSize: _titleFontSize,
                                 fontWeight: FontWeight.w700,
-                                height: 1.2,
+                                height: _titleLineHeight,
                                 color: Colors.white,
                               ),
                             ),
                           ),
-                          Text(
-                            subtitle,
-                            style: textTheme.bodyLarge?.copyWith(
-                              fontSize: _subtitleFontSize,
-                              height: 1.25,
-                              color: Colors.white,
-                            ),
+                        ),
+                        Text(
+                          subtitle,
+                          style: textTheme.bodyLarge?.copyWith(
+                            fontSize: _subtitleFontSize,
+                            height: _subtitleLineHeight,
+                            color: Colors.white,
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
-                  if (showLogo) ...[
-                    const SizedBox(width: _titleToLogoGap),
-                    const _HeaderLogo(),
-                  ],
+                  const SizedBox(height: _subtitleToSearchGap),
+                  LibrarySearchField(
+                    controller: searchController,
+                    onChanged: onSearchChanged,
+                  ),
                 ],
-              ),
-              const SizedBox(height: _subtitleToSearchGap),
-              LibrarySearchField(
-                controller: searchController,
-                onChanged: onSearchChanged,
               ),
             ],
           ),

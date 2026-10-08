@@ -817,6 +817,47 @@ void main() {
       );
     });
 
+    testWidgets('title and search sit where round 1 (61f5583) put them', (
+      tester,
+    ) async {
+      // Round 1 at 412 dp under a 24 dp status bar: title at 24 + 2 + 49
+      // (centred mark) + 10 = 85; search at 85 + 40.8 (34 sp x 1.2) +
+      // 18.75 (15 sp x 1.25) + 10 = 154.55. User asked to keep these.
+      const statusBar = 24.0;
+      await _pumpLibrary(
+        tester,
+        _apiReturning(_scores),
+        physicalSize: const Size(1236, 2745),
+        devicePixelRatio: 3.0,
+        topInset: statusBar,
+      );
+      await tester.pumpAndSettle();
+
+      final title = tester.getRect(find.text(LibraryMessages.title));
+      final subtitle = tester.getRect(
+        find.text(LibraryMessages.scoreCountSubtitle(_scores.length)),
+      );
+      expect(title.top, closeTo(85, 2));
+
+      // The test font (Ahem) draws every glyph 1 em wide, so the title and
+      // subtitle wrap here where the real font fits them on one line each.
+      // Line heights are fixed by the styles (34 x 1.2, 15 x 1.25), so the
+      // round-1 search offset is checked per line: one line each gives the
+      // 154.55 dp the device shows.
+      const titleLine = 34 * 1.2;
+      const subtitleLine = 15 * 1.25;
+      final titleLines = (title.height / titleLine).round();
+      final subtitleLines = (subtitle.height / subtitleLine).round();
+      final extraLines =
+          (titleLines - 1) * titleLine + (subtitleLines - 1) * subtitleLine;
+      expect(
+        tester.getRect(find.byType(TextField)).top,
+        closeTo(154.55 + extraLines, 2),
+      );
+      // The corner mark is still shown and doesn't push the text around.
+      expect(find.byKey(const ValueKey('library-header-logo')), findsOneWidget);
+    });
+
     testWidgets('Capture is a true circle; Library shows as selected', (
       tester,
     ) async {
