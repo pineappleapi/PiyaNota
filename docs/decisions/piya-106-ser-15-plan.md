@@ -1483,6 +1483,51 @@ so freezing Stage 1/2 before this step would bake the thick strokes into the tra
 6. The canary byte-match hard-aborts a launch.
 7. A gate pass shows the corpus is consistent with camera statistics. It is not accuracy evidence.
 
+#### Full re-cut result (2026-10-08; ml-cv-lead CONDITIONAL GO to Phase 2)
+
+Kaggle kernel `piamac/piyanota-recut-full-1`, commit 0498b49. All 3,190 pages finished in one launch (8.2 h, CPU), so
+no chained launch was needed. Workers 1 vs 4 matched on 49/49 canary pages. The Drive backup was skipped because the
+secret was attached after the session started.
+
+- **Gate v2: 29/29 PASS.** 2,686 pages ok and 504 dropped; page_drop_rate is 0.122 on the gated pages (0.158 over
+  all pages).
+  - Drops by type: 130 structural skips, 286 band failures, 88 caused by augmentation (2.9% of photographed pages).
+  - Drops by reason: no_strip_source 344, short_systems_only 130, stage2_error 21 (staff count not divisible by 4),
+    staff_count 6, staff_mismatch 3.
+  - Per-font drops are 14.7-16.6%.
+- **Strips and registration:** 25,766 strips cut. feature_drop_rate 0.023; feature_registration 0.045 (CI 0.040-0.051).
+- **Platform noise:** pessimistic 0.076, optimistic 0.012. Both pass.
+- **Thin-line skew (line_mult_cprime):** worst ratio 1.49 (p 0.0014), under the 2.0 limit.
+- **Structural label loss:** 768 of 7,510 systems (10.2%), all of them final systems.
+- **Off-paper (BUG-047):** 11.9% of strips are more than 0.05 off the sheet. p95 is 0.064 on the left and 0.084 on the
+  right; the maximum is 0.317 on the left and 0.200 on the right.
+- **Token coverage (cut / source): 0.911 overall.**
+  - accidental.double_sharp: 125 → 0. These strips are quarantined as OOV and dropped whole.
+  - rest.half: 0.444 (n = 45). note.whole: 0.752. Both are mostly lost with final systems.
+  - Every other class is 0.86-0.92.
+- **Page survival by augmentation quintile:**
+  - line_mult: Q1 0.835 vs Q4 0.912.
+  - interline: 0.838 → 0.905.
+  - top_extra: Q5 0.69 (BUG-048).
+  - canvas_h: Q5 0.75.
+- **Frozen copy:** `D:/PiyaNota-training/data/phase1_recut_full/`, with `MANIFEST.sha256` covering 3,473 files. The
+  Kaggle output is not durable.
+
+ml-cv-lead's conditions for Phase 2:
+1. **Piece-level split:** split train/val by `bach_` piece ID, with all five fonts of a piece on the same side.
+2. **Freeze the corpus:** keep the sha256 manifest above, plus a second copy before training starts. Done except the
+   second copy.
+3. **No reweighting by default.** Stratify the synthetic val split by line_mult and interline tertile, and report SER
+   per stratum.
+   - If thin-line SER lags, use capped inverse-propensity weights (≤ 1.2), never oversampling.
+   - Track the top_extra survival loss as BUG-048.
+4. **Off-paper filter:** drop strips with `off_paper_left_frac` > 0.10 or `off_paper_right_frac` > 0.10, and keep
+   0.05-0.10. Eyeball 20 strips in 0.10-0.32 first, and relax the filter if their headers are intact.
+5. **Known gaps:**
+   - Double sharps are not in the training data (OOV).
+   - Whole notes and half rests are under-represented because of the final-system loss.
+   - At G2, report per-class recall for whole notes, half rests, fermatas and final barlines.
+
 ### Phase 2: retraining (Kaggle GPU; Oct 4 - Oct 12)
 
 **ml-cv-lead reviews the training code before any run** (CLAUDE.md). The DataLoader seeding fix (notebook cell 12,
