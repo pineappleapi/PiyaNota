@@ -164,6 +164,15 @@ class CaptureMessages {
       'Your session has expired. Log in again to send this score.';
   static const String logIn = 'Log In';
   static const String editDetails = 'Edit details';
+
+  /// The action on a retake that can no longer go anywhere: the banner
+  /// says to go back to the library, so it must offer the way there.
+  static const String backToLibrary = 'Back to library';
+
+  /// PIYA-116 answers that no retake can fix.
+  static bool isDeadRetake(ScoreUploadException e) =>
+      e is UploadRejectedException &&
+      (e.code == jobNotFoundCode || e.code == pageNotRetakeableCode);
   static const String cancelUpload = 'Cancel sending';
   static const String uploadCancelled =
       'Sending cancelled. Your pages are still here.';

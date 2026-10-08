@@ -7,8 +7,8 @@ import '../../models/library_entry.dart';
 import '../../models/score_summary.dart';
 import '../../routes/app_routes.dart';
 import '../../services/score_library_api.dart';
-import '../../state/auth_providers.dart';
 import '../../state/score_library_providers.dart';
+import '../../state/session_actions.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/primary_pill_button.dart';
 import '../auth/widgets/auth_error_banner.dart';
@@ -105,13 +105,7 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
   void _openSettings() => Navigator.of(context).pushNamed(AppRoutes.settings);
 
   Future<void> _returnToLogin() async {
-    try {
-      await ref.read(sessionStorageProvider).clear();
-    } catch (e) {
-      // The token is already rejected by the server; failing to wipe it
-      // locally must not trap the user on this screen.
-      debugPrint('Session clear failed: $e');
-    }
+    await endLocalSession(ref);
     if (!mounted) return;
     Navigator.of(context)
         .pushNamedAndRemoveUntil(AppRoutes.login, (_) => false);

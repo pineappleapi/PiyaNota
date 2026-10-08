@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -154,6 +156,45 @@ void main() {
       });
     });
 
+    test('forget then track during an in-flight poll runs one loop', () {
+      final api = ScriptedProcessingApi([running(10)]);
+      _withTracker(api, (async, tracker, job) {
+        // Made inside the fake zone, so completing it is fake-async too.
+        api.fetchGate = Completer<void>();
+        tracker.track(kJob);
+        async.flushMicrotasks();
+        tracker.forget(kJob);
+        tracker.track(kJob);
+        async.flushMicrotasks();
+        expect(api.fetches, 2, reason: 'both polls are in flight');
+
+        // The first loop's answer lands after the job was re-tracked; it
+        // must be dropped, not start a second timer.
+        api.fetchGate!.complete();
+        api.fetchGate = null;
+        async.flushMicrotasks();
+        expect(job()!.percent, 10);
+        async.elapse(_tick * 3);
+        expect(api.fetches, 2 + 3, reason: 'one poll per 2 s, not two');
+      });
+    });
+
+    test('keeps the title so rows can be labelled from the tracker', () {
+      final api = ScriptedProcessingApi([running(10)]);
+      _withTracker(api, (async, tracker, job) {
+        tracker.track(kJob);
+        async.flushMicrotasks();
+        expect(job()!.title, isNull);
+        tracker.track(kJob, title: kTitle);
+        expect(job()!.title, kTitle);
+        expect(api.fetches, 1, reason: 'adding a title is not a restart');
+        tracker.track(kJob, title: 'Other');
+        expect(job()!.title, kTitle);
+        async.elapse(_tick);
+        expect(job()!.title, kTitle, reason: 'polls keep it');
+      });
+    });
+
     test('forget stops the loop and drops the job', () {
       final api = ScriptedProcessingApi([running(10)]);
       _withTracker(api, (async, tracker, job) {
@@ -199,10 +240,12 @@ void main() {
       _withTracker(api, (async, tracker, job) {
         tracker.track(kJob);
         async.flushMicrotasks();
-        async.elapse(_tick * (ProcessingTiming.pauseAfterFailures - 1));
+        // First failure at 2 s; 30 s of failing is reached at 32 s.
+        async.elapse(_tick * 15);
         expect(job()!.phase, TrackedPhase.reconnecting);
         async.elapse(_tick);
         expect(job()!.phase, TrackedPhase.paused);
+        expect(job()!.failedPolls, 16);
         expect(job()!.percent, 40);
         final fetches = api.fetches;
         async.elapse(_tick * 5);
@@ -215,6 +258,55 @@ void main() {
         expect(job()!.percent, 70);
         async.elapse(_tick);
         expect(api.fetches, fetches + 2, reason: 'polling resumed');
+      });
+    });
+
+    test('the pause is wall-clock time, not a count of failures', () {
+      // A server that only fails at a 10 s connect timeout: each failure
+      // takes 12 s. Counting 15 failures would take three minutes.
+      const timeout = Duration(seconds: 10);
+      final api = ScriptedProcessingApi([
+        running(40),
+        const ProcessingNetworkException(),
+      ]);
+      _withTracker(api, (async, tracker, job) {
+        tracker.track(kJob);
+        async.flushMicrotasks();
+        api.fetchDelay = timeout;
+        // Poll 2 starts at 2 s and fails at 12 s; then 24, 36, 48 s.
+        async.elapse(const Duration(seconds: 12));
+        expect(job()!.phase, TrackedPhase.reconnecting);
+        expect(job()!.failingSince, isNotNull);
+        async.elapse(const Duration(seconds: 47 - 12));
+        expect(job()!.phase, TrackedPhase.reconnecting);
+        expect(job()!.failedPolls, 3);
+        async.elapse(const Duration(seconds: 1));
+        expect(job()!.phase, TrackedPhase.paused, reason: '36 s failing');
+        expect(job()!.failedPolls, 4);
+        final fetches = api.fetches;
+        async.elapse(timeout * 5);
+        expect(api.fetches, fetches);
+      });
+    });
+
+    test('a good poll restarts the failure clock', () {
+      final api = ScriptedProcessingApi([
+        running(40),
+        for (var i = 0; i < 10; i++) const ProcessingNetworkException(),
+        running(45),
+        const ProcessingNetworkException(),
+      ]);
+      _withTracker(api, (async, tracker, job) {
+        tracker.track(kJob);
+        async.flushMicrotasks();
+        async.elapse(_tick * 11);
+        expect(job()!.phase, TrackedPhase.active);
+        expect(job()!.failingSince, isNull);
+        // 20 s of failing before the good poll don't count towards 30.
+        async.elapse(_tick * 15);
+        expect(job()!.phase, TrackedPhase.reconnecting);
+        async.elapse(_tick);
+        expect(job()!.phase, TrackedPhase.paused);
       });
     });
 

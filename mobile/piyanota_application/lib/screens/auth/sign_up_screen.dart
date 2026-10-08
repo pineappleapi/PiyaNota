@@ -6,6 +6,7 @@ import '../../routes/app_routes.dart';
 import '../../services/auth_api.dart';
 import '../../services/auth_validators.dart';
 import '../../state/auth_providers.dart';
+import '../../state/session_actions.dart';
 import '../../widgets/primary_pill_button.dart';
 import 'auth_messages.dart';
 import 'widgets/auth_error_banner.dart';
@@ -115,7 +116,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
           );
       // AC6: the sign-up response already carries a session token, so the
       // user is logged in here with no separate Login round trip.
-      await ref.read(sessionStorageProvider).save(session);
+      await startSession(ref, session);
     } on EmailAlreadyRegisteredException {
       error = AuthMessages.emailAlreadyRegistered;
       offerLogin = true;

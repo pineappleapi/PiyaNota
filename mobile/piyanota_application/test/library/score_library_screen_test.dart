@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -14,8 +15,12 @@ import 'package:piyanota_application/screens/library/widgets/library_bottom_nav.
 import 'package:piyanota_application/screens/library/widgets/library_header.dart';
 import 'package:piyanota_application/screens/library/widgets/score_cards.dart';
 import 'package:piyanota_application/services/score_library_api.dart';
+import 'package:piyanota_application/state/processing_providers.dart';
 import 'package:piyanota_application/state/score_library_providers.dart';
 import 'package:piyanota_application/theme/app_theme.dart';
+
+import '../processing/processing_fakes.dart'
+    show ScriptedProcessingApi, expectTrackerCleared, running, seedOldJob;
 
 /// [ScoreLibraryApi] whose every call is answered by the test, either
 /// immediately or via a [Completer] so in-flight states are observable.
@@ -105,6 +110,7 @@ Future<void> _pumpLibrary(
   double textScale = 1.0,
   double topInset = 0,
   bool disableAnimations = false,
+  List<Override> extraOverrides = const [],
 }) async {
   FlutterSecureStorage.setMockInitialValues({});
   _lastPlaybackArguments = null;
@@ -115,7 +121,10 @@ Future<void> _pumpLibrary(
 
   await tester.pumpWidget(
     ProviderScope(
-      overrides: [scoreLibraryApiProvider.overrideWithValue(api)],
+      overrides: [
+        scoreLibraryApiProvider.overrideWithValue(api),
+        ...extraOverrides,
+      ],
       child: MaterialApp(
         builder: (context, child) => MediaQuery(
           data: MediaQuery.of(context).copyWith(
@@ -292,6 +301,26 @@ void main() {
       await tester.tap(find.text(LibraryMessages.logInAgain));
       await tester.pumpAndSettle();
       expect(find.text(_loginMarker), findsOneWidget);
+    });
+
+    testWidgets('401 to Login also stops following this account\'s jobs', (
+      tester,
+    ) async {
+      final processing = ScriptedProcessingApi([running(10)]);
+      await _pumpLibrary(
+        tester,
+        ScriptedScoreLibraryApi(
+          onFetch: () async => throw const SessionExpiredException(),
+        ),
+        extraOverrides: [processingApiProvider.overrideWithValue(processing)],
+      );
+      await tester.pumpAndSettle();
+      await seedOldJob(tester, processing);
+
+      await tester.tap(find.text(LibraryMessages.logInAgain));
+      await tester.pumpAndSettle();
+      expect(find.text(_loginMarker), findsOneWidget);
+      await expectTrackerCleared(tester, processing);
     });
   });
 

@@ -5,8 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/processing_status.dart';
 import '../../routes/app_routes.dart';
-import '../../state/auth_providers.dart';
 import '../../state/processing_providers.dart';
+import '../../state/session_actions.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/primary_pill_button.dart';
 import 'processing_messages.dart';
@@ -69,7 +69,9 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
     // Providers can't change while this widget is building.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      ref.read(processingJobsProvider.notifier).track(widget.jobId);
+      ref
+          .read(processingJobsProvider.notifier)
+          .track(widget.jobId, title: widget.title);
       final job = ref.read(processingJobsProvider)[widget.jobId];
       if (job != null) _react(job);
     });
@@ -159,15 +161,7 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
     _leaving = true;
     _completionTimer?.cancel();
     final navigator = Navigator.of(context);
-    // The next account must not see this one's jobs.
-    ref.read(processingJobsProvider.notifier).forgetAll();
-    try {
-      await ref.read(sessionStorageProvider).clear();
-    } catch (e) {
-      // The server already rejected the token; failing to wipe it locally
-      // must not trap the user here.
-      debugPrint('Session clear failed: $e');
-    }
+    await endLocalSession(ref);
     _snack(ProcessingMessages.sessionExpired);
     navigator.pushNamedAndRemoveUntil(AppRoutes.login, (_) => false);
   }
@@ -218,7 +212,21 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
       case CancelOutcome.sessionExpired:
         await _returnToLogin();
       case CancelOutcome.failed:
-        _snack(ProcessingMessages.cancelFailed);
+        // The job may have finished while the dialog was open or the
+        // request was out. _react was skipped then (cancelling), and the
+        // tracker has stopped polling a finished job, so nothing else
+        // would ever move this screen on from 100%.
+        final job = _job;
+        final finished =
+            job != null &&
+            (job.phase == TrackedPhase.complete ||
+                job.phase == TrackedPhase.failed);
+        _snack(
+          finished
+              ? ProcessingMessages.alreadyFinished
+              : ProcessingMessages.cancelFailed,
+        );
+        if (job != null) _react(job);
       case CancelOutcome.alreadyFinished:
         // The tracker has re-polled: complete goes on to Playback, failed
         // shows its view.

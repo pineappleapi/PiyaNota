@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:clock/clock.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -29,8 +30,6 @@ class ProcessingTiming {
   /// without the percentage moving.
   static const Duration stallAfter = Duration(seconds: 90);
 
-  static int get pauseAfterFailures =>
-      (pauseAfter.inMilliseconds / pollInterval.inMilliseconds).ceil();
   static int get stallAfterPolls =>
       (stallAfter.inMilliseconds / pollInterval.inMilliseconds).ceil();
 }
@@ -44,7 +43,8 @@ enum TrackedPhase {
   /// The last poll failed (network or server); still polling.
   reconnecting,
 
-  /// Too many failed polls in a row; waiting for Retry.
+  /// Polls have failed for [ProcessingTiming.pauseAfter]; waiting for
+  /// Retry.
   paused,
   complete,
   failed,
@@ -68,14 +68,21 @@ enum TrackedPhase {
 class TrackedJob {
   const TrackedJob({
     required this.jobId,
+    this.title,
     this.phase = TrackedPhase.active,
     this.status,
     this.percent = 0,
     this.failedPolls = 0,
+    this.failingSince,
     this.unchangedPolls = 0,
   });
 
   final String jobId;
+
+  /// The score's title as the user typed it, so a list of jobs (the
+  /// library card, the PIYA-218 bell) can be labelled from the tracker
+  /// alone. PIYA-102 doesn't return it.
+  final String? title;
   final TrackedPhase phase;
 
   /// The last good PIYA-102 answer, kept through failed polls so the
@@ -88,6 +95,12 @@ class TrackedJob {
 
   final int failedPolls;
 
+  /// When the current run of failed polls began; null after a good poll.
+  /// The pause rule is measured from here, not by counting failures: a
+  /// poll that hangs to the 10 s connect timeout takes 12 s per failure,
+  /// so counting would stretch "30 s" to minutes.
+  final DateTime? failingSince;
+
   /// Good polls in a row with no change in [percent].
   final int unchangedPolls;
 
@@ -96,18 +109,23 @@ class TrackedJob {
       status?.stage != ProcessingStage.queued &&
       unchangedPolls >= ProcessingTiming.stallAfterPolls;
 
+  /// [failingSince] is always given, since null is a meaningful value.
   TrackedJob copyWith({
     TrackedPhase? phase,
     ProcessingStatus? status,
     int? percent,
     int? failedPolls,
+    required DateTime? failingSince,
     int? unchangedPolls,
+    String? title,
   }) => TrackedJob(
     jobId: jobId,
+    title: title ?? this.title,
     phase: phase ?? this.phase,
     status: status ?? this.status,
     percent: percent ?? this.percent,
     failedPolls: failedPolls ?? this.failedPolls,
+    failingSince: failingSince,
     unchangedPolls: unchangedPolls ?? this.unchangedPolls,
   );
 }
@@ -151,6 +169,13 @@ final processingApiProvider = Provider<ProcessingApi>((ref) {
   );
 });
 
+/// The tracker's wall clock. `clock.now` rather than `DateTime.now` so
+/// widget tests and fake_async move it with fake time; tests may also
+/// override it outright.
+final processingClockProvider = Provider<DateTime Function()>(
+  (ref) => clock.now,
+);
+
 /// Every job the app is following, by job id: the one progress source the
 /// Processing screen (and later the library card and bell) read (spec §8).
 ///
@@ -166,7 +191,9 @@ class ProcessingJobsController extends Notifier<Map<String, TrackedJob>> {
   final Map<String, Timer> _timers = {};
 
   /// Bumped per job on every poll, retry and forget, so an answer that
-  /// arrives late for a superseded request is dropped.
+  /// arrives late for a superseded request is dropped. Never reset: a
+  /// forgotten then re-tracked id must not reuse a number an in-flight
+  /// poll from the old loop still holds.
   final Map<String, int> _generations = {};
 
   @override
@@ -181,10 +208,19 @@ class ProcessingJobsController extends Notifier<Map<String, TrackedJob>> {
   }
 
   /// Starts following [jobId] and polls it straight away. A job already
-  /// followed is left alone (opening its screen again doesn't restart it).
-  void track(String jobId) {
-    if (state.containsKey(jobId)) return;
-    _put(TrackedJob(jobId: jobId));
+  /// followed is left alone (opening its screen again doesn't restart it),
+  /// apart from picking up a [title] it didn't have.
+  void track(String jobId, {String? title}) {
+    final existing = state[jobId];
+    if (existing != null) {
+      if (existing.title == null && title != null) {
+        _put(
+          existing.copyWith(title: title, failingSince: existing.failingSince),
+        );
+      }
+      return;
+    }
+    _put(TrackedJob(jobId: jobId, title: title));
     unawaited(_poll(jobId));
   }
 
@@ -192,14 +228,20 @@ class ProcessingJobsController extends Notifier<Map<String, TrackedJob>> {
   Future<void> retry(String jobId) async {
     final job = state[jobId];
     if (job == null || job.phase.isFinal) return;
-    _put(job.copyWith(phase: TrackedPhase.reconnecting, failedPolls: 0));
+    _put(
+      job.copyWith(
+        phase: TrackedPhase.reconnecting,
+        failedPolls: 0,
+        failingSince: null,
+      ),
+    );
     await _poll(jobId);
   }
 
   /// Stops following [jobId] (cancelled, replaced by a retake).
   void forget(String jobId) {
     _stop(jobId);
-    _generations.remove(jobId);
+    _generations[jobId] = (_generations[jobId] ?? 0) + 1;
     if (!state.containsKey(jobId)) return;
     state = {...state}..remove(jobId);
   }
@@ -257,9 +299,12 @@ class ProcessingJobsController extends Notifier<Map<String, TrackedJob>> {
 
     final next = status != null
         ? _withStatus(job, status)
-        : _withError(job, error!);
+        : _withError(job, error!, ref.read(processingClockProvider)());
     _put(next);
     if (next.phase.isFinal || next.phase == TrackedPhase.paused) return;
+    // Belt and braces with the generation check: whatever timer is there
+    // belongs to a superseded loop, and must not keep running beside this.
+    _stop(jobId);
     _timers[jobId] = Timer(ProcessingTiming.pollInterval, () => _poll(jobId));
   }
 
@@ -272,6 +317,7 @@ class ProcessingJobsController extends Notifier<Map<String, TrackedJob>> {
       status: status,
       percent: percent,
       failedPolls: 0,
+      failingSince: null,
       unchangedPolls: percent == job.percent && job.status != null
           ? job.unchangedPolls + 1
           : 0,
@@ -284,10 +330,20 @@ class ProcessingJobsController extends Notifier<Map<String, TrackedJob>> {
     );
   }
 
-  static TrackedJob _withError(TrackedJob job, ProcessingException error) {
+  /// [now] is when the failed poll finished. The run of failures counts
+  /// from the first one's finish, so a single slow failure never pauses
+  /// on its own; after that, 30 s of wall-clock failure pauses however
+  /// long each attempt took.
+  static TrackedJob _withError(
+    TrackedJob job,
+    ProcessingException error,
+    DateTime now,
+  ) {
     final failures = job.failedPolls + 1;
+    final since = job.failingSince ?? now;
     return job.copyWith(
       failedPolls: failures,
+      failingSince: since,
       phase: switch (error) {
         ProcessingSessionExpiredException() => TrackedPhase.sessionExpired,
         ProcessingJobNotFoundException() => TrackedPhase.notFound,
@@ -295,7 +351,7 @@ class ProcessingJobsController extends Notifier<Map<String, TrackedJob>> {
         ProcessingNetworkException() ||
         ProcessingServerException() ||
         ProcessingConflictException() =>
-          failures >= ProcessingTiming.pauseAfterFailures
+          now.difference(since) >= ProcessingTiming.pauseAfter
               ? TrackedPhase.paused
               : TrackedPhase.reconnecting,
       },

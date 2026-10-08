@@ -24,8 +24,11 @@ import 'package:piyanota_application/services/score_upload_api.dart';
 import 'package:piyanota_application/services/session_storage.dart';
 import 'package:piyanota_application/state/auth_providers.dart';
 import 'package:piyanota_application/state/capture_providers.dart';
+import 'package:piyanota_application/state/processing_providers.dart';
 
 import '../auth/auth_test_harness.dart';
+import '../processing/processing_fakes.dart'
+    show ScriptedProcessingApi, running;
 
 /// A real 1x1 PNG, so thumbnails decode without touching disk.
 final Uint8List kTinyPng = img.encodePng(img.Image(width: 1, height: 1));
@@ -271,6 +274,9 @@ class CaptureHarness {
   final picker = FakePagePicker();
   final processor = FakePageImageProcessor();
   final upload = ScriptedScoreUploadApi();
+
+  /// Answers polls for jobs a test seeds into the tracker.
+  final processing = ScriptedProcessingApi([running(10)]);
   final files = FakeCaptureFileStore();
   final secureStorage = FaultySecureStorage({'session_token': 'sess_t'});
   final List<FakeCaptureCamera> cameras = [];
@@ -290,6 +296,7 @@ class CaptureHarness {
       return camera;
     }),
     scoreUploadApiProvider.overrideWithValue(upload),
+    processingApiProvider.overrideWithValue(processing),
     captureFileStoreProvider.overrideWithValue(files),
     sessionStorageProvider.overrideWithValue(SessionStorage(secureStorage)),
   ];

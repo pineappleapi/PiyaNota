@@ -14,10 +14,10 @@ import '../../services/capture/device_channel.dart';
 import '../../services/capture/page_image_processor.dart';
 import '../../services/capture/page_picker.dart';
 import '../../services/score_upload_api.dart';
-import '../../state/auth_providers.dart';
 import '../../state/capture_providers.dart';
 import '../../state/processing_providers.dart';
 import '../../state/score_library_providers.dart';
+import '../../state/session_actions.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/primary_pill_button.dart';
 import 'capture_messages.dart';
@@ -635,6 +635,32 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     });
   }
 
+  /// A retake the server refused for good (job gone, or page no longer
+  /// replaceable). Closing would land back on the failure view, which
+  /// offers this same retake again, so go past it to the library. The
+  /// library reloads to show where the scan really stands.
+  void _abandonRetake() {
+    final retake = widget.retake;
+    if (retake == null || _submitting) return;
+    _pendingUndo = null;
+    _files.deleteAll();
+    final error = _uploadError;
+    if (error is UploadRejectedException && error.code == jobNotFoundCode) {
+      ref.read(processingJobsProvider.notifier).forget(retake.jobId);
+    }
+    ref.invalidate(scoreLibraryProvider);
+    final navigator = Navigator.of(context);
+    var found = false;
+    navigator.popUntil((route) {
+      if (route.settings.name == AppRoutes.scoreLibrary) {
+        found = true;
+        return true;
+      }
+      return route.isFirst;
+    });
+    if (!found) navigator.pushReplacementNamed(AppRoutes.scoreLibrary);
+  }
+
   void _cancelSubmit() => _cancelToken?.cancel();
 
   Future<void> _submit() async {
@@ -724,13 +750,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   }
 
   Future<void> _returnToLogin() async {
-    try {
-      await ref.read(sessionStorageProvider).clear();
-    } catch (e) {
-      // The server already rejected the token; failing to wipe it locally
-      // must not trap the user here.
-      debugPrint('Session clear failed: $e');
-    }
+    await endLocalSession(ref);
     if (!mounted) return;
     Navigator.of(context)
         .pushNamedAndRemoveUntil(AppRoutes.login, (_) => false);
@@ -877,6 +897,10 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                                 CaptureMessages.logIn,
                                 _returnToLogin,
                               ),
+                              _
+                                  when widget.retake != null &&
+                                      CaptureMessages.isDeadRetake(error) =>
+                                (CaptureMessages.backToLibrary, _abandonRetake),
                               _ when CaptureMessages.isDetailsError(error) => (
                                 CaptureMessages.editDetails,
                                 _editDetails,

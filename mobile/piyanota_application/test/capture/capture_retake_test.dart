@@ -4,7 +4,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:piyanota_application/routes/app_routes.dart';
 import 'package:piyanota_application/screens/capture/capture_messages.dart';
 import 'package:piyanota_application/services/score_upload_api.dart';
+import 'package:piyanota_application/state/processing_providers.dart';
 
+import '../processing/processing_fakes.dart'
+    show appContainer, expectTrackerCleared, seedOldJob;
 import 'capture_fakes.dart';
 
 const _retake = CaptureRetakeArguments(
@@ -83,4 +86,74 @@ void main() {
     expect(find.textContaining('can\'t be replaced any more'), findsOneWidget);
     expect(find.textContaining('ROUTE:processing'), findsNothing);
   });
+
+  testWidgets('closing out discards the photo and sends nothing', (
+    tester,
+  ) async {
+    final h = CaptureHarness();
+    await pumpCapture(tester, h, retake: _retake);
+    await _shoot(tester);
+    await tester.tap(find.byTooltip(CaptureMessages.close));
+    await tester.pumpAndSettle();
+    expect(find.text(CaptureMessages.discardTitle(1)), findsOneWidget);
+    await tester.tap(find.text(CaptureMessages.discard));
+    await tester.pumpAndSettle();
+
+    expect(find.text(kLibraryMarker), findsOneWidget);
+    expect(h.upload.resubmitCalls, isEmpty);
+    expect(h.files.deleted, contains('prepared/raw-0.jpg'));
+  });
+
+  testWidgets('session expiry during a retake logs out cleanly', (
+    tester,
+  ) async {
+    final h = CaptureHarness();
+    h.upload.onResubmit = () =>
+        Future.error(const UploadSessionExpiredException());
+    await pumpCapture(tester, h, retake: _retake);
+    await seedOldJob(tester, h.processing);
+    await _shoot(tester);
+    await tester.tap(find.text(CaptureMessages.sendRetake(2)));
+    await tester.pumpAndSettle();
+    expect(find.text(CaptureMessages.sessionExpired), findsOneWidget);
+
+    await tester.tap(find.text(CaptureMessages.logIn));
+    await tester.pumpAndSettle();
+    expect(find.text(kLoginMarker), findsOneWidget);
+    expect(h.secureStorage.values, isEmpty);
+    await expectTrackerCleared(tester, h.processing);
+  });
+
+  for (final (code, forgets) in [
+    (jobNotFoundCode, true),
+    (pageNotRetakeableCode, false),
+  ]) {
+    testWidgets('$code offers a way back to the library', (tester) async {
+      final h = CaptureHarness();
+      h.upload.onResubmit = () => Future.error(
+        UploadRejectedException(
+          statusCode: code == jobNotFoundCode ? 404 : 409,
+          code: code,
+        ),
+      );
+      await pumpCapture(tester, h, retake: _retake);
+      appContainer(tester)
+          .read(processingJobsProvider.notifier)
+          .track(_retake.jobId);
+      await tester.pump();
+      await _shoot(tester);
+      await tester.tap(find.text(CaptureMessages.sendRetake(2)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text(CaptureMessages.backToLibrary));
+      await tester.pumpAndSettle();
+      expect(find.text(kLibraryMarker), findsOneWidget);
+      expect(h.upload.resubmitCalls, hasLength(1));
+      expect(h.files.deleted, contains('prepared/raw-0.jpg'));
+      expect(
+        appContainer(tester).read(processingJobsProvider),
+        forgets ? isNot(contains(_retake.jobId)) : contains(_retake.jobId),
+      );
+    });
+  }
 }

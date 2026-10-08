@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -14,6 +16,16 @@ import 'processing_fakes.dart';
 Future<void> _nextPoll(WidgetTester tester) async {
   await tester.pump(const Duration(milliseconds: 1300));
   await tester.pump(const Duration(milliseconds: 700));
+}
+
+/// From [pumpProcessing]'s first good poll, far enough that polls failing
+/// from the next one on have failed for [ProcessingTiming.pauseAfter].
+Future<void> _pumpPastPause(WidgetTester tester) async {
+  final end = ProcessingTiming.pauseAfter + ProcessingTiming.pollInterval * 2;
+  for (var t = Duration.zero; t < end; t += ProcessingTiming.pollInterval) {
+    await tester.pump(ProcessingTiming.pollInterval);
+  }
+  await tester.pump();
 }
 
 Future<void> _settleNavigation(WidgetTester tester) async {
@@ -193,6 +205,74 @@ void main() {
       expect(find.text(playbackMarker(3)), findsOneWidget);
     });
 
+    testWidgets('finished while the dialog was open, then cancel fails: '
+        'still opens Playback (AC8)', (tester) async {
+      final h = ProcessingHarness(
+        ScriptedProcessingApi([running(90)])
+          ..cancelError = const ProcessingNetworkException(),
+      );
+      await pumpProcessing(tester, h);
+      await tester.tap(find.text(ProcessingMessages.cancelScan));
+      await _settleNavigation(tester);
+      h.api.then([done(scoreId: 3)]);
+      await _nextPoll(tester);
+      expect(h.job!.phase, TrackedPhase.complete);
+      expect(find.text(ProcessingMessages.cancelTitle), findsOneWidget);
+      expect(find.text(playbackMarker(3)), findsNothing, reason: 'waits');
+
+      await tester.tap(find.text(ProcessingMessages.confirmCancel));
+      await tester.pump();
+      expect(find.text(ProcessingMessages.alreadyFinished), findsOneWidget);
+      expect(find.text(ProcessingMessages.cancelFailed), findsNothing);
+      await tester.pump(ProcessingScreen.completionHold);
+      await _settleNavigation(tester);
+      expect(find.text(playbackMarker(3)), findsOneWidget);
+    });
+
+    testWidgets('finished while the cancel request was out, then it fails: '
+        'still opens Playback (AC8)', (tester) async {
+      final gate = Completer<void>();
+      final h = ProcessingHarness(
+        ScriptedProcessingApi([running(90)])
+          ..cancelGate = gate
+          ..cancelError = const ProcessingServerException(),
+      );
+      await pumpProcessing(tester, h);
+      await tester.tap(find.text(ProcessingMessages.cancelScan));
+      await _settleNavigation(tester);
+      await tester.tap(find.text(ProcessingMessages.confirmCancel));
+      await _settleNavigation(tester);
+      expect(h.api.cancels, 1);
+
+      h.api.then([done(scoreId: 3)]);
+      await _nextPoll(tester);
+      expect(h.job!.phase, TrackedPhase.complete);
+      expect(find.text(playbackMarker(3)), findsNothing);
+
+      gate.complete();
+      await tester.pump();
+      await tester.pump(ProcessingScreen.completionHold);
+      await _settleNavigation(tester);
+      expect(find.text(playbackMarker(3)), findsOneWidget);
+    });
+
+    testWidgets('failed while the dialog was open, then cancel fails: '
+        'shows the failure', (tester) async {
+      final h = ProcessingHarness(
+        ScriptedProcessingApi([running(40)])
+          ..cancelError = const ProcessingNetworkException(),
+      );
+      await pumpProcessing(tester, h);
+      await tester.tap(find.text(ProcessingMessages.cancelScan));
+      await _settleNavigation(tester);
+      h.api.then([failed(FailureReason.noStaffDetected, pageIndex: 1)]);
+      await _nextPoll(tester);
+      await tester.tap(find.text(ProcessingMessages.confirmCancel));
+      await _settleNavigation(tester);
+      expect(find.text(ProcessingMessages.failedHeading), findsOneWidget);
+      expect(find.text('Retake page 2'), findsOneWidget);
+    });
+
     testWidgets('a failed cancel request stays and says so', (tester) async {
       final h = ProcessingHarness(
         ScriptedProcessingApi([running(30)])
@@ -233,6 +313,7 @@ void main() {
         await tester.pump(ProcessingTiming.pollInterval * 2);
         expect(h.api.fetches, greaterThan(fetches));
         expect(h.job!.percent, 60);
+        expect(h.job!.title, kTitle, reason: 'labels the row later');
       });
     }
   });
@@ -372,10 +453,7 @@ void main() {
         ]),
       );
       await pumpProcessing(tester, h);
-      for (var i = 0; i < ProcessingTiming.pauseAfterFailures; i++) {
-        await tester.pump(ProcessingTiming.pollInterval);
-      }
-      await tester.pump();
+      await _pumpPastPause(tester);
       expect(find.text(ProcessingMessages.pausedTitle), findsOneWidget);
       expect(find.text('40%'), findsOneWidget);
       expect(find.text(ProcessingMessages.reconnecting), findsNothing);
@@ -425,9 +503,7 @@ void main() {
           size: const Size(320, 640),
           textScale: 2,
         );
-        for (var i = 0; i < ProcessingTiming.pauseAfterFailures; i++) {
-          await tester.pump(ProcessingTiming.pollInterval);
-        }
+        await _pumpPastPause(tester);
         expect(tester.takeException(), isNull);
       });
     }

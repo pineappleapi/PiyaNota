@@ -47,6 +47,9 @@ dependencies:
   google_fonts: ^8.2.1
   camera: ^0.12.1
   image: ^4.10.1
+  # Wall clock for the processing tracker's pause rule; flutter_test and
+  # fake_async replace it with fake time, which DateTime.now can't do.
+  clock: ^1.1.2
 
 dev_dependencies:
   flutter_test:

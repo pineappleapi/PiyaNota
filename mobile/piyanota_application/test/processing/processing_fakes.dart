@@ -32,12 +32,22 @@ class ScriptedProcessingApi implements ProcessingApi {
   Completer<void>? cancelGate;
   int cancels = 0;
 
+  /// Holds every poll started while set until it completes, to have polls
+  /// in flight across a forget/track.
+  Completer<void>? fetchGate;
+
+  /// How long each poll takes to answer, e.g. a server that only fails
+  /// at the connect timeout.
+  Duration fetchDelay = Duration.zero;
+
   /// Appends entries (e.g. the next state, after a test checks this one).
   void then(List<Object> more) => script.addAll(more);
 
   @override
   Future<ProcessingStatus> fetchStatus(String jobId) async {
     fetches++;
+    if (fetchGate case final gate?) await gate.future;
+    if (fetchDelay > Duration.zero) await Future<void>.delayed(fetchDelay);
     final next = script.isNotEmpty ? script.removeAt(0) : _last;
     _last = next;
     if (next is ProcessingException) throw next;
@@ -89,6 +99,37 @@ const kTitle = 'Ave Maria';
 const kLibrary = 'ROUTE:library';
 const kLogin = 'ROUTE:login';
 
+/// A job left in the tracker by whoever was signed in before.
+const kOldJob = 'job-old';
+
+/// The app's container in any test tree with a ProviderScope over a
+/// MaterialApp.
+ProviderContainer appContainer(WidgetTester tester) =>
+    ProviderScope.containerOf(
+      tester.element(find.byType(MaterialApp)),
+      listen: false,
+    );
+
+/// Starts the tracker following [kOldJob] on [api], as if the previous
+/// account had a scan running.
+Future<void> seedOldJob(WidgetTester tester, ScriptedProcessingApi api) async {
+  appContainer(tester).read(processingJobsProvider.notifier).track(kOldJob);
+  await tester.pump();
+  expect(appContainer(tester).read(processingJobsProvider), contains(kOldJob));
+  expect(api.fetches, 1);
+}
+
+/// The tracker is empty and nothing polls any more.
+Future<void> expectTrackerCleared(
+  WidgetTester tester,
+  ScriptedProcessingApi api,
+) async {
+  expect(appContainer(tester).read(processingJobsProvider), isEmpty);
+  final fetches = api.fetches;
+  await tester.pump(ProcessingTiming.pollInterval * 3);
+  expect(api.fetches, fetches, reason: 'old jobs must stop polling');
+}
+
 String playbackMarker(int scoreId) => 'ROUTE:playback $scoreId $kTitle';
 String retakeMarker(String jobId, int pageIndex) =>
     'ROUTE:retake $jobId $pageIndex';
@@ -102,10 +143,7 @@ class ProcessingHarness {
 
   /// Owned by the ProviderScope, so unmounting the tree disposes it (and
   /// the poll timers) before the pending-timer check.
-  ProviderContainer get container => ProviderScope.containerOf(
-    _tester.element(find.byType(MaterialApp)),
-    listen: false,
-  );
+  ProviderContainer get container => appContainer(_tester);
 
   List<Override> get overrides => [
     processingApiProvider.overrideWithValue(api),
