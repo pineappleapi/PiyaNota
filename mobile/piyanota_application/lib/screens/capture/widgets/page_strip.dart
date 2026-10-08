@@ -400,7 +400,13 @@ class _PhotoThumb extends StatelessWidget {
               child: InkWell(
                 onTap: onOpen,
                 child: Image(
-                  image: imageSource.imageFor(page.path),
+                  // BoxFit.cover fills the thumb by its short side, so a
+                  // wide page needs more than thumbHeight on its long side.
+                  image: capToDisplay(
+                    imageSource.imageFor(page.path),
+                    logicalSide: PageStrip.thumbHeight * 2,
+                    devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+                  ),
                   fit: BoxFit.cover,
                   gaplessPlayback: true,
                   errorBuilder: (_, _, _) => const Center(

@@ -13,6 +13,25 @@ abstract interface class PageImageSource {
   Future<Size> sizeOf(String path);
 }
 
+/// Decodes [image] no larger than a square of [logicalSide] logical pixels
+/// at [devicePixelRatio], keeping its aspect ratio. A 12 MP page decoded at
+/// full size is ~48 MB of RAM per copy; the screen never shows more than
+/// its own pixels. Edits are still applied to the full-size file.
+ImageProvider capToDisplay(
+  ImageProvider image, {
+  required double logicalSide,
+  required double devicePixelRatio,
+}) {
+  final side = (logicalSide * devicePixelRatio).ceil();
+  return ResizeImage(
+    image,
+    width: side,
+    height: side,
+    policy: ResizeImagePolicy.fit,
+    allowUpscaling: false,
+  );
+}
+
 class FilePageImageSource implements PageImageSource {
   const FilePageImageSource();
 

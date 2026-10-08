@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/capture_page.dart';
+import '../../services/capture/page_image_source.dart';
 import '../../state/capture_providers.dart';
 import '../../theme/app_theme.dart';
 import 'capture_messages.dart';
@@ -47,7 +48,11 @@ class PagePreviewScreen extends ConsumerWidget {
             maxScale: 6,
             child: Center(
               child: Image(
-                image: ref.read(pageImageSourceProvider).imageFor(item.path),
+                image: capToDisplay(
+                  ref.read(pageImageSourceProvider).imageFor(item.path),
+                  logicalSide: MediaQuery.sizeOf(context).longestSide,
+                  devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+                ),
                 fit: BoxFit.contain,
                 semanticLabel: CaptureMessages.pageOf(number, total),
               ),

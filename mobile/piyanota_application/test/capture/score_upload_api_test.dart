@@ -23,7 +23,11 @@ class _StubAdapter implements HttpClientAdapter {
     this.headers = const {},
     this.connectionFails = false,
     this.rawBody,
+    this.holdUntilCancelled = false,
   });
+
+  /// Never answers; fails only once the request is cancelled.
+  final bool holdUntilCancelled;
 
   final int status;
   final Object? body;
@@ -42,6 +46,13 @@ class _StubAdapter implements HttpClientAdapter {
     requests++;
     lastRequest = options;
     await requestStream?.drain<void>();
+    if (holdUntilCancelled) {
+      await cancelFuture;
+      throw DioException.requestCancelled(
+        requestOptions: options,
+        reason: 'cancelled',
+      );
+    }
     if (connectionFails) {
       throw DioException.connectionError(
         requestOptions: options,
@@ -283,6 +294,57 @@ void main() {
           ),
         ),
       );
+    });
+
+    test('a page file gone from disk is a typed failure naming it', () async {
+      final adapter = _StubAdapter();
+      await expectLater(
+        _apiWith(adapter).submitImages(
+          details: const ScoreDetails(title: 'Ave'),
+          imagePaths: [page1, '${temp.path}/gone.jpg'],
+        ),
+        throwsA(
+          isA<UploadFileMissingException>().having(
+            (e) => e.pageIndex,
+            'pageIndex',
+            1,
+          ),
+        ),
+      );
+      expect(adapter.requests, 0);
+    });
+
+    test('a PDF gone from disk is a typed failure with no page', () async {
+      await expectLater(
+        _apiWith(_StubAdapter()).submitPdf(
+          details: const ScoreDetails(title: 'Ave'),
+          pdfPath: '${temp.path}/gone.pdf',
+        ),
+        throwsA(
+          isA<UploadFileMissingException>().having(
+            (e) => e.pageIndex,
+            'pageIndex',
+            isNull,
+          ),
+        ),
+      );
+    });
+
+    test('uploads have a send timeout and honour cancel', () async {
+      final adapter = _StubAdapter(holdUntilCancelled: true);
+      final token = CancelToken();
+      final submit = _apiWith(adapter).submitImages(
+        details: const ScoreDetails(title: 'Ave'),
+        imagePaths: [page1],
+        cancelToken: token,
+      );
+      // Cancel mid-request, not before it starts.
+      while (adapter.lastRequest == null) {
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      }
+      token.cancel();
+      await expectLater(submit, throwsA(isA<UploadCancelledException>()));
+      expect(adapter.lastRequest!.sendTimeout, ApiConfig.uploadSendTimeout);
     });
 
     test('a 202 without data.jobId is a rejection, not a crash', () async {

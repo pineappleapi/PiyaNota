@@ -1,5 +1,4 @@
-import 'dart:io';
-
+import 'package:dio/dio.dart' show CancelToken;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,6 +8,7 @@ import '../../models/capture_session.dart';
 import '../../models/score_details.dart';
 import '../../routes/app_routes.dart';
 import '../../services/capture/capture_camera.dart';
+import '../../services/capture/capture_files.dart';
 import '../../services/capture/capture_permissions.dart';
 import '../../services/capture/device_channel.dart';
 import '../../services/capture/page_image_processor.dart';
@@ -22,6 +22,7 @@ import '../../widgets/primary_pill_button.dart';
 import 'capture_messages.dart';
 import 'edit_page_screen.dart';
 import 'page_preview_screen.dart';
+import 'score_details_screen.dart';
 import 'widgets/camera_frame.dart';
 import 'widgets/page_strip.dart';
 
@@ -60,7 +61,23 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   /// Pages being prepared or a photo being taken.
   int _busy = 0;
   bool _submitting = false;
+  CancelToken? _cancelToken;
   ScoreUploadException? _uploadError;
+
+  /// What will be sent: step 1's answers, possibly fixed here after the
+  /// server rejected a field.
+  late ScoreDetails _details = widget.details;
+
+  late final CaptureFileStore _store = ref.read(captureFileStoreProvider);
+  late final CaptureFileLedger _files = CaptureFileLedger(_store.delete);
+
+  /// A removed item whose Undo is still on offer; its file must survive
+  /// until the snack bar closes.
+  CaptureItem? _pendingUndo;
+
+  /// Slack for file systems that store modification times in whole
+  /// seconds, so a file made just after opening is never seen as stale.
+  static const Duration _staleSlack = Duration(seconds: 2);
 
   static const double _gutter = 16;
   static const double _minFrameHeight = 160;
@@ -69,6 +86,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Leftovers of a session that crashed or was killed. Only one Capture
+    // exists at a time, so anything older than this screen is orphaned.
+    _store.clearStale(DateTime.now().subtract(_staleSlack));
     // AC2: asked at first use, i.e. when the user reaches the camera.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _startCamera(ask: true);
@@ -78,6 +98,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _cancelToken?.cancel();
+    // Discard, Back, or a finished upload: the pages are no longer needed.
+    _files.deleteAll();
     _cameraGeneration++;
     _camera?.dispose();
     _camera = null;
@@ -188,8 +211,10 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
 
   bool get _canAct => _busy == 0 && !_submitting;
 
-  /// Clears the way for photos: offers to replace a PDF, refuses when full.
-  Future<bool> _makeRoomForPhotos() async {
+  /// Decides whether photos can be added: offers to replace a PDF, refuses
+  /// when full. Changes nothing yet: a PDF is only replaced once photos
+  /// actually arrive, so cancelling the picker or a failed shot keeps it.
+  Future<_PhotoRoom> _makeRoomForPhotos() async {
     if (_session.hasPdf) {
       final replace = await _confirm(
         title: CaptureMessages.replacePdfTitle,
@@ -197,27 +222,38 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
         confirm: CaptureMessages.replace,
         cancel: CaptureMessages.keep,
       );
-      if (!replace || !mounted) return false;
-      _setSession(_session.withoutAll());
+      return replace && mounted ? _PhotoRoom.replacePdf : _PhotoRoom.none;
     }
     if (_session.photoRoom <= 0) {
       _snack(CaptureMessages.scoreFull);
-      return false;
+      return _PhotoRoom.none;
     }
-    return true;
+    return _PhotoRoom.add;
   }
 
   Future<void> _takePhoto() async {
     final camera = _camera;
     if (camera == null || !_canAct) return;
-    if (!await _makeRoomForPhotos() || !mounted) return;
+    final room = await _makeRoomForPhotos();
+    if (room == _PhotoRoom.none || !mounted) return;
     setState(() => _busy++);
     try {
       final raw = await camera.takePicture();
-      final prepared = await ref.read(pageImageProcessorProvider).prepare(raw);
-      _deleteQuietly(raw);
-      if (!mounted) return;
-      _addPhotos([prepared], PageSource.camera);
+      final String prepared;
+      try {
+        prepared = await ref.read(pageImageProcessorProvider).prepare(raw);
+      } finally {
+        _store.delete(raw);
+      }
+      if (!mounted) {
+        _store.delete(prepared);
+        return;
+      }
+      _addPhotos(
+        [prepared],
+        PageSource.camera,
+        replacePdf: room == _PhotoRoom.replacePdf,
+      );
     } on CameraUnavailableException {
       _snack(CaptureMessages.captureFailed);
     } on UnreadableImageException {
@@ -229,7 +265,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
 
   Future<void> _pickGallery() async {
     if (!_canAct) return;
-    if (!await _makeRoomForPhotos() || !mounted) return;
+    final room = await _makeRoomForPhotos();
+    if (room == _PhotoRoom.none || !mounted) return;
     final outcome = await ref.read(capturePermissionsProvider).requestGallery();
     if (!mounted) return;
     if (outcome != PermissionOutcome.granted) {
@@ -242,24 +279,36 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     final prepared = <String>[];
     var unreadable = 0;
     var skipped = 0;
+    final replacePdf = room == _PhotoRoom.replacePdf;
     try {
       final processor = ref.read(pageImageProcessorProvider);
       for (final path in picked) {
-        if (prepared.length >= _session.photoRoom) {
-          skipped++;
-          continue;
-        }
+        final photoRoom = replacePdf
+            ? CaptureSession.maxPages
+            : _session.photoRoom;
         try {
+          if (prepared.length >= photoRoom) {
+            skipped++;
+            continue;
+          }
           prepared.add(await processor.prepare(path));
         } on UnreadableImageException {
           unreadable++;
+        } finally {
+          // image_picker hands over cache copies; ours is the prepared JPEG.
+          _store.delete(path);
         }
       }
     } finally {
       if (mounted) setState(() => _busy--);
     }
-    if (!mounted) return;
-    if (prepared.isNotEmpty) _addPhotos(prepared, PageSource.gallery);
+    if (!mounted) {
+      prepared.forEach(_store.delete);
+      return;
+    }
+    if (prepared.isNotEmpty) {
+      _addPhotos(prepared, PageSource.gallery, replacePdf: replacePdf);
+    }
     // AC7: anything that isn't a readable image never joins the score.
     if (unreadable > 0) {
       _snack(CaptureMessages.unreadablePhotos(unreadable));
@@ -284,14 +333,17 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     try {
       pages = await ref.read(deviceChannelProvider).pdfPageCount(picked.path);
     } on PdfUnreadableException catch (e) {
-      _deleteQuietly(picked.path);
+      _store.delete(picked.path);
       if (mounted) {
         setState(() => _busy--);
         await _explain(CaptureMessages.pdfProblem(e.problem));
       }
       return;
     }
-    if (!mounted) return;
+    if (!mounted) {
+      _store.delete(picked.path);
+      return;
+    }
     setState(() => _busy--);
     // AC6: checked on the phone so a long PDF never starts uploading.
     final rejection = pages <= 0
@@ -300,7 +352,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
         ? CaptureMessages.pdfTooLong(pages)
         : null;
     if (rejection != null) {
-      _deleteQuietly(picked.path);
+      _store.delete(picked.path);
       await _explain(rejection);
       return;
     }
@@ -315,12 +367,16 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
         confirm: CaptureMessages.replace,
         cancel: CaptureMessages.keep,
       );
-      if (!replace) {
-        _deleteQuietly(picked.path);
+      if (!replace || !mounted) {
+        _store.delete(picked.path);
         return;
       }
     }
-    if (!mounted) return;
+    if (!mounted) {
+      _store.delete(picked.path);
+      return;
+    }
+    _files.own(picked.path);
     final pdf = PdfDocument(
       id: _nextId++,
       path: picked.path,
@@ -397,17 +453,42 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     }
   }
 
-  void _addPhotos(List<String> paths, PageSource source) {
+  void _addPhotos(
+    List<String> paths,
+    PageSource source, {
+    bool replacePdf = false,
+  }) {
+    paths.forEach(_files.own);
+    final base = replacePdf && _session.hasPdf
+        ? _session.withoutAll()
+        : _session;
+    if (base.hasPdf) {
+      // A PDF came back (Undo) while these were being prepared; photos and
+      // a PDF never mix. The sweep below deletes the new files.
+      _setSession(base);
+      return;
+    }
     final photos = [
       for (final path in paths)
         PhotoPage(id: _nextId++, path: path, source: source),
     ];
-    final next = _session.addPhotos(photos);
-    final added = next.items.length - _session.items.length;
+    final next = base.addPhotos(photos);
+    final added = next.items.length - base.items.length;
     _setSession(next, flash: added > 0 ? photos[added - 1].id : null);
   }
 
+  /// Deletes working files nothing points at any more.
+  void _sweepFiles() {
+    final pending = _pendingUndo;
+    _files.sweep(_session, keep: [?pending?.path]);
+  }
+
   void _setSession(CaptureSession next, {int? flash, int? focus}) {
+    _applySession(next, flash: flash, focus: focus);
+    _sweepFiles();
+  }
+
+  void _applySession(CaptureSession next, {int? flash, int? focus}) {
     setState(() {
       _session = next;
       _flashId = flash;
@@ -435,9 +516,11 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   void _remove(CaptureItem item) {
     final index = _session.indexOf(item.id);
     if (index < 0) return;
+    // A newer removal supersedes the older Undo, whose file is then swept.
+    _pendingUndo = item;
     _setSession(_session.remove(item.id));
     final messenger = ScaffoldMessenger.of(context)..hideCurrentSnackBar();
-    messenger.showSnackBar(
+    final snack = messenger.showSnackBar(
       SnackBar(
         content: Text(
           item is PdfDocument
@@ -450,17 +533,26 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
         ),
       ),
     );
+    snack.closed.then((_) {
+      if (!mounted || _pendingUndo?.id != item.id) return;
+      _pendingUndo = null;
+      _sweepFiles();
+    });
   }
 
   void _undoRemove(int index, CaptureItem item) {
-    if (!mounted) return;
+    if (!mounted || _pendingUndo?.id != item.id) return;
+    _pendingUndo = null;
     // The strip may have changed since: never let Undo mix a PDF with
     // photos or push a score past the page limit.
     final fits = switch (item) {
       PdfDocument() => _session.isEmpty,
       PhotoPage() => !_session.hasPdf && _session.photoRoom > 0,
     };
-    if (!fits || _session.indexOf(item.id) >= 0) return;
+    if (!fits || _session.indexOf(item.id) >= 0) {
+      _sweepFiles();
+      return;
+    }
     _setSession(_session.insert(index, item), flash: item.id);
   }
 
@@ -469,7 +561,13 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     final newPath = await Navigator.of(context).push<String>(
       MaterialPageRoute(builder: (_) => EditPageScreen(path: page.path)),
     );
-    if (newPath == null || !mounted) return;
+    if (newPath == null) return;
+    if (!mounted) {
+      _store.delete(newPath);
+      return;
+    }
+    // The pre-edit file is swept once nothing refers to it.
+    _files.own(newPath);
     _setSession(_session.replacePath(page.id, newPath), flash: page.id);
   }
 
@@ -489,10 +587,15 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
 
   // ------------------------------------------------------- leave and submit
 
+  /// Leaves with the details, so step 1 shows any edit made here.
+  void _leave() => Navigator.of(context).pop(_details);
+
+  bool get _detailsEdited => !identical(_details, widget.details);
+
   Future<void> _close() async {
     if (_submitting) return;
     if (_session.isEmpty) {
-      Navigator.of(context).pop();
+      _leave();
       return;
     }
     final discard = await _confirm(
@@ -501,26 +604,56 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
       confirm: CaptureMessages.discard,
       cancel: CaptureMessages.keepEditing,
     );
-    if (discard && mounted) Navigator.of(context).pop();
+    if (!discard || !mounted) return;
+    _pendingUndo = null;
+    _files.deleteAll();
+    _leave();
   }
+
+  Future<void> _editDetails() async {
+    if (!_canAct) return;
+    final edited = await Navigator.of(context).push<ScoreDetails>(
+      MaterialPageRoute(builder: (_) => ScoreDetailsScreen(initial: _details)),
+    );
+    if (edited == null || !mounted) return;
+    setState(() {
+      _details = edited;
+      _uploadError = null;
+    });
+  }
+
+  void _cancelSubmit() => _cancelToken?.cancel();
 
   Future<void> _submit() async {
     if (_submitting || _session.isEmpty || _busy > 0) return;
+    final cancelToken = CancelToken();
     setState(() {
       _submitting = true;
+      _cancelToken = cancelToken;
       _uploadError = null;
     });
-    final api = ref.read(scoreUploadApiProvider);
+    final details = _details;
+    var sent = false;
     try {
+      final api = ref.read(scoreUploadApiProvider);
       // AC8: a PDF goes to PIYA-310, camera/gallery photos to PIYA-101.
       final pdf = _session.pdf;
       final job = pdf != null
-          ? await api.submitPdf(details: widget.details, pdfPath: pdf.path)
+          ? await api.submitPdf(
+              details: details,
+              pdfPath: pdf.path,
+              cancelToken: cancelToken,
+            )
           : await api.submitImages(
-              details: widget.details,
+              details: details,
               imagePaths: [for (final page in _session.photos) page.path],
+              cancelToken: cancelToken,
             );
       if (!mounted) return;
+      sent = true;
+      // The server has its own copies now.
+      _pendingUndo = null;
+      _files.deleteAll();
       ref.invalidate(scoreLibraryProvider);
       // Details and Capture leave the stack: Back from Processing returns
       // to the library, not to a form that was already sent.
@@ -528,16 +661,26 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
         AppRoutes.processing,
         (route) =>
             route.settings.name == AppRoutes.scoreLibrary || route.isFirst,
-        arguments: ProcessingArguments(
-          jobId: job.jobId,
-          title: widget.details.title,
-        ),
+        arguments: ProcessingArguments(jobId: job.jobId, title: details.title),
       );
+    } on UploadCancelledException {
+      _snack(CaptureMessages.uploadCancelled);
     } on ScoreUploadException catch (e) {
+      if (mounted) setState(() => _uploadError = e);
+    } catch (e, stack) {
+      // Anything unforeseen must still give the screen back, never leave
+      // the button spinning forever.
+      debugPrint('Score upload failed unexpectedly: $e\n$stack');
       if (mounted) {
+        setState(
+          () => _uploadError = const UploadRejectedException(statusCode: null),
+        );
+      }
+    } finally {
+      if (mounted && !sent) {
         setState(() {
           _submitting = false;
-          _uploadError = e;
+          _cancelToken = null;
         });
       }
     }
@@ -614,17 +757,15 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     if (open) await _openSettings();
   }
 
-  void _deleteQuietly(String path) {
-    File(path).delete().ignore();
-  }
-
   // ------------------------------------------------------------------ build
 
   @override
   Widget build(BuildContext context) {
     final count = _session.pageCount;
     return PopScope(
-      canPop: _session.isEmpty && !_submitting,
+      // Popping by the system would drop edited details; _close hands them
+      // back to step 1.
+      canPop: _session.isEmpty && !_submitting && !_detailsEdited,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) _close();
       },
@@ -687,9 +828,17 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                           const SizedBox(height: 8),
                           _UploadErrorBanner(
                             message: CaptureMessages.uploadError(error),
-                            onLogIn: error is UploadSessionExpiredException
-                                ? _returnToLogin
-                                : null,
+                            action: switch (error) {
+                              UploadSessionExpiredException() => (
+                                CaptureMessages.logIn,
+                                _returnToLogin,
+                              ),
+                              _ when CaptureMessages.isDetailsError(error) => (
+                                CaptureMessages.editDetails,
+                                _editDetails,
+                              ),
+                              _ => null,
+                            },
                           ),
                         ],
                         const SizedBox(height: 12),
@@ -702,6 +851,18 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                           backgroundColor: AppTheme.captureAccent,
                           foregroundColor: AppTheme.captureInk,
                         ),
+                        if (_submitting)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: TextButton(
+                              onPressed: _cancelSubmit,
+                              style: TextButton.styleFrom(
+                                foregroundColor: AppTheme.captureInk,
+                                minimumSize: const Size(48, 48),
+                              ),
+                              child: const Text(CaptureMessages.cancelUpload),
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -1007,11 +1168,15 @@ class _StripHeading extends StatelessWidget {
   }
 }
 
+enum _PhotoRoom { none, add, replacePdf }
+
 class _UploadErrorBanner extends StatelessWidget {
-  const _UploadErrorBanner({required this.message, required this.onLogIn});
+  const _UploadErrorBanner({required this.message, required this.action});
 
   final String message;
-  final VoidCallback? onLogIn;
+
+  /// The one thing that fixes this error, if it isn't just "try again".
+  final (String, VoidCallback)? action;
 
   @override
   Widget build(BuildContext context) {
@@ -1024,25 +1189,39 @@ class _UploadErrorBanner extends StatelessWidget {
           color: AppTheme.errorBannerFill,
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Row(
+        // The action sits under the message: beside it, "Edit details" at
+        // 2x text would squeeze the message to a sliver on a 320 dp phone.
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Icon(Icons.error_outline_rounded, color: AppTheme.errorRed),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                message,
-                style: Theme.of(context).textTheme.bodyMedium
-                    ?.copyWith(color: AppTheme.errorRed),
-              ),
-            ),
-            if (onLogIn != null)
-              TextButton(
-                onPressed: onLogIn,
-                style: TextButton.styleFrom(
-                  foregroundColor: AppTheme.errorRed,
-                  minimumSize: const Size(48, 48),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(
+                  Icons.error_outline_rounded,
+                  color: AppTheme.errorRed,
                 ),
-                child: const Text(CaptureMessages.logIn),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    message,
+                    style: Theme.of(context).textTheme.bodyMedium
+                        ?.copyWith(color: AppTheme.errorRed),
+                  ),
+                ),
+              ],
+            ),
+            if (action case (final label, final onPressed))
+              Align(
+                alignment: AlignmentDirectional.centerEnd,
+                child: TextButton(
+                  onPressed: onPressed,
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppTheme.errorRed,
+                    minimumSize: const Size(48, 48),
+                  ),
+                  child: Text(label),
+                ),
               ),
           ],
         ),

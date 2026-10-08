@@ -40,6 +40,8 @@ class MethodChannelDeviceChannel implements DeviceChannel {
       throw PdfUnreadableException(
         e.code == 'encrypted' ? PdfProblem.encrypted : PdfProblem.corrupt,
       );
+    } on MissingPluginException {
+      throw const PdfUnreadableException(PdfProblem.corrupt);
     }
   }
 }

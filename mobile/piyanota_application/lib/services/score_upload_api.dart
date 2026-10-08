@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
@@ -34,6 +36,19 @@ class UploadNetworkException extends ScoreUploadException {
   const UploadNetworkException();
 }
 
+/// A page file (or the PDF) is gone from the phone before it could be
+/// read for upload — Android may clear the app's temp folder. [pageIndex]
+/// counts from 0 and is null for a PDF.
+class UploadFileMissingException extends ScoreUploadException {
+  const UploadFileMissingException({this.pageIndex});
+  final int? pageIndex;
+}
+
+/// The user cancelled the upload. Not an error to show.
+class UploadCancelledException extends ScoreUploadException {
+  const UploadCancelledException();
+}
+
 /// The server answered with an error. [code] is `error.code` from the
 /// PIYA-101 AC9 envelope (null when the body had none), [pageIndex] is set
 /// for errors about one file, [retryAfter] for 429.
@@ -55,15 +70,19 @@ class UploadRejectedException extends ScoreUploadException {
 
 abstract interface class ScoreUploadApi {
   /// PIYA-101: camera and gallery pages, in page order.
+  /// [cancelToken] aborts the request; the future then fails with
+  /// [UploadCancelledException].
   Future<SubmittedJob> submitImages({
     required ScoreDetails details,
     required List<String> imagePaths,
+    CancelToken? cancelToken,
   });
 
   /// PIYA-310: one PDF, rasterised by the server.
   Future<SubmittedJob> submitPdf({
     required ScoreDetails details,
     required String pdfPath,
+    CancelToken? cancelToken,
   });
 }
 
@@ -99,6 +118,7 @@ class HttpScoreUploadApi implements ScoreUploadApi {
   Future<SubmittedJob> submitImages({
     required ScoreDetails details,
     required List<String> imagePaths,
+    CancelToken? cancelToken,
   }) async {
     // Part order is page order (PIYA-101 context note).
     final form = FormData()..fields.addAll(scoreFormFields(details));
@@ -106,45 +126,64 @@ class HttpScoreUploadApi implements ScoreUploadApi {
       form.files.add(
         MapEntry(
           'pages',
-          await MultipartFile.fromFile(
+          await _readFile(
             imagePaths[i],
             filename: 'page-${i + 1}.jpg',
             contentType: _jpeg,
+            pageIndex: i,
           ),
         ),
       );
     }
-    return _post(ApiConfig.submitImagesPath, form);
+    return _post(ApiConfig.submitImagesPath, form, cancelToken: cancelToken);
   }
 
   @override
   Future<SubmittedJob> submitPdf({
     required ScoreDetails details,
     required String pdfPath,
+    CancelToken? cancelToken,
   }) async {
     final form = FormData()
       ..fields.addAll(scoreFormFields(details))
       ..files.add(
         MapEntry(
           'file',
-          await MultipartFile.fromFile(
-            pdfPath,
-            filename: 'score.pdf',
-            contentType: _pdf,
-          ),
+          await _readFile(pdfPath, filename: 'score.pdf', contentType: _pdf),
         ),
       );
     return _post(
       ApiConfig.submitPdfPath,
       form,
       receiveTimeout: ApiConfig.pdfReceiveTimeout,
+      cancelToken: cancelToken,
     );
+  }
+
+  /// Opens a part's file, turning a vanished temp file into a typed failure
+  /// instead of an unhandled FileSystemException.
+  static Future<MultipartFile> _readFile(
+    String path, {
+    required String filename,
+    required DioMediaType contentType,
+    int? pageIndex,
+  }) async {
+    try {
+      return await MultipartFile.fromFile(
+        path,
+        filename: filename,
+        contentType: contentType,
+      );
+    } on FileSystemException {
+      throw UploadFileMissingException(pageIndex: pageIndex);
+    }
   }
 
   Future<SubmittedJob> _post(
     String path,
     FormData form, {
     Duration? receiveTimeout,
+    CancelToken? cancelToken,
   }) async {
     final token = await _sessionStorage.readToken();
     if (token == null || token.isEmpty) {
@@ -158,8 +197,10 @@ class HttpScoreUploadApi implements ScoreUploadApi {
         options: Options(
           headers: {'Authorization': 'Bearer $token'},
           contentType: 'multipart/form-data',
+          sendTimeout: ApiConfig.uploadSendTimeout,
           receiveTimeout: receiveTimeout,
         ),
+        cancelToken: cancelToken,
       );
     } on DioException catch (e) {
       throw _mapDioError(e);
@@ -193,9 +234,13 @@ class HttpScoreUploadApi implements ScoreUploadApi {
         return const UploadNetworkException();
       case DioExceptionType.badResponse:
         return rejectionFrom(e.response);
+      case DioExceptionType.cancel:
+        return const UploadCancelledException();
+      case DioExceptionType.unknown when e.error is FileSystemException:
+        // A file vanished while the body was streaming.
+        return const UploadFileMissingException();
       case DioExceptionType.transformTimeout:
       case DioExceptionType.badCertificate:
-      case DioExceptionType.cancel:
       case DioExceptionType.unknown:
         return const UploadRejectedException(statusCode: null);
     }

@@ -1,3 +1,5 @@
+import 'package:dio/dio.dart' show CancelToken;
+
 import '../models/score_details.dart';
 import 'fake_score_library_api.dart';
 import 'score_upload_api.dart';
@@ -33,19 +35,31 @@ class FakeScoreUploadApi implements ScoreUploadApi {
   Future<SubmittedJob> submitImages({
     required ScoreDetails details,
     required List<String> imagePaths,
-  }) => _submit(details, imagePaths.length);
+    CancelToken? cancelToken,
+  }) => _submit(details, imagePaths.length, cancelToken);
 
   @override
   Future<SubmittedJob> submitPdf({
     required ScoreDetails details,
     required String pdfPath,
+    CancelToken? cancelToken,
   }) =>
       // The real PIYA-310 counts the pages itself; the fake has no PDF
       // parser, so the library card shows no page count.
-      _submit(details, null);
+      _submit(details, null, cancelToken);
 
-  Future<SubmittedJob> _submit(ScoreDetails details, int? pageCount) async {
-    await Future<void>.delayed(latency);
+  Future<SubmittedJob> _submit(
+    ScoreDetails details,
+    int? pageCount,
+    CancelToken? cancelToken,
+  ) async {
+    await Future.any<void>([
+      Future<void>.delayed(latency),
+      if (cancelToken != null) cancelToken.whenCancel,
+    ]);
+    if (cancelToken?.isCancelled ?? false) {
+      throw const UploadCancelledException();
+    }
     final token = await _sessionStorage.readToken();
     final account = token == null ? null : _accountForToken(token);
     if (account == null) throw const UploadSessionExpiredException();

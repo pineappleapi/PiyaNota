@@ -56,8 +56,10 @@ class CaptureSession {
 
   CaptureSession withoutAll() => const CaptureSession();
 
-  CaptureSession remove(int id) =>
-      CaptureSession([for (final item in items) if (item.id != id) item]);
+  CaptureSession remove(int id) => CaptureSession([
+    for (final item in items)
+      if (item.id != id) item,
+  ]);
 
   /// Puts back an item removed from [index] (Undo).
   CaptureSession insert(int index, CaptureItem item) {

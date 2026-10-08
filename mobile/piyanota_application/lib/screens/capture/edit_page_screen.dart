@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/page_edit.dart';
+import '../../services/capture/page_image_source.dart';
 import '../../state/capture_providers.dart';
 import '../../theme/app_theme.dart';
 import 'capture_messages.dart';
@@ -230,9 +231,17 @@ class _EditPageScreenState extends ConsumerState<EditPageScreen> {
                       child: RotatedBox(
                         quarterTurns: _edit.quarterTurns,
                         child: Image(
-                          image: ref
-                              .read(pageImageSourceProvider)
-                              .imageFor(widget.path),
+                          // Display copy only; the isolate applies the
+                          // edit to the full-size file.
+                          image: capToDisplay(
+                            ref
+                                .read(pageImageSourceProvider)
+                                .imageFor(widget.path),
+                            logicalSide: MediaQuery.sizeOf(context).longestSide,
+                            devicePixelRatio: MediaQuery.devicePixelRatioOf(
+                              context,
+                            ),
+                          ),
                           fit: BoxFit.fill,
                           gaplessPlayback: true,
                         ),

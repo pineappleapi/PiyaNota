@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show FileSystemException;
 
 import 'package:flutter/gestures.dart' show kLongPressTimeout;
 import 'package:flutter/material.dart';
@@ -567,6 +568,272 @@ void main() {
     });
   });
 
+  group('review fixes: failures, cancel, details, files', () {
+    for (final (name, error) in [
+      ('a vanished file', const FileSystemException('gone', 'p.jpg')),
+      ('an unforeseen error', StateError('boom')),
+    ]) {
+      testWidgets('$name gives the screen back with the generic error', (
+        tester,
+      ) async {
+        final h = CaptureHarness();
+        h.upload.onSubmit = () => Future.error(error);
+        await pumpCapture(tester, h);
+        await _shoot(tester);
+        await tester.tap(find.text(CaptureMessages.createScoreWith(1)));
+        await tester.pumpAndSettle();
+        expect(find.text(CaptureMessages.generic), findsOneWidget);
+        expect(find.byType(CircularProgressIndicator), findsNothing);
+        expect(_submitButton(tester).onPressed, isNotNull);
+        expect(find.text(CaptureMessages.cancelUpload), findsNothing);
+      });
+    }
+
+    testWidgets('a missing page file says which page to retake', (
+      tester,
+    ) async {
+      final h = CaptureHarness();
+      const error = UploadFileMissingException(pageIndex: 1);
+      h.upload.onSubmit = () => Future.error(error);
+      await pumpCapture(tester, h);
+      await _shoot(tester, 2);
+      await tester.tap(find.text(CaptureMessages.createScoreWith(2)));
+      await tester.pumpAndSettle();
+      expect(find.text(CaptureMessages.uploadError(error)), findsOneWidget);
+      expect(CaptureMessages.uploadError(error), contains('Page 2'));
+    });
+
+    testWidgets('Cancel sending stops the upload and keeps the pages', (
+      tester,
+    ) async {
+      final h = CaptureHarness();
+      final never = Completer<SubmittedJob>();
+      h.upload.onSubmit = () => never.future;
+      await pumpCapture(tester, h);
+      await _shoot(tester, 2);
+      await tester.tap(find.text(CaptureMessages.createScoreWith(2)));
+      await tester.pump();
+      expect(_submitButton(tester).onPressed, isNull);
+
+      await tester.tap(find.text(CaptureMessages.cancelUpload));
+      await tester.pump();
+      await tester.pump();
+      expect(h.upload.lastCancelToken!.isCancelled, isTrue);
+      expect(find.text(CaptureMessages.uploadCancelled), findsOneWidget);
+      expect(find.text(CaptureMessages.cancelUpload), findsNothing);
+      expect(find.text(CaptureMessages.network), findsNothing);
+      expect(_submitButton(tester).onPressed, isNotNull);
+      expect(h.files.deleted.where((p) => p.startsWith('prepared/')), isEmpty);
+    });
+
+    testWidgets('cancelling the gallery after "Replace" keeps the PDF', (
+      tester,
+    ) async {
+      final h = CaptureHarness();
+      await pumpCapture(tester, h);
+      h.picker.pdf = const PickedPdf(path: 'x.pdf', name: 'x.pdf');
+      await _pickPdf(tester);
+
+      h.picker.gallery = const [];
+      await tester.tap(find.text(CaptureMessages.gallery));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(CaptureMessages.replace));
+      await tester.pumpAndSettle();
+      expect(find.text(CaptureMessages.createScoreWith(3)), findsOneWidget);
+      expect(h.files.deleted, isNot(contains('x.pdf')));
+
+      // Photos that do arrive replace it, and its copy is deleted.
+      await _addGallery(tester, h, 2);
+      await tester.tap(find.text(CaptureMessages.replace));
+      await tester.pumpAndSettle();
+      expect(find.text(CaptureMessages.createScoreWith(2)), findsOneWidget);
+      expect(h.files.deleted, contains('x.pdf'));
+    });
+
+    testWidgets('a failed shot after "Replace" keeps the PDF', (tester) async {
+      final h = CaptureHarness();
+      await pumpCapture(tester, h);
+      h.picker.pdf = const PickedPdf(path: 'x.pdf', name: 'x.pdf');
+      await _pickPdf(tester);
+      h.camera!.failCapture = true;
+      await _shoot(tester);
+      await tester.tap(find.text(CaptureMessages.replace));
+      await tester.pumpAndSettle();
+      expect(find.text(CaptureMessages.captureFailed), findsOneWidget);
+      expect(find.text(CaptureMessages.createScoreWith(3)), findsOneWidget);
+    });
+
+    testWidgets('a rejected title is fixed via Edit details, pages kept', (
+      tester,
+    ) async {
+      final h = CaptureHarness();
+      h.upload.onSubmit = () => Future.error(
+        const UploadRejectedException(
+          statusCode: 400,
+          code: 'title_too_long',
+          field: 'title',
+        ),
+      );
+      await pumpCapture(tester, h, startOnDetails: true);
+      await tester.enterText(find.byType(TextField).first, 'Ave Maria');
+      await tester.pump();
+      await tester.tap(find.text(CaptureMessages.nextAddPages));
+      await tester.pumpAndSettle();
+      await _shoot(tester, 2);
+      await tester.tap(find.text(CaptureMessages.createScoreWith(2)));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Tap Edit details'), findsOneWidget);
+      expect(find.textContaining('Go back'), findsNothing);
+
+      await tester.tap(find.text(CaptureMessages.editDetails));
+      await tester.pumpAndSettle();
+      expect(find.text(CaptureMessages.editDetailsTitle), findsOneWidget);
+      expect(find.text('Ave Maria'), findsOneWidget);
+      await tester.enterText(find.byType(TextField).first, 'Ave');
+      await tester.pump();
+      await tester.tap(find.text(CaptureMessages.saveDetails));
+      await tester.pumpAndSettle();
+
+      // Back on Capture, pages intact, banner gone.
+      expect(find.text(CaptureMessages.createScoreWith(2)), findsOneWidget);
+      expect(find.textContaining('Tap Edit details'), findsNothing);
+
+      // Leaving hands the fix back to step 1.
+      await tester.tap(find.byTooltip(CaptureMessages.close));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(CaptureMessages.discard));
+      await tester.pumpAndSettle();
+      expect(find.text(CaptureMessages.detailsTitle), findsOneWidget);
+      expect(find.text('Ave'), findsOneWidget);
+
+      // And it is what gets sent.
+      await tester.tap(find.text(CaptureMessages.nextAddPages));
+      await tester.pumpAndSettle();
+      await _shoot(tester);
+      h.upload.onSubmit = null;
+      await tester.tap(find.text(CaptureMessages.createScoreWith(1)));
+      await tester.pumpAndSettle();
+      expect(h.upload.detailsSent.last.title, 'Ave');
+      expect(find.text('ROUTE:processing job-42 Ave'), findsOneWidget);
+    });
+
+    testWidgets('edited details are sent on retry without leaving', (
+      tester,
+    ) async {
+      final h = CaptureHarness();
+      h.upload.onSubmit = () => Future.error(
+        const UploadRejectedException(
+          statusCode: 400,
+          code: 'invalid_tempo',
+          field: 'tempoBpm',
+        ),
+      );
+      await pumpCapture(tester, h);
+      await _shoot(tester);
+      await tester.tap(find.text(CaptureMessages.createScoreWith(1)));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(CaptureMessages.editDetails));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).first, 'Salve');
+      await tester.pump();
+      await tester.tap(find.text(CaptureMessages.saveDetails));
+      await tester.pumpAndSettle();
+      h.upload.onSubmit = null;
+      await tester.tap(find.text(CaptureMessages.createScoreWith(1)));
+      await tester.pumpAndSettle();
+      expect(h.upload.detailsSent.last.title, 'Salve');
+    });
+
+    testWidgets('Cancel on Edit details changes nothing', (tester) async {
+      final h = CaptureHarness();
+      h.upload.onSubmit = () => Future.error(
+        const UploadRejectedException(statusCode: 400, code: 'title_invalid'),
+      );
+      await pumpCapture(tester, h);
+      await _shoot(tester);
+      await tester.tap(find.text(CaptureMessages.createScoreWith(1)));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(CaptureMessages.editDetails));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).first, 'Other');
+      await tester.tap(find.text(CaptureMessages.cancel));
+      await tester.pumpAndSettle();
+      expect(find.text(CaptureMessages.createScoreWith(1)), findsOneWidget);
+      h.upload.onSubmit = null;
+      await tester.tap(find.text(CaptureMessages.createScoreWith(1)));
+      await tester.pumpAndSettle();
+      expect(h.upload.detailsSent.last.title, 'Ave Maria');
+    });
+
+    testWidgets('working files are deleted once nothing needs them', (
+      tester,
+    ) async {
+      final h = CaptureHarness();
+      await pumpCapture(tester, h);
+      expect(h.files.staleCleared, hasLength(1));
+
+      await _shoot(tester, 3);
+      // The raw camera file goes as soon as the page is prepared.
+      expect(h.files.deleted, ['raw-0.jpg', 'raw-1.jpg', 'raw-2.jpg']);
+
+      await tester.tap(_label(CaptureMessages.removePage(3)));
+      await tester.pumpAndSettle();
+      expect(h.files.deleted, isNot(contains('prepared/raw-2.jpg')));
+      // A newer removal supersedes the older Undo: its file goes.
+      await tester.tap(_label(CaptureMessages.removePage(2)));
+      await tester.pumpAndSettle();
+      expect(h.files.deleted, contains('prepared/raw-2.jpg'));
+      expect(h.files.deleted, isNot(contains('prepared/raw-1.jpg')));
+      // Dismissing the Undo snack bar lets the last one go too.
+      await tester.drag(find.byType(SnackBar), const Offset(0, 300));
+      await tester.pumpAndSettle();
+      expect(h.files.deleted, contains('prepared/raw-1.jpg'));
+      expect(h.files.deleted, isNot(contains('prepared/raw-0.jpg')));
+
+      // An edit deletes the pre-edit file.
+      await tester.tap(_label(CaptureMessages.editPage(1)));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(CaptureMessages.rotate));
+      await tester.pump();
+      await tester.tap(find.text(CaptureMessages.done));
+      await tester.pumpAndSettle();
+      expect(h.files.deleted, contains('prepared/raw-0.jpg'));
+
+      // A sent score's pages go once the server has them.
+      await tester.tap(find.text(CaptureMessages.createScoreWith(1)));
+      await tester.pumpAndSettle();
+      expect(h.files.deleted, contains('prepared/raw-0.jpg+edit1'));
+    });
+
+    testWidgets('gallery copies and discarded pages are deleted', (
+      tester,
+    ) async {
+      final h = CaptureHarness();
+      await pumpCapture(tester, h);
+      await _addGallery(tester, h, 2);
+      expect(h.files.deleted, unorderedEquals(['g0.jpg', 'g1.jpg']));
+
+      await tester.tap(find.byTooltip(CaptureMessages.close));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(CaptureMessages.discard));
+      await tester.pumpAndSettle();
+      expect(
+        h.files.deleted,
+        containsAll(['prepared/g0.jpg', 'prepared/g1.jpg']),
+      );
+    });
+
+    testWidgets('a rejected or declined PDF copy is deleted', (tester) async {
+      final h = CaptureHarness(device: FakeDeviceChannel(pages: 21));
+      await pumpCapture(tester, h);
+      h.picker.pdf = const PickedPdf(path: 'long.pdf', name: 'long.pdf');
+      await _pickPdf(tester);
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      expect(h.files.deleted, ['long.pdf']);
+    });
+  });
+
   group('layout and accessibility (NFR-10, NFR-3)', () {
     for (final status in ['ready', 'denied']) {
       testWidgets('320x568 at 2x text fits ($status camera)', (tester) async {
@@ -589,6 +856,45 @@ void main() {
         expect(find.text(CaptureMessages.createScoreWith(4)), findsOneWidget);
       });
     }
+
+    testWidgets('320x568 at 2x: Edit details and Cancel sending fit', (
+      tester,
+    ) async {
+      final h = CaptureHarness();
+      h.upload.onSubmit = () => Future.error(
+        const UploadRejectedException(statusCode: 400, code: 'title_invalid'),
+      );
+      await pumpCapture(tester, h, size: const Size(320, 568), textScale: 2);
+      await _addGallery(tester, h, 2);
+      // Everything is built (no lazy list), so bring it into view.
+      Future<void> show(Finder finder) async {
+        await tester.ensureVisible(finder);
+        await tester.pump();
+      }
+
+      final create = find.text(CaptureMessages.createScoreWith(2));
+      await show(create);
+      await tester.tap(create);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await show(find.text(CaptureMessages.editDetails));
+      expect(
+        tester.getSize(find.textContaining('Tap Edit details')).width,
+        greaterThan(150),
+      );
+
+      final never = Completer<SubmittedJob>();
+      h.upload.onSubmit = () => never.future;
+      await show(create);
+      await tester.tap(create);
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      await show(find.text(CaptureMessages.cancelUpload));
+      await tester.tap(find.text(CaptureMessages.cancelUpload));
+      await tester.pump();
+      await tester.pump();
+      expect(_submitButton(tester).onPressed, isNotNull);
+    });
 
     testWidgets('meets tap-target, label and contrast guidelines', (
       tester,

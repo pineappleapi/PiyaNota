@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:dio/dio.dart' show CancelToken;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
@@ -13,6 +14,7 @@ import 'package:piyanota_application/routes/app_routes.dart';
 import 'package:piyanota_application/screens/capture/capture_screen.dart';
 import 'package:piyanota_application/screens/capture/score_details_screen.dart';
 import 'package:piyanota_application/services/capture/capture_camera.dart';
+import 'package:piyanota_application/services/capture/capture_files.dart';
 import 'package:piyanota_application/services/capture/capture_permissions.dart';
 import 'package:piyanota_application/services/capture/device_channel.dart';
 import 'package:piyanota_application/services/capture/page_image_processor.dart';
@@ -142,6 +144,18 @@ class FakePageImageProcessor implements PageImageProcessor {
   }
 }
 
+/// Records deletions instead of touching disk.
+class FakeCaptureFileStore implements CaptureFileStore {
+  final List<String> deleted = [];
+  final List<DateTime> staleCleared = [];
+
+  @override
+  Future<void> delete(String path) async => deleted.add(path);
+
+  @override
+  Future<void> clearStale(DateTime before) async => staleCleared.add(before);
+}
+
 class FakePageImageSource implements PageImageSource {
   const FakePageImageSource([this.size = const Size(300, 400)]);
 
@@ -182,26 +196,42 @@ class ScriptedScoreUploadApi implements ScoreUploadApi {
     status: 'queued',
   );
 
-  Future<SubmittedJob> _answer() => onSubmit?.call() ?? Future.value(job);
+  /// The token passed with the latest submit.
+  CancelToken? lastCancelToken;
+
+  /// Like the real API, a cancel wins over a still-pending answer.
+  Future<SubmittedJob> _answer(CancelToken? cancelToken) {
+    lastCancelToken = cancelToken;
+    final answer = onSubmit?.call() ?? Future.value(job);
+    if (cancelToken == null) return answer;
+    return Future.any([
+      answer,
+      cancelToken.whenCancel.then<SubmittedJob>(
+        (_) => throw const UploadCancelledException(),
+      ),
+    ]);
+  }
 
   @override
   Future<SubmittedJob> submitImages({
     required ScoreDetails details,
     required List<String> imagePaths,
+    CancelToken? cancelToken,
   }) {
     detailsSent.add(details);
     imageCalls.add(imagePaths);
-    return _answer();
+    return _answer(cancelToken);
   }
 
   @override
   Future<SubmittedJob> submitPdf({
     required ScoreDetails details,
     required String pdfPath,
+    CancelToken? cancelToken,
   }) {
     detailsSent.add(details);
     pdfCalls.add(pdfPath);
-    return _answer();
+    return _answer(cancelToken);
   }
 }
 
@@ -218,6 +248,7 @@ class CaptureHarness {
   final picker = FakePagePicker();
   final processor = FakePageImageProcessor();
   final upload = ScriptedScoreUploadApi();
+  final files = FakeCaptureFileStore();
   final secureStorage = FaultySecureStorage({'session_token': 'sess_t'});
   final List<FakeCaptureCamera> cameras = [];
   bool cameraFailsInit = false;
@@ -236,6 +267,7 @@ class CaptureHarness {
       return camera;
     }),
     scoreUploadApiProvider.overrideWithValue(upload),
+    captureFileStoreProvider.overrideWithValue(files),
     sessionStorageProvider.overrideWithValue(SessionStorage(secureStorage)),
   ];
 }

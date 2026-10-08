@@ -64,9 +64,7 @@ class PluginPagePicker implements PagePicker {
   Future<List<String>> pickGalleryImages() async {
     // Full metadata off: on Android 13+ this keeps the permission-less
     // system photo picker (AC3); orientation is still read from the file.
-    final files = await _imagePicker.pickMultiImage(
-      requestFullMetadata: false,
-    );
+    final files = await _imagePicker.pickMultiImage(requestFullMetadata: false);
     return [for (final file in files) file.path];
   }
 

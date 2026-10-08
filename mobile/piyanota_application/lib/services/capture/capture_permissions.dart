@@ -41,8 +41,7 @@ class PluginCapturePermissions implements CapturePermissions {
   static const int _photoPickerSdk = 33;
 
   @override
-  Future<PermissionOutcome> requestCamera() =>
-      _request(Permission.camera);
+  Future<PermissionOutcome> requestCamera() => _request(Permission.camera);
 
   @override
   Future<bool> cameraGranted() => Permission.camera.isGranted;

@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../config/api_config.dart';
 import '../services/capture/capture_camera.dart';
+import '../services/capture/capture_files.dart';
 import '../services/capture/capture_permissions.dart';
 import '../services/capture/device_channel.dart';
 import '../services/capture/page_image_processor.dart';
@@ -39,6 +40,10 @@ final pagePickerProvider = Provider<PagePicker>(
 
 final pageImageProcessorProvider = Provider<PageImageProcessor>(
   (ref) => IsolatePageImageProcessor(captureWorkingDirectory),
+);
+
+final captureFileStoreProvider = Provider<CaptureFileStore>(
+  (ref) => DiskCaptureFileStore(captureWorkingDirectory),
 );
 
 final pageImageSourceProvider = Provider<PageImageSource>(

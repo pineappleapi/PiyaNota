@@ -40,6 +40,8 @@ class CaptureMessages {
   static const String done = 'Done';
   static const String cancel = 'Cancel';
   static const String nextAddPages = 'Next: add pages';
+  static const String editDetailsTitle = 'Song details';
+  static const String saveDetails = 'Save details';
 
   static String tempoValue(int bpm) => '♩ = $bpm';
 
@@ -155,6 +157,10 @@ class CaptureMessages {
   static const String sessionExpired =
       'Your session has expired. Log in again to send this score.';
   static const String logIn = 'Log In';
+  static const String editDetails = 'Edit details';
+  static const String cancelUpload = 'Cancel sending';
+  static const String uploadCancelled =
+      'Sending cancelled. Your pages are still here.';
   static const String network =
       'Couldn\'t reach PiyaNota. Check your internet connection and try '
       'again.';
@@ -164,8 +170,29 @@ class CaptureMessages {
   static String uploadError(ScoreUploadException error) => switch (error) {
     UploadSessionExpiredException() => sessionExpired,
     UploadNetworkException() => network,
+    UploadFileMissingException(:final pageIndex) =>
+      pageIndex == null
+          ? 'The PDF is no longer on this phone. Remove it and add it again.'
+          : 'Page ${pageIndex + 1} is no longer on this phone. Remove it and '
+                'take or add it again.',
+    // Shown as a snack bar, not the error banner.
+    UploadCancelledException() => uploadCancelled,
     UploadRejectedException() => _rejection(error),
   };
+
+  /// Codes whose fix is on the details form, not the pages.
+  static bool isDetailsError(ScoreUploadException error) =>
+      error is UploadRejectedException &&
+      const {
+        'title_required',
+        'title_too_long',
+        'title_invalid',
+        'composer_too_long',
+        'composer_invalid',
+        'invalid_tempo',
+        'invalid_key_signature',
+        'invalid_time_signature',
+      }.contains(error.code);
 
   static String _rejection(UploadRejectedException e) {
     // PIYA-101 AC5 numbers pages from 0, like the pipeline's page_index;
@@ -179,22 +206,22 @@ class CaptureMessages {
             'some pages and try again.',
       'mixed_input_types' ||
       'multiple_pdfs' => 'Send either photos or one PDF, not both.',
-      'title_required' => 'Go back and add a song title.',
+      'title_required' => 'Tap Edit details and add a song title.',
       'title_too_long' =>
-        'The song title is too long. Go back and shorten it to 120 '
-            'characters or fewer.',
+        'The song title is too long. Tap Edit details and shorten it to '
+            '120 characters or fewer.',
       'title_invalid' =>
-        'The song title has characters PiyaNota can\'t save. Go back and '
-            'retype it.',
+        'The song title has characters PiyaNota can\'t save. Tap Edit '
+            'details and retype it.',
       'composer_too_long' =>
-        'The composer name is too long. Go back and shorten it to 120 '
-            'characters or fewer.',
+        'The composer name is too long. Tap Edit details and shorten it to '
+            '120 characters or fewer.',
       'composer_invalid' =>
-        'The composer name has characters PiyaNota can\'t save. Go back '
-            'and retype it.',
+        'The composer name has characters PiyaNota can\'t save. Tap Edit '
+            'details and retype it.',
       'invalid_tempo' || 'invalid_key_signature' || 'invalid_time_signature' =>
-        'One of the music details wasn\'t accepted. Go back and set it to '
-            '"Not sure".',
+        'One of the music details wasn\'t accepted. Tap Edit details and '
+            'set it to "Not sure".',
       'file_too_large' =>
         page == null
             ? 'This PDF is too large to send. Try a smaller copy.'

@@ -12,8 +12,14 @@ import 'widgets/music_pictures.dart';
 /// Step 1 of Add Score (PIYA-206): the song's title and optional details.
 /// This screen stays under Capture on the stack, so its answers are still
 /// here when the user comes back from step 2.
+///
+/// With [initial] set it edits answers already given: Capture opens it so
+/// a field the server rejected can be fixed without losing the pages, and
+/// "Save details" pops with the new [ScoreDetails] (Cancel pops null).
 class ScoreDetailsScreen extends StatefulWidget {
-  const ScoreDetailsScreen({super.key});
+  const ScoreDetailsScreen({super.key, this.initial});
+
+  final ScoreDetails? initial;
 
   @override
   State<ScoreDetailsScreen> createState() => _ScoreDetailsScreenState();
@@ -31,10 +37,22 @@ class _ScoreDetailsScreenState extends State<ScoreDetailsScreen> {
   static const double _stackTextScale = 1.3;
   static const double _gutter = 16;
 
+  bool get _editing => widget.initial != null;
+
   @override
   void initState() {
     super.initState();
+    if (widget.initial case final initial?) _apply(initial);
+    _hadTitle = _title.text.trim().isNotEmpty;
     _title.addListener(_onTitleChanged);
+  }
+
+  void _apply(ScoreDetails details) {
+    _title.text = details.title;
+    _composer.text = details.composer;
+    _key = details.keySignature;
+    _time = details.timeSignature;
+    _tempo = details.tempoBpm;
   }
 
   @override
@@ -61,13 +79,20 @@ class _ScoreDetailsScreenState extends State<ScoreDetailsScreen> {
     tempoBpm: _tempo,
   );
 
-  void _next() {
+  Future<void> _next() async {
     if (!_hadTitle) return;
     FocusScope.of(context).unfocus();
-    Navigator.of(context).pushNamed(
+    if (_editing) {
+      Navigator.of(context).pop(_details);
+      return;
+    }
+    // Capture hands back the details if they were edited there, so this
+    // form shows what will actually be sent.
+    final edited = await Navigator.of(context).pushNamed<Object?>(
       AppRoutes.capturePages,
       arguments: CapturePagesArguments(details: _details),
     );
+    if (edited is ScoreDetails && mounted) setState(() => _apply(edited));
   }
 
   Future<void> _pickKey() async {
@@ -95,7 +120,7 @@ class _ScoreDetailsScreenState extends State<ScoreDetailsScreen> {
           controller: _title,
           hint: CaptureMessages.titleHint,
           icon: Icons.music_note_rounded,
-          autofocus: true,
+          autofocus: !_editing,
           textInputAction: TextInputAction.next,
         ),
       ),
@@ -170,6 +195,9 @@ class _ScoreDetailsScreenState extends State<ScoreDetailsScreen> {
         padding: const EdgeInsets.fromLTRB(_gutter, 8, _gutter, 12),
         child: _Buttons(
           stacked: stacked,
+          nextLabel: _editing
+              ? CaptureMessages.saveDetails
+              : CaptureMessages.nextAddPages,
           onCancel: () => Navigator.of(context).maybePop(),
           onNext: _hadTitle ? _next : null,
         ),
@@ -185,7 +213,7 @@ class _ScoreDetailsScreenState extends State<ScoreDetailsScreen> {
         body: ListView(
           padding: EdgeInsets.zero,
           children: [
-            const _Header(),
+            _Header(editing: _editing),
             Padding(
               padding: formPadding,
               child: Column(
@@ -202,7 +230,7 @@ class _ScoreDetailsScreenState extends State<ScoreDetailsScreen> {
       backgroundColor: Colors.white,
       body: Column(
         children: [
-          const _Header(),
+          _Header(editing: _editing),
           Expanded(
             child: ListView(padding: formPadding, children: form),
           ),
@@ -214,7 +242,9 @@ class _ScoreDetailsScreenState extends State<ScoreDetailsScreen> {
 }
 
 class _Header extends StatelessWidget {
-  const _Header();
+  const _Header({required this.editing});
+
+  final bool editing;
 
   @override
   Widget build(BuildContext context) {
@@ -231,18 +261,22 @@ class _Header extends StatelessWidget {
               Semantics(
                 header: true,
                 child: Text(
-                  CaptureMessages.detailsTitle,
+                  editing
+                      ? CaptureMessages.editDetailsTitle
+                      : CaptureMessages.detailsTitle,
                   style: textTheme.headlineSmall?.copyWith(
                     color: Colors.white,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
               ),
-              const SizedBox(height: 4),
-              Text(
-                CaptureMessages.detailsStep,
-                style: textTheme.bodyMedium?.copyWith(color: Colors.white),
-              ),
+              if (!editing) ...[
+                const SizedBox(height: 4),
+                Text(
+                  CaptureMessages.detailsStep,
+                  style: textTheme.bodyMedium?.copyWith(color: Colors.white),
+                ),
+              ],
             ],
           ),
         ),
@@ -481,11 +515,13 @@ class _MusicTile extends StatelessWidget {
 class _Buttons extends StatelessWidget {
   const _Buttons({
     required this.stacked,
+    required this.nextLabel,
     required this.onCancel,
     required this.onNext,
   });
 
   final bool stacked;
+  final String nextLabel;
   final VoidCallback onCancel;
   final VoidCallback? onNext;
 
@@ -502,7 +538,7 @@ class _Buttons extends StatelessWidget {
       child: const Text(CaptureMessages.cancel),
     );
     final next = PrimaryPillButton(
-      label: CaptureMessages.nextAddPages,
+      label: nextLabel,
       onPressed: onNext,
       backgroundColor: AppTheme.libraryHeaderBottom,
     );
