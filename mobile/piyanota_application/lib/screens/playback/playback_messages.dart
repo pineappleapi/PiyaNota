@@ -42,6 +42,8 @@ class PlaybackMessages {
 
   static const String noScoreImage =
       'The score image couldn\'t be shown, but you can still listen.';
+  static const String indicatorUnavailable =
+      'Score position indicator unavailable';
   static String pageLabel(int page, int total) => 'Score page $page of $total';
 
   static String voiceChip(VoicePart voice) => voice.label;
@@ -77,8 +79,8 @@ class PlaybackMessages {
     PlaybackError.server =>
       'Something went wrong on our side. Try again in a moment.',
     PlaybackError.audio =>
-      'The audio for this score didn\'t load. Try again, and if it keeps '
-          'happening, re-scan the score.',
+      'The audio for this score didn\'t load or stopped playing. Try '
+          'again, and if it keeps happening, re-scan the score.',
     PlaybackError.sessionExpired => 'Your session has ended.',
   };
 }

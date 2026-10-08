@@ -79,6 +79,7 @@ class PlaybackState {
     this.duration = Duration.zero,
     this.speed = 1,
     this.reviewDismissed = false,
+    this.timingUnavailable = false,
   });
 
   final PlaybackPhase phase;
@@ -99,6 +100,10 @@ class PlaybackState {
 
   /// The review banner was closed; lasts as long as this screen.
   final bool reviewDismissed;
+
+  /// The timing file failed to load: the audio plays, but there is no
+  /// position indicator. The screen says so once, quietly.
+  final bool timingUnavailable;
 
   Set<VoicePart> get available => result?.audioTracks.keys.toSet() ?? const {};
 
@@ -132,6 +137,7 @@ class PlaybackState {
     duration: duration ?? this.duration,
     speed: speed ?? this.speed,
     reviewDismissed: reviewDismissed ?? this.reviewDismissed,
+    timingUnavailable: timingUnavailable,
   );
 }
 
@@ -151,6 +157,11 @@ class PlaybackController extends Notifier<PlaybackState> {
 
   PlaybackEngine? _engine;
   StreamSubscription<bool>? _playingSub;
+  StreamSubscription<PlaybackFailure>? _failureSub;
+
+  /// Voices whose player failed while unselected. Silent already; choosing
+  /// one later fails the screen like a selected voice failing would.
+  final Set<VoicePart> _failedVoices = {};
 
   /// Bumped by every load, so a slow earlier load can't overwrite a newer
   /// one (Retry pressed twice, or the screen left mid-load).
@@ -181,25 +192,34 @@ class PlaybackController extends Notifier<PlaybackState> {
     final generation = ++_generation;
     bool current() => ref.mounted && generation == _generation;
     _releaseEngine();
-    final api = ref.read(scoreResultApiProvider);
+    final ScoreResultApi api;
     final ScoreResult result;
     try {
+      api = ref.read(scoreResultApiProvider);
       result = await api.fetchResult(scoreId);
     } on ScoreResultException catch (e) {
       if (current()) _fail(_errorFor(e));
       return;
+    } on Object catch (e, stack) {
+      // Not a typed API failure: a misconfigured build (StateError from
+      // the provider), an unreadable token (PlatformException), a bug.
+      // Shown as the server error, never an endless spinner.
+      debugPrint('Playback: result load failed: $e\n$stack');
+      if (current()) _fail(PlaybackError.server);
+      return;
     }
     if (!current()) return;
 
-    final timeline = await _loadTimeline(api, result);
+    final (timeline, timingFailed) = await _loadTimeline(api, result);
     if (!current()) return;
 
-    final engine = ref.read(playbackEngineFactoryProvider)();
+    PlaybackEngine? engine;
     try {
+      engine = ref.read(playbackEngineFactoryProvider)();
       await engine.load(result.audioTracks);
-    } on PlaybackLoadException catch (e) {
-      if (kDebugMode) debugPrint('Playback: audio failed to load: $e');
-      await engine.dispose();
+    } on Object catch (e, stack) {
+      debugPrint('Playback: audio failed to load: $e\n$stack');
+      await _disposeQuietly(engine);
       if (current()) _fail(PlaybackError.audio);
       return;
     }
@@ -214,9 +234,11 @@ class PlaybackController extends Notifier<PlaybackState> {
       return;
     }
     _engine = engine;
+    _failedVoices.clear();
     _playingSub = engine.playingChanges.listen((playing) {
       if (ref.mounted) state = state.copyWith(playing: playing);
     });
+    _failureSub = engine.failures.listen(_onFailure);
     final volumes = {
       for (final voice in result.audioTracks.keys) voice: fullVolume,
     };
@@ -228,23 +250,81 @@ class PlaybackController extends Notifier<PlaybackState> {
       selected: selected,
       volumes: volumes,
       duration: engine.duration,
+      timingUnavailable: timingFailed,
     );
     await _applyVolumes();
   }
 
   /// A timing file that fails to load costs only the indicator (and
-  /// bar-based skipping), not the audio, so it doesn't fail the screen.
-  Future<ScoreTimeline> _loadTimeline(
+  /// bar-based skipping), not the audio, so it doesn't fail the screen;
+  /// the flag lets the screen say so once. No timing URL at all is not a
+  /// failure (nothing to show).
+  Future<(ScoreTimeline, bool)> _loadTimeline(
     ScoreResultApi api,
     ScoreResult result,
   ) async {
     final url = result.timingMetadataUrl;
-    if (url == null) return ScoreTimeline.empty;
+    if (url == null) return (ScoreTimeline.empty, false);
     try {
-      return ScoreTimeline(await api.fetchTiming(url));
+      final events = await api.fetchTiming(url);
+      return (
+        ScoreTimeline(onExistingPages(events, result.scoreImages.length)),
+        false,
+      );
+    } on Object catch (e, stack) {
+      debugPrint('Playback: timing unavailable: $e\n$stack');
+      return (ScoreTimeline.empty, true);
+    }
+  }
+
+  /// Events pointing at a page the result has no image for can't be drawn;
+  /// placing them would mean inventing heights for pages that don't exist.
+  @visibleForTesting
+  static List<TimingEvent> onExistingPages(
+    List<TimingEvent> events,
+    int pageCount,
+  ) {
+    final kept = [
+      for (final event in events)
+        if (event.pageIndex >= 0 && event.pageIndex < pageCount) event,
+    ];
+    if (kept.length != events.length) {
+      debugPrint(
+        'Playback: dropped ${events.length - kept.length} timing events '
+        'outside the $pageCount score page(s)',
+      );
+    }
+    return kept;
+  }
+
+  /// A runtime audio failure. The master, or a voice the user is listening
+  /// to, failing stops playback and shows the audio error (FR-14); an
+  /// unselected voice failing is silent already, so it is only noted.
+  void _onFailure(PlaybackFailure failure) {
+    if (!ref.mounted || state.phase != PlaybackPhase.ready) return;
+    if (failure.master || state.selected.contains(failure.voice)) {
+      _failPlaying();
+    } else {
+      _failedVoices.add(failure.voice);
+    }
+  }
+
+  void _failPlaying() {
+    final engine = _engine;
+    if (engine != null) unawaited(_quietly(engine.pause()));
+    _releaseEngine();
+    _fail(PlaybackError.audio);
+  }
+
+  static Future<void> _disposeQuietly(PlaybackEngine? engine) async {
+    if (engine != null) await _quietly(engine.dispose());
+  }
+
+  static Future<void> _quietly(Future<void> call) async {
+    try {
+      await call;
     } on Object catch (e) {
-      if (kDebugMode) debugPrint('Playback: timing unavailable: $e');
-      return ScoreTimeline.empty;
+      debugPrint('Playback: engine cleanup failed: $e');
     }
   }
 
@@ -329,6 +409,10 @@ class PlaybackController extends Notifier<PlaybackState> {
       if (selected.length == 1) return false;
       selected.remove(voice);
     } else {
+      if (_failedVoices.contains(voice)) {
+        _failPlaying();
+        return false;
+      }
       selected.add(voice);
     }
     state = state.copyWith(selected: selected);
@@ -364,9 +448,11 @@ class PlaybackController extends Notifier<PlaybackState> {
 
   void _releaseEngine() {
     unawaited(_playingSub?.cancel());
+    unawaited(_failureSub?.cancel());
     _playingSub = null;
+    _failureSub = null;
     final engine = _engine;
     _engine = null;
-    if (engine != null) unawaited(engine.dispose());
+    unawaited(_disposeQuietly(engine));
   }
 }

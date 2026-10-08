@@ -3,8 +3,9 @@ import 'package:flutter/foundation.dart';
 import 'score_result.dart';
 
 /// Whether ⏮ skips a pickup (anacrusis) and goes to t = 0 instead of the
-/// start of bar 1. Pending user confirmation (backend-lead, 2026-10-09):
-/// flip this one constant to change the rule; tests cover both.
+/// start of bar 1. Confirmed by the user 2026-10-09: ⏮ goes to t = 0, so a
+/// pickup is heard. Kept as one constant (tests cover both values) in case
+/// the rule is ever revisited.
 const bool kSkipBackIncludesPickup = true;
 
 /// Where ⏮ and ⏭ jump to (user decision 2026-10-09), from the timing

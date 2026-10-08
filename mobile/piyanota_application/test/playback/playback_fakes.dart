@@ -20,7 +20,10 @@ import 'package:piyanota_application/state/playback_providers.dart';
 import '../auth/auth_test_harness.dart';
 
 /// [PlaybackEngine] whose position runs on the test clock (`clock.now`,
-/// which `testWidgets` advances with `pump`), at the set speed.
+/// which `testWidgets` advances with `pump`), at the set speed. Like the
+/// real engine it stops at the end of the track (noticed the next time the
+/// position is read, which the screen's ticker does every frame), and a
+/// play from the end starts again at 0.
 class FakePlaybackEngine implements PlaybackEngine {
   FakePlaybackEngine({
     this.trackDuration = const Duration(seconds: 10),
@@ -30,6 +33,15 @@ class FakePlaybackEngine implements PlaybackEngine {
   final Duration trackDuration;
   final Object? loadError;
   final StreamController<bool> _changes = StreamController.broadcast();
+  final StreamController<PlaybackFailure> _failures =
+      StreamController.broadcast();
+
+  /// When set, the next seek is recorded at once but completes only when
+  /// this does (to see what the screen shows while a seek is in flight).
+  Completer<void>? seekGate;
+
+  /// When set, every seek throws it (after recording).
+  Object? seekError;
 
   Map<VoicePart, Uri>? loaded;
   final Map<VoicePart, double> volumes = {};
@@ -54,8 +66,20 @@ class FakePlaybackEngine implements PlaybackEngine {
     if (started == null) return _anchor;
     final elapsed = clock.now().difference(started) * speed;
     final now = _anchor + elapsed;
-    return now > trackDuration ? trackDuration : now;
+    if (now < trackDuration) return now;
+    _anchor = trackDuration;
+    _startedAt = null;
+    _changes.add(false);
+    return trackDuration;
   }
+
+  /// A runtime failure of [voice]'s player, as the real engine reports it.
+  void fail(VoicePart voice, {bool master = false}) {
+    _failures.add(PlaybackFailure(voice, 'test failure', master: master));
+  }
+
+  @override
+  Stream<PlaybackFailure> get failures => _failures.stream;
 
   @override
   Duration get duration => trackDuration;
@@ -70,6 +94,7 @@ class FakePlaybackEngine implements PlaybackEngine {
   Future<void> play() async {
     playCalls++;
     if (playing) return;
+    if (position >= trackDuration) _anchor = Duration.zero;
     _startedAt = clock.now();
     _changes.add(true);
   }
@@ -86,6 +111,10 @@ class FakePlaybackEngine implements PlaybackEngine {
   @override
   Future<void> seek(Duration position) async {
     seeks.add(position);
+    final gate = seekGate;
+    seekGate = null;
+    if (gate != null) await gate.future;
+    if (seekError case final error?) throw error;
     _anchor = position;
     if (playing) _startedAt = clock.now();
   }
@@ -103,6 +132,7 @@ class FakePlaybackEngine implements PlaybackEngine {
     disposed = true;
     _startedAt = null;
     await _changes.close();
+    await _failures.close();
   }
 }
 
@@ -234,11 +264,15 @@ class PlaybackHarness {
     this.api, {
     this.engineDuration = const Duration(seconds: 10),
     this.engineLoadError,
+    this.engineCreateError,
   });
 
   final ScriptedScoreResultApi api;
   final Duration engineDuration;
   final Object? engineLoadError;
+
+  /// Thrown by the engine factory itself (e.g. a missing audio plugin).
+  final Object? engineCreateError;
   final List<FakePlaybackEngine> engines = [];
   final secureStorage = FaultySecureStorage({'session_token': 'sess_t'});
 
@@ -247,6 +281,7 @@ class PlaybackHarness {
   List<Override> get overrides => [
     scoreResultApiProvider.overrideWithValue(api),
     playbackEngineFactoryProvider.overrideWithValue(() {
+      if (engineCreateError case final error?) throw error;
       final engine = FakePlaybackEngine(
         trackDuration: engineDuration,
         loadError: engineLoadError,

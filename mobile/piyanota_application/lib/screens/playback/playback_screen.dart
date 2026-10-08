@@ -66,7 +66,7 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden) {
-      unawaited(_controller.pause());
+      _run(_controller.pause(), 'pause on background');
     }
   }
 
@@ -74,11 +74,43 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
     if (!_dragging) _display.value = _controller.position;
   }
 
+  /// Fire-and-forget for transport calls: a throw is logged, never left
+  /// unhandled. Engine failures reach the screen as the audio error state
+  /// through the controller, not through these futures.
+  void _run(Future<void> call, String what) {
+    unawaited(
+      call.catchError((Object e, StackTrace stack) {
+        debugPrint('Playback: $what failed: $e\n$stack');
+      }),
+    );
+  }
+
   Future<void> _afterSeek(Future<void> seek) async {
-    await seek;
+    try {
+      await seek;
+    } on Object catch (e, stack) {
+      debugPrint('Playback: seek failed: $e\n$stack');
+    }
     if (!mounted) return;
     _syncDisplay();
     _jumps.value++;
+  }
+
+  /// AC7: the display already shows [value]; a failed seek must still let
+  /// the seek bar, times and band follow the audio again.
+  Future<void> _onSeekEnd(Duration value) async {
+    _display.value = value;
+    try {
+      await _controller.seek(value);
+    } on Object catch (e, stack) {
+      debugPrint('Playback: seek failed: $e\n$stack');
+    } finally {
+      _dragging = false;
+      if (mounted) {
+        _syncDisplay();
+        _jumps.value++;
+      }
+    }
   }
 
   void _onPlayingChanged(bool playing) {
@@ -93,7 +125,12 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
   Future<void> _back() async {
     if (_leaving) return;
     _leaving = true;
-    await _controller.pause();
+    try {
+      await _controller.pause();
+    } on Object catch (e, stack) {
+      // Leaving disposes the engine anyway, which stops the audio.
+      debugPrint('Playback: pause on leaving failed: $e\n$stack');
+    }
     if (!mounted) return;
     final navigator = Navigator.of(context);
     if (navigator.canPop()) {
@@ -147,14 +184,17 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
     });
     final state = ref.watch(provider);
     final ready = state.phase == PlaybackPhase.ready;
+    final error = state.error ?? PlaybackError.server;
 
     final Widget body = switch (state.phase) {
       PlaybackPhase.loading => const _LoadingView(),
       PlaybackPhase.failed when state.error == PlaybackError.sessionExpired =>
         const _LoadingView(),
       PlaybackPhase.failed => _ErrorView(
-        error: state.error ?? PlaybackError.server,
-        onRetry: () => unawaited(_controller.retry()),
+        error: error,
+        onRetry: error == PlaybackError.notFound
+            ? null
+            : () => _run(_controller.retry(), 'retry'),
         onBack: () => unawaited(_back()),
       ),
       PlaybackPhase.ready => Stack(
@@ -204,6 +244,8 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
                   selected: state.selected,
                   onToggle: _toggleVoice,
                 ),
+              if (ready && state.timingUnavailable)
+                const _IndicatorUnavailableNote(),
               Expanded(child: body),
             ],
           ),
@@ -213,7 +255,7 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
                 display: _display,
                 duration: state.duration,
                 playing: state.playing,
-                onPlayPause: () => unawaited(_controller.togglePlay()),
+                onPlayPause: () => _run(_controller.togglePlay(), 'play'),
                 onToStart: () =>
                     unawaited(_afterSeek(_controller.skipToStart())),
                 onToEnd: () => unawaited(_afterSeek(_controller.skipToEnd())),
@@ -227,15 +269,7 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
                   _dragging = true;
                   _display.value = value;
                 },
-                onSeekEnd: (value) async {
-                  _display.value = value;
-                  await _controller.seek(value);
-                  _dragging = false;
-                  if (mounted) {
-                    _syncDisplay();
-                    _jumps.value++;
-                  }
-                },
+                onSeekEnd: (value) => unawaited(_onSeekEnd(value)),
                 onMixer: () =>
                     _openPlaceholder(PlaybackMessages.mixerSheetTitle),
                 onSpeed: () =>
@@ -483,6 +517,26 @@ class _LoadingView extends StatelessWidget {
 
 /// FR-14: one view per failure kind, each with its own heading, icon and
 /// copy, so "still converting" never reads like "no internet".
+/// The timing file didn't load: the audio plays, the band can't. Said
+/// once, quietly, so the missing band doesn't look like a bug.
+class _IndicatorUnavailableNote extends StatelessWidget {
+  const _IndicatorUnavailableNote();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      key: const ValueKey('indicator-unavailable'),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+      child: Text(
+        PlaybackMessages.indicatorUnavailable,
+        textAlign: TextAlign.center,
+        style: Theme.of(context).textTheme.bodySmall
+            ?.copyWith(color: AppTheme.playbackSubtle),
+      ),
+    );
+  }
+}
+
 class _ErrorView extends StatelessWidget {
   const _ErrorView({
     required this.error,
@@ -491,7 +545,10 @@ class _ErrorView extends StatelessWidget {
   });
 
   final PlaybackError error;
-  final VoidCallback onRetry;
+
+  /// Null hides Retry: a score that is gone (404) won't come back by
+  /// asking again, so the only way on is back to the library.
+  final VoidCallback? onRetry;
   final VoidCallback onBack;
 
   static const double _iconSize = 48;
@@ -539,12 +596,14 @@ class _ErrorView extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 24),
-          PrimaryPillButton(
-            label: PlaybackMessages.retry,
-            onPressed: onRetry,
-            backgroundColor: AppTheme.processingSecondary,
-          ),
-          const SizedBox(height: 8),
+          if (onRetry case final retry?) ...[
+            PrimaryPillButton(
+              label: PlaybackMessages.retry,
+              onPressed: retry,
+              backgroundColor: AppTheme.processingSecondary,
+            ),
+            const SizedBox(height: 8),
+          ],
           OutlinedButton(
             onPressed: onBack,
             style: OutlinedButton.styleFrom(
@@ -650,6 +709,7 @@ class _ScoreViewState extends State<_ScoreView> {
   final List<(ImageStream, ImageStreamListener)> _streams = [];
   DateTime? _lastUserScroll;
   bool _autoScrolling = false;
+  int _scrollAnimation = 0;
   double _pageWidth = 0;
 
   @override
@@ -692,15 +752,22 @@ class _ScoreViewState extends State<_ScoreView> {
       final provider = _imageFor(images[i]);
       if (provider == null) continue;
       final stream = provider.resolve(createLocalImageConfiguration(context));
-      final listener = ImageStreamListener((info, _) {
-        if (!mounted) return;
-        setState(() {
-          _decoded[i] = Size(
-            info.image.width.toDouble(),
-            info.image.height.toDouble(),
-          );
-        });
-      }, onError: (_, _) {});
+      final listener = ImageStreamListener(
+        (info, _) {
+          if (!mounted) return;
+          setState(() {
+            _decoded[i] = Size(
+              info.image.width.toDouble(),
+              info.image.height.toDouble(),
+            );
+          });
+        },
+        onError: (error, _) {
+          // The page still shows (at A4 proportions); only the band's
+          // placement on it may be off.
+          debugPrint('Playback: page ${i + 1} size unreadable: $error');
+        },
+      );
       stream.addListener(listener);
       _streams.add((stream, listener));
     }
@@ -729,17 +796,21 @@ class _ScoreViewState extends State<_ScoreView> {
     return top;
   }
 
+  /// A seek the user asked for wins over a follow animation still running
+  /// (it would otherwise land on the old spot and ignore the jump).
   void _onJump() {
     _lastUserScroll = null;
-    _follow();
+    _follow(interrupt: true);
   }
 
   /// Keeps the band on screen while it moves, unless the user scrolled in
   /// the last few seconds (don't fight them).
-  void _follow() {
-    if (!_scroll.hasClients || _autoScrolling || _pageWidth <= 0) return;
+  void _follow({bool interrupt = false}) {
+    if (!_scroll.hasClients || _pageWidth <= 0) return;
+    if (_autoScrolling && !interrupt) return;
     final position = widget.timeline.positionAt(widget.display.value);
     if (position == null) return;
+    if (position.pageIndex >= widget.result.scoreImages.length) return;
     final scale = _scaleFor(position.pageIndex);
     if (scale == 0) return;
     final userScrolled = _lastUserScroll;
@@ -759,10 +830,15 @@ class _ScoreViewState extends State<_ScoreView> {
       metrics.maxScrollExtent,
     );
     _autoScrolling = true;
+    final animation = ++_scrollAnimation;
     unawaited(
       _scroll
           .animateTo(target, duration: _scrollDuration, curve: Curves.easeInOut)
-          .whenComplete(() => _autoScrolling = false),
+          .whenComplete(() {
+            // An interrupted animation completes too; only the newest one
+            // may clear the flag.
+            if (animation == _scrollAnimation) _autoScrolling = false;
+          }),
     );
   }
 
