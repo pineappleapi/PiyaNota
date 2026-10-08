@@ -104,6 +104,31 @@ These are separate values from the primary gradient, not reuses of its stops.
   clamp at 1.5x text scale and the logo is hidden above 1.3x, so on a 320 dp phone at 2x the
   heading doesn't fill the screen (search field and cards keep the full scale)
 
+**Capture / Add Score tokens (PIYA-206, dropper-sampled from
+`references/PIYA206_CaptureScreen_MultipleImage.png`, 2026-10-08):** all `AppTheme.capture*`.
+Unlike the library header, the gradient keeps its sampled stops; instead, all text on it is navy.
+- Background gradient (vertical): `captureBackgroundTop` `#05CEBD` → `captureBackgroundBottom`
+  `#178BCB`, both as sampled. Navy text is 8.2:1 / 4.57:1. The mockup's white text would only
+  reach 3.8:1, so no white text sits on this gradient.
+- Ink (title, camera-frame fill, page labels, button text) `captureInk` `#091D2C`, as sampled
+- ✕ button fill `captureCloseFill` `#0F9F95`, as sampled. The white ✕ on it is 3.3:1, which
+  meets the 3:1 icon floor.
+- Accent (corner brackets, thumbnail border, page action icons, submit fill) `captureAccent`
+  `#98FFF8`, as sampled; 14.7:1 on `captureInk`
+- Decorative placeholder art: frame `capturePlaceholderGlyph` `#2C4652`, thumbnail
+  `captureThumbGlyph` `#97C3C6`, both as sampled
+- Adjusted for AA: the dotted "+" add tile has no fill in the mockup, and its cyan plus on the
+  gradient is only 2.7:1. The tile now has a `captureInk` fill at `captureAddTileFillAlpha`
+  0.35, which lifts the plus to at least 3.35:1.
+- Derived (not in the mockup): a thumbnail's edit and remove icons sit on a solid `captureInk`
+  disc, since cyan on white paper is 1.1:1
+- Details (step 1), Edit Page and Preview reuse existing tokens: `libraryHeaderGradient`,
+  `libraryHeaderBottom` for the primary pill, `libraryCardOutline`, `noticeBannerFill` for a
+  selected option, and `primaryBlue` for its border
+- Large text: above 1.3x, the Details tiles and buttons stack and the whole page scrolls as one
+  (header included). On a 320x568 screen at 2x, a pinned header plus stacked buttons left the
+  form only 24 dp tall. Edit Page puts the straighten label and value above a full-width slider.
+
 ### Typography
 
 **Font family: Plus Jakarta Sans**, for all text (confirmed — not just headings). Bundling approach:
