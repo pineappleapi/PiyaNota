@@ -78,6 +78,32 @@ eyedropper/color-picker read on the actual exported PNGs, don't estimate from de
   no dedicated dot color was ever sampled from Figma — current values are a reasonable guess
   (`#1F2937` / `#D9D9D9`), not a confirmed brand token.
 
+**Score Library tokens (PIYA-205, dropper-sampled from `references/PIYA203_Home Page_ListScores.png`
+and `..._NewScores.png`, 412x917 px = dp):** all `AppTheme.library*` in `lib/theme/app_theme.dart`.
+These are separate values from the primary gradient, not reuses of its stops.
+- Header gradient (vertical): `libraryHeaderTop` `#03857B` → `libraryHeaderBottom` `#157DB7`
+  (sampled `#05CDBD` → `#178BCB`; darkened for AA, user decision 2026-10-08: white subtitle and
+  search text 4.5:1, white title 3:1, wherever they sit)
+- Bottom-nav gradient (vertical): `libraryNavTop` `#106A97` → `libraryNavBottom` `#08868D`
+  (sampled `#168ECA` → `#0BB9C2`; darkened for AA, user decision 2026-10-08: white 13 sp labels
+  4.5:1)
+- Body background `libraryBackground` `#E8E8E8`; card outline `libraryCardOutline` `#8D8585` (1 dp)
+- Score card fill `libraryScoreCardFill` `#C2DFEF`; Add Score tile `libraryAddTileFill` `#D9EAF3`
+- Icon blue (plus, music note) `libraryIconBlue` `#1894D5`; trash `libraryTrash` `#4683A2`
+  (sampled `#4B8CAD`; darkened for AA, user decision 2026-10-08: 3:1 on the card fill)
+- Text: card title `libraryCardTitle` `#3D3D3D`, Add Score subtitle `libraryAddSubtitle` `#7C7474`
+  (sampled `#8D8585`; darkened for AA, user decision 2026-10-08: 4.5:1 on white),
+  score subtitle `libraryScoreSubtitle` `#575757`
+- Search field: no fill, white outline at `librarySearchBorderAlpha` 0.5, hint white at
+  `librarySearchHintAlpha` 0.8; Capture button shadow `libraryCaptureShadow` `#33000000`
+- Round-2 polish (2026-10-08, not in the mockups, so derived rather than dropper-sampled):
+  header logo is the full-colour PNG at `libraryHeaderLogoOpacity` 0.4, top-right; selected nav
+  tab is a white pill at `libraryNavIndicatorAlpha` 0.22; skeleton bars are white at
+  `librarySkeletonBaseAlpha` 0.7 with a shimmer band at `librarySkeletonHighlightAlpha` 0.95
+  (static when `MediaQuery.disableAnimations` is on). Large text: the header title/subtitle
+  clamp at 1.5x text scale and the logo is hidden above 1.3x, so on a 320 dp phone at 2x the
+  heading doesn't fill the screen (search field and cards keep the full scale)
+
 ### Typography
 
 **Font family: Plus Jakarta Sans**, for all text (confirmed — not just headings). Bundling approach:

@@ -143,9 +143,7 @@ class _AuthPasswordFieldState extends State<AuthPasswordField> {
         onPressed: () => setState(() => _obscured = !_obscured),
         tooltip: _obscured ? 'Show password' : 'Hide password',
         icon: Icon(
-          _obscured
-              ? Icons.visibility_off_outlined
-              : Icons.visibility_outlined,
+          _obscured ? Icons.visibility_off_outlined : Icons.visibility_outlined,
           color: AppTheme.authFieldIcon,
         ),
       ),

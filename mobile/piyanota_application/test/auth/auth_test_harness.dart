@@ -52,10 +52,7 @@ class ScriptedAuthApi implements AuthApi {
   }
 
   @override
-  Future<AuthSession> login({
-    required String email,
-    required String password,
-  }) {
+  Future<AuthSession> login({required String email, required String password}) {
     loginCalls++;
     lastEmail = email;
     return onLogin!();
@@ -77,8 +74,7 @@ class ScriptedAuthApi implements AuthApi {
 /// [PlatformException] — what flutter_secure_storage raises when the Keystore
 /// is unavailable or ciphertext can't be decrypted.
 class FaultySecureStorage extends FlutterSecureStorage {
-  FaultySecureStorage([Map<String, String>? initial])
-      : values = {...?initial};
+  FaultySecureStorage([Map<String, String>? initial]) : values = {...?initial};
 
   final Map<String, String> values;
   final Set<String> failWritesFor = {};
@@ -137,12 +133,12 @@ class FaultySecureStorage extends FlutterSecureStorage {
 }
 
 AuthSession testSession() => AuthSession(
-      userId: 214,
-      email: 'maria@example.com',
-      role: 'choir_member',
-      sessionToken: 'sess_a1b2c3d4',
-      expiresAt: DateTime.utc(2026, 11, 6),
-    );
+  userId: 214,
+  email: 'maria@example.com',
+  role: 'choir_member',
+  sessionToken: 'sess_a1b2c3d4',
+  expiresAt: DateTime.utc(2026, 11, 6),
+);
 
 /// Route stubs are plain labelled pages so tests can assert *where* a tap
 /// navigated without depending on those screens' implementations.
@@ -176,14 +172,14 @@ Future<void> pumpAuthScreen(
       ],
       child: MaterialApp(
         builder: (context, child) => MediaQuery(
-          data: MediaQuery.of(context).copyWith(
-            textScaler: TextScaler.linear(textScale),
-          ),
+          data: MediaQuery.of(context)
+              .copyWith(textScaler: TextScaler.linear(textScale)),
           child: child!,
         ),
         home: screen,
         routes: {
-          AppRoutes.scoreLibrary: (_) => const Scaffold(body: Text(libraryMarker)),
+          AppRoutes.scoreLibrary: (_) =>
+              const Scaffold(body: Text(libraryMarker)),
           AppRoutes.passwordReset: (_) =>
               const Scaffold(body: Text(passwordResetMarker)),
           if (stubLogin)

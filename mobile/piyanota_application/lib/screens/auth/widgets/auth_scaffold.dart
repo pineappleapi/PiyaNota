@@ -129,10 +129,10 @@ class _AuthHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final style = Theme.of(context).textTheme.headlineMedium?.copyWith(
-          fontWeight: FontWeight.w700,
-          height: 1.25,
-          color: Colors.white,
-        );
+      fontWeight: FontWeight.w700,
+      height: 1.25,
+      color: Colors.white,
+    );
 
     return Stack(
       clipBehavior: Clip.none,

@@ -35,8 +35,11 @@ void main() {
     await expectLater(
       SessionStorage(backing).save(testSession()),
       throwsA(
-        isA<PlatformException>()
-            .having((e) => e.code, 'code', 'test-write-failed'),
+        isA<PlatformException>().having(
+          (e) => e.code,
+          'code',
+          'test-write-failed',
+        ),
       ),
     );
   });

@@ -32,8 +32,9 @@ Future<void> _fillAndSubmit(WidgetTester tester) async {
 void main() {
   setUp(() => FlutterSecureStorage.setMockInitialValues({}));
 
-  testWidgets('AC1: Log In disabled until email and password both non-empty',
-      (tester) async {
+  testWidgets('AC1: Log In disabled until email and password both non-empty', (
+    tester,
+  ) async {
     await pumpAuthScreen(
       tester,
       screen: const LoginScreen(),
@@ -52,8 +53,9 @@ void main() {
     expect(isButtonEnabled(tester, _logIn), isFalse);
   });
 
-  testWidgets('AC2: invalid credentials show inline error, email kept',
-      (tester) async {
+  testWidgets('AC2: invalid credentials show inline error, email kept', (
+    tester,
+  ) async {
     final api = ScriptedAuthApi(
       onLogin: () async => throw const InvalidCredentialsException(),
     );
@@ -68,8 +70,9 @@ void main() {
     expect(find.text(libraryMarker), findsNothing);
   });
 
-  testWidgets('AC3: success stores token securely and routes to library',
-      (tester) async {
+  testWidgets('AC3: success stores token securely and routes to library', (
+    tester,
+  ) async {
     final api = ScriptedAuthApi(onLogin: () async => testSession());
     await pumpAuthScreen(tester, screen: const LoginScreen(), api: api);
 
@@ -85,8 +88,7 @@ void main() {
     expect(find.text(libraryMarker), findsOneWidget);
   });
 
-  testWidgets('AC4: Forgot Password? routes to Password Reset',
-      (tester) async {
+  testWidgets('AC4: Forgot Password? routes to Password Reset', (tester) async {
     await pumpAuthScreen(
       tester,
       screen: const LoginScreen(),
@@ -114,8 +116,9 @@ void main() {
     expect(find.text(signUpMarker), findsOneWidget);
   });
 
-  testWidgets('AC6: loading state shown and repeat submission blocked',
-      (tester) async {
+  testWidgets('AC6: loading state shown and repeat submission blocked', (
+    tester,
+  ) async {
     final pending = Completer<AuthSession>();
     final api = ScriptedAuthApi(onLogin: () => pending.future);
     await pumpAuthScreen(tester, screen: const LoginScreen(), api: api);
@@ -137,8 +140,9 @@ void main() {
     expect(find.text(libraryMarker), findsOneWidget);
   });
 
-  testWidgets('AC7: network failure shows a distinct connectivity error',
-      (tester) async {
+  testWidgets('AC7: network failure shows a distinct connectivity error', (
+    tester,
+  ) async {
     final api = ScriptedAuthApi(
       onLogin: () async => throw const AuthNetworkException(),
     );
@@ -167,8 +171,9 @@ void main() {
     expect(isButtonEnabled(tester, _logIn), isTrue);
   });
 
-  testWidgets('secure-storage failure blocks entry with a distinct error',
-      (tester) async {
+  testWidgets('secure-storage failure blocks entry with a distinct error', (
+    tester,
+  ) async {
     final backing = FaultySecureStorage()..failWritesFor.add('session_token');
     await pumpAuthScreen(
       tester,
@@ -185,8 +190,9 @@ void main() {
     expect(backing.values, isEmpty);
   });
 
-  testWidgets('back from Sign-Up returns to Login instead of exiting',
-      (tester) async {
+  testWidgets('back from Sign-Up returns to Login instead of exiting', (
+    tester,
+  ) async {
     await pumpAuthScreen(
       tester,
       screen: const LoginScreen(),
@@ -213,8 +219,9 @@ void main() {
     expect(find.byType(SignUpScreen), findsNothing);
   });
 
-  testWidgets('NFR-10: small screen at 2x text scale does not overflow',
-      (tester) async {
+  testWidgets('NFR-10: small screen at 2x text scale does not overflow', (
+    tester,
+  ) async {
     final api = ScriptedAuthApi(
       onLogin: () async => throw const AuthNetworkException(),
     );

@@ -43,6 +43,11 @@ class FakeAuthApi implements AuthApi {
   /// Outstanding codes, keyed by code because PIYA-304 identifies the
   /// account by `resetToken` alone (no email in the confirm request).
   final Map<String, _ResetGrant> _grantsByCode = {};
+
+  /// Which account each issued token belongs to, so the fake Score Library
+  /// can scope its data per account the way the real API scopes by the
+  /// token's `userId` (PIYA-205 AC1 / PIYA-308 AC2).
+  final Map<String, String> _emailsByToken = {};
   int _nextUserId = 1;
 
   @override
@@ -127,6 +132,10 @@ class FakeAuthApi implements AuthApi {
     return null;
   }
 
+  /// The (normalized) email a token from this fake was issued to, or null
+  /// for an unknown token — the fake equivalent of the server's 401.
+  String? accountForToken(String token) => _emailsByToken[token];
+
   void _checkNewPassword(String password, String confirmation) {
     if (password != confirmation) {
       throw const AuthValidationException('Passwords do not match.');
@@ -153,11 +162,14 @@ class FakeAuthApi implements AuthApi {
 
   AuthSession _issueSession(String email) {
     final userId = _nextUserId++;
+    final token =
+        'fake_sess_${userId}_${DateTime.now().microsecondsSinceEpoch}';
+    _emailsByToken[token] = email;
     return AuthSession(
       userId: userId,
       email: email,
       role: _defaultRole,
-      sessionToken: 'fake_sess_${userId}_${DateTime.now().microsecondsSinceEpoch}',
+      sessionToken: token,
       expiresAt: DateTime.now().toUtc().add(_sessionLifetime),
     );
   }

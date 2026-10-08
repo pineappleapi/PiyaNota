@@ -37,8 +37,10 @@ void main() {
       password: 'secret123',
       passwordConfirmation: 'secret123',
     );
-    final session =
-        await api.login(email: 'new@example.com', password: 'secret123');
+    final session = await api.login(
+      email: 'new@example.com',
+      password: 'secret123',
+    );
     expect(session.email, 'new@example.com');
   });
 

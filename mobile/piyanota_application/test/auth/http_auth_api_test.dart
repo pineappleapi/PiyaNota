@@ -67,8 +67,7 @@ Future<AuthSession> _login(HttpAuthApi api) =>
     api.login(email: 'maria@example.com', password: 'secret123');
 
 void main() {
-  test('parses the PIYA-302 success schema and posts email/password',
-      () async {
+  test('parses the PIYA-302 success schema and posts email/password', () async {
     final adapter = _StubAdapter(body: _successBody);
     final session = await _login(_apiWith(adapter));
 
@@ -140,9 +139,11 @@ void main() {
 
   test('2xx with a malformed body maps to AuthServerException', () {
     final api = _apiWith(
-      _StubAdapter(body: {
-        'data': {'userId': 214},
-      }),
+      _StubAdapter(
+        body: {
+          'data': {'userId': 214},
+        },
+      ),
     );
     expect(_login(api), throwsA(isA<AuthServerException>()));
   });

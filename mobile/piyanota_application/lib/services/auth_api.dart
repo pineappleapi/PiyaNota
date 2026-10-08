@@ -83,14 +83,11 @@ class HttpAuthApi implements AuthApi {
   static const int _gone = 410;
 
   @override
-  Future<AuthSession> login({
-    required String email,
-    required String password,
-  }) {
-    return _postForSession(
-      ApiConfig.loginPath,
-      {'email': email, 'password': password},
-    );
+  Future<AuthSession> login({required String email, required String password}) {
+    return _postForSession(ApiConfig.loginPath, {
+      'email': email,
+      'password': password,
+    });
   }
 
   @override

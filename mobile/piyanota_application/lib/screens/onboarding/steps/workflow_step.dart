@@ -56,7 +56,8 @@ class WorkflowStep extends StatelessWidget {
                 textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
               ),
             ],
-            subtitle: 'Photograph your score and get audio in minutes — '
+            subtitle:
+                'Photograph your score and get audio in minutes — '
                 'then use it to follow along, learn your part, and build '
                 'your reading skills.',
           ),

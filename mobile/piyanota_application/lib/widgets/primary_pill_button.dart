@@ -59,10 +59,8 @@ class PrimaryPillButton extends StatelessWidget {
           RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
         ),
         textStyle: WidgetStatePropertyAll(
-          Theme.of(context).textTheme.labelLarge?.copyWith(
-                fontWeight: FontWeight.w600,
-                color: foregroundColor,
-              ),
+          Theme.of(context).textTheme.labelLarge
+              ?.copyWith(fontWeight: FontWeight.w600, color: foregroundColor),
         ),
       ),
       child: isLoading
