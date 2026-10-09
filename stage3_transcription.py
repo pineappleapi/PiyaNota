@@ -787,6 +787,9 @@ TIME_SIG_SOURCE_DEFAULT = "default"
 # multirest after it: a tuplet number or bar-number hallucination).
 METER_FLAG_UNPAIRED_DIGIT = "meter_digit_unpaired"
 METER_FLAG_ORPHAN_COUNT = "multirest_count_orphaned"
+# A meter (pair or metersign) with notes/rests before it in the same measure: an engraver only ever
+# changes meter at a barline, so this is a misread and is never applied (senior-reviewer 2026-10-09).
+METER_FLAG_MID_MEASURE = "meter_mid_measure"
 # Tokens that are measure content: a meter with none of these after it in the
 # strip is a courtesy meter (it announces the next system) and changes nothing
 # in this one.
@@ -848,6 +851,16 @@ def _is_multirest_count(sym: str) -> bool:
 def _has_body_content_after(symbols: list[str], start: int) -> bool:
     """True if any note/rest/multirest token sits at or after ``start`` (courtesy-meter test)."""
     return any(sym.startswith(BODY_CONTENT_PREFIXES) for sym in symbols[start:])
+
+
+def _at_measure_start(symbols: list[str], idx: int) -> bool:
+    """True if no note/rest/multirest sits between the previous barline (or strip start) and ``idx``."""
+    for sym in reversed(symbols[:idx]):
+        if sym.startswith("barline"):
+            return True
+        if sym.startswith(BODY_CONTENT_PREFIXES):
+            return False
+    return True
 
 
 def _meter_bar_ticks(time_signature: str) -> int:
@@ -1093,9 +1106,14 @@ def infer_pitch(
     header_override: Optional[HeaderOverride] = None,
     next_system_key: Optional[int] = None,
     trace:      Optional[list] = None,
+    meter_flags_out: Optional[list[str]] = None,
 ) -> list:
     """
     Converts a CRNN symbol sequence into note events with MIDI pitch.
+
+    meter_flags_out: optional out-list that receives the strip's meter_flags.
+    They are also stamped on every event, but a strip with no events has
+    nowhere else to carry them, and they must still reach the review.
 
     header_override: clef, opening key and octave decided by ClefKeyNet (stage3_clefkey). Every CRNN clef
     token is then ignored (the CRNN's clef can't override the rule, user decision 2026-09-28), and the
@@ -1339,6 +1357,8 @@ def infer_pitch(
         #   • an L4+L2 pair is a meter wherever it appears, unless it is a
         #     courtesy meter (no note/rest after it in this strip): that only
         #     announces the next system and must not change this one;
+        #   • a meter with notes/rests before it in the same measure is a
+        #     misread (meters change only at a barline): not applied, flagged;
         #   • a lone L4/L2 digit changes nothing and flags the strip;
         #   • an S5 run that ends at a multirest is that multirest's count and
         #     goes on to the states below; any other S5 run (missing multirest,
@@ -1362,7 +1382,9 @@ def infer_pitch(
             else:
                 meter = _meter_pair_at(symbols, tok_idx)
                 if meter is not None:
-                    if _has_body_content_after(symbols, tok_idx + 2):
+                    if not _at_measure_start(symbols, tok_idx):
+                        meter_flags.append(METER_FLAG_MID_MEASURE)
+                    elif _has_body_content_after(symbols, tok_idx + 2):
                         time_signature        = meter
                         time_signature_source = TIME_SIG_SOURCE_DETECTED
                 elif (_parse_digit(sym) or (0, ""))[1] in (
@@ -1372,6 +1394,9 @@ def infer_pitch(
                 continue
         elif sym.startswith("metersign") and not _has_body_content_after(symbols, tok_idx + 1):
             continue    # courtesy metersign at the end of the strip: announces the next system only
+        elif sym.startswith("metersign") and not _at_measure_start(symbols, tok_idx):
+            meter_flags.append(METER_FLAG_MID_MEASURE)
+            continue
 
         # ══════════════════════════════════════════════════════════════════
         # KEY-SIG STATE MACHINE
@@ -1833,6 +1858,8 @@ def infer_pitch(
     if strip_meter_flags:
         print(f"[Stage 3] {voice} p{page_index} s{sys_idx}: unplaced digit token(s): "
               f"{', '.join(strip_meter_flags)} (strip flagged for review)")
+    if meter_flags_out is not None:
+        meter_flags_out.extend(strip_meter_flags)
     for e in events:
         e["meter_flags"] = list(strip_meter_flags)
     return events
@@ -2549,9 +2576,13 @@ def process_strip(
     sys_idx:    int = 1,
     strip_id:   str = "",
     clef_key_decision: Optional["StripDecision"] = None,
+    strip_flags_out: Optional[list[dict[str, Any]]] = None,
 ) -> list:
 
     """Transcribes one strip and returns pitch-assigned events for Stage 4.
+
+    strip_flags_out: receives ``{"voice", "page_index", "sys_idx", "meter_flags"}`` for a strip that
+    produced no events but raised meter flags (on any other strip the flags ride on its events).
 
     clef_key_decision: a stage3_clefkey.StripDecision; when given, clef/key/octave come from ClefKeyNet
     (version b) and every event carries ``review_needed`` / ``clef_key_flags``.
@@ -2565,13 +2596,19 @@ def process_strip(
                                spans_out=spans)
     symbols = [s for s, _ in scored]
     confs   = [c for _, c in scored]
+    meter_flags: list[str] = []
     if clef_key_decision is not None:
         import stage3_clefkey  # lazy: stage3_clefkey imports this module
         events, _, _ = stage3_clefkey.infer_pitch_b(symbols, confs, voice, page_index, sys_idx,
-                                                    clef_key_decision, trace=trace)
+                                                    clef_key_decision, trace=trace,
+                                                    meter_flags_out=meter_flags)
     else:
         events = infer_pitch(symbols, voice=voice, page_index=page_index,
-                             sys_idx=sys_idx, confidences=confs, trace=trace)
+                             sys_idx=sys_idx, confidences=confs, trace=trace,
+                             meter_flags_out=meter_flags)
+    if not events and meter_flags and strip_flags_out is not None:
+        strip_flags_out.append({"voice": voice, "page_index": page_index, "sys_idx": sys_idx,
+                                "meter_flags": meter_flags})
 
     print(f"[Stage 3] {voice} p{page_index}: "
           f"{len(symbols)} symbols -> {len(events)} events")
@@ -2593,6 +2630,7 @@ def transcribe_voice_sequences(
     viz_dir:         str = r"D:\PiyaNota (Code)\data\symbol_detection_viz",
     events_dir:      str = r"D:\PiyaNota (Code)\data\transcribed_symbols",   # ← add this
     clef_key_decisions: Optional[dict[str, "StripDecision"]] = None,
+    strip_flags_out: Optional[list[dict[str, Any]]] = None,
 ) -> dict:
     """
     Processes all voice strips from Stage 2 and returns event sequences.
@@ -2611,6 +2649,8 @@ def transcribe_voice_sequences(
           ``stage3_clefkey.decisions_for_pages``; None runs version (a) (CRNN clef/key), and every
           event is then flagged ``clef_key_disabled`` / ``review_needed`` (the CRNN clef collapses on
           real scores, BUG-011).
+        strip_flags_out: optional out-list for meter flags of strips with no events (see
+          ``process_strip``); Stage 5's ``build_review`` turns them into review items.
 
     Raises:
         ValueError: clef_key_decisions is given but lacks a strip.
@@ -2645,7 +2685,8 @@ def transcribe_voice_sequences(
                     viz_dir=viz_dir,
                     sys_idx=sys_idx,
                     strip_id=strip_id,
-                    clef_key_decision=decision)
+                    clef_key_decision=decision,
+                    strip_flags_out=strip_flags_out)
             if decision is None:
                 for e in events:
                     e["clef_key_flags"] = [CLEF_KEY_DISABLED_FLAG, "review_needed"]
@@ -2732,7 +2773,8 @@ def run_stages_1_to_3(
         crnn_weights: Stage 3 CRNN checkpoint.
         clef_key_weights: ClefKeyNet checkpoint; None opts out (version a, CRNN clef/key).
         img_height: CRNN input height.
-        **transcribe_kwargs: passed on to ``transcribe_voice_sequences`` (viz_dir, events_dir).
+        **transcribe_kwargs: passed on to ``transcribe_voice_sequences`` (viz_dir, events_dir,
+            strip_flags_out).
 
     Returns:
         {voice: [event_dict, ...]} as ``transcribe_voice_sequences``.

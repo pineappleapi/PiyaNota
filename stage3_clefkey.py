@@ -327,6 +327,7 @@ def substitute_header(tokens: Sequence[str], confs: Sequence[float], clef_token:
 
 def infer_pitch_b(tokens: Sequence[str], confs: Sequence[float], voice: str, page_index: int, sys_idx: int,
                   decision: StripDecision, trace: Optional[list[dict[str, Any]]] = None,
+                  meter_flags_out: Optional[list[str]] = None,
                   ) -> tuple[list[dict[str, Any]], list[str], dict[str, Any]]:
     """Version (b) pitch inference for one strip.
 
@@ -349,7 +350,8 @@ def infer_pitch_b(tokens: Sequence[str], confs: Sequence[float], voice: str, pag
     with contextlib.redirect_stdout(log):
         events = s3.infer_pitch(list(tokens), voice=voice, page_index=page_index, sys_idx=sys_idx,
                                 confidences=list(confs), header_override=override,
-                                next_system_key=decision.next_key, trace=trace)
+                                next_system_key=decision.next_key, trace=trace,
+                                meter_flags_out=meter_flags_out)
     print(log.getvalue(), end="")
     flags = list(decision.flags) + list(decision.clef.flags)
     info["mid_key_changes"] = log.getvalue().count(MID_KEY_CHANGE_MARK)
