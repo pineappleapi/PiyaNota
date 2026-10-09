@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../config/api_config.dart';
 import '../../models/score_result.dart';
 import '../../models/score_timeline.dart';
 import '../../models/voice_part.dart';
@@ -771,13 +772,7 @@ class _ScoreViewState extends State<_ScoreView> {
     super.dispose();
   }
 
-  static ImageProvider? _imageFor(Uri uri) => switch (uri.scheme) {
-    'asset' => AssetImage(uri.path.substring(1)),
-    // The debug-only demo page, generated into the cache dir.
-    'file' => FileImage(File(uri.toFilePath())),
-    'http' || 'https' => NetworkImage(uri.toString()),
-    _ => null,
-  };
+  static ImageProvider? _imageFor(Uri uri) => scoreImageFor(uri);
 
   /// Pages without a server-given size are measured from the decoded
   /// image (see ScoreResult.pageSizes).
@@ -1329,6 +1324,19 @@ class _MetronomePainter extends CustomPainter {
   @override
   bool shouldRepaint(_MetronomePainter oldDelegate) => false;
 }
+
+/// A score page's image. `file:` only in the debug-only fake build (the
+/// demo page is generated into the cache dir); ScoreResult already drops
+/// such URLs otherwise, and this keeps the screen safe on its own.
+@visibleForTesting
+ImageProvider? scoreImageFor(
+  Uri uri, {
+  bool allowLocalFiles = ApiConfig.useFakeAuth,
+}) => switch (uri.scheme) {
+  'file' when allowLocalFiles => FileImage(File(uri.toFilePath())),
+  'http' || 'https' => NetworkImage(uri.toString()),
+  _ => null,
+};
 
 class _ComingSoonSheet extends StatelessWidget {
   const _ComingSoonSheet({required this.title});

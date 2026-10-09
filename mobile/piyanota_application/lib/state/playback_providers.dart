@@ -174,7 +174,13 @@ class PlaybackState {
   /// Playback rate: chosen BPM / the tempo the tracks were rendered at.
   double get speed => chosenBpm / tempoBpm;
 
-  bool get anySoloed => soloed.isNotEmpty || clickSoloed;
+  /// The click can sound: the Speed toggle is on and the track is loaded.
+  bool get clickLive => metronomeOn && clickStatus == ClickStatus.ready;
+
+  /// A soloed metronome row counts only while the click can sound, so
+  /// soloing it with the Speed toggle off never silences the voices
+  /// (coordinator decision 2026-10-09).
+  bool get anySoloed => soloed.isNotEmpty || (clickSoloed && clickLive);
 
   /// What [voice] is played at: silent if it can't play, its chip is off
   /// (PIYA-208 chips stack with the mixer), it is muted, or another row is
@@ -189,13 +195,10 @@ class PlaybackState {
     return volumes[voice] ?? PlaybackController.fullVolume;
   }
 
-  /// The click: only while the Speed toggle is on, not muted, and not
-  /// left out by a solo; then the Metronome row's level.
+  /// The click: only while it is live (Speed toggle on, track loaded), not
+  /// muted, and not left out by a solo; then the Metronome row's level.
   double get clickGain {
-    if (!metronomeOn ||
-        clickStatus == ClickStatus.unavailable ||
-        clickMuted ||
-        (anySoloed && !clickSoloed)) {
+    if (!clickLive || clickMuted || (anySoloed && !clickSoloed)) {
       return 0;
     }
     return clickVolume;

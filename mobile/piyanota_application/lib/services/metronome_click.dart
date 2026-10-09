@@ -40,9 +40,10 @@ class ClickPlan {
 /// on (bar 0 is a pickup, which starts mid-bar). With no bar numbers, no
 /// accents: the meter is unknown, so every click is the same.
 ///
-/// Known limit: a bar's first timestamp is its first *event*. If every
-/// voice opens a bar with a rest and the timing file has no events for
-/// rests, that bar's accent lands on its first note instead.
+/// A bar's first timestamp is its first *event*. That is its downbeat
+/// because PIYA-117 AC7 includes rest events, so a bar that opens on a
+/// rest still has an event there. (A timing file without rest events
+/// would put such a bar's accent on its first note instead.)
 ClickPlan planClicks({
   required List<TimingEvent> events,
   required int tempoBpm,

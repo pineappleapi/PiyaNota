@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:piyanota_application/models/voice_part.dart';
 import 'package:piyanota_application/screens/playback/playback_messages.dart';
+import 'package:piyanota_application/screens/playback/playback_screen.dart';
 import 'package:piyanota_application/services/score_result_api.dart';
 import 'package:piyanota_application/state/playback_providers.dart';
 
@@ -704,6 +705,20 @@ void main() {
       expect(harness.engine.playing, isFalse);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     });
+  });
+
+  test('page images: file only in the demo build', () {
+    final file = Uri.parse('file:///data/p1.png');
+    expect(scoreImageFor(file, allowLocalFiles: false), isNull);
+    expect(scoreImageFor(file, allowLocalFiles: true), isA<FileImage>());
+    expect(
+      scoreImageFor(Uri.parse('https://cdn/p1.png'), allowLocalFiles: false),
+      isA<NetworkImage>(),
+    );
+    expect(
+      scoreImageFor(Uri.parse('content://x/p1'), allowLocalFiles: true),
+      isNull,
+    );
   });
 
   group('timing pages', () {

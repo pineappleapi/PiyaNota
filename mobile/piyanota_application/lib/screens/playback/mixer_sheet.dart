@@ -30,6 +30,9 @@ class VoiceMixerSheet extends ConsumerWidget {
     final state = ref.watch(provider);
     final controller = ref.read(provider.notifier);
     final clickUsable = state.clickStatus != ClickStatus.unavailable;
+    // Toggle off: the row still takes level, Mute and Solo (they apply
+    // once it is on), but looks inactive and says where to turn it on.
+    final clickOff = clickUsable && !state.metronomeOn;
     final rows = <Widget>[];
     for (final voice in VoicePart.values) {
       // A voice the result never had has no row; one that failed keeps
@@ -60,10 +63,12 @@ class VoiceMixerSheet extends ConsumerWidget {
         name: PlaybackMessages.metronomeClick,
         label: Text(
           PlaybackMessages.metronomeClick,
-          style: Theme.of(context).textTheme.bodyMedium
-              ?.copyWith(color: AppTheme.sheetText),
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+            color: clickOff ? AppTheme.sheetSubtle : AppTheme.sheetText,
+          ),
         ),
         enabled: clickUsable,
+        inactive: clickOff,
         disabledNote: PlaybackMessages.metronomeUnavailable,
         soloed: state.clickSoloed,
         muted: state.clickMuted,
@@ -75,6 +80,13 @@ class VoiceMixerSheet extends ConsumerWidget {
     );
     if (!clickUsable) {
       rows.add(const SheetNote(PlaybackMessages.metronomeUnavailable));
+    } else if (clickOff) {
+      rows.add(
+        const SheetNote(
+          PlaybackMessages.metronomeOff,
+          key: ValueKey('mixer-metronome-off'),
+        ),
+      );
     }
     return SheetFrame(
       key: const ValueKey('mixer-sheet'),
@@ -118,6 +130,7 @@ class _MixerRow extends StatelessWidget {
     required this.onSolo,
     required this.onMute,
     required this.onVolume,
+    this.inactive = false,
   });
 
   /// The row's name for screen readers ("Soprano", "Metronome Click").
@@ -132,6 +145,10 @@ class _MixerRow extends StatelessWidget {
   final ValueChanged<bool> onMute;
   final ValueChanged<double> onVolume;
 
+  /// Usable, but not sounding for now (the metronome with the Speed toggle
+  /// off): the slider is drawn faded. Text keeps AA contrast.
+  final bool inactive;
+
   /// Fixed so every row's slider starts at the same x, as in the mockup.
   static const double labelWidth = 112;
 
@@ -142,28 +159,32 @@ class _MixerRow extends StatelessWidget {
       label: PlaybackMessages.soloLabel(name),
       onChanged: enabled ? onSolo : null,
     );
-    final slider = Row(
-      children: [
-        const SpeakerGlyph(muted: true),
-        Expanded(
-          // Merged so the slider node carries the row's name.
-          child: MergeSemantics(
-            child: Semantics(
-              label: PlaybackMessages.volumeLabel(name),
-              child: SheetSliderTheme(
-                child: Slider(
-                  // Muting leaves the slider where it was (AC4).
-                  value: volume,
-                  semanticFormatterCallback: PlaybackMessages.volumeValue,
-                  // On every change, not on change-end: AC3's 100 ms.
-                  onChanged: enabled ? onVolume : null,
+    final slider = Opacity(
+      key: const ValueKey('mixer-slider-fade'),
+      opacity: inactive ? 0.45 : 1,
+      child: Row(
+        children: [
+          const SpeakerGlyph(muted: true),
+          Expanded(
+            // Merged so the slider node carries the row's name.
+            child: MergeSemantics(
+              child: Semantics(
+                label: PlaybackMessages.volumeLabel(name),
+                child: SheetSliderTheme(
+                  child: Slider(
+                    // Muting leaves the slider where it was (AC4).
+                    value: volume,
+                    semanticFormatterCallback: PlaybackMessages.volumeValue,
+                    // On every change, not on change-end: AC3's 100 ms.
+                    onChanged: enabled ? onVolume : null,
+                  ),
                 ),
               ),
             ),
           ),
-        ),
-        const SpeakerGlyph(muted: false),
-      ],
+          const SpeakerGlyph(muted: false),
+        ],
+      ),
     );
     final mute = _MutePill(
       muted: muted,

@@ -2,6 +2,8 @@ import 'dart:ui' show Size;
 
 import 'package:flutter/foundation.dart';
 
+import '../config/api_config.dart';
+
 import 'score_details.dart';
 import 'voice_part.dart';
 
@@ -110,7 +112,16 @@ class ScoreResult {
   /// Parses `data` (the envelope is unwrapped by the API). Throws
   /// [FormatException] when no audio track or score id is usable, since
   /// then there is nothing to play.
-  static ScoreResult fromJson(Map<String, dynamic> data) {
+  ///
+  /// URLs must be http(s). `file:` is accepted only when
+  /// [allowLocalFiles], which defaults to the debug-only fake build (its
+  /// demo score lives in the cache dir): a real server has no business
+  /// pointing the app at files on the phone.
+  static ScoreResult fromJson(
+    Map<String, dynamic> data, {
+    bool allowLocalFiles = ApiConfig.useFakeAuth,
+  }) {
+    Uri? uri(Object? value) => _uri(value, allowLocalFiles: allowLocalFiles);
     final scoreId = data['scoreId'];
     if (scoreId is! int) {
       throw const FormatException('PIYA-103 result without an int scoreId');
@@ -120,8 +131,8 @@ class ScoreResult {
     if (rawTracks is Map) {
       rawTracks.forEach((key, value) {
         final voice = parseVoicePart(key);
-        final uri = _uri(value);
-        if (voice != null && uri != null) tracks[voice] = uri;
+        final track = uri(value);
+        if (voice != null && track != null) tracks[voice] = track;
       });
     }
     if (tracks.isEmpty) {
@@ -131,8 +142,8 @@ class ScoreResult {
     final rawImages = data['scoreImages'];
     if (rawImages is List) {
       for (final image in rawImages) {
-        final uri = _uri(image);
-        if (uri != null) images.add(uri);
+        final page = uri(image);
+        if (page != null) images.add(page);
       }
     }
     final rawSizes = data['scoreImageSizes'];
@@ -144,7 +155,7 @@ class ScoreResult {
       jobId: jobId is String ? jobId : null,
       audioTracks: Map.unmodifiable(tracks),
       scoreImages: List.unmodifiable(images),
-      timingMetadataUrl: _uri(data['timingMetadataUrl']),
+      timingMetadataUrl: uri(data['timingMetadataUrl']),
       review: ReviewSummary.fromJson(data['review']),
       pageSizes: [
         if (rawSizes is List)
@@ -166,10 +177,15 @@ class ScoreResult {
   Size? pageSizeAt(int pageIndex) =>
       pageIndex < pageSizes.length ? pageSizes[pageIndex] : null;
 
-  static Uri? _uri(Object? value) {
+  static Uri? _uri(Object? value, {required bool allowLocalFiles}) {
     if (value is! String || value.trim().isEmpty) return null;
     final uri = Uri.tryParse(value.trim());
-    return uri != null && uri.hasScheme ? uri : null;
+    if (uri == null) return null;
+    return switch (uri.scheme) {
+      'http' || 'https' => uri,
+      'file' when allowLocalFiles => uri,
+      _ => null,
+    };
   }
 
   static Size? _size(Object? value) {

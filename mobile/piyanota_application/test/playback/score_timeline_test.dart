@@ -152,6 +152,47 @@ void main() {
       }
     });
 
+    test('URLs: http(s) always; file only in the demo build', () {
+      Map<String, dynamic> body(String scheme) => {
+        'scoreId': 7,
+        'audioTracks': {
+          'soprano': 'https://cdn/s.mp3',
+          'alto': '$scheme:///data/a.wav',
+        },
+        'scoreImages': ['$scheme:///data/p1.png', 'http://cdn/p2.png'],
+        'timingMetadataUrl': '$scheme:///data/t.json',
+      };
+      final release = ScoreResult.fromJson(
+        body('file'),
+        allowLocalFiles: false,
+      );
+      expect(release.audioTracks.keys, [VoicePart.soprano]);
+      expect(release.scoreImages, [Uri.parse('http://cdn/p2.png')]);
+      expect(release.timingMetadataUrl, isNull);
+
+      final demo = ScoreResult.fromJson(body('file'), allowLocalFiles: true);
+      expect(demo.audioTracks.keys, [VoicePart.soprano, VoicePart.alto]);
+      expect(demo.scoreImages, hasLength(2));
+      expect(demo.timingMetadataUrl, Uri.parse('file:///data/t.json'));
+
+      // Other schemes never, even in the demo build.
+      for (final scheme in ['content', 'asset', 'javascript', 'ftp']) {
+        final other = ScoreResult.fromJson(body(scheme), allowLocalFiles: true);
+        expect(other.audioTracks.keys, [VoicePart.soprano], reason: scheme);
+        expect(other.scoreImages, hasLength(1), reason: scheme);
+        expect(other.timingMetadataUrl, isNull, reason: scheme);
+      }
+
+      // Only local tracks, outside the demo: nothing to play.
+      expect(
+        () => ScoreResult.fromJson({
+          'scoreId': 7,
+          'audioTracks': {'soprano': 'file:///data/s.wav'},
+        }, allowLocalFiles: false),
+        throwsFormatException,
+      );
+    });
+
     test('an explicit reviewNeeded false is respected', () {
       final review = ReviewSummary.fromJson({'reviewNeeded': false});
       expect(review.reviewNeeded, isFalse);

@@ -16,6 +16,7 @@ class FakeAudioPlayer implements AudioPlayer {
     this.length = const Duration(seconds: 10),
     this.rate = 1,
     this.loadError,
+    this.loadHangs = false,
   });
 
   final Duration length;
@@ -29,6 +30,9 @@ class FakeAudioPlayer implements AudioPlayer {
   }
 
   final Object? loadError;
+
+  /// [setAudioSource] never completes (a stalled download).
+  final bool loadHangs;
 
   final StreamController<bool> _playingEvents = StreamController.broadcast();
   final StreamController<ProcessingState> _states =
@@ -62,6 +66,7 @@ class FakeAudioPlayer implements AudioPlayer {
     Duration? initialPosition,
   }) async {
     if (loadError case final error?) throw error;
+    if (loadHangs) await Completer<void>().future;
     loadedUri = (audioSource as UriAudioSource).uri;
     return length;
   }
@@ -255,6 +260,41 @@ void main() {
         unawaited(r.engine.dispose());
         async.flushMicrotasks();
         expect(r.players.values.every((p) => p.disposed), isTrue);
+      });
+    });
+
+    test('a track that never loads times out into a failed voice', () {
+      fakeAsync((async) {
+        final alto = FakeAudioPlayer(loadHangs: true);
+        final r = rig(overrides: {VoicePart.alto: alto});
+        var done = false;
+        unawaited(r.engine.load(tracks()).then((_) => done = true));
+        async.elapse(
+          JustAudioPlaybackEngine.loadTimeout - const Duration(seconds: 1),
+        );
+        expect(done, isFalse);
+        async.elapse(const Duration(seconds: 1));
+        expect(done, isTrue);
+        expect(r.engine.unavailableVoices, {VoicePart.alto});
+        expect(alto.disposed, isTrue);
+        unawaited(r.engine.play());
+        async.flushMicrotasks();
+        expect(r.players[VoicePart.soprano]!.playing, isTrue);
+      });
+    });
+
+    test('every track hanging is a PlaybackLoadException, not a spinner', () {
+      fakeAsync((async) {
+        final r = rig(
+          overrides: {
+            for (final voice in VoicePart.values)
+              voice: FakeAudioPlayer(loadHangs: true),
+          },
+        );
+        Object? thrown;
+        r.engine.load(tracks()).catchError((Object e) => thrown = e);
+        async.elapse(JustAudioPlaybackEngine.loadTimeout);
+        expect(thrown, isA<PlaybackLoadException>());
       });
     });
 
@@ -637,14 +677,24 @@ void main() {
         tenor.seeks.clear();
         final start = clock.now();
         tenor.seekTimes.clear();
+        DateTime? altoFailedAt;
+        r.engine.failures.listen((_) => altoFailedAt ??= clock.now());
         async.elapse(const Duration(seconds: 6));
         expect(r.failures.map((f) => f.voice), [VoicePart.alto]);
-        // The tenor's seeks land instantly; had the failed 400 ms seek
-        // counted, its re-seeks would lead the master by ~200 ms.
-        expect(tenor.seeks, isNotEmpty);
-        final lead =
-            tenor.seeks.first - tenor.seekTimes.first.difference(start);
-        expect(lead, Duration.zero);
+        // Only a tenor re-seek computed *after* the alto's seek failed can
+        // show whether that failed 400 ms seek fed the estimate: one issued
+        // in the same pass as the alto's had its lead fixed beforehand.
+        final later = [
+          for (var i = 0; i < tenor.seeks.length; i++)
+            if (tenor.seekTimes[i].isAfter(altoFailedAt!))
+              (tenor.seeks[i], tenor.seekTimes[i]),
+        ];
+        expect(later, isNotEmpty);
+        // The tenor's seeks land instantly; had the failed seek counted,
+        // these would lead the master by ~200 ms (0.5 x 400 ms x 1.0).
+        for (final (target, at) in later) {
+          expect(target - at.difference(start), Duration.zero);
+        }
       });
     });
 
@@ -814,6 +864,20 @@ void main() {
         unawaited(r.engine.seek(const Duration(seconds: 2)));
         async.flushMicrotasks();
         expect(r.click.seeks, hasLength(seeks));
+      });
+    });
+
+    test('a click that never loads times out into a click failure', () {
+      fakeAsync((async) {
+        final r = rig(click: FakeAudioPlayer(loadHangs: true));
+        unawaited(r.engine.load(tracks()));
+        async.flushMicrotasks();
+        bool? attached;
+        unawaited(r.engine.attachClick(_clickUri).then((v) => attached = v));
+        async.elapse(JustAudioPlaybackEngine.loadTimeout);
+        expect(attached, isFalse);
+        expect(r.clickFailures, hasLength(1));
+        expect(r.failures, isEmpty);
       });
     });
 

@@ -51,6 +51,11 @@ class PlaybackMessages {
   static String rowUnavailable(String row) => '$row audio unavailable';
 
   /// Shown on both sheets when the click track couldn't be made or played.
+  /// Under the Mixer's metronome row while the Speed toggle is off: the
+  /// row stays editable, but nothing sounds until it is turned on there.
+  static const String metronomeOff =
+      'Off. Turn on Metronome Click in Speed to hear it.';
+
   static const String metronomeUnavailable =
       'The metronome click isn’t available right now. The voices still play.';
 

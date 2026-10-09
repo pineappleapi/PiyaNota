@@ -262,6 +262,88 @@ void main() {
       expect(engine.clickVolume, 0);
     });
 
+    testWidgets('toggle off: the row looks inactive with a hint, stays '
+        'editable, and its Solo does not silence the voices', (tester) async {
+      final harness = ready();
+      await pumpPlayback(tester, harness);
+      await openMixer(tester);
+      final engine = harness.engine;
+      final hint = find.byKey(const ValueKey('mixer-metronome-off'));
+      double fade() => tester
+          .widget<Opacity>(
+            find.descendant(
+              of: metronomeRow,
+              matching: find.byKey(const ValueKey('mixer-slider-fade')),
+            ),
+          )
+          .opacity;
+
+      expect(hint, findsOneWidget);
+      expect(find.text(PlaybackMessages.metronomeOff), findsOneWidget);
+      expect(fade(), lessThan(1));
+      expect(
+        tester
+            .widget<Opacity>(
+              find.descendant(
+                of: voiceRow(VoicePart.alto),
+                matching: find.byKey(const ValueKey('mixer-slider-fade')),
+              ),
+            )
+            .opacity,
+        1,
+      );
+
+      // Still editable.
+      expect(
+        tester.widget<Slider>(sliderIn(metronomeRow)).onChanged,
+        isNotNull,
+      );
+      await setSlider(tester, metronomeRow, 0.5);
+      final level = sliderValue(tester, metronomeRow);
+      expect(level, closeTo(0.5, 0.05));
+      await tapIn(tester, muteIn(metronomeRow));
+      expect(controller(tester).state.clickMuted, isTrue);
+      await tapIn(tester, muteIn(metronomeRow));
+
+      // Soloed while off: the voices keep sounding, the click stays silent.
+      await tapIn(tester, soloIn(metronomeRow));
+      expect(tester.widget<SheetCheckbox>(soloIn(metronomeRow)).value, isTrue);
+      expect(engine.volumes.values.every((v) => v == 1), isTrue);
+      expect(engine.clickVolume, 0);
+
+      // Turned on in Speed: the hint goes, and the solo now applies.
+      controller(tester).setMetronomeOn(on: true);
+      await tester.pump();
+      expect(hint, findsNothing);
+      expect(fade(), 1);
+      expect(engine.clickVolume, level);
+      expect(engine.volumes.values.every((v) => v == 0), isTrue);
+
+      // Off again: voices back, click silent.
+      controller(tester).setMetronomeOn(on: false);
+      await tester.pump();
+      expect(engine.volumes.values.every((v) => v == 1), isTrue);
+      expect(engine.clickVolume, 0);
+    });
+
+    testWidgets('a soloed click still preparing does not silence the voices', (
+      tester,
+    ) async {
+      final harness = ready();
+      await pumpPlayback(tester, harness);
+      final c = controller(tester)
+        ..setMetronomeOn(on: true)
+        ..setClickSoloed(soloed: true);
+      expect(c.state.clickLive, isTrue);
+      expect(harness.engine.volumes.values.every((v) => v == 0), isTrue);
+      // The same state before the click loaded would not be live.
+      final preparing = c.state.copyWith(clickStatus: ClickStatus.preparing);
+      expect(preparing.clickLive, isFalse);
+      expect(preparing.anySoloed, isFalse);
+      expect(preparing.voiceGain(VoicePart.soprano), 1);
+      expect(preparing.clickGain, 0);
+    });
+
     testWidgets('a click that fails mid-play disables its row, with a note; '
         'the voices keep playing', (tester) async {
       final harness = ready();

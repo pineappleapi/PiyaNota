@@ -159,6 +159,11 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
   /// Weight of the newest measurement in the seek-latency average.
   static const double seekLatencySmoothing = 0.5;
 
+  /// A track still not loaded after this is treated as failed (the
+  /// partial-failure path), so one hung download can't leave Playback on
+  /// its spinner. Generous: a slow 3G fetch of a few MB fits well inside.
+  static const Duration loadTimeout = Duration(seconds: 30);
+
   final AudioPlayer Function() _playerFactory;
   final Map<VoicePart, AudioPlayer> _players = {};
   final Set<VoicePart> _dead = {};
@@ -241,6 +246,7 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
         for (final entry in _players.entries)
           entry.value
               .setAudioSource(AudioSource.uri(tracks[entry.key]!))
+              .timeout(loadTimeout)
               .then<void>(
                 (_) {},
                 onError: (Object e) => loadErrors[entry.key] = e,
@@ -390,7 +396,7 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
     if (_disposed || _master == null || _click != null) return false;
     final player = _click = _playerFactory();
     try {
-      await player.setAudioSource(AudioSource.uri(track));
+      await player.setAudioSource(AudioSource.uri(track)).timeout(loadTimeout);
       await player.setVolume(_clickVolume);
       await player.setSpeed(_speed);
     } on Object catch (e) {
