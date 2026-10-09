@@ -291,9 +291,14 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// does that); one that changes it re-plans (PIYA-210 "Speed changes").
   Set<int>? _plannedSubdivisions;
 
-  /// Bumped by every click plan, so an older one still being written or
-  /// attached gives way to a newer one.
-  int _clickGeneration = 0;
+  /// A click plan is being written or attached (see [_prepareClick]).
+  bool _clickBusy = false;
+
+  /// A slider release arrived while [_clickBusy]; re-checked after.
+  bool _replanPending = false;
+
+  /// A re-plan is swapping the engine's click (see [_onClickFailure]).
+  bool _clickSwapping = false;
 
   /// Gains last sent to the current engine, by voice or [_clickGainKey],
   /// so a slider drag only sends what changed.
@@ -381,7 +386,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       if (ref.mounted) state = state.copyWith(playing: playing);
     });
     _failureSub = engine.failures.listen(_onFailure);
-    _clickFailureSub = engine.clickFailures.listen((_) => _clickFailed());
+    _clickFailureSub = engine.clickFailures.listen(_onClickFailure);
     // 209 AC5: every voice unmuted at full volume, nothing soloed,
     // metronome off, speed at the score's tempo. A fresh controller
     // (autoDispose) means a reopened score starts here again (209 AC6).
@@ -413,13 +418,19 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// to [engine] as a follower track. Done after the voices are ready so
   /// it never delays them; a failure only disables the metronome controls.
   ///
-  /// [replace]: a re-plan after a speed change (see [commitBpm]). The old
-  /// click keeps playing until the new file is written, then is swapped
-  /// out; the status stays ready throughout, so a soloed click doesn't
-  /// hand the voices back for the moment of the swap. A re-plan that fails
-  /// (not written, or not attached) keeps the old click: it is still in
-  /// time, only its subdivision is out of date. The click is marked
-  /// unavailable only when there is no click left to fall back to.
+  /// One plan at a time: a slider release while one is being written or
+  /// attached is held in [_replanPending] and re-checked when it ends, so
+  /// two plans never compete for the engine's single click slot.
+  ///
+  /// [replace]: a re-plan after a speed change (see [commitBpm]); only
+  /// started once a click is attached and ready. The old click keeps
+  /// playing until the new file is written, then is swapped out; the
+  /// status stays ready throughout, so a soloed click doesn't hand the
+  /// voices back for the moment of the swap. A re-plan that fails (not
+  /// written, or not attached) keeps the old click: it is still in time,
+  /// only its subdivision is out of date, and the next release of the
+  /// slider tries again. The click is marked unavailable only when there
+  /// is no click left to fall back to.
   ///
   /// File ownership: [_clickFile] is the file the engine holds, and is
   /// set only once an attach succeeded. Whoever replaces it deletes it;
@@ -431,13 +442,31 @@ class PlaybackController extends Notifier<PlaybackState> {
     int generation, {
     bool replace = false,
   }) async {
-    final clickGeneration = ++_clickGeneration;
-    bool sameEngine() =>
+    bool live() =>
         ref.mounted && generation == _generation && identical(_engine, engine);
-    bool current() => sameEngine() && clickGeneration == _clickGeneration;
+    _clickBusy = true;
+    try {
+      await _planAndAttachClick(engine, live, replace: replace);
+    } finally {
+      // Leaving the screen already reset both (see [_releaseEngine]).
+      if (live()) {
+        _clickBusy = false;
+        _clickSwapping = false;
+        if (_replanPending) {
+          _replanPending = false;
+          commitBpm();
+        }
+      }
+    }
+  }
+
+  Future<void> _planAndAttachClick(
+    PlaybackEngine engine,
+    bool Function() live, {
+    required bool replace,
+  }) async {
     final chosenBpm = state.chosenBpm;
-    final previousPlan = _plannedSubdivisions;
-    _plannedSubdivisions = subdividedBars(_bars, chosenBpm);
+    final plannedSubdivisions = subdividedBars(_bars, chosenBpm);
     final Uri file;
     try {
       final plan = planClicks(
@@ -450,56 +479,54 @@ class PlaybackController extends Notifier<PlaybackState> {
       file = await ref.read(clickTrackWriterProvider)(plan);
     } on Object catch (e, stack) {
       debugPrint('Playback: metronome click not generated: $e\n$stack');
-      if (!current()) return;
-      if (replace && _clickFile != null) {
-        // Keep the old click; the next release of the slider tries again.
-        _plannedSubdivisions = previousPlan;
+      // A failed re-plan keeps the old click (and its plan).
+      if (live() && !replace) _clickFailed();
+      return;
+    }
+    if (!live()) {
+      unawaited(_deleteQuietly(file));
+      return;
+    }
+    final old = _clickFile;
+    // From the detach on, the engine reports this swap's own failed
+    // attempts on clickFailures too; they are handled here, from the
+    // attach results, not as the click failing (see [_onClickFailure]).
+    _clickSwapping = replace;
+    if (replace) await engine.detachClick();
+    if (!live()) {
+      // Left the screen: [_releaseEngine] deletes [old].
+      unawaited(_deleteQuietly(file));
+      return;
+    }
+    if (await engine.attachClick(file)) {
+      if (!live()) {
+        unawaited(_deleteQuietly(file));
         return;
       }
-      _clickFailed();
-      return;
-    }
-    if (!current()) {
-      unawaited(_deleteQuietly(file));
-      return;
-    }
-    final old = replace ? _clickFile : null;
-    if (old != null) await engine.detachClick();
-    if (!current()) {
-      // A newer re-plan took over; it owns the swap (and [old]).
-      unawaited(_deleteQuietly(file));
-      return;
-    }
-    final attached = await engine.attachClick(file);
-    if (!sameEngine()) {
-      // Left the screen: [_releaseEngine] deletes what [_clickFile] was.
-      unawaited(_deleteQuietly(file));
-      return;
-    }
-    if (attached) {
       _clickFile = file;
-      if (old != null && old != file) unawaited(_deleteQuietly(old));
-      if (!current()) return;
+      _plannedSubdivisions = plannedSubdivisions;
+      if (old != null && replace) unawaited(_deleteQuietly(old));
       state = state.copyWith(clickStatus: ClickStatus.ready);
       _applyGains();
       return;
     }
     unawaited(_deleteQuietly(file));
-    if (!current()) return;
-    if (old != null) {
-      debugPrint('Playback: re-planned click not attached; keeping the old');
-      final back = await engine.attachClick(old);
-      if (!sameEngine()) return;
-      if (back) {
-        // The next release of the slider tries the re-plan again.
-        if (current()) _plannedSubdivisions = previousPlan;
-        return;
-      }
-      // A newer re-plan that took over meanwhile owns [old] now.
-      if (!current()) return;
-      _clickFile = null;
-      unawaited(_deleteQuietly(old));
+    if (!live()) return;
+    if (!replace || old == null) {
+      _clickFailed();
+      return;
     }
+    debugPrint('Playback: re-planned click not attached; keeping the old');
+    // The failed attempt still holds the engine's one click slot.
+    await engine.detachClick();
+    if (!live()) return;
+    // A fresh load of the old file, then a seek to the voices: the click
+    // is silent for that moment (a few hundred ms at most), then resumes
+    // in time. The plan stays the old one, so the next release re-plans.
+    if (await engine.attachClick(old)) return;
+    if (!live()) return;
+    _clickFile = null;
+    unawaited(_deleteQuietly(old));
     _clickFailed();
   }
 
@@ -512,11 +539,21 @@ class PlaybackController extends Notifier<PlaybackState> {
     final engine = _engine;
     if (engine == null || state.phase != PlaybackPhase.ready) return;
     if (state.clickStatus == ClickStatus.unavailable) return;
+    if (_clickBusy) {
+      // Re-checked once the plan in progress ends.
+      _replanPending = true;
+      return;
+    }
     final planned = _plannedSubdivisions;
-    // Not planned yet: the first plan reads the speed when it starts.
     if (planned == null) return;
     if (setEquals(planned, subdividedBars(_bars, state.chosenBpm))) return;
     unawaited(_prepareClick(engine, _generation, replace: true));
+  }
+
+  /// A swap's own failed attempts are handled by [_planAndAttachClick];
+  /// the old click it detached can no longer report anything.
+  void _onClickFailure(Object _) {
+    if (!_clickSwapping) _clickFailed();
   }
 
   void _clickFailed() {
@@ -808,7 +845,9 @@ class PlaybackController extends Notifier<PlaybackState> {
   }
 
   void _releaseEngine() {
-    _clickGeneration++;
+    _clickBusy = false;
+    _replanPending = false;
+    _clickSwapping = false;
     _bars = const [];
     _plannedSubdivisions = null;
     unawaited(_playingSub?.cancel());

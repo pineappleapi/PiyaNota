@@ -1087,6 +1087,37 @@ void main() {
       });
     });
 
+    test('a failed attach holds the slot until a detach; then a new '
+        'attach works', () {
+      fakeAsync((async) {
+        final second = FakeAudioPlayer();
+        final r = rig(
+          click: FakeAudioPlayer(loadError: StateError('codec')),
+          laterClicks: [second],
+        );
+        unawaited(r.engine.load(tracks()));
+        async.flushMicrotasks();
+        unawaited(r.engine.play());
+        final results = <bool>[];
+        unawaited(r.engine.attachClick(_clickUri).then(results.add));
+        async.flushMicrotasks();
+        expect(r.clickFailures, hasLength(1));
+        // Still held by the dead player.
+        unawaited(r.engine.attachClick(_clickUri).then(results.add));
+        async.flushMicrotasks();
+        expect(results, [false, false]);
+
+        unawaited(r.engine.detachClick());
+        async.flushMicrotasks();
+        expect(r.click.disposed, isTrue);
+        unawaited(r.engine.attachClick(_clickUri).then(results.add));
+        async.elapse(const Duration(milliseconds: 100));
+        expect(results, [false, false, true]);
+        expect(second.playing, isTrue);
+        expect(r.clickFailures, hasLength(1));
+      });
+    });
+
     test('a second click is refused (one per engine)', () {
       fakeAsync((async) {
         final r = rig();

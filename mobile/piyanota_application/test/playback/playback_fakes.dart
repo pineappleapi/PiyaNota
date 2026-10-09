@@ -173,30 +173,45 @@ class FakePlaybackEngine implements PlaybackEngine {
     this.speed = speed;
   }
 
+  /// Like [JustAudioPlaybackEngine.attachClick]: one click slot, taken
+  /// at the start of an attach and freed only by [detachClick] (a failed
+  /// attach keeps it, holding the dead player); a failure is also
+  /// reported on [clickFailures], unless a detach (or dispose) came first.
   @override
   Future<bool> attachClick(Uri track) async {
     final call = attachCalls.length;
     attachCalls.add(track);
-    if (clickAttachFails) return false;
+    if (disposed || clickSlotTaken) return false;
+    clickSlotTaken = true;
     final key = _clickKey;
-    if (attachGateAt[call] case final gate?) {
-      if (!await gate.future) return false;
-    } else if (clickAttachGate case final gate?) {
-      if (!await gate.future) return false;
+    bool gone() => key != _clickKey || disposed;
+    bool fail() {
+      if (!gone()) _clickFailures.add('test click not attached');
+      return false;
     }
-    if (attachOutcomeAt[call] == false) return false;
-    // Like the real engine: a detach (or dispose) during the attach wins.
-    if (key != _clickKey || disposed) return false;
+
+    if (clickAttachFails) return fail();
+    if (attachGateAt[call] case final gate?) {
+      if (!await gate.future) return fail();
+    } else if (clickAttachGate case final gate?) {
+      if (!await gate.future) return fail();
+    }
+    if (attachOutcomeAt[call] == false) return fail();
+    if (gone()) return false;
     click = track;
     attachedClicks.add(track);
     return true;
   }
 
+  /// A click is attached, being attached, or failed and not yet detached.
+  bool clickSlotTaken = false;
+
   /// Every attachClick call, attached or not.
   final List<Uri> attachCalls = [];
 
   /// The result of the attachClick call at this index (0 = the first);
-  /// a call not listed attaches normally.
+  /// a call not listed attaches normally. False fails it like a load
+  /// error: reported on [clickFailures], slot kept until a detach.
   final Map<int, bool> attachOutcomeAt = {};
 
   /// Holds the attachClick call at this index until completed (instead
@@ -212,6 +227,7 @@ class FakePlaybackEngine implements PlaybackEngine {
   Future<void> detachClick() async {
     detachCalls++;
     _clickKey++;
+    clickSlotTaken = false;
     click = null;
   }
 

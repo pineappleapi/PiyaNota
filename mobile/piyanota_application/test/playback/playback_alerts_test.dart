@@ -441,24 +441,27 @@ void main() {
         addTearDown(() => dir.deleteSync(recursive: true));
       });
 
-      PlaybackHarness fileHarness() => PlaybackHarness(
-        ScriptedScoreResultApi(
-          [testResult()],
-          timing: testTiming(),
-          bars: sixEight,
-        ),
-        clickWriter: (plan) async {
-          final index = written.length;
-          if (writeFailsAt.remove(index)) {
-            written.add(File('${dir.path}/unwritten$index.wav'));
-            throw const FileSystemException('disk full');
-          }
-          final file = File('${dir.path}/click$index.wav')
-            ..writeAsBytesSync([0]);
-          written.add(file);
-          return file.uri;
-        },
-      );
+      // [attachGate] holds every attach not in attachGateAt (the first).
+      PlaybackHarness fileHarness({Completer<bool>? attachGate}) =>
+          PlaybackHarness(
+            clickAttachGate: attachGate,
+            ScriptedScoreResultApi(
+              [testResult()],
+              timing: testTiming(),
+              bars: sixEight,
+            ),
+            clickWriter: (plan) async {
+              final index = written.length;
+              if (writeFailsAt.remove(index)) {
+                written.add(File('${dir.path}/unwritten$index.wav'));
+                throw const FileSystemException('disk full');
+              }
+              final file = File('${dir.path}/click$index.wav')
+                ..writeAsBytesSync([0]);
+              written.add(file);
+              return file.uri;
+            },
+          );
 
       // Deletion is real file I/O, outside the fake clock.
       Future<void> flushIo(WidgetTester tester) async {
@@ -497,8 +500,8 @@ void main() {
       );
 
       testWidgetsPrinting(
-        'two overlapping re-plans: only the latest stays, the '
-        'other file is deleted',
+        'two overlapping re-plans: the second waits for the first, '
+        'only the latest stays and the other files are deleted',
         (tester) async {
           final h = fileHarness();
           await pumpPlayback(tester, h);
@@ -508,19 +511,68 @@ void main() {
           await replan(tester, 80);
           await settle(tester);
           expect(h.engine.attachCalls, hasLength(2));
-          // Released before the first attaches: back above 60.
+          // Released before the first attaches: back above 60. Held
+          // until the first swap ends (one click slot).
           await replan(tester, 100);
           await settle(tester);
-          expect(h.engine.attachCalls, hasLength(3));
+          expect(h.engine.attachCalls, hasLength(2));
+          expect(h.clickPlans, hasLength(2));
           gate.complete(true);
           await settle(tester);
           await flushIo(tester);
+          expect(h.engine.attachCalls, hasLength(3));
 
           expect(h.clickPlans, hasLength(3));
           expect(h.engine.click, written[2].uri);
           expect(h.engine.attachedClicks.last, written[2].uri);
           expect([exists(0), exists(1), exists(2)], [false, false, true]);
           expect(controller(tester).state.clickStatus, ClickStatus.ready);
+          noDoubleDelete();
+        },
+      );
+
+      testWidgetsPrinting(
+        'a re-plan while the first click is still attaching waits for '
+        'it, then ends ready with the latest plan',
+        (tester) async {
+          // The first attach hangs until released.
+          final gate = Completer<bool>();
+          final h = fileHarness(attachGate: gate);
+          await pumpPlayback(tester, h);
+          expect(controller(tester).state.clickStatus, ClickStatus.preparing);
+          await replan(tester, 80);
+          await settle(tester);
+          expect(h.clickPlans, hasLength(1));
+          expect(h.engine.detachCalls, 0);
+
+          gate.complete(true);
+          await settle(tester);
+          await flushIo(tester);
+          expect(h.clickPlans, hasLength(2));
+          expect(h.clickPlans.last.clicks.length, 6 * 5);
+          expect(h.engine.attachCalls, [written[0].uri, written[1].uri]);
+          expect(h.engine.click, written[1].uri);
+          expect([exists(0), exists(1)], [false, true]);
+          expect(controller(tester).state.clickStatus, ClickStatus.ready);
+          noDoubleDelete();
+        },
+      );
+
+      testWidgetsPrinting(
+        'a re-plan while the first click is attaching, and the first '
+        'fails: unavailable, no re-plan, its file deleted',
+        (tester) async {
+          final gate = Completer<bool>();
+          final h = fileHarness(attachGate: gate);
+          await pumpPlayback(tester, h);
+          await replan(tester, 80);
+          await settle(tester);
+          gate.complete(false);
+          await settle(tester);
+          await flushIo(tester);
+          expect(controller(tester).state.clickStatus, ClickStatus.unavailable);
+          expect(h.clickPlans, hasLength(1));
+          expect(exists(0), isFalse);
           noDoubleDelete();
         },
       );
@@ -566,6 +618,10 @@ void main() {
             written[1].uri,
             written[0].uri,
           ]);
+          // The failed attempt was detached (freeing the slot) before the
+          // old click went back in; its clickFailures event was not taken
+          // as the click failing.
+          expect(h.engine.detachCalls, 2);
           expect(h.engine.click, written[0].uri);
           expect([exists(0), exists(1)], [true, false]);
           expect(controller(tester).state.clickStatus, ClickStatus.ready);
