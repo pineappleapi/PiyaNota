@@ -121,6 +121,8 @@ _Covers: UI tickets (Onboarding, Account, Score Library, Playback, Settings, Sys
 7. Non-PDF, non-image file types rejected immediately at selection time with a clear error message.
 8. Tapping Submit/Confirm calls PIYA-101 (camera/gallery input) or PIYA-310 (PDF input), routing to Processing in either case — client selects correct endpoint based on input method, not a single hardcoded call.
 
+*(2026-10-09, user decision: the optional name field on the score-details screen (the PIYA-101 AC8 metadata sent at submit) holds the **arranger**, not the composer. It is sent as `arranger` (renamed from `composer`, with error codes `arranger_too_long` / `arranger_invalid`) and labelled as the arranger in the UI.)*
+
 ---
 
 ### PIYA-207 — Processing Status UI
@@ -176,6 +178,10 @@ _Covers: UI tickets (Onboarding, Account, Score Library, Playback, Settings, Sys
 - Grey text and chip text are darkened just enough to meet WCAG AA contrast.
 - A dismissible "automatic transcription — some notes may be wrong" banner appears when PIYA-103 `review.reviewNeeded` is true (see PIYA-216 AC4).
 - Mixer, Speed and Download open placeholder sheets until PIYA-209, PIYA-210 and PIYA-211 land.
+- The header shows the title and, when present, "arr. by <arranger>" (matches the mockup). The value is the score's `arranger` field (PIYA-101 AC8 / PIYA-103 AC7 / PIYA-308 AC3); with no arranger the line is left out. *(2026-10-09: the field was renamed from `composer`, user decision — it holds the arranger.)*
+- Audio plays only while the Playback screen is open. Leaving the screen or sending the app to the background pauses/stops playback. Offline or background listening is what Export (PIYA-211) downloads are for.
+- If one voice's track fails to load or drops out, the other voices keep playing; that voice's chip is disabled with a short notice. The score fails as a whole only if no track can play.
+- Bundled demo data (the fake API) exists in debug/fake builds only, never in release builds.
 
 ---
 
@@ -328,7 +334,7 @@ Wires Login (PIYA-202), Sign-Up (PIYA-203), and Password Reset (PIYA-204) screen
 Wires Score Library (PIYA-205) and Capture/Add Score (PIYA-206) to PIYA-101, PIYA-308, PIYA-309, PIYA-310.
 
 **Acceptance Criteria:**
-1. Score Library calls PIYA-308 on load, rendering loading/empty/error states exactly as defined in PIYA-205. The search bar filters the already-fetched list on the phone (title, composer, displayed last-opened date and "New Score (n)" label) and does not call PIYA-308 per keystroke. PIYA-308's server-side `search` matches title and composer only (PIYA-308 AC4). *(Amended 2026-10-08, backend-lead; replaces "calls PIYA-308 on load and on each search-bar keystroke (debounced)".)*
+1. Score Library calls PIYA-308 on load, rendering loading/empty/error states exactly as defined in PIYA-205. The search bar filters the already-fetched list on the phone (title, arranger, displayed last-opened date and "New Score (n)" label) and does not call PIYA-308 per keystroke. PIYA-308's server-side `search` matches title and arranger only (PIYA-308 AC4). *(Amended 2026-10-08, backend-lead; replaces "calls PIYA-308 on load and on each search-bar keystroke (debounced)".)* *(2026-10-09: renamed from `composer`, user decision — the field holds the arranger.)*
 2. Score deletion calls PIYA-309 and removes the entry from the displayed list only after a 200 response, not optimistically before confirmation.
 3. Capture/Add Score routes to PIYA-101 or PIYA-310 per PIYA-206's logic, surfaces PIYA-101/310's 400/415/429 responses as the specific UI errors PIYA-206 defines.
 

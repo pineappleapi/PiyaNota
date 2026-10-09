@@ -16,12 +16,12 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
 5. Each page is tagged internally with its `page_index`, reflecting submission order, preserved through every downstream stage.
 6. If the processing queue is at capacity, returns 429 with an estimated wait time instead of silently dropping the request. *(2026-10-08: error code `queue_full`. The wait is sent both as a `Retry-After` header and as `error.retryAfterSeconds`. A per-user submission limit is a separate 429, `rate_limited`, per AC9.)*
 7. The submission is logged with `job_id`, `user_id`, `page_count`, and timestamp.
-8. **Score metadata fields** (added 2026-10-08, PIYA-206, user decision; canonical values chosen by backend-lead). Sent as text parts next to the files:
+8. **Score metadata fields** (added 2026-10-08, PIYA-206, user decision; canonical values chosen by backend-lead). Sent as text parts next to the files. *(2026-10-09: `composer` renamed to `arranger`, with error codes `arranger_too_long` / `arranger_invalid` and column `jobs.arranger`, user decision — the field holds the arranger.)*
 
    | Field | Required | Rule | Stored in `jobs` (PIYA-311) | 400 error code |
    |---|---|---|---|---|
    | `title` | yes | 1–120 characters after trimming | `title` | `title_required` (missing or blank), `title_too_long`, `title_invalid` |
-   | `composer` | no | at most 120 characters after trimming | `composer`, NULL when absent | `composer_too_long`, `composer_invalid` |
+   | `arranger` | no | at most 120 characters after trimming | `arranger`, NULL when absent | `arranger_too_long`, `arranger_invalid` |
    | `tempoBpm` | no | ASCII digits only, integer 30–240; absent means 90 | `tempo_bpm`, always stored (90 when absent) | `invalid_tempo` |
    | `keySignature` | no | one of the 15 values below, exact case | `key_signature`, NULL when absent | `invalid_key_signature` |
    | `timeSignature` | no | one of `4/4`, `3/4`, `2/4`, `6/8`, `2/2` | `time_signature`, NULL when absent | `invalid_time_signature` |
@@ -36,8 +36,8 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
    |---|---|---|---|---|---|---|---|
    | value | `F` | `Bb` | `Eb` | `Ab` | `Db` | `Gb` | `Cb` |
 
-   - **Absent values.** "Not sure" (key) and "Other" (time signature) are both expressed by omitting the field, and the server stores NULL. Multipart cannot carry `null`; an optional field sent with an empty or whitespace-only value is treated as absent. The literal string `"null"` gets no special handling: it is an invalid enumerated value (400), and as `composer` it would be stored as text, so the client must omit the field as agreed.
-   - **Character counting.** Values are trimmed and NFC-normalized, then counted in Unicode code points (Python `len()`, PostgreSQL `char_length()`). Text containing control characters (Unicode category Cc, including newlines and tabs) is rejected with `title_invalid` / `composer_invalid`.
+   - **Absent values.** "Not sure" (key) and "Other" (time signature) are both expressed by omitting the field, and the server stores NULL. Multipart cannot carry `null`; an optional field sent with an empty or whitespace-only value is treated as absent. The literal string `"null"` gets no special handling: it is an invalid enumerated value (400), and as `arranger` it would be stored as text, so the client must omit the field as agreed.
+   - **Character counting.** Values are trimmed and NFC-normalized, then counted in Unicode code points (Python `len()`, PostgreSQL `char_length()`). Text containing control characters (Unicode category Cc, including newlines and tabs) is rejected with `title_invalid` / `arranger_invalid`.
    - A field sent more than once returns 400 `duplicate_field`. Unrecognized field names are ignored and not stored, so a newer client still works against an older server.
    - **Meaning.** `keySignature` and `timeSignature` are display labels only. They are never passed to the pipeline; Stages 3–4 use their own clef/key/time-signature detection. `tempoBpm` is the default playback speed, and the four tracks are rendered at it (Stage 5 `bpm`). It counts **quarter notes per minute whatever the time signature** (Stage 5 writes a quarter-note MIDI tempo at 480 PPQ), so `6/8` at dotted-quarter = 60 is `tempoBpm` 90, and `2/2` at half = 60 is `tempoBpm` 120. The submitted (or default) tempo takes precedence over any detected tempo marking. *(PIYA-109 AC2 still reads "unless a detected tempo marking overrides it" and needs the matching edit; flagged to the user.)*
 9. **Errors** (added 2026-10-08, PIYA-206 / PIYA-215 AC3). Every error uses the standard envelope with an `error` object, so the app can map `error.code` to its own message. `message` is English text for logs, not for display:
@@ -64,7 +64,7 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
     - OpenCV's `cv2.imread` / `cv2.imdecode` apply EXIF orientation by default, so decode with `cv2.IMREAD_IGNORE_ORIENTATION` (or use Pillow without `ImageOps.exif_transpose`). Test: a JPEG carrying Orientation = 6 comes out of standardization with its pixels unrotated, in the orientation in which they were submitted.
 11. **No partial state** (added 2026-10-08). The job row and its stored page images are committed together. On any error, no job row is left behind, and page images already written for that request are deleted.
 
-**Response Schema:** *(2026-10-08: the response echoes the stored `title` and `tempoBpm`, the latter with the default applied. `composer`, `keySignature` and `timeSignature` are echoed only when present and omitted otherwise, never `null`.)*
+**Response Schema:** *(2026-10-08: the response echoes the stored `title` and `tempoBpm`, the latter with the default applied. `arranger`, `keySignature` and `timeSignature` are echoed only when present and omitted otherwise, never `null`.)* *(2026-10-09: renamed from `composer`, user decision — the field holds the arranger.)*
 ```json
 {
   "data": {
@@ -74,7 +74,7 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
     "status": "queued",
     "submittedAt": "2026-09-10T09:15:00Z",
     "title": "Bayan Ko",
-    "composer": "Constancio de Guzman",
+    "arranger": "Constancio de Guzman",
     "tempoBpm": 90,
     "keySignature": "Eb",
     "timeSignature": "4/4"
@@ -129,6 +129,8 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
 5. Repeated calls return cached results and do not re-trigger pipeline computation.
 6. Once complete, the response includes a `review` object. `reviewNeeded` is true whenever any Stage 3 strip flag or Stage 4 reconstruction flag carries `review_needed`, or the clef/key classifier was disabled. `reasons` lists the distinct flag codes. `items` holds at most 200 entries, each with `code`, `voice`, `pageIndex`, `systemIndex`, `bar`, and `truncated` is set when entries were left out. `reviewNeeded: false` means no flag was raised, not that the transcription is verified correct. Model provenance (checkpoint hash, gate status) is never included in the response. *(Added 2026-09-29, backend-lead review. While the clef/key classifier has not passed its real-photo gate (BUG-021), every job carries the reason `clef_key_unvalidated`, so `reviewNeeded` is always true. The pipeline side is `stage5_synthesis.run_full_pipeline_with_report()` / `build_review()`; flag codes stay snake_case, voice is lowercase.)*
 
+7. Once complete, the response includes `title` (always present) and `arranger` (omitted when absent, never `null`), read from the job's `scores` row (PIYA-321), so Playback (PIYA-208) can show its header ("arr. by <arranger>") when opened straight from Processing without a library fetch. *(Added 2026-10-09, user decision — closes the "PIYA-103 result has no title/composer" contract gap reported by frontend-lead; the field is `arranger`, not `composer`.)*
+
 *(2026-10-09: open gap. This endpoint is keyed by `job_id`, but the library opens scores by `scoreId`. See PIYA-308 AC8 in `module3-backend.md`. Playback (PIYA-208) is currently built against a fake keyed by score. `review.items[].pageIndex` / `systemIndex` are also affected by the index-base question under PIYA-117.)*
 
 **Response Schema:**
@@ -137,6 +139,8 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
   "data": {
     "jobId": "job_8841",
     "scoreId": 552,
+    "title": "Bayan Ko",
+    "arranger": "Constancio de Guzman",
     "audioTracks": {
       "soprano": "https://cdn.piyanota.app/audio/job_8841_soprano.mp3",
       "alto": "https://cdn.piyanota.app/audio/job_8841_alto.mp3",
