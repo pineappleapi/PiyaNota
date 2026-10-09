@@ -263,6 +263,38 @@ void main() {
       expect(band(tester), held);
     });
 
+    testWidgets('an earlier seek landing does not end a newer drag', (
+      tester,
+    ) async {
+      final harness = ready();
+      await pumpPlayback(tester, harness);
+      final gate = Completer<void>();
+      harness.engine.seekGate = gate;
+      final rect = tester.getRect(find.byKey(const ValueKey('seek-bar')));
+      Offset at(double fraction) =>
+          Offset(rect.left + rect.width * fraction, rect.center.dy);
+
+      // First drag released: its seek is held in flight.
+      await tester.dragFrom(at(0.1), at(0.8) - at(0.1));
+      await tester.pump();
+      expect(harness.engine.seeks, hasLength(1));
+
+      // A second drag starts and is still held when the first seek lands.
+      final drag = await tester.startGesture(at(0.5));
+      await drag.moveTo(at(0.3));
+      await tester.pump();
+      final dragging = positionText(tester);
+      gate.complete();
+      await tester.pump();
+      await tester.pump();
+      expect(positionText(tester), dragging);
+
+      await drag.up();
+      await tester.pump();
+      expect(harness.engine.seeks, hasLength(2));
+      expect(positionText(tester), dragging);
+    });
+
     testWidgets('a failed seek does not freeze the seek bar or band', (
       tester,
     ) async {
@@ -415,8 +447,9 @@ void main() {
     testWidgets('an untyped load failure is the server error, not a spinner', (
       tester,
     ) async {
-      // Not a ScoreResultException: the scripted API throws a StateError,
-      // like a misconfigured provider or an unreadable token would.
+      // Not a ScoreResultException: the scripted API throws a plain
+      // Exception, standing in for a misconfigured provider's StateError or
+      // an unreadable token's PlatformException.
       final harness = PlaybackHarness(
         ScriptedScoreResultApi([Exception('not a result')]),
       );
@@ -443,7 +476,68 @@ void main() {
       );
     });
 
-    testWidgets('a selected voice failing mid-play stops on the audio error', (
+    testWidgets('one voice failing to load: the rest play, its chip is off', (
+      tester,
+    ) async {
+      final harness = PlaybackHarness(
+        ScriptedScoreResultApi([testResult()], timing: testTiming()),
+        engineFailAtLoad: {VoicePart.tenor},
+      );
+      await pumpPlayback(tester, harness);
+      expect(find.byKey(const ValueKey('play-pause')), findsOneWidget);
+      expect(
+        find.text(PlaybackMessages.audioUnavailable([VoicePart.tenor])),
+        findsWidgets,
+      );
+      expect(
+        tester.widget<FilterChip>(chip(VoicePart.tenor)).onSelected,
+        isNull,
+      );
+      expect(chipSelected(tester, VoicePart.tenor), isFalse);
+      for (final voice in [VoicePart.soprano, VoicePart.alto, VoicePart.bass]) {
+        expect(chipSelected(tester, voice), isTrue, reason: voice.name);
+      }
+
+      await tester.tap(find.byKey(const ValueKey('play-pause')));
+      await tester.pump();
+      expect(harness.engine.playing, isTrue);
+    });
+
+    testWidgets('the default voice failing to load selects the others', (
+      tester,
+    ) async {
+      final harness = PlaybackHarness(
+        ScriptedScoreResultApi([testResult()], timing: testTiming()),
+        engineFailAtLoad: {VoicePart.alto},
+      );
+      await pumpPlayback(tester, harness, defaultVoice: VoicePart.alto);
+      expect(find.byKey(const ValueKey('play-pause')), findsOneWidget);
+      expect(chipSelected(tester, VoicePart.alto), isFalse);
+      for (final voice in [
+        VoicePart.soprano,
+        VoicePart.tenor,
+        VoicePart.bass,
+      ]) {
+        expect(chipSelected(tester, voice), isTrue, reason: voice.name);
+      }
+    });
+
+    testWidgets('every voice failing to load is the audio error', (
+      tester,
+    ) async {
+      final harness = PlaybackHarness(
+        ScriptedScoreResultApi([testResult()], timing: testTiming()),
+        engineFailAtLoad: {...VoicePart.values},
+      );
+      await pumpPlayback(tester, harness);
+      expect(
+        find.text(PlaybackMessages.errorHeading(PlaybackError.audio)),
+        findsOneWidget,
+      );
+      expect(harness.engine.disposed, isTrue);
+    });
+
+    testWidgets('a voice dropping out mid-play: the others keep playing', (
       tester,
     ) async {
       final harness = ready();
@@ -453,6 +547,74 @@ void main() {
       final engine = harness.engine;
 
       engine.fail(VoicePart.alto);
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(const ValueKey('play-pause')), findsOneWidget);
+      expect(engine.playing, isTrue);
+      expect(engine.disposed, isFalse);
+      expect(
+        find.text(PlaybackMessages.audioUnavailable([VoicePart.alto])),
+        findsWidgets,
+      );
+      expect(
+        tester.widget<FilterChip>(chip(VoicePart.alto)).onSelected,
+        isNull,
+      );
+      expect(chipSelected(tester, VoicePart.alto), isFalse);
+
+      // The failed chip can't be chosen again.
+      await tester.tap(chip(VoicePart.alto), warnIfMissed: false);
+      await tester.pump();
+      expect(chipSelected(tester, VoicePart.alto), isFalse);
+      expect(engine.playing, isTrue);
+    });
+
+    testWidgets('the only selected voice dropping out selects the rest', (
+      tester,
+    ) async {
+      final harness = ready();
+      await pumpPlayback(tester, harness, defaultVoice: VoicePart.bass);
+      await tester.tap(find.byKey(const ValueKey('play-pause')));
+      await tester.pump();
+
+      // The bass was also the master: the engine moved the clock to
+      // another track (see the engine tests), so this is not fatal.
+      harness.engine.fail(VoicePart.bass);
+      await tester.pump();
+      await tester.pump();
+      expect(harness.engine.playing, isTrue);
+      expect(chipSelected(tester, VoicePart.bass), isFalse);
+      for (final voice in [
+        VoicePart.soprano,
+        VoicePart.alto,
+        VoicePart.tenor,
+      ]) {
+        expect(chipSelected(tester, voice), isTrue, reason: voice.name);
+        expect(harness.engine.volumes[voice], 1, reason: voice.name);
+      }
+
+      // Still at least one voice: the last one stays on.
+      await tester.tap(chip(VoicePart.alto));
+      await tester.tap(chip(VoicePart.tenor));
+      await tester.pump();
+      await tester.tap(chip(VoicePart.soprano));
+      await tester.pump();
+      expect(chipSelected(tester, VoicePart.soprano), isTrue);
+    });
+
+    testWidgets('the last playable voice failing stops on the audio error', (
+      tester,
+    ) async {
+      final harness = PlaybackHarness(
+        ScriptedScoreResultApi([testResult()], timing: testTiming()),
+        engineFailAtLoad: {VoicePart.soprano, VoicePart.alto, VoicePart.tenor},
+      );
+      await pumpPlayback(tester, harness);
+      await tester.tap(find.byKey(const ValueKey('play-pause')));
+      await tester.pump();
+      final engine = harness.engine;
+
+      engine.fail(VoicePart.bass, fatal: true);
       await tester.pump();
       await tester.pump();
       expect(
@@ -468,36 +630,6 @@ void main() {
       await settle(tester);
       expect(harness.engines, hasLength(2));
       expect(find.byKey(const ValueKey('play-pause')), findsOneWidget);
-    });
-
-    testWidgets('the master failing stops on the audio error', (tester) async {
-      final harness = ready();
-      await pumpPlayback(tester, harness, defaultVoice: VoicePart.bass);
-      harness.engine.fail(VoicePart.soprano, master: true);
-      await tester.pump();
-      await tester.pump();
-      expect(
-        find.text(PlaybackMessages.errorHeading(PlaybackError.audio)),
-        findsOneWidget,
-      );
-    });
-
-    testWidgets('an unselected voice failing keeps playing until chosen', (
-      tester,
-    ) async {
-      final harness = ready();
-      await pumpPlayback(tester, harness, defaultVoice: VoicePart.bass);
-      harness.engine.fail(VoicePart.alto);
-      await tester.pump();
-      expect(find.byKey(const ValueKey('play-pause')), findsOneWidget);
-
-      await tester.tap(chip(VoicePart.alto));
-      await tester.pump();
-      await tester.pump();
-      expect(
-        find.text(PlaybackMessages.errorHeading(PlaybackError.audio)),
-        findsOneWidget,
-      );
     });
 
     testWidgets('loading state shows until the result arrives', (tester) async {

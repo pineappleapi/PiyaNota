@@ -17,30 +17,34 @@ class PlaybackLoadException implements Exception {
 }
 
 /// One voice's player failed after loading (decoder error, lost stream,
-/// a seek or play that threw). The failed voice stays silent from then on.
+/// a seek or play that threw). The failed voice stays silent from then on;
+/// the others keep playing (user decision 2026-10-09).
 @immutable
 class PlaybackFailure {
-  const PlaybackFailure(this.voice, this.cause, {required this.master});
+  const PlaybackFailure(this.voice, this.cause, {required this.fatal});
 
   final VoicePart voice;
 
-  /// The failed voice was the master clock, so position and completion are
-  /// gone too; nothing can keep playing.
-  final bool master;
+  /// No voice is left that can play, so the whole score has failed.
+  final bool fatal;
   final Object cause;
 
   @override
   String toString() =>
-      'PlaybackFailure(${voice.name}${master ? ', master' : ''}: $cause)';
+      'PlaybackFailure(${voice.name}${fatal ? ', fatal' : ''}: $cause)';
 }
 
 /// Plays the per-voice tracks of one score in step (FR-4/FR-5).
 ///
 /// An interface so widget tests can swap in a fake clock-driven engine.
 abstract interface class PlaybackEngine {
-  /// Loads every track; throws [PlaybackLoadException] if any fails, for
-  /// whatever reason.
+  /// Loads every track. A track that won't load is left out (see
+  /// [unavailableVoices]) and the rest still play; throws
+  /// [PlaybackLoadException] only when no track loads, for whatever reason.
   Future<void> load(Map<VoicePart, Uri> tracks);
+
+  /// Voices whose audio failed, at load or since. Silent from then on.
+  Set<VoicePart> get unavailableVoices;
 
   /// The audio position of the master track. This drives the seek bar and
   /// the indicator, so both follow the audio at any speed.
@@ -56,7 +60,8 @@ abstract interface class PlaybackEngine {
   Stream<bool> get playingChanges;
 
   /// Runtime failures after [load]. Transport calls never throw for a
-  /// failed player; the failure arrives here instead.
+  /// failed player; the failure arrives here instead, and is [fatal] only
+  /// when it was the last voice that could play.
   Stream<PlaybackFailure> get failures;
 
   /// Starts playing. Returns once playback has been started, not when it
@@ -77,8 +82,9 @@ abstract interface class PlaybackEngine {
 ///
 /// The longest loaded track is the master clock (ties go to S/A/T/B
 /// order): a shorter master would report completion while the others
-/// still had notes left. The others are started from its position and
-/// re-seeked to it when they drift (see [resyncTrigger]). Muting is volume
+/// still had notes left. If the master fails, the longest remaining track
+/// takes over. The others are started from its position and re-seeked to
+/// it when they drift (see [resyncTrigger]). Muting is volume
 /// 0 rather than pausing, so a re-selected voice comes back exactly in
 /// time.
 ///
@@ -91,14 +97,21 @@ abstract interface class PlaybackEngine {
 /// just_audio 0.10 reports playback errors only on `errorStream`
 /// (maxSkipsOnError is 0), so every player's stream is watched; a failure
 /// marks that player dead, stops it, and is passed on as [failures].
+/// One voice failing never stops the others (user decision 2026-10-09).
 class JustAudioPlaybackEngine implements PlaybackEngine {
   JustAudioPlaybackEngine({AudioPlayer Function()? playerFactory})
     : _playerFactory = playerFactory ?? AudioPlayer.new;
 
-  /// A follower this far from the master on [resyncStrikes] checks in a
-  /// row is re-seeked. ExoPlayer's position reports jitter by a few tens
-  /// of ms, so a lower trigger re-seeks voices that are in fact in step,
-  /// and each re-seek is itself an audible glitch.
+  /// A follower read further than this from the master on [resyncStrikes]
+  /// checks is re-seeked. The checks need not be consecutive: they count
+  /// from when the follower was last within [inStepTolerance], and readings
+  /// in between leave the count alone. ExoPlayer's position reports jitter
+  /// by a few tens of ms, so a lower trigger re-seeks voices that are in
+  /// fact in step, and each re-seek is itself an audible glitch.
+  ///
+  /// So a follower that sits steadily between [inStepTolerance] and this
+  /// is never corrected: that offset is accepted as the price of not
+  /// glitching on jitter.
   static const Duration resyncTrigger = Duration(milliseconds: 100);
 
   /// Back under this, a follower counts as in step again and its strikes
@@ -107,8 +120,8 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
   /// on every check.
   static const Duration inStepTolerance = Duration(milliseconds: 40);
 
-  /// Consecutive over-trigger checks before a re-seek, so one stale
-  /// position report doesn't cause one.
+  /// Over-trigger readings (see [resyncTrigger]) before a re-seek, so one
+  /// stale position report doesn't cause one.
   static const int resyncStrikes = 2;
   static const Duration driftCheckInterval = Duration(milliseconds: 500);
 
@@ -129,6 +142,9 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
   final StreamController<PlaybackFailure> _failures =
       StreamController.broadcast();
   final List<StreamSubscription<Object?>> _subscriptions = [];
+
+  /// The master's playing/completion listeners, moved when it changes.
+  final List<StreamSubscription<Object?>> _masterSubscriptions = [];
   VoicePart? _masterVoice;
   Timer? _driftTimer;
   bool _disposed = false;
@@ -157,28 +173,45 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
       _players.entries.where((entry) => !_dead.contains(entry.key));
 
   @override
+  Set<VoicePart> get unavailableVoices => Set.unmodifiable(_dead);
+
+  @override
   Future<void> load(Map<VoicePart, Uri> tracks) async {
+    final Map<VoicePart, Object> loadErrors;
     try {
       for (final voice in VoicePart.values) {
         final uri = tracks[voice];
         if (uri != null) _players[voice] = _playerFactory();
       }
       if (_players.isEmpty) throw const PlaybackLoadException('no tracks');
-      final lengths = await Future.wait([
+      loadErrors = {};
+      await Future.wait([
         for (final entry in _players.entries)
-          entry.value.setAudioSource(AudioSource.uri(tracks[entry.key]!)),
+          entry.value
+              .setAudioSource(AudioSource.uri(tracks[entry.key]!))
+              .then<void>(
+                (_) {},
+                onError: (Object e) => loadErrors[entry.key] = e,
+              ),
       ]);
-      _masterVoice = _longest(lengths);
     } on PlaybackLoadException {
       rethrow;
     } on Object catch (e, stack) {
-      // Anything at all (PlayerException, PlatformException, a missing
-      // plugin, a bad URI) is a load failure; the caller shows the audio
-      // error rather than spinning.
+      // Anything at all (a missing plugin, a bad URI) is a load failure;
+      // the caller shows the audio error rather than spinning.
       debugPrint('Playback: audio load failed: $e\n$stack');
       throw PlaybackLoadException(e);
     }
-    for (final entry in _players.entries) {
+    for (final MapEntry(key: voice, value: error) in loadErrors.entries) {
+      debugPrint('Playback: ${voice.name} audio failed to load: $error');
+      _dead.add(voice);
+      unawaited(_quietly(_players.remove(voice)!.dispose()));
+    }
+    final master = _longestLive();
+    if (master == null) {
+      throw PlaybackLoadException(loadErrors.values.firstOrNull);
+    }
+    for (final entry in _live) {
       final voice = entry.key;
       _subscriptions.add(
         entry.value.errorStream.listen(
@@ -187,26 +220,52 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
         ),
       );
     }
-    final master = _master!;
-    _subscriptions
-      ..add(master.playingStream.listen(_onPlayingChanged))
+    _attachMaster(master);
+  }
+
+  /// The longest live track (ties in S/A/T/B order), or null if none is
+  /// left.
+  VoicePart? _longestLive() {
+    VoicePart? best;
+    var bestLength = Duration.zero;
+    for (final MapEntry(key: voice, value: player) in _live) {
+      final length = player.duration ?? Duration.zero;
+      if (best == null || length > bestLength) {
+        best = voice;
+        bestLength = length;
+      }
+    }
+    return best;
+  }
+
+  /// Makes [voice] the clock: its playing state and its end drive the
+  /// engine's.
+  void _attachMaster(VoicePart voice) {
+    for (final subscription in _masterSubscriptions) {
+      unawaited(subscription.cancel());
+    }
+    _masterSubscriptions.clear();
+    _masterVoice = voice;
+    final master = _players[voice]!;
+    // Each listener checks it still belongs to the master, so a late event
+    // from a replaced master (its own pause as it failed) is ignored.
+    _masterSubscriptions
+      ..add(
+        master.playingStream.listen((playing) {
+          if (voice == _masterVoice) _onPlayingChanged(playing);
+        }),
+      )
       ..add(
         master.processingStateStream.listen((state) {
-          if (state == ProcessingState.completed) unawaited(_onCompleted());
+          if (voice == _masterVoice && state == ProcessingState.completed) {
+            unawaited(_onCompleted());
+          }
         }),
       );
   }
 
-  VoicePart _longest(List<Duration?> lengths) {
-    final voices = _players.keys.toList();
-    var best = 0;
-    for (var i = 1; i < voices.length; i++) {
-      final length = lengths[i] ?? _players[voices[i]]!.duration;
-      final bestLength = lengths[best] ?? _players[voices[best]]!.duration;
-      if ((length ?? Duration.zero) > (bestLength ?? Duration.zero)) best = i;
-    }
-    return voices[best];
-  }
+  static Future<void> _quietly(Future<void> call) =>
+      call.catchError((Object e) => debugPrint('Playback: cleanup: $e'));
 
   @override
   Duration get position => _master?.position ?? Duration.zero;
@@ -280,14 +339,12 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
     _driftTimer?.cancel();
     // Not awaited: the listeners stop at once, and the players must be
     // released even if a source's cancel is slow to settle.
-    for (final subscription in _subscriptions) {
+    for (final subscription in [..._subscriptions, ..._masterSubscriptions]) {
       unawaited(subscription.cancel());
     }
     await Future.wait([
-      for (final player in _players.values)
-        player.dispose().catchError(
-          (Object e) => debugPrint('Playback: dispose failed: $e'),
-        ),
+      // Players that failed to load were removed and disposed then.
+      for (final player in _players.values) _quietly(player.dispose()),
     ]);
     await _playing.close();
     await _failures.close();
@@ -295,37 +352,51 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
 
   /// Runs one player's call; a throw becomes that voice's failure instead
   /// of an unhandled error. An interrupted call (a newer seek or load
-  /// replaced it) is not a failure.
-  Future<void> _guard(VoicePart voice, Future<Object?> call) async {
+  /// replaced it) is not a failure. True only if the call completed.
+  Future<bool> _guard(VoicePart voice, Future<Object?> call) async {
     try {
       await call;
+      return true;
     } on PlayerInterruptedException {
-      return;
+      return false;
     } on Object catch (e) {
       _fail(voice, e);
+      return false;
     }
   }
 
   void _fail(VoicePart voice, Object error) {
     if (_disposed || !_dead.add(voice)) return;
-    final master = voice == _masterVoice;
+    final wasMaster = voice == _masterVoice;
     debugPrint(
-      'Playback: ${voice.name} failed${master ? ' (master)' : ''}: '
+      'Playback: ${voice.name} failed${wasMaster ? ' (master)' : ''}: '
       '$error',
     );
     _strikes.remove(voice);
     // Silence what's left of the failed voice; it may already be gone.
     unawaited(_players[voice]!.pause().catchError((Object _) {}));
-    if (master) {
-      // No clock any more: stop the rest so nothing plays unsynced.
-      _transport++;
-      _driftTimer?.cancel();
-      for (final entry in _live) {
-        unawaited(entry.value.pause().catchError((Object _) {}));
+    var fatal = false;
+    if (wasMaster) {
+      final next = _longestLive();
+      if (next == null) {
+        // Nothing left to play.
+        fatal = true;
+        _transport++;
+        _driftTimer?.cancel();
+        _playing.add(false);
+      } else {
+        // The others carry on; the longest of them becomes the clock.
+        _attachMaster(next);
+        if (kDebugMode) debugPrint('Playback: ${next.name} is now master');
+        // A shorter track may already have finished; its completion came
+        // before it was master, so end here instead of playing on silent.
+        final end = _players[next]!.duration;
+        if (end != null && _players[next]!.position >= end) {
+          unawaited(_onCompleted());
+        }
       }
-      _playing.add(false);
     }
-    _failures.add(PlaybackFailure(voice, error, master: master));
+    _failures.add(PlaybackFailure(voice, error, fatal: fatal));
   }
 
   void _onPlayingChanged(bool playing) {
@@ -405,11 +476,14 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
     }
     final watch = clock.stopwatch()..start();
     try {
-      await _guard(voice, player.seek(target));
-      final took = watch.elapsed;
-      _seekLatency =
-          _seekLatency * (1 - seekLatencySmoothing) +
-          took * seekLatencySmoothing;
+      // A failed or interrupted seek says nothing about how long a seek
+      // takes, so only a completed one updates the estimate.
+      if (await _guard(voice, player.seek(target))) {
+        final took = watch.elapsed;
+        _seekLatency =
+            _seekLatency * (1 - seekLatencySmoothing) +
+            took * seekLatencySmoothing;
+      }
     } finally {
       _resyncing.remove(voice);
     }

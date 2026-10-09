@@ -28,10 +28,16 @@ class FakePlaybackEngine implements PlaybackEngine {
   FakePlaybackEngine({
     this.trackDuration = const Duration(seconds: 10),
     this.loadError,
+    this.failAtLoad = const {},
   });
 
   final Duration trackDuration;
   final Object? loadError;
+
+  /// Voices whose track "fails to load"; the rest load, like the real
+  /// engine (unless that is every track, which is a load error).
+  final Set<VoicePart> failAtLoad;
+  final Set<VoicePart> _unavailable = {};
   final StreamController<bool> _changes = StreamController.broadcast();
   final StreamController<PlaybackFailure> _failures =
       StreamController.broadcast();
@@ -57,8 +63,16 @@ class FakePlaybackEngine implements PlaybackEngine {
   @override
   Future<void> load(Map<VoicePart, Uri> tracks) async {
     if (loadError case final error?) throw PlaybackLoadException(error);
+    final failed = failAtLoad.intersection(tracks.keys.toSet());
+    if (failed.length == tracks.length) {
+      throw const PlaybackLoadException('every track failed');
+    }
+    _unavailable.addAll(failed);
     loaded = tracks;
   }
+
+  @override
+  Set<VoicePart> get unavailableVoices => Set.unmodifiable(_unavailable);
 
   @override
   Duration get position {
@@ -73,9 +87,16 @@ class FakePlaybackEngine implements PlaybackEngine {
     return trackDuration;
   }
 
-  /// A runtime failure of [voice]'s player, as the real engine reports it.
-  void fail(VoicePart voice, {bool master = false}) {
-    _failures.add(PlaybackFailure(voice, 'test failure', master: master));
+  /// A runtime failure of [voice]'s player, as the real engine reports it:
+  /// [fatal] when no other voice is left to play, which also stops it.
+  void fail(VoicePart voice, {bool fatal = false}) {
+    _unavailable.add(voice);
+    if (fatal && playing) {
+      _anchor = position;
+      _startedAt = null;
+      _changes.add(false);
+    }
+    _failures.add(PlaybackFailure(voice, 'test failure', fatal: fatal));
   }
 
   @override
@@ -265,11 +286,15 @@ class PlaybackHarness {
     this.engineDuration = const Duration(seconds: 10),
     this.engineLoadError,
     this.engineCreateError,
+    this.engineFailAtLoad = const {},
   });
 
   final ScriptedScoreResultApi api;
   final Duration engineDuration;
   final Object? engineLoadError;
+
+  /// Voices whose track fails to load (see [FakePlaybackEngine.failAtLoad]).
+  final Set<VoicePart> engineFailAtLoad;
 
   /// Thrown by the engine factory itself (e.g. a missing audio plugin).
   final Object? engineCreateError;
@@ -285,6 +310,7 @@ class PlaybackHarness {
       final engine = FakePlaybackEngine(
         trackDuration: engineDuration,
         loadError: engineLoadError,
+        failAtLoad: engineFailAtLoad,
       );
       engines.add(engine);
       return engine;

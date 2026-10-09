@@ -1,8 +1,10 @@
 import 'dart:convert';
+import 'dart:io';
 
-import 'package:flutter/services.dart' show AssetBundle, rootBundle;
+import 'package:path_provider/path_provider.dart';
 
 import '../models/score_result.dart';
+import 'demo/playback_demo.dart';
 import 'fake_processing_api.dart';
 import 'fake_score_library_api.dart';
 import 'score_result_api.dart';
@@ -16,38 +18,42 @@ import 'session_storage.dart';
 ///   a 409.
 /// - Accounts on [FakeScoreLibraryApi.flakyDomain] fail every odd fetch, so
 ///   the error/Retry state can be demoed.
-/// - Every other score plays the same bundled demo (assets/demo/, made by
-///   tool/generate_playback_demo.py): one real preprocessed page with
-///   synthesized audio whose notes do NOT match the printed ones; only the
-///   indicator's bar and staff positions are real.
+/// - Every other score plays the same demo, generated on the device into
+///   the cache dir (see [PlaybackDemo]; never a bundled asset, so release
+///   builds, which never construct this class, carry none of it).
 class FakeScoreResultApi implements ScoreResultApi {
   FakeScoreResultApi({
     required this._sessionStorage,
     required this._accountForToken,
     required this._library,
     this._processing,
-    AssetBundle? bundle,
+    Future<PlaybackDemoFiles> Function()? demoFiles,
     this.latency = defaultLatency,
-  }) : _bundle = bundle ?? rootBundle;
+  }) : _writeDemo = demoFiles ?? _writeDemoToCache;
 
   static const Duration defaultLatency = Duration(milliseconds: 600);
-
-  static const String _demo = 'assets/demo';
-  static const List<String> _voices = ['soprano', 'alto', 'tenor', 'bass'];
-
-  /// The demo page's pixel size; generate_playback_demo.py checks it.
-  static const int demoPageWidth = 1300;
-  static const int demoPageHeight = 1575;
 
   final SessionStorage _sessionStorage;
   final AccountForToken _accountForToken;
   final FakeScoreLibraryApi _library;
   final FakeProcessingApi? _processing;
-  final AssetBundle _bundle;
+  final Future<PlaybackDemoFiles> Function() _writeDemo;
   final Duration latency;
   final Map<String, int> _fetchCallsByAccount = {};
+  Future<PlaybackDemoFiles>? _demo;
 
-  static Uri _asset(String path) => Uri.parse('asset:///$_demo/$path');
+  static Future<PlaybackDemoFiles> _writeDemoToCache() async =>
+      PlaybackDemo.writeTo(
+        Directory('${(await getTemporaryDirectory()).path}/playback_demo'),
+      );
+
+  /// Generated once per app run (and reused from the cache dir after).
+  /// A failed attempt is retried on the next fetch.
+  Future<PlaybackDemoFiles> _demoFiles() =>
+      _demo ??= _writeDemo().catchError((Object e) {
+        _demo = null;
+        throw e;
+      });
 
   @override
   Future<ScoreResult> fetchResult(int scoreId) async {
@@ -66,16 +72,18 @@ class FakeScoreResultApi implements ScoreResultApi {
         false) {
       throw const ScoreResultNotReadyException();
     }
+    final demo = await _demoFiles();
     // The PIYA-103 envelope's `data`, through the real parser, so the fake
     // can't hand Playback something the server never could.
     return ScoreResult.fromJson({
       'jobId': 'fake-job-$scoreId',
       'scoreId': scoreId,
       'audioTracks': {
-        for (final voice in _voices) voice: _asset('$voice.mp3').toString(),
+        for (final MapEntry(key: voice, value: uri) in demo.tracks.entries)
+          voice.name: uri.toString(),
       },
-      'scoreImages': [_asset('score_page_1.png').toString()],
-      'timingMetadataUrl': _asset('timing.json').toString(),
+      'scoreImages': [demo.page.toString()],
+      'timingMetadataUrl': demo.timing.toString(),
       'review': {
         'reviewNeeded': true,
         'reasons': ['low_confidence'],
@@ -84,7 +92,7 @@ class FakeScoreResultApi implements ScoreResultApi {
       },
       // Not in PIYA-103 (proposed): see ScoreResult.pageSizes / composer.
       'scoreImageSizes': [
-        {'width': demoPageWidth, 'height': demoPageHeight},
+        {'width': PlaybackDemo.pageWidth, 'height': PlaybackDemo.pageHeight},
       ],
       'composer': ?score.composer,
     });
@@ -92,12 +100,14 @@ class FakeScoreResultApi implements ScoreResultApi {
 
   @override
   Future<List<TimingEvent>> fetchTiming(Uri url) async {
-    if (url.scheme != 'asset') throw const ScoreResultNotFoundException();
+    if (url.scheme != 'file') throw const ScoreResultNotFoundException();
     try {
-      final text = await _bundle.loadString(url.path.substring(1));
+      final text = await File.fromUri(url).readAsString();
       return parseTimingEvents(jsonDecode(text));
     } on FormatException {
       throw const ScoreResultServerException();
+    } on FileSystemException {
+      throw const ScoreResultNotFoundException();
     }
   }
 }

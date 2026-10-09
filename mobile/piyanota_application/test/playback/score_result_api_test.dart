@@ -1,10 +1,12 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:piyanota_application/models/voice_part.dart';
+import 'package:piyanota_application/services/demo/playback_demo.dart';
 import 'package:piyanota_application/services/fake_auth_api.dart';
 import 'package:piyanota_application/services/fake_processing_api.dart';
 import 'package:piyanota_application/services/fake_score_library_api.dart';
@@ -13,6 +15,10 @@ import 'package:piyanota_application/services/score_result_api.dart';
 import 'package:piyanota_application/services/session_storage.dart';
 
 import '../auth/auth_test_harness.dart';
+
+/// The demo is written here instead of the cache dir (no path_provider
+/// plugin in unit tests).
+late Directory _demoDir;
 
 class _Fakes {
   _Fakes() {
@@ -33,6 +39,7 @@ class _Fakes {
       accountForToken: auth.accountForToken,
       library: library,
       processing: processing,
+      demoFiles: () => PlaybackDemo.writeTo(_demoDir),
       latency: Duration.zero,
     );
   }
@@ -98,27 +105,47 @@ HttpScoreResultApi _http(_StubAdapter adapter) => HttpScoreResultApi(
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  setUpAll(() async {
+    _demoDir = Directory(
+      '${(await Directory.systemTemp.createTemp('piyanota_demo')).path}/demo',
+    );
+  });
+  tearDownAll(() async {
+    await _demoDir.parent.delete(recursive: true);
+  });
 
   group('FakeScoreResultApi', () {
     test(
-      'a demo score plays the bundled demo through the real parser',
+      'a demo score plays the generated demo through the real parser',
       () async {
         final f = _Fakes();
         await f.signIn(FakeAuthApi.demoEmail);
         final result = await f.api.fetchResult(101);
         expect(result.scoreId, 101);
         expect(result.audioTracks.keys.toSet(), {...VoicePart.values});
+        for (final uri in [
+          ...result.audioTracks.values,
+          ...result.scoreImages,
+          result.timingMetadataUrl!,
+        ]) {
+          expect(uri.scheme, 'file');
+          expect(
+            File.fromUri(uri).parent.path,
+            File.fromUri(Uri.file('${_demoDir.path}/x')).parent.path,
+          );
+          expect(File.fromUri(uri).existsSync(), isTrue, reason: '$uri');
+        }
         expect(
-          result.audioTracks[VoicePart.soprano].toString(),
-          'asset:///assets/demo/soprano.mp3',
+          result.audioTracks[VoicePart.soprano]!.pathSegments.last,
+          'soprano.wav',
         );
         expect(result.review.reviewNeeded, isTrue);
         expect(result.composer, 'Robert Delgado');
         expect(
           result.pageSizeAt(0),
           const Size(
-            FakeScoreResultApi.demoPageWidth + 0.0,
-            FakeScoreResultApi.demoPageHeight + 0.0,
+            PlaybackDemo.pageWidth + 0.0,
+            PlaybackDemo.pageHeight + 0.0,
           ),
         );
 
@@ -126,12 +153,32 @@ void main() {
         expect(events, isNotEmpty);
         for (final event in events) {
           expect(event.pageIndex, 0);
-          expect(event.x, lessThan(FakeScoreResultApi.demoPageWidth));
-          expect(event.y, lessThan(FakeScoreResultApi.demoPageHeight));
+          expect(event.x, lessThan(PlaybackDemo.pageWidth));
+          expect(event.y, lessThan(PlaybackDemo.pageHeight));
         }
         expect(events.map((e) => e.voice).toSet(), {...VoicePart.values});
+        expect(events, hasLength(PlaybackDemo.notes().length));
+
+        // Generated once: a second fetch reuses the same files.
+        final page = File.fromUri(result.scoreImages.single);
+        final written = page.lastModifiedSync();
+        final again = await f.api.fetchResult(101);
+        expect(again.scoreImages.single, result.scoreImages.single);
+        expect(page.lastModifiedSync(), written);
       },
     );
+
+    test('a timing URL outside the demo is a 404', () async {
+      final f = _Fakes();
+      await expectLater(
+        f.api.fetchTiming(Uri.parse('https://example.com/timing.json')),
+        throwsA(isA<ScoreResultNotFoundException>()),
+      );
+      await expectLater(
+        f.api.fetchTiming(Uri.file('${_demoDir.path}/missing.json')),
+        throwsA(isA<ScoreResultNotFoundException>()),
+      );
+    });
 
     test('a score the account does not have is a 404', () async {
       final f = _Fakes();

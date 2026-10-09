@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:clock/clock.dart';
 import 'package:flutter/foundation.dart';
@@ -40,6 +41,10 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
   final ValueNotifier<int> _jumps = ValueNotifier(0);
   late final Ticker _ticker = createTicker((_) => _syncDisplay());
   bool _dragging = false;
+
+  /// Bumped by every seek-bar change, so an earlier drag's seek finishing
+  /// late can't clear [_dragging] while a newer drag is in progress.
+  int _dragGeneration = 0;
   bool _leaving = false;
 
   PlaybackController get _controller =>
@@ -60,8 +65,10 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
     super.dispose();
   }
 
-  /// Backgrounding pauses (the engine itself is released when the screen's
-  /// provider is disposed on leaving).
+  /// Audio plays only while Playback is on screen (user decision
+  /// 2026-10-09: downloads, PIYA-211, are for listening elsewhere), so
+  /// backgrounding pauses and leaving releases the engine (the screen's
+  /// provider is autoDispose). No background-audio service, on purpose.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused ||
@@ -75,8 +82,9 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
   }
 
   /// Fire-and-forget for transport calls: a throw is logged, never left
-  /// unhandled. Engine failures reach the screen as the audio error state
-  /// through the controller, not through these futures.
+  /// unhandled. Engine failures reach the screen through the controller
+  /// (a disabled chip, or the audio error once no voice is left), not
+  /// through these futures.
   void _run(Future<void> call, String what) {
     unawaited(
       call.catchError((Object e, StackTrace stack) {
@@ -99,14 +107,15 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
   /// AC7: the display already shows [value]; a failed seek must still let
   /// the seek bar, times and band follow the audio again.
   Future<void> _onSeekEnd(Duration value) async {
+    final drag = _dragGeneration;
     _display.value = value;
     try {
       await _controller.seek(value);
     } on Object catch (e, stack) {
       debugPrint('Playback: seek failed: $e\n$stack');
     } finally {
-      _dragging = false;
-      if (mounted) {
+      if (drag == _dragGeneration) _dragging = false;
+      if (mounted && !_dragging) {
         _syncDisplay();
         _jumps.value++;
       }
@@ -149,6 +158,22 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
         .pushNamedAndRemoveUntil(AppRoutes.login, (_) => false);
   }
 
+  /// One short note per voice that drops out; the chip itself stays
+  /// struck through for as long as the screen is open.
+  void _onVoicesFailed(Set<VoicePart>? before, Set<VoicePart> now) {
+    final added = now.difference(before ?? const {});
+    if (added.isEmpty || !mounted) return;
+    final voices = [
+      for (final voice in VoicePart.values)
+        if (added.contains(voice)) voice,
+    ];
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(content: Text(PlaybackMessages.audioUnavailable(voices))),
+      );
+  }
+
   void _toggleVoice(VoicePart voice) {
     if (_controller.toggleVoice(voice)) return;
     final state = ref.read(playbackControllerProvider(widget.scoreId));
@@ -182,6 +207,7 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
     ref.listen(provider.select((s) => s.error), (_, error) {
       if (error == PlaybackError.sessionExpired) unawaited(_toLogin());
     });
+    ref.listen(provider.select((s) => s.failedVoices), _onVoicesFailed);
     final state = ref.watch(provider);
     final ready = state.phase == PlaybackPhase.ready;
     final error = state.error ?? PlaybackError.server;
@@ -267,6 +293,7 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
                 ),
                 onSeekChanged: (value) {
                   _dragging = true;
+                  _dragGeneration++;
                   _display.value = value;
                 },
                 onSeekEnd: (value) => unawaited(_onSeekEnd(value)),
@@ -515,8 +542,6 @@ class _LoadingView extends StatelessWidget {
   }
 }
 
-/// FR-14: one view per failure kind, each with its own heading, icon and
-/// copy, so "still converting" never reads like "no internet".
 /// The timing file didn't load: the audio plays, the band can't. Said
 /// once, quietly, so the missing band doesn't look like a bug.
 class _IndicatorUnavailableNote extends StatelessWidget {
@@ -537,6 +562,8 @@ class _IndicatorUnavailableNote extends StatelessWidget {
   }
 }
 
+/// FR-14: one view per failure kind, each with its own heading, icon and
+/// copy, so "still converting" never reads like "no internet".
 class _ErrorView extends StatelessWidget {
   const _ErrorView({
     required this.error,
@@ -738,6 +765,8 @@ class _ScoreViewState extends State<_ScoreView> {
 
   static ImageProvider? _imageFor(Uri uri) => switch (uri.scheme) {
     'asset' => AssetImage(uri.path.substring(1)),
+    // The debug-only demo page, generated into the cache dir.
+    'file' => FileImage(File(uri.toFilePath())),
     'http' || 'https' => NetworkImage(uri.toString()),
     _ => null,
   };

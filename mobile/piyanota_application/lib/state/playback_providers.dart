@@ -80,6 +80,7 @@ class PlaybackState {
     this.speed = 1,
     this.reviewDismissed = false,
     this.timingUnavailable = false,
+    this.failedVoices = const {},
   });
 
   final PlaybackPhase phase;
@@ -105,7 +106,14 @@ class PlaybackState {
   /// position indicator. The screen says so once, quietly.
   final bool timingUnavailable;
 
-  Set<VoicePart> get available => result?.audioTracks.keys.toSet() ?? const {};
+  /// Voices whose audio failed to load or dropped out mid-play. The others
+  /// keep playing (user decision 2026-10-09); these chips show as
+  /// unavailable, like a missing track.
+  final Set<VoicePart> failedVoices;
+
+  /// Voices that can be heard: in the result, and not failed.
+  Set<VoicePart> get available =>
+      {...?result?.audioTracks.keys}.difference(failedVoices);
 
   bool get showReviewBanner =>
       phase == PlaybackPhase.ready &&
@@ -125,6 +133,7 @@ class PlaybackState {
     Duration? duration,
     double? speed,
     bool? reviewDismissed,
+    Set<VoicePart>? failedVoices,
   }) => PlaybackState(
     phase: phase ?? this.phase,
     error: clearError ? null : error ?? this.error,
@@ -138,6 +147,7 @@ class PlaybackState {
     speed: speed ?? this.speed,
     reviewDismissed: reviewDismissed ?? this.reviewDismissed,
     timingUnavailable: timingUnavailable,
+    failedVoices: failedVoices ?? this.failedVoices,
   );
 }
 
@@ -158,10 +168,6 @@ class PlaybackController extends Notifier<PlaybackState> {
   PlaybackEngine? _engine;
   StreamSubscription<bool>? _playingSub;
   StreamSubscription<PlaybackFailure>? _failureSub;
-
-  /// Voices whose player failed while unselected. Silent already; choosing
-  /// one later fails the screen like a selected voice failing would.
-  final Set<VoicePart> _failedVoices = {};
 
   /// Bumped by every load, so a slow earlier load can't overwrite a newer
   /// one (Retry pressed twice, or the screen left mid-load).
@@ -216,6 +222,8 @@ class PlaybackController extends Notifier<PlaybackState> {
     PlaybackEngine? engine;
     try {
       engine = ref.read(playbackEngineFactoryProvider)();
+      // Throws only if no voice at all loads; a voice that didn't is in
+      // unavailableVoices and the rest still play.
       await engine.load(result.audioTracks);
     } on Object catch (e, stack) {
       debugPrint('Playback: audio failed to load: $e\n$stack');
@@ -224,17 +232,18 @@ class PlaybackController extends Notifier<PlaybackState> {
       return;
     }
     if (!current()) {
-      await engine.dispose();
+      await _disposeQuietly(engine);
       return;
     }
 
-    final selected = await _defaultSelection(result.audioTracks.keys.toSet());
+    final failedVoices = {...engine.unavailableVoices};
+    final playable = result.audioTracks.keys.toSet().difference(failedVoices);
+    final selected = await _defaultSelection(playable);
     if (!current()) {
-      await engine.dispose();
+      await _disposeQuietly(engine);
       return;
     }
     _engine = engine;
-    _failedVoices.clear();
     _playingSub = engine.playingChanges.listen((playing) {
       if (ref.mounted) state = state.copyWith(playing: playing);
     });
@@ -251,6 +260,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       volumes: volumes,
       duration: engine.duration,
       timingUnavailable: timingFailed,
+      failedVoices: failedVoices,
     );
     await _applyVolumes();
   }
@@ -297,16 +307,27 @@ class PlaybackController extends Notifier<PlaybackState> {
     return kept;
   }
 
-  /// A runtime audio failure. The master, or a voice the user is listening
-  /// to, failing stops playback and shows the audio error (FR-14); an
-  /// unselected voice failing is silent already, so it is only noted.
+  /// A voice's audio dropped out mid-play. The rest keep playing and its
+  /// chip turns unavailable (user decision 2026-10-09); only when no voice
+  /// is left does the screen show the audio error (FR-14). If it was the
+  /// only voice selected, every remaining voice is selected instead, so
+  /// something is still heard and "at least one selected" still holds.
   void _onFailure(PlaybackFailure failure) {
     if (!ref.mounted || state.phase != PlaybackPhase.ready) return;
-    if (failure.master || state.selected.contains(failure.voice)) {
+    final remaining = state.available.difference({failure.voice});
+    if (failure.fatal || remaining.isEmpty) {
       _failPlaying();
-    } else {
-      _failedVoices.add(failure.voice);
+      return;
     }
+    var selected = state.selected.difference({failure.voice});
+    if (selected.isEmpty) selected = remaining;
+    state = state.copyWith(
+      failedVoices: {...state.failedVoices, failure.voice},
+      selected: selected,
+      // The new master may be a shorter track.
+      duration: _engine?.duration,
+    );
+    unawaited(_applyVolumes());
   }
 
   void _failPlaying() {
@@ -409,10 +430,6 @@ class PlaybackController extends Notifier<PlaybackState> {
       if (selected.length == 1) return false;
       selected.remove(voice);
     } else {
-      if (_failedVoices.contains(voice)) {
-        _failPlaying();
-        return false;
-      }
       selected.add(voice);
     }
     state = state.copyWith(selected: selected);

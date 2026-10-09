@@ -10,6 +10,10 @@ class PlaybackMessages {
   static const String selectVoices = 'Select voice/s to hear.';
   static const String keepOneVoice = 'Keep at least one voice selected.';
   static const String voiceUnavailable = 'not available for this score';
+
+  /// A voice whose audio failed to load or dropped out; the rest play on.
+  static String audioUnavailable(List<VoicePart> voices) =>
+      '${voices.map((voice) => voice.label).join(', ')} audio unavailable';
   static const String loading = 'Loading your score…';
   static const String back = 'Back';
   static const String download = 'Download audio';

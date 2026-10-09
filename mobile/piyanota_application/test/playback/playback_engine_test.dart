@@ -129,11 +129,12 @@ class FakeAudioPlayer implements AudioPlayer {
   @override
   Future<void> dispose() async => disposed = true;
 
-  /// Reached the end of the track.
+  /// Reached the end of the track. Like real just_audio, `playing` stays
+  /// true (only the processing state says it ended), so whatever stops the
+  /// player afterwards is the engine's doing.
   void complete() {
     _anchor = length;
-    _startedAt = null;
-    _playingEvents.add(false);
+    if (playing) _startedAt = clock.now();
     _states.add(ProcessingState.completed);
   }
 
@@ -218,11 +219,55 @@ void main() {
       });
     });
 
-    test('any load failure is a PlaybackLoadException', () {
+    test('one voice failing to load leaves it out; the rest play', () {
+      fakeAsync((async) {
+        final alto = FakeAudioPlayer(loadError: StateError('codec'));
+        final r = rig(overrides: {VoicePart.alto: alto});
+        Object? thrown;
+        r.engine.load(tracks()).catchError((Object e) => thrown = e);
+        async.flushMicrotasks();
+        expect(thrown, isNull);
+        expect(r.engine.unavailableVoices, {VoicePart.alto});
+        expect(alto.disposed, isTrue);
+
+        unawaited(r.engine.play());
+        async.flushMicrotasks();
+        expect(alto.playing, isFalse);
+        for (final voice in [VoicePart.soprano, VoicePart.tenor]) {
+          expect(r.players[voice]!.playing, isTrue, reason: voice.name);
+        }
+        unawaited(r.engine.dispose());
+        async.flushMicrotasks();
+        expect(r.players.values.every((p) => p.disposed), isTrue);
+      });
+    });
+
+    test('the longest track failing to load: the next longest is master', () {
       fakeAsync((async) {
         final r = rig(
           overrides: {
-            VoicePart.alto: FakeAudioPlayer(loadError: StateError('codec')),
+            VoicePart.tenor: FakeAudioPlayer(
+              length: const Duration(seconds: 12),
+              loadError: StateError('codec'),
+            ),
+            VoicePart.bass: FakeAudioPlayer(
+              length: const Duration(seconds: 11),
+            ),
+          },
+        );
+        unawaited(r.engine.load(tracks()));
+        async.flushMicrotasks();
+        expect(r.engine.masterVoice, VoicePart.bass);
+        expect(r.engine.duration, const Duration(seconds: 11));
+      });
+    });
+
+    test('every voice failing to load is a PlaybackLoadException', () {
+      fakeAsync((async) {
+        final r = rig(
+          overrides: {
+            for (final voice in VoicePart.values)
+              voice: FakeAudioPlayer(loadError: StateError('codec')),
           },
         );
         Object? thrown;
@@ -315,6 +360,9 @@ void main() {
         async.elapse(const Duration(seconds: 3));
 
         r.players[VoicePart.soprano]!.complete();
+        // complete() leaves the master "playing", like just_audio: only the
+        // engine's completion handling stops it.
+        expect(r.players[VoicePart.soprano]!.playing, isTrue);
         async.flushMicrotasks();
         expect(r.players.values.any((p) => p.playing), isFalse);
         expect(r.playing.last, isFalse);
@@ -344,9 +392,11 @@ void main() {
         async.flushMicrotasks();
         expect(r.failures, hasLength(1));
         expect(r.failures.single.voice, VoicePart.alto);
-        expect(r.failures.single.master, isFalse);
-        // The others play on; the controller decides whether to stop.
+        expect(r.failures.single.fatal, isFalse);
+        expect(r.engine.unavailableVoices, {VoicePart.alto});
+        // The others play on.
         expect(r.players[VoicePart.soprano]!.playing, isTrue);
+        expect(r.engine.playing, isTrue);
 
         final seeksBefore = r.players[VoicePart.alto]!.seeks.length;
         unawaited(r.engine.seek(const Duration(seconds: 2)));
@@ -359,23 +409,97 @@ void main() {
       });
     });
 
-    test('the master failing stops everyone and reports it', () {
+    test('the master failing mid-play hands the clock to the longest left', () {
       fakeAsync((async) {
-        final r = rig();
+        final r = rig(
+          overrides: {
+            VoicePart.tenor: FakeAudioPlayer(
+              length: const Duration(seconds: 9),
+            ),
+          },
+        );
+        unawaited(r.engine.load(tracks()));
+        async.flushMicrotasks();
+        expect(r.engine.masterVoice, VoicePart.soprano);
+        unawaited(r.engine.play());
+        async.elapse(const Duration(seconds: 2));
+
+        r.players[VoicePart.soprano]!.raise();
+        async.flushMicrotasks();
+        expect(r.failures.single.voice, VoicePart.soprano);
+        expect(r.failures.single.fatal, isFalse);
+        // Alto: 10 s like bass, and first in S/A/T/B order.
+        expect(r.engine.masterVoice, VoicePart.alto);
+        expect(r.engine.playing, isTrue);
+        expect(r.playing, [true]);
+        for (final voice in [VoicePart.alto, VoicePart.tenor, VoicePart.bass]) {
+          expect(r.players[voice]!.playing, isTrue, reason: voice.name);
+        }
+        expect(r.engine.position, r.players[VoicePart.alto]!.position);
+
+        // The new master drives completion and the drift check.
+        final bass = r.players[VoicePart.bass]!..setRate(1.1);
+        async.elapse(const Duration(seconds: 3));
+        expect(r.engine.resyncCount, greaterThan(0));
+        expect(bass.seeks, isNotEmpty);
+        r.players[VoicePart.alto]!.complete();
+        async.flushMicrotasks();
+        expect(r.players.values.any((p) => p.playing), isFalse);
+        expect(r.playing.last, isFalse);
+      });
+    });
+
+    test('the master failing after a shorter follower ended stops there', () {
+      fakeAsync((async) {
+        final r = rig(
+          overrides: {
+            VoicePart.soprano: FakeAudioPlayer(
+              length: const Duration(seconds: 10),
+            ),
+            for (final voice in [VoicePart.alto, VoicePart.tenor])
+              voice: FakeAudioPlayer(length: const Duration(seconds: 1)),
+            VoicePart.bass: FakeAudioPlayer(loadError: StateError('codec')),
+          },
+        );
+        unawaited(r.engine.load(tracks()));
+        async.flushMicrotasks();
+        unawaited(r.engine.play());
+        async.elapse(const Duration(seconds: 2));
+
+        r.players[VoicePart.soprano]!.raise();
+        async.flushMicrotasks();
+        expect(r.engine.masterVoice, VoicePart.alto);
+        expect(r.players.values.any((p) => p.playing), isFalse);
+        expect(r.playing.last, isFalse);
+      });
+    });
+
+    test('the last voice failing is fatal and stops playback', () {
+      fakeAsync((async) {
+        final r = rig(
+          overrides: {
+            for (final voice in [
+              VoicePart.soprano,
+              VoicePart.alto,
+              VoicePart.tenor,
+            ])
+              voice: FakeAudioPlayer(loadError: StateError('codec')),
+          },
+        );
         unawaited(r.engine.load(tracks()));
         async.flushMicrotasks();
         unawaited(r.engine.play());
         async.flushMicrotasks();
 
-        r.players[VoicePart.soprano]!.raise();
+        r.players[VoicePart.bass]!.raise();
         async.flushMicrotasks();
-        expect(r.failures.single.master, isTrue);
-        expect(r.players.values.any((p) => p.playing), isFalse);
+        expect(r.failures.single.fatal, isTrue);
         expect(r.playing.last, isFalse);
         // No clock left: nothing further plays or drifts.
         unawaited(r.engine.play());
         async.elapse(const Duration(seconds: 2));
         expect(r.players.values.any((p) => p.playing), isFalse);
+        expect(async.periodicTimerCount, 0);
       });
     });
 
@@ -449,6 +573,62 @@ void main() {
         async.elapse(JustAudioPlaybackEngine.driftCheckInterval);
         // Back in step at the second: strikes reset, no re-seek.
         expect(r.engine.resyncCount, 0);
+      });
+    });
+
+    test('a steady offset between the tolerance and the trigger stays', () {
+      fakeAsync((async) {
+        final alto = FakeAudioPlayer();
+        final r = rig(overrides: {VoicePart.alto: alto});
+        unawaited(r.engine.load(tracks()));
+        async.flushMicrotasks();
+        unawaited(r.engine.play());
+        async.flushMicrotasks();
+
+        // Put the alto 70 ms ahead, then keep it there.
+        alto.setRate(1.7);
+        async.elapse(const Duration(milliseconds: 100));
+        alto.setRate(1);
+        final offset = alto.position - r.engine.position;
+        expect(
+          offset,
+          allOf(
+            greaterThan(JustAudioPlaybackEngine.inStepTolerance),
+            lessThan(JustAudioPlaybackEngine.resyncTrigger),
+          ),
+        );
+        async.elapse(const Duration(seconds: 8));
+        // Accepted, by design (see resyncTrigger): never corrected.
+        expect(r.engine.resyncCount, 0);
+        expect(alto.position - r.engine.position, offset);
+      });
+    });
+
+    test('a failed re-seek does not feed the seek-latency estimate', () {
+      fakeAsync((async) {
+        final alto = FakeAudioPlayer(rate: 1.2)
+          ..seekDelay = const Duration(milliseconds: 400);
+        final tenor = FakeAudioPlayer(rate: 1.2);
+        final r = rig(
+          overrides: {VoicePart.alto: alto, VoicePart.tenor: tenor},
+        );
+        unawaited(r.engine.load(tracks()));
+        async.flushMicrotasks();
+        unawaited(r.engine.play());
+        async.elapse(alto.seekDelay);
+        // From now on the alto's slow seeks fail.
+        alto.seekError = StateError('gone');
+        tenor.seeks.clear();
+        final start = clock.now();
+        tenor.seekTimes.clear();
+        async.elapse(const Duration(seconds: 6));
+        expect(r.failures.map((f) => f.voice), [VoicePart.alto]);
+        // The tenor's seeks land instantly; had the failed 400 ms seek
+        // counted, its re-seeks would lead the master by ~200 ms.
+        expect(tenor.seeks, isNotEmpty);
+        final lead =
+            tenor.seeks.first - tenor.seekTimes.first.difference(start);
+        expect(lead, Duration.zero);
       });
     });
 
