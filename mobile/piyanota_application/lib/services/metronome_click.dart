@@ -111,12 +111,28 @@ typedef Meter = ({int numerator, int denominator});
 /// Pairs each bar with the meter its clicks use (PIYA-210 "Unknown
 /// meter"): its own when [MeterSource.trusted], else the last trusted
 /// meter before it, else null (a plain quarter grid).
+///
+/// A pickup without a trusted meter of its own looks forward instead,
+/// to the first trusted meter after it: it is the end of a bar of the
+/// meter that follows it, and there is normally nothing before it. Only
+/// then the last one before it, then null (quarters counted back).
 List<(BarInfo, Meter?)> resolveMeters(List<BarInfo> bars) {
+  Meter? meterOf(BarInfo bar) => bar.meterSource.trusted && bar.hasMeter
+      ? (numerator: bar.numerator!, denominator: bar.denominator!)
+      : null;
   Meter? last;
   final resolved = <(BarInfo, Meter?)>[];
-  for (final bar in bars) {
-    if (bar.meterSource.trusted && bar.hasMeter) {
-      last = (numerator: bar.numerator!, denominator: bar.denominator!);
+  for (var i = 0; i < bars.length; i++) {
+    final bar = bars[i];
+    final own = meterOf(bar);
+    if (own != null) last = own;
+    if (own == null && bar.pickup) {
+      Meter? next;
+      for (var j = i + 1; j < bars.length && next == null; j++) {
+        next = meterOf(bars[j]);
+      }
+      resolved.add((bar, next ?? last));
+      continue;
     }
     resolved.add((bar, last));
   }
@@ -278,6 +294,7 @@ Uint8List renderClickWav(ClickPlan plan) {
   final total = (plan.length.inMicroseconds * sampleRate / 1e6).ceil();
   final pcm = ByteData(total * 2);
   final clickSamples = (_clickSeconds * sampleRate).round();
+  final fadeSamples = (_fadeSeconds * sampleRate).round();
   for (var index = 0; index < plan.clicks.length; index++) {
     final (freq, level) = _voicing[plan.levels[index]]!;
     final gain = level * _pcmMax;
@@ -285,8 +302,13 @@ Uint8List renderClickWav(ClickPlan plan) {
         .round();
     for (var i = 0; i < clickSamples && start + i < total; i++) {
       final t = i / sampleRate;
+      // A linear fade over the last samples, so the cut-off at
+      // _clickSeconds leaves no step (an audible tick of its own).
+      final fade = math.min(1.0, (clickSamples - i) / fadeSamples);
       final sample =
-          math.sin(2 * math.pi * freq * t) * math.exp(-t / _decaySeconds);
+          math.sin(2 * math.pi * freq * t) *
+          math.exp(-t / _decaySeconds) *
+          fade;
       pcm.setInt16((start + i) * 2, (sample * gain).round(), Endian.little);
     }
   }
@@ -296,11 +318,14 @@ Uint8List renderClickWav(ClickPlan plan) {
 const int clickSampleRate = 22050;
 const double _clickSeconds = 0.04;
 const double _decaySeconds = 0.008;
+const double _fadeSeconds = 0.002;
 
 /// (Hz, level 0-1) per click level: higher and louder for stronger ones.
 const Map<ClickLevel, (double, double)> _voicing = {
   ClickLevel.downbeat: (1600, 0.9),
-  ClickLevel.secondary: (1300, 0.7),
+  // Close to the beat, so beat 3 of 4/4 isn't heard as a new bar; the
+  // downbeat alone is high and loud.
+  ClickLevel.secondary: (1100, 0.62),
   ClickLevel.beat: (1000, 0.55),
   ClickLevel.subdivision: (800, 0.3),
 };

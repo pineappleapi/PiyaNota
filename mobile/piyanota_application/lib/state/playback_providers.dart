@@ -416,19 +416,27 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// [replace]: a re-plan after a speed change (see [commitBpm]). The old
   /// click keeps playing until the new file is written, then is swapped
   /// out; the status stays ready throughout, so a soloed click doesn't
-  /// hand the voices back for the moment of the swap.
+  /// hand the voices back for the moment of the swap. A re-plan that fails
+  /// (not written, or not attached) keeps the old click: it is still in
+  /// time, only its subdivision is out of date. The click is marked
+  /// unavailable only when there is no click left to fall back to.
+  ///
+  /// File ownership: [_clickFile] is the file the engine holds, and is
+  /// set only once an attach succeeded. Whoever replaces it deletes it;
+  /// a file that never got attached is deleted by the call that wrote it;
+  /// leaving the screen deletes whatever [_clickFile] is then. So no file
+  /// is deleted twice, or left behind.
   Future<void> _prepareClick(
     PlaybackEngine engine,
     int generation, {
     bool replace = false,
   }) async {
     final clickGeneration = ++_clickGeneration;
-    bool current() =>
-        ref.mounted &&
-        generation == _generation &&
-        identical(_engine, engine) &&
-        clickGeneration == _clickGeneration;
+    bool sameEngine() =>
+        ref.mounted && generation == _generation && identical(_engine, engine);
+    bool current() => sameEngine() && clickGeneration == _clickGeneration;
     final chosenBpm = state.chosenBpm;
+    final previousPlan = _plannedSubdivisions;
     _plannedSubdivisions = subdividedBars(_bars, chosenBpm);
     final Uri file;
     try {
@@ -442,32 +450,57 @@ class PlaybackController extends Notifier<PlaybackState> {
       file = await ref.read(clickTrackWriterProvider)(plan);
     } on Object catch (e, stack) {
       debugPrint('Playback: metronome click not generated: $e\n$stack');
-      if (current()) _clickFailed();
+      if (!current()) return;
+      if (replace && _clickFile != null) {
+        // Keep the old click; the next release of the slider tries again.
+        _plannedSubdivisions = previousPlan;
+        return;
+      }
+      _clickFailed();
       return;
     }
     if (!current()) {
       unawaited(_deleteQuietly(file));
       return;
     }
-    if (replace) {
-      final old = _clickFile;
-      _clickFile = null;
-      await engine.detachClick();
-      unawaited(_deleteQuietly(old));
-      if (!current()) {
-        unawaited(_deleteQuietly(file));
-        return;
-      }
-    }
-    _clickFile = file;
-    final attached = await engine.attachClick(file);
-    if (!current()) return;
-    if (!attached) {
-      _clickFailed();
+    final old = replace ? _clickFile : null;
+    if (old != null) await engine.detachClick();
+    if (!current()) {
+      // A newer re-plan took over; it owns the swap (and [old]).
+      unawaited(_deleteQuietly(file));
       return;
     }
-    state = state.copyWith(clickStatus: ClickStatus.ready);
-    _applyGains();
+    final attached = await engine.attachClick(file);
+    if (!sameEngine()) {
+      // Left the screen: [_releaseEngine] deletes what [_clickFile] was.
+      unawaited(_deleteQuietly(file));
+      return;
+    }
+    if (attached) {
+      _clickFile = file;
+      if (old != null && old != file) unawaited(_deleteQuietly(old));
+      if (!current()) return;
+      state = state.copyWith(clickStatus: ClickStatus.ready);
+      _applyGains();
+      return;
+    }
+    unawaited(_deleteQuietly(file));
+    if (!current()) return;
+    if (old != null) {
+      debugPrint('Playback: re-planned click not attached; keeping the old');
+      final back = await engine.attachClick(old);
+      if (!sameEngine()) return;
+      if (back) {
+        // The next release of the slider tries the re-plan again.
+        if (current()) _plannedSubdivisions = previousPlan;
+        return;
+      }
+      // A newer re-plan that took over meanwhile owns [old] now.
+      if (!current()) return;
+      _clickFile = null;
+      unawaited(_deleteQuietly(old));
+    }
+    _clickFailed();
   }
 
   /// The Speed slider was let go (or stepped by a screen reader). Re-plans

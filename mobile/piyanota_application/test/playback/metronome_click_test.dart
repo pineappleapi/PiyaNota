@@ -145,6 +145,19 @@ void main() {
         (1200, _u),
       ]);
     });
+    test('9/8 at quarter = 60 (beat 40/min): D u u b u u b u u', () {
+      expect(_one(9, 8, bpm: 60), [
+        (0, _d),
+        (240, _u),
+        (480, _u),
+        (720, _b),
+        (960, _u),
+        (1200, _u),
+        (1440, _b),
+        (1680, _u),
+        (1920, _u),
+      ]);
+    });
     test('9/8 at 120', () {
       expect(_one(9, 8, bpm: 120), [(0, _d), (720, _b), (1440, _b)]);
     });
@@ -229,6 +242,25 @@ void main() {
         (960, _b),
         (1200, _u),
         (1440, _u),
+      ]);
+    });
+    test('a short final bar in 6/8 stops at its end, fast and slow', () {
+      final table = _table([(6, 8), (6, 8)], last: 720);
+      expect(_plan(table), [(0, _d), (720, _b), (1440, _d)]);
+      expect(_plan(table, chosenBpm: 60).where((c) => c.$1 >= 1440), [
+        (1440, _d),
+        (1680, _u),
+        (1920, _u),
+      ]);
+    });
+    test('a pickup and the short final bar that completes it', () {
+      expect(_plan(_table([(3, 4), (3, 4), (3, 4)], pickup: 480, last: 960)), [
+        (0, _b),
+        (480, _d),
+        (960, _b),
+        (1440, _b),
+        (1920, _d),
+        (2400, _b),
       ]);
     });
     test('a short final bar stops at its end', () {
@@ -343,13 +375,52 @@ void main() {
         [(0, _d), (480, _b), (960, _b), (1440, _b), (1920, _d), (2400, _b)],
       );
     });
-    test('an unknown pickup counts quarters back from its end', () {
-      expect(_plan(_table([null, (3, 4)], pickup: 720)), [
+    test('an unknown pickup with no meter anywhere counts quarters back '
+        'from its end', () {
+      expect(_plan(_table([null, null], pickup: 720)), [
         (240, _b),
         (720, _d),
         (1200, _b),
         (1680, _b),
+        (2160, _b),
       ]);
+    });
+    test('an unknown pickup takes the first trusted meter after it: a '
+        'dotted-quarter pickup before 6/8 is beat 2', () {
+      final table = _table([null, (6, 8)], pickup: 720);
+      // Fast: one click on the dotted-quarter beat, none at 240.
+      expect(_plan(table, chosenBpm: 240).where((c) => c.$1 < 720), [(0, _b)]);
+      expect(_plan(table).take(3), [(0, _b), (720, _d), (1440, _b)]);
+      // Slow: the 6/8 subdivisions, still no downbeat.
+      expect(_plan(table, chosenBpm: 60).where((c) => c.$1 < 720), [
+        (0, _b),
+        (240, _u),
+        (480, _u),
+      ]);
+    });
+    test('a default-meter pickup also looks forward, past unknown bars', () {
+      final table = _table(
+        [(4, 4), null, (6, 8)],
+        pickup: 720,
+        sources: {0: MeterSource.assumed},
+      );
+      expect(resolveMeters(table).first.$2, (numerator: 6, denominator: 8));
+    });
+    test('an unknown pickup with nothing trusted after it takes the last '
+        'one before it', () {
+      const bars = [
+        BarInfo(
+          bar: 1,
+          startTick: 0,
+          durTicks: 1440,
+          numerator: 3,
+          denominator: 4,
+          meterSource: MeterSource.detected,
+        ),
+        BarInfo(bar: 2, startTick: 1440, durTicks: 480, pickup: true),
+        BarInfo(bar: 3, startTick: 1920, durTicks: 1440),
+      ];
+      expect(resolveMeters(bars)[1].$2, (numerator: 3, denominator: 4));
     });
   });
 
@@ -530,6 +601,54 @@ void main() {
       // Silent between clicks.
       expect(sampleAt(data, const Duration(milliseconds: 200)), 0);
       expect(sampleAt(data, const Duration(milliseconds: 950)), 0);
+    });
+
+    test('each level has its own pitch, highest for the downbeat', () {
+      const at = [0, 250, 500, 750];
+      final data = ByteData.sublistView(
+        renderClickWav(
+          ClickPlan(
+            clicks: [for (final ms in at) Duration(milliseconds: ms)],
+            levels: const [_d, _s, _b, _u],
+            length: const Duration(seconds: 1),
+          ),
+        ),
+      );
+      // Sign changes over each burst's first 20 ms: 2 x Hz x 0.02 s.
+      int crossings(int ms) {
+        final start = ms * clickSampleRate ~/ 1000;
+        final n = clickSampleRate ~/ 50;
+        var count = 0;
+        var last = 0;
+        for (var i = start; i < start + n; i++) {
+          final v = data.getInt16(44 + i * 2, Endian.little).sign;
+          if (v == 0) continue;
+          if (last != 0 && v != last) count++;
+          last = v;
+        }
+        return count;
+      }
+
+      final counts = [for (final ms in at) crossings(ms)];
+      for (var i = 0; i < 3; i++) {
+        expect(counts[i], greaterThan(counts[i + 1]), reason: '$counts');
+      }
+      // Downbeat well clear of the secondary; secondary near the beat.
+      expect(counts[0] - counts[1], greaterThan(15), reason: '$counts');
+    });
+
+    test('each burst fades to silence at its end: no step at the cut', () {
+      final data = ByteData.sublistView(
+        renderClickWav(
+          ClickPlan(
+            clicks: const [Duration.zero],
+            levels: const [_d],
+            length: const Duration(milliseconds: 100),
+          ),
+        ),
+      );
+      final last = (0.04 * clickSampleRate).round() - 1;
+      expect(data.getInt16(44 + last * 2, Endian.little).abs(), lessThan(10));
     });
   });
 }

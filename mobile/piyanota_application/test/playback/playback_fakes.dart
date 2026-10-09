@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
 
 import 'package:piyanota_application/models/measure_table.dart';
 import 'package:piyanota_application/models/score_result.dart';
@@ -174,14 +175,34 @@ class FakePlaybackEngine implements PlaybackEngine {
 
   @override
   Future<bool> attachClick(Uri track) async {
+    final call = attachCalls.length;
+    attachCalls.add(track);
     if (clickAttachFails) return false;
-    if (clickAttachGate case final gate?) {
+    final key = _clickKey;
+    if (attachGateAt[call] case final gate?) {
+      if (!await gate.future) return false;
+    } else if (clickAttachGate case final gate?) {
       if (!await gate.future) return false;
     }
+    if (attachOutcomeAt[call] == false) return false;
+    // Like the real engine: a detach (or dispose) during the attach wins.
+    if (key != _clickKey || disposed) return false;
     click = track;
     attachedClicks.add(track);
     return true;
   }
+
+  /// Every attachClick call, attached or not.
+  final List<Uri> attachCalls = [];
+
+  /// The result of the attachClick call at this index (0 = the first);
+  /// a call not listed attaches normally.
+  final Map<int, bool> attachOutcomeAt = {};
+
+  /// Holds the attachClick call at this index until completed (instead
+  /// of [clickAttachGate]).
+  final Map<int, Completer<bool>> attachGateAt = {};
+  int _clickKey = 0;
 
   /// Every click track attached, in order (a re-plan attaches another).
   final List<Uri> attachedClicks = [];
@@ -190,6 +211,7 @@ class FakePlaybackEngine implements PlaybackEngine {
   @override
   Future<void> detachClick() async {
     detachCalls++;
+    _clickKey++;
     click = null;
   }
 
@@ -359,7 +381,11 @@ class PlaybackHarness {
     this.clickAttachFails = false,
     this.clickWriteError,
     this.clickAttachGate,
+    this.clickWriter,
   });
+
+  /// Replaces the default click writer (which writes nothing).
+  final Future<Uri> Function(ClickPlan plan)? clickWriter;
 
   /// Holds every engine's click in "preparing" until completed (see
   /// [FakePlaybackEngine.clickAttachGate]).
@@ -403,6 +429,7 @@ class PlaybackHarness {
     clickTrackWriterProvider.overrideWithValue((plan) async {
       clickPlans.add(plan);
       if (clickWriteError case final error?) throw error;
+      if (clickWriter case final write?) return write(plan);
       // Not a file, so nothing is written or deleted.
       return Uri.parse('test://click.wav');
     }),
@@ -419,12 +446,22 @@ Future<void> pumpPlayback(
   Size size = const Size(412, 917),
   double textScale = 1,
   Map<String, Object> prefs = const {},
+  SharedPreferencesStorePlatform Function(Map<String, Object> values)?
+  prefsStore,
 }) async {
-  SharedPreferences.setMockInitialValues({
+  final values = <String, Object>{
     'onboarding_completed': true,
     'onboarding_default_voice': ?defaultVoice?.name,
     ...prefs,
-  });
+  };
+  SharedPreferences.setMockInitialValues(values);
+  if (prefsStore != null) {
+    // After setMockInitialValues, which resets the cached instance.
+    SharedPreferencesStorePlatform.instance = prefsStore({
+      for (final MapEntry(:key, :value) in values.entries)
+        'flutter.$key': value,
+    });
+  }
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);

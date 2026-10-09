@@ -176,6 +176,7 @@ Map<VoicePart, Uri> tracks([
 rig({
   Map<VoicePart, FakeAudioPlayer> overrides = const {},
   FakeAudioPlayer? click,
+  List<FakeAudioPlayer> laterClicks = const [],
 }) {
   final players = {
     for (final voice in VoicePart.values)
@@ -186,6 +187,8 @@ rig({
   final queue = [
     for (final voice in VoicePart.values) players[voice]!,
     clickPlayer,
+    // Re-attached clicks after a detachClick, in order.
+    ...laterClicks,
   ];
   final engine = JustAudioPlaybackEngine(playerFactory: queue.removeAt0);
   final playing = <bool>[];
@@ -980,6 +983,107 @@ void main() {
         expect(attached, isFalse);
         expect(r.clickFailures, hasLength(1));
         expect(r.failures, isEmpty);
+      });
+    });
+
+    test('detach while an attach is still loading: the attach returns '
+        'false and its late failure is not reported', () {
+      fakeAsync((async) {
+        final r = rig(click: FakeAudioPlayer(loadHangs: true));
+        unawaited(r.engine.load(tracks()));
+        async.flushMicrotasks();
+        bool? attached;
+        unawaited(r.engine.attachClick(_clickUri).then((v) => attached = v));
+        async.flushMicrotasks();
+        unawaited(r.engine.detachClick());
+        async.flushMicrotasks();
+        expect(r.click.disposed, isTrue);
+        // The hung load times out after the detach: not a click failure.
+        async.elapse(JustAudioPlaybackEngine.loadTimeout);
+        expect(attached, isFalse);
+        expect(r.clickFailures, isEmpty);
+        expect(r.engine.clickAttached, isFalse);
+      });
+    });
+
+    test('detach during the catch-up seek: the attach returns false', () {
+      fakeAsync((async) {
+        final click = FakeAudioPlayer()
+          ..seekDelay = const Duration(milliseconds: 200);
+        final r = rig(click: click);
+        unawaited(r.engine.load(tracks()));
+        async.flushMicrotasks();
+        unawaited(r.engine.play());
+        async.flushMicrotasks();
+        bool? attached;
+        unawaited(r.engine.attachClick(_clickUri).then((v) => attached = v));
+        async.elapse(const Duration(milliseconds: 50));
+        expect(attached, isNull);
+        unawaited(r.engine.detachClick());
+        async.elapse(const Duration(seconds: 1));
+        expect(attached, isFalse);
+        expect(click.playing, isFalse);
+        expect(r.clickFailures, isEmpty);
+        expect(r.engine.clickAttached, isFalse);
+      });
+    });
+
+    test('an error from the old click after a detach is ignored', () {
+      fakeAsync((async) {
+        final r = rig();
+        unawaited(r.engine.load(tracks()));
+        async.flushMicrotasks();
+        unawaited(r.engine.attachClick(_clickUri));
+        unawaited(r.engine.play());
+        async.elapse(const Duration(seconds: 1));
+        expect(r.click.playing, isTrue);
+        unawaited(r.engine.detachClick());
+        async.flushMicrotasks();
+        r.click.raise();
+        async.flushMicrotasks();
+        expect(r.clickFailures, isEmpty);
+        expect(r.failures, isEmpty);
+        expect(r.engine.playing, isTrue);
+      });
+    });
+
+    test('re-attach after a detach: the new click is driven, the old one '
+        'is released and no longer driven', () {
+      fakeAsync((async) {
+        final second = FakeAudioPlayer();
+        final r = rig(laterClicks: [second]);
+        unawaited(r.engine.load(tracks()));
+        async.flushMicrotasks();
+        unawaited(r.engine.setClickVolume(0.4));
+        unawaited(r.engine.attachClick(_clickUri));
+        unawaited(r.engine.play());
+        async.elapse(const Duration(seconds: 1));
+
+        unawaited(r.engine.detachClick());
+        async.flushMicrotasks();
+        expect(r.click.disposed, isTrue);
+        final again = Uri.file('/tmp/click2.wav');
+        bool? attached;
+        unawaited(r.engine.attachClick(again).then((v) => attached = v));
+        async.elapse(const Duration(milliseconds: 100));
+        expect(attached, isTrue);
+        expect(r.engine.clickAttached, isTrue);
+        expect(second.loadedUri, again);
+        expect(second.playing, isTrue);
+        // The last level is kept for the next click.
+        expect(second.volumeSet, 0.4);
+        unawaited(r.engine.pause());
+        async.flushMicrotasks();
+        expect(second.playing, isFalse);
+        final oldSeeks = r.click.seeks.length;
+        unawaited(r.engine.seek(const Duration(seconds: 3)));
+        async.flushMicrotasks();
+        expect(r.click.seeks, hasLength(oldSeeks));
+        expect(second.seeks.last, const Duration(seconds: 3));
+        // Its failures are reported as before.
+        second.raise();
+        async.flushMicrotasks();
+        expect(r.clickFailures, hasLength(1));
       });
     });
 
