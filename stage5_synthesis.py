@@ -21,7 +21,7 @@ from midiutil import MIDIFile
 
 import stage3_clefkey
 
-from stage3_transcription import CLEF_KEY_DISABLED_FLAG
+from stage3_transcription import CLEF_KEY_DISABLED_FLAG, DEFAULT_TIME_SIGNATURE
 from stage4_reconstruction import TICKS_PER_QUARTER
 
 # FluidSynth output sample rate (midi2audio's former default).
@@ -30,6 +30,10 @@ RENDER_SAMPLE_RATE = 44100
 # ── MIDI constants ────────────────────────────────────────────────────────────
 PPQ          = 480          # pulses per quarter note (ticks per beat)
 DEFAULT_BPM  = 90           # default tempo if not detected
+MS_PER_MINUTE = 60_000
+ROUND_HALF_UP = 0.5         # ms values round half up: int(x + 0.5), same rule as the timing file
+# PIYA-103 AC10: the review code for a voice in failedVoices.
+VOICE_FAILED_CODE = "voice_failed"
 # Client-facing review items are capped; the full list goes to the job record (backend-lead review
 # 2026-09-29: Stage 4 bar flags are unbounded, strips are at most 20 pages x 16 staves).
 REVIEW_ITEMS_CAP = 200
@@ -64,9 +68,15 @@ def synthesize_satb(
     output_dir:      str  = "output/audio",
     bpm:             int  = DEFAULT_BPM,
     soundfont_path:  str  = "soundfont/piano.sf2",
+    muted_spans:     Optional[dict[str, list[tuple[int, int]]]] = None,
 ) -> dict:
     """
     Converts four SATB voice event sequences into four MP3 files.
+
+    Kept for the CLI and older callers: a voice whose MP3 cannot be rendered
+    falls back to its MIDI path here. The API path uses
+    ``synthesize_satb_with_failures``, where that voice fails instead
+    (PIYA-109 AC9), because a client cannot play a .mid track.
 
     Args:
         satb_sequences:  Output of Stage 4 reconstruct_satb().
@@ -74,16 +84,50 @@ def synthesize_satb(
         output_dir:      Directory where MP3 files will be saved.
         bpm:             Playback tempo in beats per minute.
         soundfont_path:  Path to a .sf2 piano soundfont for rendering.
+        muted_spans:     {voice: [(start_tick, end_tick), ...]} to render as
+                         silence (PIYA-109 AC8); see ``muted_spans_by_voice``.
 
     Returns:
         {voice: mp3_path} dict of output file paths.
     """
+    files, _ = _synthesize(satb_sequences, output_dir, bpm, soundfont_path, muted_spans or {},
+                           midi_fallback=True)
+    return files
+
+
+def synthesize_satb_with_failures(
+    satb_sequences:  dict,
+    output_dir:      str,
+    bpm:             int,
+    soundfont_path:  str,
+    muted_spans:     dict[str, list[tuple[int, int]]],
+) -> tuple[dict[str, str], list[str]]:
+    """Renders every voice it can; returns ({voice: mp3_path}, failed voices in SATB order).
+
+    A voice fails when it has no events or its MP3 cannot be rendered
+    (PIYA-109 AC9); the other voices still render. Raising when all four fail
+    is the caller's job, so this stays usable for partial re-renders.
+    """
+    return _synthesize(satb_sequences, output_dir, bpm, soundfont_path, muted_spans,
+                       midi_fallback=False)
+
+
+def _synthesize(
+    satb_sequences: dict,
+    output_dir:     str,
+    bpm:            int,
+    soundfont_path: str,
+    muted_spans:    dict[str, list[tuple[int, int]]],
+    midi_fallback:  bool,
+) -> tuple[dict[str, str], list[str]]:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
     print(f"\n[Stage 5] Synthesizing SATB audio at {bpm} BPM...")
 
-    output_files = {}
+    output_files: dict[str, str] = {}
+    failed: list[str] = []
+    # Taken before muting so a silenced final bar does not shorten the track.
     total_ticks = _piece_end_tick(satb_sequences)
 
     for voice in VOICES:
@@ -96,8 +140,14 @@ def synthesize_satb(
                    f"{len(VOICES)} so far).")
             print(f"  {msg.replace('[Stage 5]', '[Stage 5] WARNING:', 1)}",
                   file=sys.stderr)
-            warnings.warn(msg, RuntimeWarning, stacklevel=2)
+            warnings.warn(msg, RuntimeWarning, stacklevel=3)
+            failed.append(voice)
             continue
+
+        spans = muted_spans.get(voice, [])
+        if spans:
+            events = apply_muted_spans(events, spans)
+            print(f"  [Stage 5] {voice}: {len(spans)} damaged span(s) rendered as silence")
 
         # ── Build single-track MIDI per voice ─────────────────────────────
         midi = build_voice_midi(events, bpm, total_ticks)
@@ -117,14 +167,17 @@ def synthesize_satb(
         if success:
             output_files[voice] = str(mp3_path)
             print(f"  [Stage 5] {voice}: MP3 saved -> {mp3_path}")
-        else:
-            # Fall back to returning the MIDI if rendering failed
+        elif midi_fallback:
             output_files[voice] = str(midi_path)
             print(f"  [Stage 5] {voice}: MP3 rendering failed, "
                   f"returning MIDI -> {midi_path}")
+        else:
+            failed.append(voice)
+            print(f"  [Stage 5] WARNING: {voice}: MP3 rendering failed; voice listed as failed",
+                  file=sys.stderr)
 
     _report(output_files)
-    return output_files
+    return output_files, failed
 
 
 # ── MIDI construction ─────────────────────────────────────────────────────────
@@ -283,9 +336,123 @@ def _report(output_files: dict):
     print()
 
 
+# ── Muted measures, failed voices, measure table (PIYA-103 AC9/AC10, PIYA-109 AC8/AC9, PIYA-117 AC9) ──
+
+def tick_to_ms(tick: int, bpm: int) -> int:
+    """Global tick -> milliseconds at ``bpm`` quarter notes per minute, rounded half up.
+
+    One rounding rule for the bars table, mutedMeasures and the timing file keeps
+    every ms value in the API on the same clock.
+    """
+    return int(tick * MS_PER_MINUTE / (PPQ * bpm) + ROUND_HALF_UP)
+
+
+def muted_spans_by_voice(stage4_flags: list[dict[str, Any]]) -> dict[str, list[tuple[int, int]]]:
+    """{voice: [(start_tick, end_tick), ...]} for every Stage 4 flag marked muted (PIYA-108 AC8)."""
+    spans: dict[str, list[tuple[int, int]]] = {}
+    for f in stage4_flags:
+        if f.get("muted") and f.get("voice") in VOICE_TRACK:
+            spans.setdefault(f["voice"], []).append((int(f["start_tick"]), int(f["end_tick"])))
+    return spans
+
+
+def apply_muted_spans(events: list[dict[str, Any]],
+                      spans: list[tuple[int, int]]) -> list[dict[str, Any]]:
+    """Copies of ``events`` with every span silenced (PIYA-109 AC8).
+
+    A note starting inside [start, end) is dropped; a note starting earlier
+    that sounds into the span is cut at ``start``. Rests and other events are
+    kept so the timeline (and the timing file built from it) is unchanged.
+    """
+    out: list[dict[str, Any]] = []
+    for e in events:
+        if e["type"] != "note" or not spans:
+            out.append(e)
+            continue
+        onset, end = e["tick_onset"], e["tick_onset"] + e["duration_ticks"]
+        if any(s <= onset < t for s, t in spans):
+            continue
+        cut = min((s for s, _ in spans if onset < s < end), default=None)
+        if cut is not None:
+            e = {**e, "duration_ticks": cut - onset}
+        out.append(e)
+    return out
+
+
+def _zero_based(index: Optional[int]) -> Optional[int]:
+    """Pipeline indices count from 1; API indices count from 0 (PIYA-117 "Index bases")."""
+    return None if index is None else index - 1
+
+
+def build_muted_measures(stage4_flags: list[dict[str, Any]], bpm: int,
+                         failed_voices: list[str]) -> list[dict[str, Any]]:
+    """PIYA-103 AC9 ``mutedMeasures``: one entry per silenced span, by startMs then SATB order.
+
+    A failed voice has no entries (AC10): nothing of it plays, so nothing was muted.
+    """
+    failed = {v.lower() for v in failed_voices}
+    entries = []
+    for f in stage4_flags:
+        if not f.get("muted") or f.get("voice") not in VOICE_TRACK or f["voice"].lower() in failed:
+            continue
+        entries.append({
+            "voice": f["voice"].lower(), "bar": f.get("bar"),
+            "pageIndex": _zero_based(f.get("page_index")),
+            "systemIndex": _zero_based(f.get("sys_idx")),
+            "startMs": tick_to_ms(f["start_tick"], bpm), "endMs": tick_to_ms(f["end_tick"], bpm),
+            "reason": f["kind"]})
+    entries.sort(key=lambda m: (m["startMs"], VOICES.index(m["voice"].capitalize())))
+    return entries
+
+
+def _meter_parts(time_signature: str) -> tuple[Optional[int], Optional[int]]:
+    try:
+        num, den = (int(part) for part in time_signature.split("/"))
+    except (ValueError, AttributeError):
+        return None, None
+    return num, den
+
+
+def build_bars_table(report: dict[str, Any], bpm: int) -> list[dict[str, Any]]:
+    """PIYA-117 AC9 ``bars`` from Stage 4's report: one entry per measure, tiling from tick 0.
+
+    Built from the layout, not from events, so a measure where a voice rests,
+    failed or was muted still has its entry. ``durMs`` is the next entry's
+    ``startMs`` minus this one's, so rounding never opens a gap; the last runs
+    to its own end.
+    """
+    rows: list[tuple[int, int, int, dict[str, Any]]] = []      # (bar, startTick, durTicks, meter bar)
+    systems = sorted(report.get("systems", []), key=lambda s: s["start_tick"])
+    all_bars = [(sys["first_bar"] + i, bar) for sys in systems for i, bar in enumerate(sys.get("bars", []))]
+    pickup = int(report.get("pickup_ticks") or 0)
+    tick = 0
+    if pickup > 0:
+        # The pickup carries bar 1's meter, so the client places its clicks as the end of a full bar.
+        first = all_bars[0][1] if all_bars else {"time_signature": DEFAULT_TIME_SIGNATURE,
+                                                 "meter_source": "default"}
+        rows.append((0, 0, pickup, first))
+        tick = pickup
+    for bar_no, bar in all_bars:
+        dur = int(bar.get("actual_ticks", bar["ticks"]))
+        rows.append((bar_no, tick, dur, bar))
+        tick += dur
+
+    table = []
+    for i, (bar_no, start, dur, bar) in enumerate(rows):
+        source = bar.get("meter_source", "default")
+        num, den = (None, None) if source == "unknown" else _meter_parts(bar["time_signature"])
+        start_ms = tick_to_ms(start, bpm)
+        end_ms = tick_to_ms(rows[i + 1][1], bpm) if i + 1 < len(rows) else tick_to_ms(start + dur, bpm)
+        table.append({"bar": bar_no, "startMs": start_ms, "durMs": end_ms - start_ms,
+                      "startTick": start, "durTicks": dur, "numerator": num, "denominator": den,
+                      "meterSource": source, "pickup": bar_no == 0, "groups": None})
+    return table
+
+
 # ── Review summary (exposed by the result API, PIYA-103 AC6) ──────────────────
 
-def build_review(stage3_events: dict, stage4_flags: list) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def build_review(stage3_events: dict, stage4_flags: list, failed_voices: Optional[list[str]] = None
+                 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Maps Stage 3 strip flags and Stage 4 reconstruction flags onto the API's fixed review shape.
 
     The mapping is explicit so a change in Stage 3/4's internal flag dicts can't change the public
@@ -293,19 +460,25 @@ def build_review(stage3_events: dict, stage4_flags: list) -> tuple[dict[str, Any
     A strip's codes become items only when that strip's own flags carry ``review_needed``: informational
     codes (e.g. ``plain_treble_on_low_voice_assumed_8vb``) must not make a clean score need review once
     the classifier passes its gate. Stage 4 bar items come first so the cap never hides them behind
-    per-strip items (a long score has up to 320 strips).
+    per-strip items (a long score has up to 320 strips). Failed voices come before both: losing a
+    whole part matters more than any one bar (PIYA-103 AC10). Muted repairs already carry
+    ``review_needed``, so each ``mutedMeasures`` entry has an item with its reason as code (AC9).
+    Stage 3 ``meter_flags`` (digits the parser could not place) always need review.
 
     Args:
         stage3_events: {voice: [event, ...]} from Stage 3 (events carry ``clef_key_flags`` and, with
             ClefKeyNet, ``clef_key_strip_flags``).
         stage4_flags: ``reconstruct_satb_with_report``'s ``flags``; only those with ``review_needed`` count.
+        failed_voices: voices (any case) listed in ``failedVoices``.
 
     Returns:
         (review, full_items): ``review`` is the client object with at most REVIEW_ITEMS_CAP items;
         ``full_items`` is the uncapped list for the job record.
     """
     job_reasons: set[str] = set()
-    items: list[dict[str, Any]] = []
+    items: list[dict[str, Any]] = [
+        {"code": VOICE_FAILED_CODE, "voice": v.lower(), "pageIndex": None, "systemIndex": None, "bar": None}
+        for v in VOICES if v.lower() in {f.lower() for f in failed_voices or []}]
     for f in stage4_flags:
         if f.get("review_needed"):
             items.append({"code": f["kind"], "voice": f["voice"].lower() if f.get("voice") else None,
@@ -316,9 +489,10 @@ def build_review(stage3_events: dict, stage4_flags: list) -> tuple[dict[str, Any
         for e in events:
             job_reasons |= set(e.get("clef_key_flags", [])) & JOB_LEVEL_REVIEW_CODES
             strip_flags = set(e.get("clef_key_strip_flags", []))
-            if "review_needed" not in strip_flags:
-                continue
-            for code in sorted(strip_flags - {"review_needed"} - JOB_LEVEL_REVIEW_CODES):
+            codes = set(e.get("meter_flags", []))
+            if "review_needed" in strip_flags:
+                codes |= strip_flags - {"review_needed"} - JOB_LEVEL_REVIEW_CODES
+            for code in sorted(codes):
                 key = (voice, e["page_index"], e["sys_idx"], code)
                 if key not in seen_strips:
                     seen_strips.add(key)
@@ -371,8 +545,15 @@ def run_full_pipeline_with_report(
 ) -> dict[str, Any]:
     """Runs Stages 1-5 and returns the audio plus what the result API and job record need.
 
+    A voice that is empty after Stage 4 or cannot be rendered is listed in
+    ``failedVoices`` and the job still completes; it fails (ValueError) only
+    when all four voices fail (PIYA-108 AC4/AC5, PIYA-109 AC9).
+
     Returns:
-        {"audio": {voice: path},
+        {"audio": {voice: mp3 path}, failed voices left out,
+         "bars": PIYA-117 AC9 measure table (see build_bars_table),
+         "mutedMeasures": PIYA-103 AC9 (see build_muted_measures),
+         "failedVoices": PIYA-103 AC10, lowercase, SATB order,
          "review": client object for PIYA-103 (see build_review),
          "review_detail": uncapped review items for the job record,
          "provenance": INTERNAL ONLY (job record and logs, never the client response; backend-lead
@@ -391,7 +572,6 @@ def run_full_pipeline_with_report(
 
     # Stage 4
     satb, recon_report = reconstruct_satb_with_report(voice_events)
-    review, review_detail = build_review(voice_events, recon_report["flags"])
     provenance = {
         "clefKeyEnabled": clef_key_weights is not None,
         "clefKeyCheckpointSha256": (stage3_clefkey.file_sha256(Path(clef_key_weights))
@@ -400,12 +580,12 @@ def run_full_pipeline_with_report(
     }
 
     # Stage 5
-    mp3_files = synthesize_satb(
-        satb,
-        output_dir=output_dir,
-        bpm=bpm,
-        soundfont_path=soundfont_path,
-    )
+    mp3_files, failed = synthesize_satb_with_failures(
+        satb, output_dir, bpm, soundfont_path, muted_spans_by_voice(recon_report["flags"]))
+    if len(failed) == len(VOICES):
+        raise ValueError(f"incomplete_voice_sequence: no voice could be rendered ({', '.join(failed)})")
+    failed_voices = [v.lower() for v in failed]
+    review, review_detail = build_review(voice_events, recon_report["flags"], failed_voices)
 
     print("=" * 60)
     print("PiyaNota complete.")
@@ -413,7 +593,11 @@ def run_full_pipeline_with_report(
         print(f"  {voice}: {path}")
     print("=" * 60)
 
-    return {"audio": mp3_files, "review": review, "review_detail": review_detail, "provenance": provenance}
+    return {"audio": mp3_files,
+            "bars": build_bars_table(recon_report, bpm),
+            "mutedMeasures": build_muted_measures(recon_report["flags"], bpm, failed_voices),
+            "failedVoices": failed_voices,
+            "review": review, "review_detail": review_detail, "provenance": provenance}
 
 
 # ── CLI entry point ───────────────────────────────────────────────────────────

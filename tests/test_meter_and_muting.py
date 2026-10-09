@@ -1,0 +1,336 @@
+"""Tests for per-measure meter, multirest counts, muted measures and failed voices.
+
+Covers PIYA-107 AC7-AC9 (Stage 3 meter/multirest parsing), PIYA-108 AC4-AC8 (Stage 4 per-bar layout,
+inherit-on-default, lossy-repair spans, failed voices), PIYA-109 AC8/AC9 and PIYA-103 AC9/AC10 (Stage 5
+silence and the result fields), and PIYA-117 AC9 (the ``bars`` table), plus the BUG-035/051/052 repros.
+
+Run with ``python -m pytest tests/test_meter_and_muting.py``. No GPU, model or soundfont: tokens are
+hand-written and MP3 rendering is stubbed. These tests show the parser and layout handle meter and
+multirest tokens WHEN THEY ARE EMITTED; they say nothing about whether the CRNN emits them on real
+images (BUG-035/051 real-image detection is unverified).
+"""
+
+import os
+import sys
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")  # BUG-013: never touch the GPU
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import stage3_transcription as s3  # noqa: E402
+import stage4_reconstruction as s4  # noqa: E402
+import stage5_synthesis as s5  # noqa: E402
+
+VOICES = ["Soprano", "Alto", "Tenor", "Bass"]
+Q, H, E8 = "note.quarter-L2", "note.half-L2", "note.eighth-L2"
+BAR = "barline-L1"
+CLEF = "clef.G-L2"
+M44, M34, M68 = ["digit.4-L4", "digit.4-L2"], ["digit.3-L4", "digit.4-L2"], ["digit.6-L4", "digit.8-L2"]
+WHOLE, QUARTER = 1920, 480
+BPM = 90
+
+
+def _events(tokens: list[str], voice: str = "Soprano", page: int = 1, sys_idx: int = 1) -> list[dict]:
+    return s3.infer_pitch(list(tokens), voice=voice, page_index=page, sys_idx=sys_idx)
+
+
+def _all_voices(tokens: list[str], sys_idx: int = 1, **per_voice: list[str]) -> dict[str, list[dict]]:
+    return {v: _events(per_voice.get(v, tokens), v, 1, sys_idx) for v in VOICES}
+
+
+def _merge(*systems: dict[str, list[dict]]) -> dict[str, list[dict]]:
+    return {v: [e for sysd in systems for e in sysd[v]] for v in VOICES}
+
+
+def _bar_layout(report: dict[str, Any]) -> list[tuple[int, str, str]]:
+    return [(b["ticks"], b["time_signature"], b["meter_source"])
+            for sysd in report["systems"] for b in sysd["bars"]]
+
+
+# ── Stage 3: meter and multirest tokens (PIYA-107 AC7-AC9) ─────────────────────
+
+def test_bug051_mid_strip_meter_change() -> None:
+    tokens = [CLEF, *M44, Q, Q, Q, Q, BAR, *M34, Q, Q, Q, BAR]
+    ev = _events(tokens)
+    assert [e["time_signature"] for e in ev] == ["4/4"] * 4 + ["3/4"] * 3
+    assert {e["time_signature_source"] for e in ev} == {"detected"}
+    assert not any(e.get("type") == "multirest" or "multirest" in str(e.get("symbol")) for e in ev)
+    _, report = s4.reconstruct_satb_with_report(_all_voices(tokens))
+    assert _bar_layout(report) == [(WHOLE, "4/4", "detected"), (3 * QUARTER, "3/4", "detected")]
+    assert not [f for f in report["flags"] if f["kind"].startswith("bar_")]
+
+
+def test_bug035_multirest_before_meter_keeps_its_bars() -> None:
+    ev = _events([CLEF, "digit.4-S5", "multirest-L3", BAR, Q])
+    rests = [e for e in ev if "multirest" in str(e.get("symbol"))]
+    assert len(rests) == 1 and rests[0]["multirest_bars"] == 4
+    assert rests[0]["duration_ticks"] == 4 * WHOLE
+    note = [e for e in ev if e["type"] == "note"][0]
+    assert note["tick_onset"] == 4 * WHOLE and note["time_signature_source"] == "default"
+    assert not ev[0].get("meter_flags")
+
+
+def test_multi_digit_multirest_count_is_decimal() -> None:
+    ev = _events([CLEF, *M44, "digit.1-S5", "digit.6-S5", "multirest-L3", BAR, Q])
+    assert [e["multirest_bars"] for e in ev if "multirest" in str(e.get("symbol"))] == [16]
+
+
+def test_bug052_multirest_in_three_four() -> None:
+    # Corpus order (count before the multirest): 4 bars of 3/4, not 5 bars of whole-note length.
+    tokens = [CLEF, *M34, "digit.4-S5", "multirest-L3", BAR, Q, Q, Q, BAR]
+    ev = _events(tokens)
+    rest = [e for e in ev if "multirest" in str(e.get("symbol"))][0]
+    assert rest["multirest_bars"] == 4 and rest["duration_ticks"] == 4 * 3 * QUARTER
+    satb, report = s4.reconstruct_satb_with_report(_all_voices(tokens))
+    assert report["systems"][0]["n_bars"] == 5
+    assert [b["ticks"] for b in report["systems"][0]["bars"]] == [3 * QUARTER] * 5
+    first_note = [e for e in satb["Soprano"] if e["type"] == "note"][0]
+    assert first_note["tick_onset"] == 4 * 3 * QUARTER and first_note["global_bar"] == 5
+
+
+def test_bug052_literal_repro_no_longer_counts_five_bars() -> None:
+    # The bug row's order (count AFTER the multirest) is not a count in the corpus: the digit is flagged
+    # as orphaned and the rest covers one bar, instead of silently becoming 5 bars.
+    tokens = [CLEF, *M34, "multirest-L3", "digit.4-S5", BAR]
+    ev = _events(tokens)
+    assert ev[0]["meter_flags"] == [s3.METER_FLAG_ORPHAN_COUNT]
+    _, report = s4.reconstruct_satb_with_report(_all_voices(tokens))
+    assert report["systems"][0]["n_bars"] == 1
+
+
+def test_orphan_s5_count_is_flagged_and_ignored() -> None:
+    ev = _events([CLEF, *M44, Q, Q, Q, Q, BAR, "digit.3-S5", Q, Q, Q, Q, BAR])
+    assert ev[0]["meter_flags"] == [s3.METER_FLAG_ORPHAN_COUNT]
+    assert {e["time_signature"] for e in ev} == {"4/4"}
+    assert [e["tick_onset"] for e in ev][4] == WHOLE
+
+
+def test_lone_l4_digit_is_flagged_not_a_meter() -> None:
+    ev = _events([CLEF, *M44, Q, Q, Q, Q, BAR, "digit.3-L4", Q, Q, Q, Q, BAR])
+    assert ev[0]["meter_flags"] == [s3.METER_FLAG_UNPAIRED_DIGIT]
+    assert {e["time_signature"] for e in ev} == {"4/4"}
+
+
+def test_courtesy_meter_at_strip_end_does_not_change_meter() -> None:
+    ev = _events([CLEF, *M44, Q, Q, Q, Q, BAR, *M34])
+    assert {e["time_signature"] for e in ev} == {"4/4"} and not ev[0].get("meter_flags")
+
+
+def test_default_meter_is_marked_default() -> None:
+    ev = _events([CLEF, Q, Q, Q, Q, BAR])
+    assert {(e["time_signature"], e["time_signature_source"]) for e in ev} == {("4/4", "default")}
+
+
+# ── Stage 4: per-bar meter, inheritance, disagreement (PIYA-108 AC6/AC7) ──────
+
+def test_meter_change_back_to_four_four() -> None:
+    # Mid-strip 3/4 -> 4/4, then a system with no meter of its own: the detected 4/4 counts (it is not
+    # mistaken for a default) and the next system inherits it.
+    sys1 = _all_voices([CLEF, *M34, Q, Q, Q, BAR, *M44, Q, Q, Q, Q, BAR], sys_idx=1)
+    sys2 = _all_voices([CLEF, Q, Q, Q, Q, BAR], sys_idx=2)
+    _, report = s4.reconstruct_satb_with_report(_merge(sys1, sys2))
+    assert _bar_layout(report) == [(3 * QUARTER, "3/4", "detected"), (WHOLE, "4/4", "detected"),
+                                   (WHOLE, "4/4", "inherited")]
+    assert report["total_ticks"] == 3 * QUARTER + 2 * WHOLE
+
+
+def test_defaulted_system_inherits_non_four_four() -> None:
+    sys1 = _all_voices([CLEF, *M34, Q, Q, Q, BAR], sys_idx=1)
+    sys2 = _all_voices([CLEF, Q, Q, Q, BAR], sys_idx=2)
+    _, report = s4.reconstruct_satb_with_report(_merge(sys1, sys2))
+    assert _bar_layout(report) == [(3 * QUARTER, "3/4", "detected"), (3 * QUARTER, "3/4", "inherited")]
+    assert not [f for f in report["flags"] if f["kind"].startswith("bar_")]
+
+
+def test_meter_disagreement_is_flagged() -> None:
+    agree = [CLEF, *M44, Q, Q, Q, Q, BAR, Q, Q, Q, Q, BAR]
+    odd = [CLEF, *M44, Q, Q, Q, Q, BAR, *M34, Q, Q, Q, BAR]
+    _, report = s4.reconstruct_satb_with_report(_all_voices(agree, Soprano=odd))
+    dis = [f for f in report["flags"] if f["kind"] == s4.FLAG_METER_DISAGREEMENT]
+    assert len(dis) == 1 and dis[0]["review_needed"] is True
+    assert _bar_layout(report)[1][1] == "4/4", "the 3-voice majority wins"
+
+
+# ── Stage 4 spans + Stage 5 silence (PIYA-108 AC8, PIYA-109 AC8, PIYA-103 AC9) ─
+
+PLAIN = [CLEF, *M44, Q, Q, Q, Q, BAR, Q, Q, Q, Q, BAR, Q, Q, Q, Q, BAR]
+OVERFULL = [CLEF, *M44, Q, Q, Q, Q, BAR, Q, Q, Q, Q, H, BAR, Q, Q, Q, Q, BAR]
+
+
+def test_lossy_clip_carries_a_bar_span() -> None:
+    _, report = s4.reconstruct_satb_with_report(_all_voices(PLAIN, Alto=OVERFULL))
+    clipped = [f for f in report["flags"] if f["kind"] == "bar_overflow_clipped"]
+    assert len(clipped) == 1
+    f = clipped[0]
+    assert f["muted"] is True and (f["start_tick"], f["end_tick"]) == (WHOLE, 2 * WHOLE)
+    assert f["voice"] == "Alto" and f["bar"] == 2
+
+
+def test_scaled_repair_is_not_muted() -> None:
+    tuplet = [CLEF, *M44, Q, Q, Q, Q, BAR, H, H, H, BAR, Q, Q, Q, Q, BAR]
+    _, report = s4.reconstruct_satb_with_report(_all_voices(PLAIN, Bass=tuplet))
+    assert [f["kind"] for f in report["flags"]] == ["suspected_tuplet"]
+    assert not any(f.get("muted") for f in report["flags"])
+
+
+def test_clipped_with_no_drops_is_not_muted(monkeypatch: pytest.MonkeyPatch) -> None:
+    def no_loss(m_events: list, first_local: int, bar_ticks: int, total: int) -> tuple:
+        return m_events, "bar_overflow_clipped", "nothing dropped", "clipped", 0
+    monkeypatch.setattr(s4, "_repair_overflow", no_loss)
+    _, report = s4.reconstruct_satb_with_report(_all_voices(PLAIN, Alto=OVERFULL))
+    clipped = [f for f in report["flags"] if f["kind"] == "bar_overflow_clipped"]
+    assert clipped and not any(f.get("muted") for f in clipped)
+
+
+def _note(onset: int, dur: int, pitch: int = 60) -> dict:
+    return {"type": "note", "pitch": pitch, "tick_onset": onset, "duration_ticks": dur}
+
+
+def test_muted_span_drops_and_cuts_notes() -> None:
+    events = [_note(0, 2 * WHOLE),           # sounds into the span: cut at its start
+              _note(WHOLE + QUARTER, QUARTER),   # starts inside: dropped
+              {"type": "rest", "pitch": None, "tick_onset": WHOLE + 2 * QUARTER, "duration_ticks": QUARTER},
+              _note(2 * WHOLE, QUARTER)]     # span end is exclusive: kept
+    out = s5.apply_muted_spans(events, [(WHOLE, 2 * WHOLE)])
+    assert [(e["type"], e["tick_onset"], e["duration_ticks"]) for e in out] == [
+        ("note", 0, WHOLE), ("rest", WHOLE + 2 * QUARTER, QUARTER), ("note", 2 * WHOLE, QUARTER)]
+    assert events[0]["duration_ticks"] == 2 * WHOLE, "input not mutated"
+
+
+def test_muted_measures_entries() -> None:
+    flags = [
+        {"kind": "bar_overflow_clipped", "voice": "Bass", "page_index": 1, "sys_idx": 2, "bar": 4,
+         "muted": True, "start_tick": 3 * WHOLE, "end_tick": 4 * WHOLE, "review_needed": True},
+        {"kind": "pickup_length_mismatch", "voice": "Alto", "page_index": 1, "sys_idx": 1, "bar": 0,
+         "muted": True, "start_tick": 0, "end_tick": QUARTER, "review_needed": True},
+        {"kind": "local_placement_overrun", "voice": "Soprano", "page_index": 2, "sys_idx": 1, "bar": None,
+         "muted": True, "start_tick": 3 * WHOLE, "end_tick": 4 * WHOLE, "review_needed": True},
+        {"kind": "bar_overflow_run_scaled", "voice": "Tenor", "page_index": 1, "sys_idx": 1, "bar": 1,
+         "review_needed": True},
+        {"kind": "bar_overflow_clipped", "voice": "Tenor", "page_index": 1, "sys_idx": 1, "bar": 2,
+         "muted": True, "start_tick": WHOLE, "end_tick": 2 * WHOLE, "review_needed": True},
+    ]
+    muted = s5.build_muted_measures(flags, BPM, failed_voices=["tenor"])
+    assert muted == [
+        {"voice": "alto", "bar": 0, "pageIndex": 0, "systemIndex": 0, "startMs": 0, "endMs": 667,
+         "reason": "pickup_length_mismatch"},
+        {"voice": "soprano", "bar": None, "pageIndex": 1, "systemIndex": 0, "startMs": 8000, "endMs": 10667,
+         "reason": "local_placement_overrun"},
+        {"voice": "bass", "bar": 4, "pageIndex": 0, "systemIndex": 1, "startMs": 8000, "endMs": 10667,
+         "reason": "bar_overflow_clipped"},
+    ]
+    review, _ = s5.build_review({}, flags, ["tenor"])
+    codes = {(i["code"], i["voice"], i["bar"]) for i in review["items"]}
+    assert all((m["reason"], m["voice"], m["bar"]) in codes for m in muted)
+    assert s5.muted_spans_by_voice(flags) == {"Bass": [(3 * WHOLE, 4 * WHOLE)], "Alto": [(0, QUARTER)],
+                                              "Soprano": [(3 * WHOLE, 4 * WHOLE)],
+                                              "Tenor": [(WHOLE, 2 * WHOLE)]}
+
+
+# ── PIYA-117 AC9 bars table ────────────────────────────────────────────────────
+
+def test_bars_table_matches_piya117_example() -> None:
+    tokens = [CLEF, *M34, Q, BAR, Q, Q, Q, BAR, Q, Q, Q, BAR, *M68, E8, E8, E8, E8, E8, E8, BAR]
+    _, report = s4.reconstruct_satb_with_report(_all_voices(tokens))
+    meter = {"meterSource": "detected", "groups": None}
+    assert s5.build_bars_table(report, BPM) == [
+        {"bar": 0, "startMs": 0, "durMs": 667, "startTick": 0, "durTicks": 480, "numerator": 3,
+         "denominator": 4, "pickup": True, **meter},
+        {"bar": 1, "startMs": 667, "durMs": 2000, "startTick": 480, "durTicks": 1440, "numerator": 3,
+         "denominator": 4, "pickup": False, **meter},
+        {"bar": 2, "startMs": 2667, "durMs": 2000, "startTick": 1920, "durTicks": 1440, "numerator": 3,
+         "denominator": 4, "pickup": False, **meter},
+        {"bar": 3, "startMs": 4667, "durMs": 2000, "startTick": 3360, "durTicks": 1440, "numerator": 6,
+         "denominator": 8, "pickup": False, **meter},
+    ]
+
+
+def test_bars_table_tiles_and_expands_multirest() -> None:
+    sys1 = _all_voices([CLEF, *M34, "digit.3-S5", "multirest-L3", BAR, Q, Q, Q, BAR], sys_idx=1)
+    sys2 = _all_voices([CLEF, Q, Q, Q, BAR], sys_idx=2)
+    _, report = s4.reconstruct_satb_with_report(_merge(sys1, sys2))
+    table = s5.build_bars_table(report, BPM)
+    assert [b["bar"] for b in table] == [1, 2, 3, 4, 5]
+    assert [b["meterSource"] for b in table] == ["detected"] * 4 + ["inherited"]
+    for prev, cur in zip(table, table[1:]):
+        assert cur["startTick"] == prev["startTick"] + prev["durTicks"]
+        assert cur["startMs"] == prev["startMs"] + prev["durMs"]
+    assert table[0]["startTick"] == 0 and not any(b["pickup"] for b in table)
+
+
+# ── Failed voices (PIYA-108 AC4/AC5, PIYA-109 AC9, PIYA-103 AC10) ──────────────
+
+def _stub_render(monkeypatch: pytest.MonkeyPatch, fail: set[str] = frozenset()) -> None:
+    def render(midi_path: Path, wav_path: Path, mp3_path: Path, soundfont_path: str) -> bool:
+        if Path(mp3_path).stem.capitalize() in fail:
+            return False
+        Path(mp3_path).write_bytes(b"ID3")
+        return True
+    monkeypatch.setattr(s5, "_render_to_mp3", render)
+
+
+def _run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, voice_events: dict) -> dict[str, Any]:
+    monkeypatch.setattr(s3, "run_stages_1_to_3", lambda *a, **k: voice_events)
+    return s5.run_full_pipeline_with_report(output_dir=str(tmp_path), clef_key_weights=None, bpm=BPM)
+
+
+def test_one_empty_voice_completes_with_failed_voices(monkeypatch: pytest.MonkeyPatch,
+                                                      tmp_path: Path) -> None:
+    _stub_render(monkeypatch)
+    ve = _all_voices(PLAIN, Alto=OVERFULL)
+    ve["Tenor"] = []
+    with pytest.warns(RuntimeWarning, match="Tenor"):
+        result = _run(monkeypatch, tmp_path, ve)
+    assert result["failedVoices"] == ["tenor"]
+    assert set(result["audio"]) == {"Soprano", "Alto", "Bass"}
+    assert "voice_failed" in result["review"]["reasons"]
+    assert {"code": "voice_failed", "voice": "tenor", "pageIndex": None, "systemIndex": None,
+            "bar": None} in result["review"]["items"]
+    assert [m["voice"] for m in result["mutedMeasures"]] == ["alto"]
+    assert result["review"]["reviewNeeded"] is True
+    assert [b["bar"] for b in result["bars"]] == [1, 2, 3]
+
+
+def test_render_failure_is_a_failed_voice(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _stub_render(monkeypatch, fail={"Alto"})
+    result = _run(monkeypatch, tmp_path, _all_voices(PLAIN, Alto=OVERFULL))
+    assert result["failedVoices"] == ["alto"] and "Alto" not in result["audio"]
+    assert result["mutedMeasures"] == [], "a failed voice has no mutedMeasures entries"
+
+
+def test_nothing_failed_or_muted_gives_empty_lists(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _stub_render(monkeypatch)
+    result = _run(monkeypatch, tmp_path, _all_voices(PLAIN))
+    assert result["failedVoices"] == [] and result["mutedMeasures"] == []
+    assert len(result["audio"]) == 4
+
+
+def test_all_four_empty_raises() -> None:
+    with pytest.raises(ValueError):
+        s4.reconstruct_satb_with_report({v: [] for v in VOICES})
+
+
+def test_all_four_render_failures_raise(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _stub_render(monkeypatch, fail=set(VOICES))
+    with pytest.raises(ValueError, match="incomplete_voice_sequence"):
+        _run(monkeypatch, tmp_path, _all_voices(PLAIN))
+
+
+def test_muted_span_is_silent_in_the_midi(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    rendered: dict[str, list] = {}
+    real_build = s5.build_voice_midi
+
+    def spy(events: list, bpm: int, total_ticks: int):  # noqa: ANN202 - midiutil type
+        rendered[events[0]["voice"]] = events
+        return real_build(events, bpm, total_ticks)
+    monkeypatch.setattr(s5, "build_voice_midi", spy)
+    _stub_render(monkeypatch)
+    _run(monkeypatch, tmp_path, _all_voices(PLAIN, Alto=OVERFULL))
+    alto_notes = [e for e in rendered["Alto"] if e["type"] == "note"]
+    assert not [e for e in alto_notes if WHOLE <= e["tick_onset"] < 2 * WHOLE]
+    assert all(e["tick_onset"] + e["duration_ticks"] <= WHOLE or e["tick_onset"] >= 2 * WHOLE
+               for e in alto_notes)
+    sop = [e for e in rendered["Soprano"] if e["type"] == "note"]
+    assert len([e for e in sop if WHOLE <= e["tick_onset"] < 2 * WHOLE]) == 4, "other voices unaffected"
