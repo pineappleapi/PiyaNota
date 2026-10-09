@@ -221,9 +221,10 @@ def test_muted_measures_entries() -> None:
         {"voice": "bass", "bar": 4, "pageIndex": 0, "systemIndex": 1, "startMs": 8000, "endMs": 10667,
          "reason": "bar_overflow_clipped"},
     ]
-    review, _ = s5.build_review({}, flags, ["tenor"])
-    codes = {(i["code"], i["voice"], i["bar"]) for i in review["items"]}
-    assert all((m["reason"], m["voice"], m["bar"]) in codes for m in muted)
+    review, full = s5.build_review({}, flags, ["tenor"])
+    codes = {(i["code"], i["voice"], i["bar"], i["pageIndex"], i["systemIndex"]) for i in review["items"]}
+    assert all((m["reason"], m["voice"], m["bar"], m["pageIndex"], m["systemIndex"]) in codes for m in muted)
+    assert full == review["items"], "the stored review_detail uses the same 0-based indices"
     assert s5.muted_spans_by_voice(flags) == {"Bass": [(3 * WHOLE, 4 * WHOLE)], "Alto": [(0, QUARTER)],
                                               "Soprano": [(3 * WHOLE, 4 * WHOLE)],
                                               "Tenor": [(WHOLE, 2 * WHOLE)]}
@@ -308,14 +309,36 @@ def test_nothing_failed_or_muted_gives_empty_lists(monkeypatch: pytest.MonkeyPat
 
 
 def test_all_four_empty_raises() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="^incomplete_voice_sequence: ") as err:
         s4.reconstruct_satb_with_report({v: [] for v in VOICES})
+    assert isinstance(err.value, s4.PipelineFailure)
+    assert err.value.failure_reason == s4.FAILURE_INCOMPLETE_VOICE_SEQUENCE == "incomplete_voice_sequence"
 
 
-def test_all_four_render_failures_raise(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_all_four_empty_through_the_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _stub_render(monkeypatch)
+    with pytest.raises(s4.PipelineFailure) as err:
+        _run(monkeypatch, tmp_path, {v: [] for v in VOICES})
+    assert err.value.failure_reason == "incomplete_voice_sequence"
+
+
+def test_all_four_render_failures_are_synthesis_failed(monkeypatch: pytest.MonkeyPatch,
+                                                      tmp_path: Path) -> None:
+    # Every voice had events, so this is a server-side rendering fault, not a capture problem.
     _stub_render(monkeypatch, fail=set(VOICES))
-    with pytest.raises(ValueError, match="incomplete_voice_sequence"):
+    with pytest.raises(s4.PipelineFailure) as err:
         _run(monkeypatch, tmp_path, _all_voices(PLAIN))
+    assert err.value.failure_reason == s5.FAILURE_SYNTHESIS == "synthesis_failed"
+
+
+def test_empty_plus_render_failures_are_synthesis_failed(monkeypatch: pytest.MonkeyPatch,
+                                                        tmp_path: Path) -> None:
+    _stub_render(monkeypatch, fail={"Soprano", "Alto", "Tenor"})
+    ve = _all_voices(PLAIN)
+    ve["Bass"] = []
+    with pytest.warns(RuntimeWarning), pytest.raises(s4.PipelineFailure) as err:
+        _run(monkeypatch, tmp_path, ve)
+    assert err.value.failure_reason == "synthesis_failed"
 
 
 def test_muted_span_is_silent_in_the_midi(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -334,3 +357,194 @@ def test_muted_span_is_silent_in_the_midi(monkeypatch: pytest.MonkeyPatch, tmp_p
                for e in alto_notes)
     sop = [e for e in rendered["Soprano"] if e["type"] == "note"]
     assert len([e for e in sop if WHOLE <= e["tick_onset"] < 2 * WHOLE]) == 4, "other voices unaffected"
+
+
+# ── Review round 2026-10-09 ────────────────────────────────────────────────────
+
+def _notes(out: list[dict]) -> list[tuple[int, int]]:
+    return [(e["tick_onset"], e["duration_ticks"]) for e in out if e["type"] == "note"]
+
+
+def test_tie_out_of_a_muted_bar_is_restruck_in_the_clean_bar() -> None:
+    # A tie-merged note starting at beat 3 of muted bar 2 and held into bar 3 still sounds in bar 3.
+    out = s5.apply_muted_spans([_note(WHOLE + 2 * QUARTER, WHOLE)], [(WHOLE, 2 * WHOLE)])
+    assert _notes(out) == [(2 * WHOLE, 2 * QUARTER)]
+    assert out[0]["restruck_after_mute"] is True
+
+
+def test_note_across_a_whole_muted_bar_plays_both_ends() -> None:
+    out = s5.apply_muted_spans([_note(2 * QUARTER, 2 * WHOLE)], [(WHOLE, 2 * WHOLE)])
+    assert _notes(out) == [(2 * QUARTER, WHOLE - 2 * QUARTER), (2 * WHOLE, 2 * QUARTER)]
+    assert "restruck_after_mute" not in out[0] and out[1]["restruck_after_mute"] is True
+
+
+def test_restruck_remainder_is_clipped_against_later_spans() -> None:
+    spans = [(3 * WHOLE, 4 * WHOLE), (WHOLE, 2 * WHOLE)]          # unsorted on purpose
+    out = s5.apply_muted_spans([_note(WHOLE + QUARTER, 3 * WHOLE)], spans)
+    assert _notes(out) == [(2 * WHOLE, WHOLE), (4 * WHOLE, QUARTER)]
+
+
+def test_note_fully_inside_a_span_is_still_dropped() -> None:
+    out = s5.apply_muted_spans([_note(WHOLE, QUARTER), _note(WHOLE + QUARTER, 3 * QUARTER)],
+                               [(WHOLE, 2 * WHOLE)])
+    assert _notes(out) == []
+
+
+def test_single_voice_meter_change_is_not_applied() -> None:
+    # Continuation system: only Soprano reads 3/4 (a misread); the bars really hold four quarters.
+    sys1 = _all_voices([CLEF, *M44, Q, Q, Q, Q, BAR, Q, Q, Q, Q, BAR], sys_idx=1)
+    sys2 = _all_voices([CLEF, Q, Q, Q, Q, BAR, Q, Q, Q, Q, BAR], sys_idx=2,
+                       Soprano=[CLEF, *M34, Q, Q, Q, Q, BAR, Q, Q, Q, Q, BAR])
+    satb, report = s4.reconstruct_satb_with_report(_merge(sys1, sys2))
+    assert [ts for _, ts, _ in _bar_layout(report)] == ["4/4"] * 4
+    single = [f for f in report["flags"] if f["kind"] == s4.FLAG_METER_CHANGE_SINGLE]
+    assert len(single) == 1 and single[0]["review_needed"] is True
+    assert (single[0]["bar"], single[0]["bar_end"], single[0]["sys_idx"]) == (3, 4, 2)
+    assert [f["kind"] for f in report["flags"]] == [s4.FLAG_METER_CHANGE_SINGLE], "no voice repaired"
+    assert not any(f.get("muted") for f in report["flags"])
+    assert all(len([e for e in satb[v] if e["type"] == "note"]) == 16 for v in VOICES)
+
+
+def test_meter_change_by_all_voices_is_applied() -> None:
+    sys1 = _all_voices([CLEF, *M44, Q, Q, Q, Q, BAR], sys_idx=1)
+    sys2 = _all_voices([CLEF, *M34, Q, Q, Q, BAR], sys_idx=2)
+    _, report = s4.reconstruct_satb_with_report(_merge(sys1, sys2))
+    assert [ts for _, ts, _ in _bar_layout(report)] == ["4/4", "3/4"]
+    assert not [f for f in report["flags"] if f["kind"] == s4.FLAG_METER_CHANGE_SINGLE]
+
+
+def test_meter_disagreement_is_one_item_per_run() -> None:
+    agree = [CLEF, *M44] + [Q, Q, Q, Q, BAR] * 4
+    odd = [CLEF, *M44, Q, Q, Q, Q, BAR, *M34, Q, Q, Q, BAR, Q, Q, Q, BAR, Q, Q, Q, BAR]
+    _, report = s4.reconstruct_satb_with_report(_all_voices(agree, Soprano=odd))
+    dis = [f for f in report["flags"] if f["kind"] == s4.FLAG_METER_DISAGREEMENT]
+    assert len(dis) == 1
+    assert (dis[0]["bar"], dis[0]["bar_end"], dis[0]["system_bar_rank"]) == (2, 4, 1)
+
+
+def test_local_mode_mutes_from_the_first_trimmed_note() -> None:
+    # Alto lost a barline (2 bars vs 3), so it is placed by local ticks; its last half note crosses the
+    # system end (trimmed) and the next one starts after it (dropped). Real code path, no monkeypatch.
+    alto = [CLEF, *M44, Q, Q, Q, Q, Q, Q, Q, Q, BAR, Q, Q, Q, H, H, BAR]
+    _, report = s4.reconstruct_satb_with_report(_all_voices(PLAIN, Alto=alto))
+    over = [f for f in report["flags"] if f["kind"] == s4.FLAG_LOCAL_OVERRUN]
+    assert len(over) == 1 and over[0]["muted"] is True
+    assert (over[0]["start_tick"], over[0]["end_tick"]) == (11 * QUARTER, 3 * WHOLE)
+    muted = s5.build_muted_measures(report["flags"], BPM, [])
+    assert [(m["voice"], m["reason"], m["bar"]) for m in muted] == [("alto", "local_placement_overrun", None)]
+
+
+def test_local_mode_shortened_rest_is_never_muted() -> None:
+    alto = [CLEF, *M44, Q, Q, Q, Q, Q, Q, Q, Q, BAR, Q, Q, Q, "rest.half-L3", BAR]
+    _, report = s4.reconstruct_satb_with_report(_all_voices(PLAIN, Alto=alto))
+    assert not any(f.get("muted") for f in report["flags"])
+    assert s5.build_muted_measures(report["flags"], BPM, []) == []
+
+
+def test_trimmed_head_to_pickup_carries_a_span() -> None:
+    # Real code path: three voices agree on a quarter pickup, Alto reads two quarters.
+    _, report = s4.reconstruct_satb_with_report(
+        _all_voices([CLEF, *M44, Q, BAR, Q, Q, Q, Q, BAR], Alto=[CLEF, *M44, Q, Q, BAR, Q, Q, Q, Q, BAR]))
+    trimmed = [f for f in report["flags"] if f.get("action") == s4.ACTION_TRIMMED_PICKUP]
+    assert len(trimmed) == 1 and trimmed[0]["voice"] == "Alto"
+    assert trimmed[0]["muted"] is True and (trimmed[0]["start_tick"], trimmed[0]["end_tick"]) == (0, QUARTER)
+    muted = s5.build_muted_measures(report["flags"], BPM, [])
+    assert [(m["voice"], m["bar"], m["startMs"], m["endMs"]) for m in muted] == [("alto", 0, 0, 667)]
+
+
+def test_real_clip_with_no_drops_is_not_muted() -> None:
+    # H Q H overflows by a quarter with no run to rescale: the last half is trimmed, nothing dropped.
+    alto = [CLEF, *M44, Q, Q, Q, Q, BAR, H, Q, H, BAR, Q, Q, Q, Q, BAR]
+    _, report = s4.reconstruct_satb_with_report(_all_voices(PLAIN, Alto=alto))
+    clipped = [f for f in report["flags"] if f["kind"] == "bar_overflow_clipped"]
+    assert len(clipped) == 1 and not clipped[0].get("muted")
+    assert s5.build_muted_measures(report["flags"], BPM, []) == []
+
+
+def test_mid_measure_meter_is_flagged_not_applied() -> None:
+    for meter in (M34, ["metersign.C/-L3"]):
+        events = _events([CLEF, *M44, Q, Q, *meter, Q, Q, BAR, Q, Q, Q, Q, BAR])
+        assert {e["time_signature"] for e in events} == {"4/4"}
+        assert all(s3.METER_FLAG_MID_MEASURE in e["meter_flags"] for e in events)
+
+
+def test_meter_right_after_a_barline_is_applied() -> None:
+    events = _events([CLEF, *M44, Q, Q, Q, Q, BAR, *M34, Q, Q, Q, BAR])
+    assert [e["time_signature"] for e in events] == ["4/4"] * 4 + ["3/4"] * 3
+    assert not any(e.get("meter_flags") for e in events)
+
+
+def test_pickup_row_uses_the_opening_meter() -> None:
+    _, report = s4.reconstruct_satb_with_report(_all_voices([CLEF, *M34, Q, BAR, *M44, Q, Q, Q, Q, BAR]))
+    table = s5.build_bars_table(report, BPM)
+    assert (table[0]["pickup"], table[0]["numerator"], table[0]["denominator"]) == (True, 3, 4)
+    assert (table[1]["bar"], table[1]["numerator"], table[1]["denominator"]) == (1, 4, 4)
+
+
+def test_whole_rest_pickup_is_the_pickup_length() -> None:
+    # Bass is silent through the anacrusis, engraved as a whole rest in the pickup bar.
+    sat = [CLEF, *M44, Q, BAR, Q, Q, Q, Q, BAR, Q, Q, Q, BAR]
+    bass = [CLEF, *M44, "rest.whole-L4", BAR, Q, Q, Q, Q, BAR, Q, Q, Q, BAR]
+    satb, report = s4.reconstruct_satb_with_report(_all_voices(sat, Bass=bass))
+    assert report["pickup_ticks"] == QUARTER
+    assert [(e["type"], e["tick_onset"], e["duration_ticks"]) for e in satb["Bass"][:2]] == [
+        ("rest", 0, QUARTER), ("note", QUARTER, QUARTER)]
+    bass_kinds = {f["kind"] for f in report["flags"] if f.get("voice") == "Bass"}
+    assert not bass_kinds & {"pickup_length_mismatch", "bar_count_mismatch", "local_placement_overrun"}
+    assert not any(f.get("muted") for f in report["flags"])
+
+
+def test_review_items_put_failed_then_muted_first() -> None:
+    other = {"kind": "bar_underfull", "voice": "Soprano", "page_index": 1, "sys_idx": 1, "bar": 1,
+             "review_needed": True}
+    muted = [{"kind": "bar_overflow_clipped", "voice": v, "page_index": 1, "sys_idx": 1, "bar": 2,
+              "muted": True, "start_tick": WHOLE, "end_tick": 2 * WHOLE, "review_needed": True}
+             for v in ("Bass", "Alto")]
+    many_others = [dict(other, bar=b) for b in range(1, s5.REVIEW_ITEMS_CAP + 5)]
+    review, full = s5.build_review({}, many_others + muted, ["tenor"])
+    assert [i["code"] for i in review["items"][:3]] == ["voice_failed", "bar_overflow_clipped",
+                                                        "bar_overflow_clipped"]
+    assert [i["voice"] for i in review["items"][1:3]] == ["alto", "bass"], "mutedMeasures order"
+    assert review["truncated"] is True and len(review["items"]) == s5.REVIEW_ITEMS_CAP
+    assert len(full) == len(many_others) + 3
+
+
+def test_bars_table_short_final_bar() -> None:
+    _, report = s4.reconstruct_satb_with_report(_all_voices([CLEF, *M44, Q, Q, Q, Q, BAR, Q, Q, BAR]))
+    table = s5.build_bars_table(report, BPM)
+    assert [(b["bar"], b["startTick"], b["durTicks"]) for b in table] == [(1, 0, WHOLE), (2, WHOLE, 2 * QUARTER)]
+    assert table[-1]["durMs"] == 1333 and (table[-1]["numerator"], table[-1]["denominator"]) == (4, 4)
+
+
+def test_bars_table_refuses_drift() -> None:
+    sys1 = _all_voices([CLEF, *M44, Q, Q, Q, Q, BAR], sys_idx=1)
+    sys2 = _all_voices([CLEF, Q, Q, Q, Q, BAR], sys_idx=2)
+    _, report = s4.reconstruct_satb_with_report(_merge(sys1, sys2))
+    report["systems"][1]["start_tick"] += QUARTER
+    with pytest.raises(RuntimeError, match="drift"):
+        s5.build_bars_table(report, BPM)
+
+
+def test_meter_flags_reach_review_items(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _stub_render(monkeypatch)
+    orphan = [CLEF, *M44, "digit.3-S5", Q, Q, Q, Q, BAR, Q, Q, Q, Q, BAR, Q, Q, Q, Q, BAR]
+    result = _run(monkeypatch, tmp_path, _all_voices(PLAIN, sys_idx=2, Tenor=orphan))
+    assert {"code": "multirest_count_orphaned", "voice": "tenor", "pageIndex": 0, "systemIndex": 1,
+            "bar": None} in result["review"]["items"]
+
+
+def test_eventless_strip_meter_flags_reach_review(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    flags_out: list[str] = []
+    assert s3.infer_pitch([CLEF, "digit.3-L4"], voice="Alto", page_index=1, sys_idx=1,
+                          meter_flags_out=flags_out) == []
+    assert flags_out == [s3.METER_FLAG_UNPAIRED_DIGIT]
+    _stub_render(monkeypatch)
+
+    def stages(*a: Any, **k: Any) -> dict:
+        k["strip_flags_out"].append({"voice": "Alto", "page_index": 2, "sys_idx": 3,
+                                     "meter_flags": flags_out})
+        return _all_voices(PLAIN)
+    monkeypatch.setattr(s3, "run_stages_1_to_3", stages)
+    result = s5.run_full_pipeline_with_report(output_dir=str(tmp_path), clef_key_weights=None, bpm=BPM)
+    assert {"code": "meter_digit_unpaired", "voice": "alto", "pageIndex": 1, "systemIndex": 2,
+            "bar": None} in result["review"]["items"]

@@ -22,7 +22,8 @@ from midiutil import MIDIFile
 import stage3_clefkey
 
 from stage3_transcription import CLEF_KEY_DISABLED_FLAG, DEFAULT_TIME_SIGNATURE
-from stage4_reconstruction import TICKS_PER_QUARTER
+from stage4_reconstruction import (FAILURE_INCOMPLETE_VOICE_SEQUENCE, METER_DEFAULT, METER_UNKNOWN,
+                                   TICKS_PER_QUARTER, PipelineFailure)
 
 # FluidSynth output sample rate (midi2audio's former default).
 RENDER_SAMPLE_RATE = 44100
@@ -34,6 +35,9 @@ MS_PER_MINUTE = 60_000
 ROUND_HALF_UP = 0.5         # ms values round half up: int(x + 0.5), same rule as the timing file
 # PIYA-103 AC10: the review code for a voice in failedVoices.
 VOICE_FAILED_CODE = "voice_failed"
+# PIYA-109 AC9: every voice failed and at least one had events, so rendering (server side) broke, not the
+# capture; no recapture prompt. Stage 4's FAILURE_INCOMPLETE_VOICE_SEQUENCE covers "every voice empty".
+FAILURE_SYNTHESIS = "synthesis_failed"
 # Client-facing review items are capped; the full list goes to the job record (backend-lead review
 # 2026-09-29: Stage 4 bar flags are unbounded, strips are at most 20 pages x 16 staves).
 REVIEW_ITEMS_CAP = 200
@@ -356,27 +360,66 @@ def muted_spans_by_voice(stage4_flags: list[dict[str, Any]]) -> dict[str, list[t
     return spans
 
 
+def _merge_spans(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    merged: list[list[int]] = []
+    for start, end in sorted(spans):
+        if end <= start:
+            continue
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return [(start, end) for start, end in merged]
+
+
 def apply_muted_spans(events: list[dict[str, Any]],
                       spans: list[tuple[int, int]]) -> list[dict[str, Any]]:
     """Copies of ``events`` with every span silenced (PIYA-109 AC8).
 
-    A note starting inside [start, end) is dropped; a note starting earlier
-    that sounds into the span is cut at ``start``. Rests and other events are
-    kept so the timeline (and the timing file built from it) is unchanged.
+    Each note is split at the span edges: the part before a span plays, the
+    part inside is dropped, and the part after is struck again at the span
+    end. Stage 4 merges ties before this runs, so one event can be a tie chain
+    from a damaged bar into a clean one (or across a whole damaged bar); only
+    the damaged bar may go silent (senior-reviewer / choral-conductor
+    2026-10-09). A note wholly inside a span is dropped. Rests and other
+    events are kept so the timeline (and the timing file built from it) is
+    unchanged. Output is ordered by onset.
     """
+    merged = _merge_spans(spans)
     out: list[dict[str, Any]] = []
     for e in events:
-        if e["type"] != "note" or not spans:
+        if e["type"] != "note" or not merged:
             out.append(e)
             continue
         onset, end = e["tick_onset"], e["tick_onset"] + e["duration_ticks"]
-        if any(s <= onset < t for s, t in spans):
+        pieces: list[tuple[int, int]] = []
+        cur = onset
+        for start, stop in merged:
+            if stop <= cur or start >= end:
+                continue
+            if start > cur:
+                pieces.append((cur, start))
+            cur = stop
+            if cur >= end:
+                break
+        if cur < end:
+            pieces.append((cur, end))
+        if pieces == [(onset, end)]:
+            out.append(e)
             continue
-        cut = min((s for s, _ in spans if onset < s < end), default=None)
-        if cut is not None:
-            e = {**e, "duration_ticks": cut - onset}
-        out.append(e)
+        for piece_start, piece_end in pieces:
+            piece = {**e, "tick_onset": piece_start, "duration_ticks": piece_end - piece_start}
+            if piece_start != onset:
+                piece["restruck_after_mute"] = True
+            out.append(piece)
+    out.sort(key=lambda ev: ev["tick_onset"])
     return out
+
+
+def _is_muted_entry(flag: dict[str, Any], failed_lower: set[str]) -> bool:
+    """True if a Stage 4 flag becomes a ``mutedMeasures`` entry (a failed voice has none, AC10)."""
+    return (bool(flag.get("muted")) and flag.get("voice") in VOICE_TRACK
+            and flag["voice"].lower() not in failed_lower)
 
 
 def _zero_based(index: Optional[int]) -> Optional[int]:
@@ -393,7 +436,7 @@ def build_muted_measures(stage4_flags: list[dict[str, Any]], bpm: int,
     failed = {v.lower() for v in failed_voices}
     entries = []
     for f in stage4_flags:
-        if not f.get("muted") or f.get("voice") not in VOICE_TRACK or f["voice"].lower() in failed:
+        if not _is_muted_entry(f, failed):
             continue
         entries.append({
             "voice": f["voice"].lower(), "bar": f.get("bar"),
@@ -418,8 +461,13 @@ def build_bars_table(report: dict[str, Any], bpm: int) -> list[dict[str, Any]]:
 
     Built from the layout, not from events, so a measure where a voice rests,
     failed or was muted still has its entry. ``durMs`` is the next entry's
-    ``startMs`` minus this one's, so rounding never opens a gap; the last runs
-    to its own end.
+    ``startMs`` minus this one's, so rounding never opens a gap. The table
+    ends at the last layout bar; the audio can run slightly past it (a note
+    held over the final barline).
+
+    Raises:
+        RuntimeError: the tiled startTicks disagree with a system's
+            ``start_tick`` (the table and the audio would drift apart).
     """
     rows: list[tuple[int, int, int, dict[str, Any]]] = []      # (bar, startTick, durTicks, meter bar)
     systems = sorted(report.get("systems", []), key=lambda s: s["start_tick"])
@@ -427,20 +475,26 @@ def build_bars_table(report: dict[str, Any], bpm: int) -> list[dict[str, Any]]:
     pickup = int(report.get("pickup_ticks") or 0)
     tick = 0
     if pickup > 0:
-        # The pickup carries bar 1's meter, so the client places its clicks as the end of a full bar.
-        first = all_bars[0][1] if all_bars else {"time_signature": DEFAULT_TIME_SIGNATURE,
-                                                 "meter_source": "default"}
+        # The pickup carries the meter it was engraved under (the opening meter, which Stage 4 measured
+        # it against), so the client places its clicks as the end of a full bar.
+        opening = systems[0].get("opening_meter") if systems else None
+        first = opening or (all_bars[0][1] if all_bars else {"time_signature": DEFAULT_TIME_SIGNATURE,
+                                                             "meter_source": METER_DEFAULT})
         rows.append((0, 0, pickup, first))
         tick = pickup
+    starts = {sys["first_bar"]: sys["start_tick"] for sys in systems}
     for bar_no, bar in all_bars:
+        if bar_no in starts and starts[bar_no] != tick:
+            raise RuntimeError(f"bars table drift: bar {bar_no} tiles to tick {tick}, "
+                               f"Stage 4 starts its system at {starts[bar_no]}")
         dur = int(bar.get("actual_ticks", bar["ticks"]))
         rows.append((bar_no, tick, dur, bar))
         tick += dur
 
     table = []
     for i, (bar_no, start, dur, bar) in enumerate(rows):
-        source = bar.get("meter_source", "default")
-        num, den = (None, None) if source == "unknown" else _meter_parts(bar["time_signature"])
+        source = bar.get("meter_source", METER_DEFAULT)
+        num, den = (None, None) if source == METER_UNKNOWN else _meter_parts(bar["time_signature"])
         start_ms = tick_to_ms(start, bpm)
         end_ms = tick_to_ms(rows[i + 1][1], bpm) if i + 1 < len(rows) else tick_to_ms(start + dur, bpm)
         table.append({"bar": bar_no, "startMs": start_ms, "durMs": end_ms - start_ms,
@@ -451,7 +505,8 @@ def build_bars_table(report: dict[str, Any], bpm: int) -> list[dict[str, Any]]:
 
 # ── Review summary (exposed by the result API, PIYA-103 AC6) ──────────────────
 
-def build_review(stage3_events: dict, stage4_flags: list, failed_voices: Optional[list[str]] = None
+def build_review(stage3_events: dict, stage4_flags: list, failed_voices: Optional[list[str]] = None,
+                 eventless_strip_flags: Optional[list[dict[str, Any]]] = None,
                  ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Maps Stage 3 strip flags and Stage 4 reconstruction flags onto the API's fixed review shape.
 
@@ -459,32 +514,58 @@ def build_review(stage3_events: dict, stage4_flags: list, failed_voices: Optiona
     contract. ``reviewNeeded: False`` only means nothing was flagged, not that the transcription is right.
     A strip's codes become items only when that strip's own flags carry ``review_needed``: informational
     codes (e.g. ``plain_treble_on_low_voice_assumed_8vb``) must not make a clean score need review once
-    the classifier passes its gate. Stage 4 bar items come first so the cap never hides them behind
-    per-strip items (a long score has up to 320 strips). Failed voices come before both: losing a
-    whole part matters more than any one bar (PIYA-103 AC10). Muted repairs already carry
-    ``review_needed``, so each ``mutedMeasures`` entry has an item with its reason as code (AC9).
-    Stage 3 ``meter_flags`` (digits the parser could not place) always need review.
+    the classifier passes its gate. Stage 3 ``meter_flags`` (digits the parser could not place) always
+    need review.
+
+    Item order decides what the REVIEW_ITEMS_CAP can hide (a long score has up to 320 strips and
+    unbounded bar flags): failed voices first (a whole part is gone, PIYA-103 AC10), then muted
+    measures in ``mutedMeasures`` order (so every one has its item unless ``truncated``, AC9), then
+    other Stage 4 bar flags, then per-strip flags.
+
+    Index bases (PIYA-117 "Index bases"): snake_case ``page_index`` / ``sys_idx`` are the pipeline's
+    1-based values; every camelCase ``pageIndex`` / ``systemIndex`` written here is 0-based, converted
+    where the name changes. That includes ``full_items``, which goes to the job record; the backend
+    must not convert again.
 
     Args:
         stage3_events: {voice: [event, ...]} from Stage 3 (events carry ``clef_key_flags`` and, with
             ClefKeyNet, ``clef_key_strip_flags``).
         stage4_flags: ``reconstruct_satb_with_report``'s ``flags``; only those with ``review_needed`` count.
         failed_voices: voices (any case) listed in ``failedVoices``.
+        eventless_strip_flags: Stage 3's ``strip_flags_out``: meter flags of strips that produced no
+            events, which therefore cannot ride on an event.
 
     Returns:
         (review, full_items): ``review`` is the client object with at most REVIEW_ITEMS_CAP items;
         ``full_items`` is the uncapped list for the job record.
     """
     job_reasons: set[str] = set()
+    failed = {v.lower() for v in failed_voices or []}
+
+    def stage4_item(f: dict[str, Any]) -> dict[str, Any]:
+        return {"code": f["kind"], "voice": f["voice"].lower() if f.get("voice") else None,
+                "pageIndex": _zero_based(f.get("page_index")),
+                "systemIndex": _zero_based(f.get("sys_idx")), "bar": f.get("bar")}
+
     items: list[dict[str, Any]] = [
         {"code": VOICE_FAILED_CODE, "voice": v.lower(), "pageIndex": None, "systemIndex": None, "bar": None}
-        for v in VOICES if v.lower() in {f.lower() for f in failed_voices or []}]
-    for f in stage4_flags:
-        if f.get("review_needed"):
-            items.append({"code": f["kind"], "voice": f["voice"].lower() if f.get("voice") else None,
-                          "pageIndex": f.get("page_index"), "systemIndex": f.get("sys_idx"),
-                          "bar": f.get("bar")})
+        for v in VOICES if v.lower() in failed]
+    flagged = [f for f in stage4_flags if f.get("review_needed")]
+    muted = [f for f in flagged if _is_muted_entry(f, failed)]
+    muted.sort(key=lambda f: (f["start_tick"], VOICES.index(f["voice"])))
+    items += [stage4_item(f) for f in muted]
+    items += [stage4_item(f) for f in flagged if not _is_muted_entry(f, failed)]
+
     seen_strips: set[tuple] = set()
+
+    def strip_items(voice: str, page_index: int, sys_idx: int, codes: set[str]) -> None:
+        for code in sorted(codes):
+            key = (voice, page_index, sys_idx, code)
+            if key not in seen_strips:
+                seen_strips.add(key)
+                items.append({"code": code, "voice": voice.lower(), "pageIndex": _zero_based(page_index),
+                              "systemIndex": _zero_based(sys_idx), "bar": None})
+
     for voice, events in stage3_events.items():
         for e in events:
             job_reasons |= set(e.get("clef_key_flags", [])) & JOB_LEVEL_REVIEW_CODES
@@ -492,12 +573,9 @@ def build_review(stage3_events: dict, stage4_flags: list, failed_voices: Optiona
             codes = set(e.get("meter_flags", []))
             if "review_needed" in strip_flags:
                 codes |= strip_flags - {"review_needed"} - JOB_LEVEL_REVIEW_CODES
-            for code in sorted(codes):
-                key = (voice, e["page_index"], e["sys_idx"], code)
-                if key not in seen_strips:
-                    seen_strips.add(key)
-                    items.append({"code": code, "voice": voice.lower(), "pageIndex": e["page_index"],
-                                  "systemIndex": e["sys_idx"], "bar": None})
+            strip_items(voice, e["page_index"], e["sys_idx"], codes)
+    for strip in eventless_strip_flags or []:
+        strip_items(strip["voice"], strip["page_index"], strip["sys_idx"], set(strip["meter_flags"]))
     reasons = sorted(job_reasons | {i["code"] for i in items})
     review = {"reviewNeeded": bool(reasons), "reasons": reasons, "items": items[:REVIEW_ITEMS_CAP],
               "truncated": len(items) > REVIEW_ITEMS_CAP}
@@ -546,8 +624,11 @@ def run_full_pipeline_with_report(
     """Runs Stages 1-5 and returns the audio plus what the result API and job record need.
 
     A voice that is empty after Stage 4 or cannot be rendered is listed in
-    ``failedVoices`` and the job still completes; it fails (ValueError) only
-    when all four voices fail (PIYA-108 AC4/AC5, PIYA-109 AC9).
+    ``failedVoices`` and the job still completes. It fails only when all four
+    voices fail (PIYA-108 AC4/AC5, PIYA-109 AC9), with a PipelineFailure whose
+    ``failure_reason`` is ``incomplete_voice_sequence`` when every voice was
+    empty after Stage 4 (raised by Stage 4; recapture), else
+    ``synthesis_failed`` (a server-side rendering fault; no recapture).
 
     Returns:
         {"audio": {voice: mp3 path}, failed voices left out,
@@ -567,8 +648,10 @@ def run_full_pipeline_with_report(
     print("=" * 60)
 
     # Stages 1-3
+    eventless_strip_flags: list[dict[str, Any]] = []
     voice_events = run_stages_1_to_3(input_dir, prep_dir, strips_dir, yolo_weights, crnn_weights,
-                                     clef_key_weights, img_height=img_height)
+                                     clef_key_weights, img_height=img_height,
+                                     strip_flags_out=eventless_strip_flags)
 
     # Stage 4
     satb, recon_report = reconstruct_satb_with_report(voice_events)
@@ -583,9 +666,13 @@ def run_full_pipeline_with_report(
     mp3_files, failed = synthesize_satb_with_failures(
         satb, output_dir, bpm, soundfont_path, muted_spans_by_voice(recon_report["flags"]))
     if len(failed) == len(VOICES):
-        raise ValueError(f"incomplete_voice_sequence: no voice could be rendered ({', '.join(failed)})")
+        rendered_but_failed = [v for v in failed if satb.get(v)]
+        reason = FAILURE_SYNTHESIS if rendered_but_failed else FAILURE_INCOMPLETE_VOICE_SEQUENCE
+        raise PipelineFailure(reason, f"no voice could be rendered (render failures: "
+                                      f"{', '.join(rendered_but_failed) or 'none'})")
     failed_voices = [v.lower() for v in failed]
-    review, review_detail = build_review(voice_events, recon_report["flags"], failed_voices)
+    review, review_detail = build_review(voice_events, recon_report["flags"], failed_voices,
+                                         eventless_strip_flags)
 
     print("=" * 60)
     print("PiyaNota complete.")
