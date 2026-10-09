@@ -1,14 +1,17 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../config/api_config.dart';
+import '../models/score_details.dart';
 import '../models/score_result.dart';
 import '../models/score_timeline.dart';
 import '../models/voice_part.dart';
 import '../services/fake_score_library_api.dart';
 import '../services/fake_score_result_api.dart';
+import '../services/metronome_click.dart';
 import '../services/playback_engine.dart';
 import '../services/score_result_api.dart';
 import 'auth_providers.dart';
@@ -41,7 +44,25 @@ final playbackEngineFactoryProvider = Provider<PlaybackEngine Function()>(
   (ref) => JustAudioPlaybackEngine.new,
 );
 
+/// Writes the metronome click track; tests override it with a fake (or a
+/// failure).
+final clickTrackWriterProvider = Provider<ClickTrackWriter>(
+  (ref) => writeClickTrack,
+);
+
 enum PlaybackPhase { loading, ready, failed }
+
+/// The app-made metronome click track (PIYA-209/210).
+enum ClickStatus {
+  /// Being generated and loaded after the voices. The controls already
+  /// work; their settings apply once it is ready.
+  preparing,
+  ready,
+
+  /// Could not be generated or played. Playback carries on without it and
+  /// the metronome controls are disabled with a short note.
+  unavailable,
+}
 
 /// Why Playback couldn't open the score. Each has its own wording and
 /// action (FR-14), so none of them reads as a generic failure.
@@ -75,9 +96,16 @@ class PlaybackState {
     this.arranger,
     this.selected = const {},
     this.volumes = const {},
+    this.muted = const {},
+    this.soloed = const {},
+    this.clickVolume = PlaybackController.fullVolume,
+    this.clickMuted = false,
+    this.clickSoloed = false,
+    this.metronomeOn = false,
+    this.clickStatus = ClickStatus.preparing,
+    this.bpm,
     this.playing = false,
     this.duration = Duration.zero,
-    this.speed = 1,
     this.reviewDismissed = false,
     this.timingUnavailable = false,
     this.failedVoices = const {},
@@ -92,12 +120,34 @@ class PlaybackState {
   /// Voices the user hears (AC2). Never empty once ready.
   final Set<VoicePart> selected;
 
-  /// Per-voice level for the Voice Mixer (PIYA-209); an unselected voice
-  /// is silent whatever its level here.
+  /// Per-voice slider level in the Voice Mixer (PIYA-209), 0 to 1. Kept
+  /// as set while muted, so unmuting restores it (AC4). What is heard is
+  /// [voiceGain].
   final Map<VoicePart, double> volumes;
+
+  /// Mixer Mute per voice; independent of the slider (AC2).
+  final Set<VoicePart> muted;
+
+  /// Mixer Solo per voice. While any row (voice or click) is soloed, only
+  /// soloed rows are heard; Mute still wins (design decision 2026-10-09).
+  final Set<VoicePart> soloed;
+
+  /// The Mixer's Metronome Click row: level, Mute and Solo. Whether the
+  /// click plays at all is [metronomeOn], the Speed modal's toggle.
+  final double clickVolume;
+  final bool clickMuted;
+  final bool clickSoloed;
+
+  /// The Speed modal's Metronome Click checkbox (PIYA-210 AC3); off by
+  /// default.
+  final bool metronomeOn;
+  final ClickStatus clickStatus;
+
+  /// The Speed modal's BPM (PIYA-210), 30 to 240; null until loaded. Read
+  /// it through [chosenBpm].
+  final int? bpm;
   final bool playing;
   final Duration duration;
-  final double speed;
 
   /// The review banner was closed; lasts as long as this screen.
   final bool reviewDismissed;
@@ -115,6 +165,49 @@ class PlaybackState {
   Set<VoicePart> get available =>
       {...?result?.audioTracks.keys}.difference(failedVoices);
 
+  /// The score's own tempo (PIYA-103 AC8), 90 until loaded.
+  int get tempoBpm => result?.tempoBpm ?? ScoreDetails.defaultTempo;
+
+  /// The Speed slider's value; opens at [tempoBpm].
+  int get chosenBpm => bpm ?? tempoBpm;
+
+  /// Playback rate: chosen BPM / the tempo the tracks were rendered at.
+  double get speed => chosenBpm / tempoBpm;
+
+  /// The metronome is off for good because the server gave no tempo (see
+  /// ScoreResult.tempoKnown); the sheets say so instead of the generic note.
+  bool get clickNeedsTempo => !(result?.tempoKnown ?? true);
+
+  /// The click can sound: the Speed toggle is on and the track is loaded.
+  bool get clickLive => metronomeOn && clickStatus == ClickStatus.ready;
+
+  /// A soloed metronome row counts only while the click can sound, so
+  /// soloing it with the Speed toggle off never silences the voices
+  /// (coordinator decision 2026-10-09).
+  bool get anySoloed => soloed.isNotEmpty || (clickSoloed && clickLive);
+
+  /// What [voice] is played at: silent if it can't play, its chip is off
+  /// (PIYA-208 chips stack with the mixer), it is muted, or another row is
+  /// soloed; else its slider level.
+  double voiceGain(VoicePart voice) {
+    if (!available.contains(voice) ||
+        !selected.contains(voice) ||
+        muted.contains(voice) ||
+        (anySoloed && !soloed.contains(voice))) {
+      return 0;
+    }
+    return volumes[voice] ?? PlaybackController.fullVolume;
+  }
+
+  /// The click: only while it is live (Speed toggle on, track loaded), not
+  /// muted, and not left out by a solo; then the Metronome row's level.
+  double get clickGain {
+    if (!clickLive || clickMuted || (anySoloed && !clickSoloed)) {
+      return 0;
+    }
+    return clickVolume;
+  }
+
   bool get showReviewBanner =>
       phase == PlaybackPhase.ready &&
       !reviewDismissed &&
@@ -129,9 +222,16 @@ class PlaybackState {
     String? arranger,
     Set<VoicePart>? selected,
     Map<VoicePart, double>? volumes,
+    Set<VoicePart>? muted,
+    Set<VoicePart>? soloed,
+    double? clickVolume,
+    bool? clickMuted,
+    bool? clickSoloed,
+    bool? metronomeOn,
+    ClickStatus? clickStatus,
+    int? bpm,
     bool? playing,
     Duration? duration,
-    double? speed,
     bool? reviewDismissed,
     Set<VoicePart>? failedVoices,
   }) => PlaybackState(
@@ -142,9 +242,16 @@ class PlaybackState {
     arranger: arranger ?? this.arranger,
     selected: selected ?? this.selected,
     volumes: volumes ?? this.volumes,
+    muted: muted ?? this.muted,
+    soloed: soloed ?? this.soloed,
+    clickVolume: clickVolume ?? this.clickVolume,
+    clickMuted: clickMuted ?? this.clickMuted,
+    clickSoloed: clickSoloed ?? this.clickSoloed,
+    metronomeOn: metronomeOn ?? this.metronomeOn,
+    clickStatus: clickStatus ?? this.clickStatus,
+    bpm: bpm ?? this.bpm,
     playing: playing ?? this.playing,
     duration: duration ?? this.duration,
-    speed: speed ?? this.speed,
     reviewDismissed: reviewDismissed ?? this.reviewDismissed,
     timingUnavailable: timingUnavailable,
     failedVoices: failedVoices ?? this.failedVoices,
@@ -168,6 +275,15 @@ class PlaybackController extends Notifier<PlaybackState> {
   PlaybackEngine? _engine;
   StreamSubscription<bool>? _playingSub;
   StreamSubscription<PlaybackFailure>? _failureSub;
+  StreamSubscription<Object>? _clickFailureSub;
+
+  /// The generated click file of the current engine; deleted with it.
+  Uri? _clickFile;
+
+  /// Gains last sent to the current engine, by voice or [_clickGainKey],
+  /// so a slider drag only sends what changed.
+  final Map<Object, double> _sentGains = {};
+  static const Object _clickGainKey = #click;
 
   /// Bumped by every load, so a slow earlier load can't overwrite a newer
   /// one (Retry pressed twice, or the screen left mid-load).
@@ -248,6 +364,10 @@ class PlaybackController extends Notifier<PlaybackState> {
       if (ref.mounted) state = state.copyWith(playing: playing);
     });
     _failureSub = engine.failures.listen(_onFailure);
+    _clickFailureSub = engine.clickFailures.listen((_) => _clickFailed());
+    // 209 AC5: every voice unmuted at full volume, nothing soloed,
+    // metronome off, speed at the score's tempo. A fresh controller
+    // (autoDispose) means a reopened score starts here again (209 AC6).
     final volumes = {
       for (final voice in result.audioTracks.keys) voice: fullVolume,
     };
@@ -261,8 +381,69 @@ class PlaybackController extends Notifier<PlaybackState> {
       duration: engine.duration,
       timingUnavailable: timingFailed,
       failedVoices: failedVoices,
+      bpm: result.tempoBpm,
+      // No tempo, no grid to lay the click on (coordinator decision
+      // 2026-10-09); the slider still runs relative to the assumed 90.
+      clickStatus: result.tempoKnown
+          ? ClickStatus.preparing
+          : ClickStatus.unavailable,
     );
-    await _applyVolumes();
+    _applyGains();
+    if (result.tempoKnown) unawaited(_prepareClick(engine, generation));
+  }
+
+  /// Generates the click for this score and adds it to [engine] as a
+  /// follower track. Done after the voices are ready so it never delays
+  /// them; a failure only disables the metronome controls.
+  Future<void> _prepareClick(PlaybackEngine engine, int generation) async {
+    bool current() =>
+        ref.mounted && generation == _generation && identical(_engine, engine);
+    final Uri file;
+    try {
+      final plan = planClicks(
+        events: _eventsOf(state.timeline),
+        tempoBpm: state.tempoBpm,
+        length: engine.duration,
+      );
+      file = await ref.read(clickTrackWriterProvider)(plan);
+    } on Object catch (e, stack) {
+      debugPrint('Playback: metronome click not generated: $e\n$stack');
+      if (current()) _clickFailed();
+      return;
+    }
+    if (!current()) {
+      unawaited(_deleteQuietly(file));
+      return;
+    }
+    _clickFile = file;
+    final attached = await engine.attachClick(file);
+    if (!current()) return;
+    if (!attached) {
+      _clickFailed();
+      return;
+    }
+    state = state.copyWith(clickStatus: ClickStatus.ready);
+    _applyGains();
+  }
+
+  void _clickFailed() {
+    if (!ref.mounted || state.phase != PlaybackPhase.ready) return;
+    if (state.clickStatus == ClickStatus.unavailable) return;
+    state = state.copyWith(
+      clickStatus: ClickStatus.unavailable,
+      // A solo on a click that can't play would silence every voice.
+      clickSoloed: false,
+    );
+    _applyGains();
+  }
+
+  static Future<void> _deleteQuietly(Uri? file) async {
+    if (file == null || file.scheme != 'file') return;
+    try {
+      await File.fromUri(file).delete();
+    } on Object catch (e) {
+      if (kDebugMode) debugPrint('Playback: click file not deleted: $e');
+    }
   }
 
   /// A timing file that fails to load costs only the indicator (and
@@ -277,10 +458,7 @@ class PlaybackController extends Notifier<PlaybackState> {
     if (url == null) return (ScoreTimeline.empty, false);
     try {
       final events = await api.fetchTiming(url);
-      return (
-        ScoreTimeline(onExistingPages(events, result.scoreImages.length)),
-        false,
-      );
+      return (ScoreTimeline(onExistingPages(events, result.hasPage)), false);
     } on Object catch (e, stack) {
       debugPrint('Playback: timing unavailable: $e\n$stack');
       return (ScoreTimeline.empty, true);
@@ -288,20 +466,21 @@ class PlaybackController extends Notifier<PlaybackState> {
   }
 
   /// Events pointing at a page the result has no image for can't be drawn;
-  /// placing them would mean inventing heights for pages that don't exist.
+  /// placing them would mean inventing heights for pages that don't exist
+  /// (or a band over a blank page).
   @visibleForTesting
   static List<TimingEvent> onExistingPages(
     List<TimingEvent> events,
-    int pageCount,
+    bool Function(int pageIndex) hasPage,
   ) {
     final kept = [
       for (final event in events)
-        if (event.pageIndex >= 0 && event.pageIndex < pageCount) event,
+        if (hasPage(event.pageIndex)) event,
     ];
     if (kept.length != events.length) {
       debugPrint(
         'Playback: dropped ${events.length - kept.length} timing events '
-        'outside the $pageCount score page(s)',
+        'on pages without an image',
       );
     }
     return kept;
@@ -324,10 +503,12 @@ class PlaybackController extends Notifier<PlaybackState> {
     state = state.copyWith(
       failedVoices: {...state.failedVoices, failure.voice},
       selected: selected,
+      // A solo on a voice that can't play would silence the rest.
+      soloed: state.soloed.difference({failure.voice}),
       // The new master may be a shorter track.
       duration: _engine?.duration,
     );
-    unawaited(_applyVolumes());
+    _applyGains();
   }
 
   void _failPlaying() {
@@ -434,43 +615,111 @@ class PlaybackController extends Notifier<PlaybackState> {
       selected.add(voice);
     }
     state = state.copyWith(selected: selected);
-    unawaited(_applyVolumes());
+    _applyGains();
     return true;
   }
 
-  /// PIYA-209's entry point; also kept for the mixer sheet.
-  Future<void> setVoiceVolume(VoicePart voice, double volume) async {
-    state = state.copyWith(volumes: {...state.volumes, voice: volume});
-    await _applyVolumes();
+  /// PIYA-209 AC3: sent to the engine at once, on every slider change (not
+  /// at the end of a drag), so it is heard within the 100 ms budget.
+  void setVoiceVolume(VoicePart voice, double volume) {
+    if (!state.available.contains(voice)) return;
+    state = state.copyWith(
+      volumes: {...state.volumes, voice: volume.clamp(0.0, fullVolume)},
+    );
+    _applyGains();
   }
 
-  /// PIYA-210's entry point. The indicator reads the engine's audio
-  /// position, so it needs no change when the speed does.
-  Future<void> setSpeed(double speed) async {
-    state = state.copyWith(speed: speed);
-    await _engine?.setSpeed(speed);
+  /// PIYA-209 AC2/AC4: the slider keeps its place while muted.
+  void setVoiceMuted(VoicePart voice, {required bool muted}) {
+    if (!state.available.contains(voice)) return;
+    state = state.copyWith(
+      muted: muted ? {...state.muted, voice} : state.muted.difference({voice}),
+    );
+    _applyGains();
+  }
+
+  void setVoiceSoloed(VoicePart voice, {required bool soloed}) {
+    if (!state.available.contains(voice)) return;
+    state = state.copyWith(
+      soloed: soloed
+          ? {...state.soloed, voice}
+          : state.soloed.difference({voice}),
+    );
+    _applyGains();
+  }
+
+  void setClickVolume(double volume) {
+    if (state.clickStatus == ClickStatus.unavailable) return;
+    state = state.copyWith(clickVolume: volume.clamp(0.0, fullVolume));
+    _applyGains();
+  }
+
+  void setClickMuted({required bool muted}) {
+    if (state.clickStatus == ClickStatus.unavailable) return;
+    state = state.copyWith(clickMuted: muted);
+    _applyGains();
+  }
+
+  void setClickSoloed({required bool soloed}) {
+    if (state.clickStatus == ClickStatus.unavailable) return;
+    state = state.copyWith(clickSoloed: soloed);
+    _applyGains();
+  }
+
+  /// PIYA-210 AC3: the Speed modal's Metronome Click checkbox.
+  void setMetronomeOn({required bool on}) {
+    if (state.clickStatus == ClickStatus.unavailable) return;
+    state = state.copyWith(metronomeOn: on);
+    _applyGains();
+  }
+
+  /// PIYA-210: the Speed slider, in whole BPM from 30 to 240. Applied to
+  /// the engine at once, also while playing (AC4); the engine keeps pitch
+  /// (FR-9). The indicator reads the engine's audio position, so it needs
+  /// no change when the speed does.
+  void setBpm(int bpm) {
+    if (state.phase != PlaybackPhase.ready) return;
+    final clamped = bpm.clamp(ScoreDetails.minTempo, ScoreDetails.maxTempo);
+    if (clamped == state.chosenBpm) return;
+    state = state.copyWith(bpm: clamped);
+    final engine = _engine;
+    if (engine != null) unawaited(engine.setSpeed(state.speed));
   }
 
   void dismissReview() => state = state.copyWith(reviewDismissed: true);
 
-  Future<void> _applyVolumes() async {
+  /// Sends every gain that changed, all started at once (never one
+  /// awaited after another), so a slider change reaches the engine in the
+  /// same frame.
+  void _applyGains() {
     final engine = _engine;
     if (engine == null) return;
     for (final voice in state.available) {
-      final level = state.selected.contains(voice)
-          ? state.volumes[voice] ?? fullVolume
-          : 0.0;
-      await engine.setVolume(voice, level);
+      final gain = state.voiceGain(voice);
+      if (_sentGains[voice] == gain) continue;
+      _sentGains[voice] = gain;
+      unawaited(engine.setVolume(voice, gain));
+    }
+    final click = state.clickGain;
+    if (_sentGains[_clickGainKey] != click) {
+      _sentGains[_clickGainKey] = click;
+      unawaited(engine.setClickVolume(click));
     }
   }
 
   void _releaseEngine() {
     unawaited(_playingSub?.cancel());
     unawaited(_failureSub?.cancel());
+    unawaited(_clickFailureSub?.cancel());
     _playingSub = null;
     _failureSub = null;
+    _clickFailureSub = null;
+    _sentGains.clear();
     final engine = _engine;
+    final clickFile = _clickFile;
     _engine = null;
-    unawaited(_disposeQuietly(engine));
+    _clickFile = null;
+    // The file goes once the player holding it is released.
+    unawaited(_disposeQuietly(engine).then((_) => _deleteQuietly(clickFile)));
   }
 }

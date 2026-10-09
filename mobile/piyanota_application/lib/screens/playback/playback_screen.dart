@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../config/api_config.dart';
 import '../../models/score_result.dart';
 import '../../models/score_timeline.dart';
 import '../../models/voice_part.dart';
@@ -15,7 +16,10 @@ import '../../state/playback_providers.dart';
 import '../../state/session_actions.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/primary_pill_button.dart';
+import 'mixer_sheet.dart';
 import 'playback_messages.dart';
+import 'sheet_parts.dart';
+import 'speed_sheet.dart';
 
 /// Score Playback & Rehearsal (PIYA-208): the original page image with an
 /// indicator band that follows the audio, S/A/T/B chips, and the transport.
@@ -186,17 +190,24 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
     }
   }
 
-  /// PIYA-209/210/211 land later. A modal sheet, not a route push, so the
+  /// PIYA-211 lands later. A modal sheet, not a route push, so the
   /// music keeps playing underneath (user decision 2026-10-09).
   void _openPlaceholder(String title) {
     unawaited(
-      showModalBottomSheet<void>(
-        context: context,
-        backgroundColor: Colors.white,
-        builder: (_) => _ComingSoonSheet(title: title),
-      ),
+      showPlaybackSheet(context, (_) => _ComingSoonSheet(title: title)),
     );
   }
+
+  void _openMixer() => unawaited(
+    showPlaybackSheet(context, (_) => VoiceMixerSheet(scoreId: widget.scoreId)),
+  );
+
+  void _openSpeed() => unawaited(
+    showPlaybackSheet(
+      context,
+      (_) => PlaybackSpeedSheet(scoreId: widget.scoreId),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -297,10 +308,8 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
                   _display.value = value;
                 },
                 onSeekEnd: (value) => unawaited(_onSeekEnd(value)),
-                onMixer: () =>
-                    _openPlaceholder(PlaybackMessages.mixerSheetTitle),
-                onSpeed: () =>
-                    _openPlaceholder(PlaybackMessages.speedSheetTitle),
+                onMixer: _openMixer,
+                onSpeed: _openSpeed,
               )
             : null,
       ),
@@ -763,13 +772,8 @@ class _ScoreViewState extends State<_ScoreView> {
     super.dispose();
   }
 
-  static ImageProvider? _imageFor(Uri uri) => switch (uri.scheme) {
-    'asset' => AssetImage(uri.path.substring(1)),
-    // The debug-only demo page, generated into the cache dir.
-    'file' => FileImage(File(uri.toFilePath())),
-    'http' || 'https' => NetworkImage(uri.toString()),
-    _ => null,
-  };
+  static ImageProvider? _imageFor(Uri? uri) =>
+      uri == null ? null : scoreImageFor(uri);
 
   /// Pages without a server-given size are measured from the decoded
   /// image (see ScoreResult.pageSizes).
@@ -885,7 +889,7 @@ class _ScoreViewState extends State<_ScoreView> {
   @override
   Widget build(BuildContext context) {
     final images = widget.result.scoreImages;
-    if (images.isEmpty) {
+    if (images.every((image) => image == null)) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -1321,6 +1325,19 @@ class _MetronomePainter extends CustomPainter {
   @override
   bool shouldRepaint(_MetronomePainter oldDelegate) => false;
 }
+
+/// A score page's image. `file:` only in the debug-only fake build (the
+/// demo page is generated into the cache dir); ScoreResult already drops
+/// such URLs otherwise, and this keeps the screen safe on its own.
+@visibleForTesting
+ImageProvider? scoreImageFor(
+  Uri uri, {
+  bool allowLocalFiles = ApiConfig.useFakeAuth,
+}) => switch (uri.scheme) {
+  'file' when allowLocalFiles => FileImage(File(uri.toFilePath())),
+  'http' || 'https' => NetworkImage(uri.toString()),
+  _ => null,
+};
 
 class _ComingSoonSheet extends StatelessWidget {
   const _ComingSoonSheet({required this.title});

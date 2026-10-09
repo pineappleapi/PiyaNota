@@ -3,8 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:piyanota_application/models/score_result.dart';
 import 'package:piyanota_application/models/voice_part.dart';
 import 'package:piyanota_application/screens/playback/playback_messages.dart';
+import 'package:piyanota_application/screens/playback/playback_screen.dart';
 import 'package:piyanota_application/services/score_result_api.dart';
 import 'package:piyanota_application/state/playback_providers.dart';
 
@@ -322,9 +324,7 @@ void main() {
       final harness = ready();
       await pumpPlayback(tester, harness);
       final container = appContainer(tester);
-      await container
-          .read(playbackControllerProvider(kScoreId).notifier)
-          .setSpeed(2);
+      container.read(playbackControllerProvider(kScoreId).notifier).setBpm(180);
       expect(harness.engine.speed, 2);
 
       await tester.tap(find.byKey(const ValueKey('play-pause')));
@@ -358,21 +358,15 @@ void main() {
   });
 
   group('mixer, speed, export (AC8)', () {
-    testWidgets('sheets open over playback without pausing it', (tester) async {
+    testWidgets('the export sheet opens over playback without pausing it', (
+      tester,
+    ) async {
       final harness = ready();
       await pumpPlayback(tester, harness);
       await tester.tap(find.byKey(const ValueKey('play-pause')));
       await tester.pump();
 
       for (final (open, title) in [
-        (
-          find.bySemanticsLabel(PlaybackMessages.voiceMixer),
-          PlaybackMessages.mixerSheetTitle,
-        ),
-        (
-          find.bySemanticsLabel(PlaybackMessages.speed),
-          PlaybackMessages.speedSheetTitle,
-        ),
         (
           find.byTooltip(PlaybackMessages.download),
           PlaybackMessages.exportSheetTitle,
@@ -714,14 +708,37 @@ void main() {
     });
   });
 
+  test('page images: file only in the demo build', () {
+    final file = Uri.parse('file:///data/p1.png');
+    expect(scoreImageFor(file, allowLocalFiles: false), isNull);
+    expect(scoreImageFor(file, allowLocalFiles: true), isA<FileImage>());
+    expect(
+      scoreImageFor(Uri.parse('https://cdn/p1.png'), allowLocalFiles: false),
+      isA<NetworkImage>(),
+    );
+    expect(
+      scoreImageFor(Uri.parse('content://x/p1'), allowLocalFiles: true),
+      isNull,
+    );
+  });
+
   group('timing pages', () {
     test('events on pages the result has no image for are dropped', () {
+      // Page 1's URL was rejected (a null slot); page 3 doesn't exist.
+      final result = ScoreResult(
+        scoreId: kScoreId,
+        audioTracks: {VoicePart.soprano: Uri.parse('https://cdn.test/s.mp3')},
+        scoreImages: [Uri.parse('test://p0'), null, Uri.parse('test://p2')],
+        review: const ReviewSummary(reviewNeeded: false),
+      );
       final kept = PlaybackController.onExistingPages([
         ev(0, 10, 10),
         ev(100, 10, 10, page: 1),
         ev(200, 10, 10, page: -1),
-      ], 1);
-      expect(kept.map((e) => e.timestampMs), [0]);
+        ev(300, 10, 10, page: 2),
+        ev(400, 10, 10, page: 3),
+      ], result.hasPage);
+      expect(kept.map((e) => e.timestampMs), [0, 300]);
     });
 
     testWidgets('an out-of-range page in the timing does not break the band', (

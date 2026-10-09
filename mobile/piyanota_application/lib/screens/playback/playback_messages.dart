@@ -32,12 +32,47 @@ class PlaybackMessages {
   static const String voiceMixer = 'Voice Mixer';
   static const String speed = 'Speed';
 
-  // Placeholder sheets until PIYA-209/210/211.
-  static const String mixerSheetTitle = 'Voice Mixer';
-  static const String speedSheetTitle = 'Playback Speed';
+  // Placeholder sheet until PIYA-211.
   static const String exportSheetTitle = 'Export Audio';
   static const String comingSoon = 'Coming soon';
   static const String close = 'Close';
+
+  // Voice Mixer sheet (PIYA-209), wording from the mockup.
+  static const String mixerTitle = 'Voice Mixer';
+  static const String mixerSubtitle = 'Adjust volume per voice and metronome';
+  static const String metronomeClick = 'Metronome Click';
+  static const String mute = 'Mute';
+
+  /// Screen-reader labels; the row's name is not repeated on screen.
+  static String soloLabel(String row) => 'Solo $row';
+  static String muteLabel(String row) => 'Mute $row';
+  static String volumeLabel(String row) => '$row volume';
+  static String volumeValue(double level) => '${(level * 100).round()}%';
+  static String rowUnavailable(String row) => '$row audio unavailable';
+
+  /// Under the Mixer's metronome row while the Speed toggle is off: the
+  /// row stays editable, but nothing sounds until it is turned on there.
+  /// Both sheets, instead of [metronomeUnavailable], when the result came
+  /// without a tempo (ScoreResult.tempoKnown).
+  static const String metronomeNeedsTempo =
+      'Metronome needs the score tempo, which this score doesn’t have. '
+      'The voices still play.';
+
+  static const String metronomeOff =
+      'Off. Turn on Metronome Click in Speed to hear it.';
+
+  /// Shown on both sheets when the click track couldn't be made or played.
+  static const String metronomeUnavailable =
+      'The metronome click isn’t available right now. The voices still play.';
+
+  // Speed sheet (PIYA-210), wording from the mockup.
+  static const String speedTitle = 'Speed';
+  static const String speedSubtitle = 'Adjust playback speed.';
+  static const String metronomeHint =
+      'Listen along with a click to stay on beat';
+  static const String playbackSpeed = 'Playback Speed';
+  static String bpmValue(int bpm) => '$bpm';
+  static String bpmSpoken(int bpm) => '$bpm beats per minute';
 
   // Review banner (PIYA-103 `review.reviewNeeded`).
   static const String review =

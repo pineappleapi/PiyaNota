@@ -2,6 +2,9 @@ import 'dart:ui' show Size;
 
 import 'package:flutter/foundation.dart';
 
+import '../config/api_config.dart';
+
+import 'score_details.dart';
 import 'voice_part.dart';
 
 /// Reads a voice name from either contract: PIYA-103 keys its audio tracks
@@ -71,6 +74,8 @@ class ScoreResult {
     this.timingMetadataUrl,
     this.pageSizes = const [],
     this.arranger,
+    this.tempoBpm = ScoreDetails.defaultTempo,
+    this.tempoKnown = true,
   });
 
   final int scoreId;
@@ -82,7 +87,9 @@ class ScoreResult {
 
   /// One original preprocessed page image per page, in page order
   /// (`pageIndex` 0 is the first). FR-8: never a re-engraved rendering.
-  final List<Uri> scoreImages;
+  /// A page whose URL was unusable keeps its slot as null, so the pages
+  /// after it keep their `pageIndex`; it shows blank, without the band.
+  final List<Uri?> scoreImages;
   final Uri? timingMetadataUrl;
   final ReviewSummary review;
 
@@ -97,10 +104,38 @@ class ScoreResult {
   /// to the library entry's arranger.
   final String? arranger;
 
+  /// PIYA-103 AC8: the tempo the tracks were rendered at, in quarter notes
+  /// per minute (PIYA-101 AC8). The Speed modal (PIYA-210) plays at
+  /// chosen BPM / this, and the metronome click is laid out on it. Absent,
+  /// not an int, or outside [ScoreDetails.minTempo]–[ScoreDetails.maxTempo]
+  /// reads as [ScoreDetails.defaultTempo] (90), the value the server
+  /// renders at when none was submitted.
+  final int tempoBpm;
+
+  /// False when the server sent no usable `tempoBpm` and [tempoBpm] is the
+  /// assumed 90. The Speed slider still works on that, but the metronome
+  /// is unavailable: a click off the music's real beat is worse than none.
+  final bool tempoKnown;
+
+  /// Whether page [pageIndex] has an image to draw on.
+  bool hasPage(int pageIndex) =>
+      pageIndex >= 0 &&
+      pageIndex < scoreImages.length &&
+      scoreImages[pageIndex] != null;
+
   /// Parses `data` (the envelope is unwrapped by the API). Throws
   /// [FormatException] when no audio track or score id is usable, since
   /// then there is nothing to play.
-  static ScoreResult fromJson(Map<String, dynamic> data) {
+  ///
+  /// URLs must be http(s). `file:` is accepted only when
+  /// [allowLocalFiles], which defaults to the debug-only fake build (its
+  /// demo score lives in the cache dir): a real server has no business
+  /// pointing the app at files on the phone.
+  static ScoreResult fromJson(
+    Map<String, dynamic> data, {
+    bool allowLocalFiles = ApiConfig.useFakeAuth,
+  }) {
+    Uri? uri(Object? value) => _uri(value, allowLocalFiles: allowLocalFiles);
     final scoreId = data['scoreId'];
     if (scoreId is! int) {
       throw const FormatException('PIYA-103 result without an int scoreId');
@@ -110,30 +145,34 @@ class ScoreResult {
     if (rawTracks is Map) {
       rawTracks.forEach((key, value) {
         final voice = parseVoicePart(key);
-        final uri = _uri(value);
-        if (voice != null && uri != null) tracks[voice] = uri;
+        final track = uri(value);
+        if (voice != null && track != null) tracks[voice] = track;
       });
     }
     if (tracks.isEmpty) {
       throw const FormatException('PIYA-103 result without audio tracks');
     }
-    final images = <Uri>[];
     final rawImages = data['scoreImages'];
-    if (rawImages is List) {
-      for (final image in rawImages) {
-        final uri = _uri(image);
-        if (uri != null) images.add(uri);
-      }
-    }
+    // Rejected entries stay as null: dropping them would shift every later
+    // page onto the wrong timing events.
+    final images = <Uri?>[
+      if (rawImages is List)
+        for (final image in rawImages) uri(image),
+    ];
     final rawSizes = data['scoreImageSizes'];
     final jobId = data['jobId'];
     final arranger = data['arranger'];
+    final tempo = data['tempoBpm'];
+    final tempoKnown =
+        tempo is int &&
+        tempo >= ScoreDetails.minTempo &&
+        tempo <= ScoreDetails.maxTempo;
     return ScoreResult(
       scoreId: scoreId,
       jobId: jobId is String ? jobId : null,
       audioTracks: Map.unmodifiable(tracks),
       scoreImages: List.unmodifiable(images),
-      timingMetadataUrl: _uri(data['timingMetadataUrl']),
+      timingMetadataUrl: uri(data['timingMetadataUrl']),
       review: ReviewSummary.fromJson(data['review']),
       pageSizes: [
         if (rawSizes is List)
@@ -142,6 +181,8 @@ class ScoreResult {
       arranger: arranger is String && arranger.trim().isNotEmpty
           ? arranger.trim()
           : null,
+      tempoBpm: tempo is int && tempoKnown ? tempo : ScoreDetails.defaultTempo,
+      tempoKnown: tempoKnown,
     );
   }
 
@@ -149,10 +190,15 @@ class ScoreResult {
   Size? pageSizeAt(int pageIndex) =>
       pageIndex < pageSizes.length ? pageSizes[pageIndex] : null;
 
-  static Uri? _uri(Object? value) {
+  static Uri? _uri(Object? value, {required bool allowLocalFiles}) {
     if (value is! String || value.trim().isEmpty) return null;
     final uri = Uri.tryParse(value.trim());
-    return uri != null && uri.hasScheme ? uri : null;
+    if (uri == null) return null;
+    return switch (uri.scheme) {
+      'http' || 'https' => uri,
+      'file' when allowLocalFiles => uri,
+      _ => null,
+    };
   }
 
   static Size? _size(Object? value) {

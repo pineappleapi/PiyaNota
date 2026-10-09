@@ -265,6 +265,64 @@ class AppTheme {
   static const Color playbackReviewFill = Color(0xFFFFF4D6);
   static const Color playbackReviewText = Color(0xFF5C4400);
 
+  // Voice Mixer (PIYA-209) and Speed (PIYA-210) sheets, dropper-sampled
+  // from references/PIYA209_VoiceMixerModal_UI.png and
+  // PIYA210_PlaybackSpeedModal_UI.png (2026-10-09). Contrast is on the
+  // sheet's white unless noted.
+  // Scrim over Playback. Not one flat pixel: solved from pixels sampled
+  // under it and the same pixels on PIYA-208 (white #FFFFFF reads #8B98A5,
+  // navy #272960 reads #1F2D55), which both fit #17314B at 50% alpha.
+  static const Color sheetScrim = Color(0x8017314B);
+  // Drag handle. Sampled #0A9BBD (3.26:1; a graphic, 3:1 floor).
+  static const Color sheetHandle = Color(0xFF0A9BBD);
+  // Titles, "Metronome Click", "Playback Speed" and the BPM value. Sampled
+  // #383838 (11.73:1).
+  static const Color sheetText = Color(0xFF383838);
+  // Adjusted for AA, 2026-10-09: the subtitles sampled #898989 (3.5:1), the
+  // same grey as Playback's, so the same fix: playbackSubtle #767676
+  // (4.54:1).
+  static const Color sheetSubtle = playbackSubtle;
+  // Adjusted for AA, 2026-10-09: close X sampled #A9A9A9 is 2.35:1; HSL
+  // lightness −0.085 (smallest 0.005 step to the 3:1 icon floor) gives
+  // #939393 (3.07:1).
+  static const Color sheetClose = Color(0xFF939393);
+  // Row dividers. Sampled #E8E8E8 (decorative, no floor).
+  static const Color sheetDivider = Color(0xFFE8E8E8);
+  // Solo / Metronome checkbox. Sampled fill #D9D9D9 is only 1.41:1, under
+  // the 3:1 a control's outline needs, so the fill is kept and a derived
+  // border is added: the fill at HSL lightness −0.27, #949494 (3.03:1).
+  static const Color sheetCheckFill = Color(0xFFD9D9D9);
+  static const Color sheetCheckBorder = Color(0xFF949494);
+  // Derived (no ticked box in the mockups): navy fill, white tick (13.36:1).
+  static const Color sheetCheckOn = playbackNavy;
+  // Voice pills, white text on each. Adjusted for AA, 2026-10-09, by the
+  // smallest HSL lightness step (0.005) that gives white text 4.5:1:
+  // Soprano sampled #FF3988 (3.39:1) −0.155 → #E9005D (4.54:1);
+  // Alto sampled #A570E4 (3.48:1) −0.065 → #9354DF (4.59:1);
+  // Tenor sampled #49D149 (2.00:1) −0.22 → #228822 (4.55:1);
+  // Bass sampled #4CA2E4 (2.76:1) −0.16 → #1D7AC1 (4.56:1).
+  static const Color mixerSoprano = Color(0xFFE9005D);
+  static const Color mixerAlto = Color(0xFF9354DF);
+  static const Color mixerTenor = Color(0xFF228822);
+  static const Color mixerBass = Color(0xFF1D7AC1);
+  // Speaker icons. Sampled #272960 (= playbackNavy, 13.36:1).
+  static const Color mixerSpeaker = playbackNavy;
+  // Sliders (both sheets). Sampled: the part left of the thumb is white
+  // with a #4F52A1 outline (6.88:1), the part right of it #272960
+  // (= playbackNavy); the thumb is white with the same outline.
+  static const Color sliderOutline = Color(0xFF4F52A1);
+  static const Color sliderInactive = playbackNavy;
+  // Mute pill, off: fill sampled #D7E4E9 (= playbackChipFill); text
+  // sampled #7993A5 is 2.48:1 on it, so playbackChipText #506777 (4.56:1),
+  // the same fix as the voice chips.
+  static const Color mixerMuteFill = playbackChipFill;
+  static const Color mixerMuteText = playbackChipText;
+  // Adjusted for AA, 2026-10-09: Mute pill, on, sampled #FF395A (white text
+  // 3.51:1); HSL lightness −0.145 gives #EE0028 (4.5:1).
+  static const Color mixerMuteOn = Color(0xFFEE0028);
+  // Speed sheet's metronome glyph. Sampled #1E9DCC (3.11:1; icon floor).
+  static const Color speedMetronome = Color(0xFF1E9DCC);
+
   /// Darkens [color] for a pressed-state SOP (see frontend-piyanota.md
   /// "Interaction states") — reduces HSL lightness rather than overlaying
   /// opacity, so the result stays the same hue, just deeper.

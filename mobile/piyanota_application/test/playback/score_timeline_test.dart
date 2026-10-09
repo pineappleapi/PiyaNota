@@ -137,6 +137,99 @@ void main() {
       );
     });
 
+    test('tempoBpm (PIYA-103 AC8): 30-240 int, else 90', () {
+      ScoreResult parse(Object? tempo) => ScoreResult.fromJson({
+        'scoreId': 7,
+        'audioTracks': {'soprano': 'https://cdn/s.mp3'},
+        'tempoBpm': ?tempo,
+      });
+      expect(parse(null).tempoBpm, 90);
+      expect(parse(120).tempoBpm, 120);
+      expect(parse(30).tempoBpm, 30);
+      expect(parse(240).tempoBpm, 240);
+      for (final bad in [29, 241, 0, -5, 90.5, '120']) {
+        expect(parse(bad).tempoBpm, 90, reason: '$bad');
+      }
+    });
+
+    test('URLs: http(s) always; file only in the demo build', () {
+      Map<String, dynamic> body(String scheme) => {
+        'scoreId': 7,
+        'audioTracks': {
+          'soprano': 'https://cdn/s.mp3',
+          'alto': '$scheme:///data/a.wav',
+        },
+        'scoreImages': ['$scheme:///data/p1.png', 'http://cdn/p2.png'],
+        'timingMetadataUrl': '$scheme:///data/t.json',
+      };
+      final release = ScoreResult.fromJson(
+        body('file'),
+        allowLocalFiles: false,
+      );
+      expect(release.audioTracks.keys, [VoicePart.soprano]);
+      expect(release.scoreImages, [null, Uri.parse('http://cdn/p2.png')]);
+      expect(release.timingMetadataUrl, isNull);
+
+      final demo = ScoreResult.fromJson(body('file'), allowLocalFiles: true);
+      expect(demo.audioTracks.keys, [VoicePart.soprano, VoicePart.alto]);
+      expect(demo.scoreImages, hasLength(2));
+      expect(demo.timingMetadataUrl, Uri.parse('file:///data/t.json'));
+
+      // Other schemes never, even in the demo build.
+      for (final scheme in ['content', 'asset', 'javascript', 'ftp']) {
+        final other = ScoreResult.fromJson(body(scheme), allowLocalFiles: true);
+        expect(other.audioTracks.keys, [VoicePart.soprano], reason: scheme);
+        expect(other.scoreImages.first, isNull, reason: scheme);
+        expect(other.timingMetadataUrl, isNull, reason: scheme);
+      }
+
+      // Only local tracks, outside the demo: nothing to play.
+      expect(
+        () => ScoreResult.fromJson({
+          'scoreId': 7,
+          'audioTracks': {'soprano': 'file:///data/s.wav'},
+        }, allowLocalFiles: false),
+        throwsFormatException,
+      );
+    });
+
+    test('a rejected page URL keeps its slot, so later pages keep their '
+        'index', () {
+      final result = ScoreResult.fromJson({
+        'scoreId': 7,
+        'audioTracks': {'soprano': 'https://cdn/s.mp3'},
+        'scoreImages': [
+          'https://cdn/p0.png',
+          'ftp://x/p1.png',
+          42,
+          'https://cdn/p3.png',
+        ],
+      }, allowLocalFiles: false);
+      expect(result.scoreImages, [
+        Uri.parse('https://cdn/p0.png'),
+        null,
+        null,
+        Uri.parse('https://cdn/p3.png'),
+      ]);
+      expect(
+        [for (var i = -1; i <= 4; i++) result.hasPage(i)],
+        [false, true, false, false, true, false],
+      );
+    });
+
+    test('tempoKnown: only a valid tempoBpm counts', () {
+      ScoreResult parse(Object? tempo) => ScoreResult.fromJson({
+        'scoreId': 7,
+        'audioTracks': {'soprano': 'https://cdn/s.mp3'},
+        'tempoBpm': ?tempo,
+      });
+      expect(parse(120).tempoKnown, isTrue);
+      for (final bad in [null, 29, 241, 90.5, '120']) {
+        expect(parse(bad).tempoKnown, isFalse, reason: '$bad');
+        expect(parse(bad).tempoBpm, 90, reason: '$bad');
+      }
+    });
+
     test('an explicit reviewNeeded false is respected', () {
       final review = ReviewSummary.fromJson({'reviewNeeded': false});
       expect(review.reviewNeeded, isFalse);

@@ -125,7 +125,7 @@ void main() {
         expect(result.audioTracks.keys.toSet(), {...VoicePart.values});
         for (final uri in [
           ...result.audioTracks.values,
-          ...result.scoreImages,
+          ...result.scoreImages.nonNulls,
           result.timingMetadataUrl!,
         ]) {
           expect(uri.scheme, 'file');
@@ -141,6 +141,7 @@ void main() {
         );
         expect(result.review.reviewNeeded, isTrue);
         expect(result.arranger, 'Robert Delgado');
+        expect(result.tempoBpm, PlaybackDemo.bpm);
         expect(
           result.pageSizeAt(0),
           const Size(
@@ -160,7 +161,7 @@ void main() {
         expect(events, hasLength(PlaybackDemo.notes().length));
 
         // Generated once: a second fetch reuses the same files.
-        final page = File.fromUri(result.scoreImages.single);
+        final page = File.fromUri(result.scoreImages.single!);
         final written = page.lastModifiedSync();
         final again = await f.api.fetchResult(101);
         expect(again.scoreImages.single, result.scoreImages.single);
