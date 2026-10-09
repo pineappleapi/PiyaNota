@@ -356,17 +356,15 @@ void main() {
   });
 
   group('mixer, speed, export (AC8)', () {
-    testWidgets('sheets open over playback without pausing it', (tester) async {
+    testWidgets('the export sheet opens over playback without pausing it', (
+      tester,
+    ) async {
       final harness = ready();
       await pumpPlayback(tester, harness);
       await tester.tap(find.byKey(const ValueKey('play-pause')));
       await tester.pump();
 
       for (final (open, title) in [
-        (
-          find.bySemanticsLabel(PlaybackMessages.speed),
-          PlaybackMessages.playbackSpeed,
-        ),
         (
           find.byTooltip(PlaybackMessages.download),
           PlaybackMessages.exportSheetTitle,

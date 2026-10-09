@@ -146,15 +146,18 @@ class _MixerRow extends StatelessWidget {
       children: [
         const SpeakerGlyph(muted: true),
         Expanded(
-          child: Semantics(
-            label: PlaybackMessages.volumeLabel(name),
-            child: SheetSliderTheme(
-              child: Slider(
-                // Muting leaves the slider where it was (AC4).
-                value: volume,
-                semanticFormatterCallback: PlaybackMessages.volumeValue,
-                // On every change, not on change-end: AC3's 100 ms.
-                onChanged: enabled ? onVolume : null,
+          // Merged so the slider node carries the row's name.
+          child: MergeSemantics(
+            child: Semantics(
+              label: PlaybackMessages.volumeLabel(name),
+              child: SheetSliderTheme(
+                child: Slider(
+                  // Muting leaves the slider where it was (AC4).
+                  value: volume,
+                  semanticFormatterCallback: PlaybackMessages.volumeValue,
+                  // On every change, not on change-end: AC3's 100 ms.
+                  onChanged: enabled ? onVolume : null,
+                ),
               ),
             ),
           ),
