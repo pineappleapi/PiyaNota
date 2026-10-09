@@ -35,8 +35,18 @@ WHOLE_NOTE_TICKS = 4 * TICKS_PER_QUARTER
 # Mirrors stage3_transcription.DEFAULT_TIME_SIGNATURE (not imported: Stage 3
 # pulls in torch). Stage 3 stamps this on any strip with no explicit meter
 # token -- i.e. every continuation system -- so it cannot be read as evidence
-# of a real 4/4; see _consensus_time_signatures().
+# of a real 4/4; see _bar_meters().
 DEFAULT_TIME_SIGNATURE = "4/4"
+
+# Where a bar's meter came from (PIYA-108 AC7; published as PIYA-117 AC9's
+# meterSource). Stage 3 marks each event "detected" or "default"
+# (PIYA-107 AC9); "inherited" and "unknown" are Stage 4's. "unknown" is part
+# of the contract but never produced here: every bar gets either a vote, an
+# inherited meter, or the 4/4 default.
+METER_DETECTED = "detected"
+METER_INHERITED = "inherited"
+METER_DEFAULT = "default"
+METER_UNKNOWN = "unknown"
 
 # Tick tolerance for the per-bar duration check below.
 # 10 ticks (~1/48 of a quarter note at PPQ=480) absorbs int() truncation
@@ -69,6 +79,15 @@ ACTION_SCALED_RUN = "scaled_run"
 FLAG_TENOR_RANGE = "tenor_range_suspect"
 FLAG_BAR_INVARIANT = "bar_length_invariant_failed"
 FLAG_LOCAL_OVERRUN = "local_placement_overrun"
+FLAG_METER_DISAGREEMENT = "meter_disagreement"
+# Repairs that threw notes away (PIYA-103 AC9 "muted reasons"). Such a flag
+# carries muted=True plus start_tick/end_tick (PIYA-108 AC8) only when its
+# repair actually dropped or cut notes: a clip that trimmed durations and
+# dropped nothing is not muted (resolution 3 of
+# docs/decisions/meter-click-and-muting-gaps.md).
+ACTION_TRIMMED_PICKUP = "trimmed_head_to_pickup"
+MUTED_FLAG_KINDS = frozenset({FLAG_BAR_OVERFLOW, FLAG_MISSING_BARLINE, FLAG_BAR_INVARIANT,
+                              FLAG_LOCAL_OVERRUN, FLAG_PICKUP_MISMATCH})
 # Flags that also carry review_needed=True ask the user to confirm/fix the
 # bar; a flag without the key is informational (treat as review_needed=False).
 
@@ -152,7 +171,7 @@ def reconstruct_satb(voice_events: dict) -> dict:
     as data.
 
     Raises:
-        ValueError if any voice sequence is missing or empty.
+        ValueError if all four voice sequences are missing or empty.
     """
     satb, _report_data = reconstruct_satb_with_report(voice_events)
     return satb
@@ -185,22 +204,30 @@ def reconstruct_satb_with_report(voice_events: dict) -> tuple[dict, dict]:
 
     Returns:
         (satb, report). satb is {voice: [event_dict, ...]} ordered by global
-        tick. report has keys: flags (list of dicts, see FLAG_* kinds),
-        pickup_ticks, total_ticks (end of the last bar), systems (per-system
-        layout).
+        tick, with [] for a failed voice. report has keys: flags (list of
+        dicts, see FLAG_* kinds; a lossy repair's flag carries muted=True and
+        its global start_tick/end_tick, PIYA-108 AC8), pickup_ticks,
+        total_ticks (nominal end of the last bar), failed_voices (voices that
+        were missing or empty, SATB order), systems (per-system layout; each
+        has a ``bars`` list with every bar's ticks, time_signature,
+        meter_source and actual_ticks, PIYA-108 AC6/AC7).
 
     Raises:
-        ValueError if any voice sequence is missing or empty.
+        ValueError if all four voice sequences are missing or empty. One to
+        three empty voices are reported in failed_voices and the rest are
+        reconstructed (PIYA-108 AC4/AC5).
     """
     print("\n[Stage 4] Reconstructing SATB part sequences...")
 
-    missing = [v for v in VOICES if v not in voice_events
-               or len(voice_events[v]) == 0]
-    if missing:
+    failed = [v for v in VOICES if not voice_events.get(v)]
+    if len(failed) == len(VOICES):
         raise ValueError(
-            f"[Stage 4] Missing or empty voice sequence(s): {missing}. "
-            f"Check Stage 2/3 outputs or recapture the score."
+            "[Stage 4] All four voice sequences are missing or empty. "
+            "Check Stage 2/3 outputs or recapture the score."
         )
+    if failed:
+        print(f"[Stage 4] WARNING: no events for {failed}; continuing with the "
+              "other voices (reported as failed voices)")
 
     flags: list[Flag] = []
     strips = _split_into_strips(voice_events)
@@ -223,11 +250,12 @@ def reconstruct_satb_with_report(voice_events: dict) -> tuple[dict, dict]:
     _flag_midbar_breaks(strips, layout, flags)
 
     total_ticks = pickup_ticks + sum(
-        info["n_bars"] * info["bar_ticks"] for info in layout.values())
+        bar["ticks"] for info in layout.values() for bar in info["bars"])
     report_data = {
         "flags": flags,
         "pickup_ticks": pickup_ticks,
         "total_ticks": total_ticks,
+        "failed_voices": failed,
         "systems": [{"page_index": k[0], "sys_idx": k[1], **layout[k]}
                     for k in sorted(layout)],
     }
@@ -262,7 +290,7 @@ def _split_into_strips(voice_events: dict) -> dict:
     strips: dict = defaultdict(dict)
     for voice in VOICES:
         by_strip: dict = defaultdict(list)
-        for e in voice_events[voice]:
+        for e in voice_events.get(voice) or []:
             copy = dict(e)
             copy["local_tick_onset"] = copy["tick_onset"]
             by_strip[(copy["page_index"], copy["sys_idx"])].append(copy)
@@ -302,27 +330,57 @@ def _measures(events: list) -> Optional[dict]:
     return dict(sorted(grouped.items()))
 
 
-def _consensus_time_signatures(strips: dict) -> dict:
-    """
-    One time signature per strip key.
+def _event_meter(e: Event) -> tuple[str, str]:
+    """(time_signature, source) of one event.
 
-    Stage 3 defaults to 4/4 whenever a strip carries no meter token, which is
-    every continuation system, so a "4/4" reading is not evidence. Rule: the
-    first system's most common value wins; a later system only *changes* the
-    meter if its consensus differs from DEFAULT_TIME_SIGNATURE, otherwise it
-    inherits. Known limit: a real change back to 4/4 mid-piece is invisible.
+    Events from before PIYA-107 AC9 carry no source; for them only a non-4/4
+    value is certainly a reading (Stage 3 stamped 4/4 on every strip without a
+    meter), so that is the rule they fall back to.
     """
-    result: dict = {}
-    previous: Optional[str] = None
-    for key in sorted(strips):
-        counts = Counter(e.get("time_signature", DEFAULT_TIME_SIGNATURE)
-                         for events in strips[key].values() for e in events)
-        top = counts.most_common()
-        best = max(top, key=lambda kv: (kv[1], kv[0] != DEFAULT_TIME_SIGNATURE))[0]
-        if previous is None or best != DEFAULT_TIME_SIGNATURE:
-            previous = best
-        result[key] = previous
-    return result
+    ts = e.get("time_signature") or DEFAULT_TIME_SIGNATURE
+    src = e.get("time_signature_source")
+    if src not in (METER_DETECTED, METER_DEFAULT):
+        src = METER_DETECTED if ts != DEFAULT_TIME_SIGNATURE else METER_DEFAULT
+    return ts, src
+
+
+def _measure_meter(m_events: list[Event]) -> Optional[str]:
+    """The meter Stage 3 read for one measure, or None if it only defaulted.
+
+    Stage 3 stamps each event with its own measure's meter (PIYA-107 AC7), so
+    every event of a measure normally agrees; the most common detected value
+    wins if a stray one does not.
+    """
+    detected = [ts for ts, src in map(_event_meter, m_events) if src == METER_DETECTED]
+    return Counter(detected).most_common(1)[0][0] if detected else None
+
+
+def _opening_meter(strips: dict, first_key: tuple) -> Optional[str]:
+    """Detected meter of the first measure of the first system, by vote across voices.
+
+    Needed before the layout exists, because the pickup decision measures the
+    first bar against it. A pickup is engraved after the header meter, so its
+    measure carries bar 1's meter.
+    """
+    votes: list[str] = []
+    for voice in VOICES:
+        events = strips[first_key].get(voice)
+        if not events:
+            continue
+        measures = _measures(events)
+        first = next(iter(measures.values())) if measures else events
+        meter = _measure_meter(first)
+        if meter is not None:
+            votes.append(meter)
+    return Counter(votes).most_common(1)[0][0] if votes else None
+
+
+def _measure_at(ranked: dict[int, list[Event]], rank: int) -> Optional[list[Event]]:
+    """The measure covering bar ``rank`` of a voice-strip (a multirest covers several ranks)."""
+    for start, m_events in ranked.items():
+        if start <= rank < start + _measure_span(m_events):
+            return m_events
+    return None
 
 
 def _plan_layout(strips: dict, flags: list) -> tuple[dict, int, dict]:
@@ -330,14 +388,25 @@ def _plan_layout(strips: dict, flags: list) -> tuple[dict, int, dict]:
     Decides bar structure for the whole piece before any event is moved.
 
     Returns:
-        layout: {(page, sys): {time_signature, bar_ticks, n_bars,
-                 first_bar, start_tick}} -- n_bars is the cross-voice
-                 consensus (most common; ties -> larger).
+        layout: {(page, sys): {time_signature, bar_ticks (both the system's
+                 first bar, kept for older readers), n_bars, voice_bars,
+                 voice_base, bars, first_bar, start_tick}} -- n_bars is the
+                 cross-voice consensus (most common; ties -> larger). ``bars``
+                 has one entry per bar: ticks (nominal, from its own meter),
+                 time_signature, meter_source and actual_ticks (equal to ticks
+                 except a short final bar, resolution 9).
         pickup_ticks: length of the anacrusis (0 if none) = the length the
                  agreeing voices share (deviant voices do not move it). Bar
                  1's downbeat is at this tick in every voice.
         voice_pickup: {voice: that voice's own pickup length} for voices
                  that have pickup content.
+
+    Meter per bar (PIYA-108 AC6/AC7): the voices whose bar count matches the
+    consensus vote with the meter Stage 3 read for the measure covering that
+    bar; defaulted readings abstain. With no vote the bar inherits the
+    previous bar's meter, so a continuation strip's stamped 4/4 never resets
+    the meter while a detected 4/4 is a real change. Detected votes that
+    disagree raise meter_disagreement.
 
     Pickups are decided by _decide_pickups() (gates plus voice consensus,
     pickup_suspect on doubt), from durations and not measure_index numbering: Stage 3 skips a
@@ -348,16 +417,17 @@ def _plan_layout(strips: dict, flags: list) -> tuple[dict, int, dict]:
     reported as FLAG_PICKUP (review_needed unless the final bar completes it)
     so it is visible, not assumed correct.
     """
-    meters = _consensus_time_signatures(strips)
     first_key = min(strips)
+    opening = _opening_meter(strips, first_key) or DEFAULT_TIME_SIGNATURE
     voice_pickup, pickup_ticks, suffix_ok = _decide_pickups(
-        strips, meters, first_key, flags)
-    voice_base: dict = {}
+        strips, {first_key: opening}, first_key, flags)
 
     layout: dict = {}
+    previous: Optional[tuple[str, str]] = None      # (meter, source) of the last bar laid out
     for key in sorted(strips):
-        bar_ticks = _bar_ticks(meters[key])
-        n_by_voice: dict = {}
+        n_by_voice: dict[str, int] = {}
+        voice_base: dict[str, int] = {}
+        ranked: dict[str, dict[int, list[Event]]] = {}
         for voice, events in strips[key].items():
             measures = _measures(events)
             if measures is None:
@@ -366,29 +436,88 @@ def _plan_layout(strips: dict, flags: list) -> tuple[dict, int, dict]:
             base = indices[0]
             if key == first_key and voice in voice_pickup:
                 base = indices[1]
-            voice_base[(key, voice)] = base
+            voice_base[voice] = base
+            ranked[voice] = {mi - base: measures[mi] for mi in indices if mi >= base}
             n_by_voice[voice] = max(
-                (mi - base) + _measure_span(measures[mi], bar_ticks)
-                for mi in indices if mi >= base)
+                (rank + _measure_span(m) for rank, m in ranked[voice].items()), default=0)
         counts = Counter(n_by_voice.values())
         n_bars = max(counts, key=lambda n: (counts[n], n)) if counts else 0
-        layout[key] = {"time_signature": meters[key], "bar_ticks": bar_ticks,
+        voters = [v for v in VOICES if n_by_voice.get(v) == n_bars] or [
+            v for v in VOICES if v in ranked]
+
+        bars: list[dict[str, Any]] = []
+        for rank in range(n_bars):
+            votes: dict[str, str] = {}
+            for voice in voters:
+                m_events = _measure_at(ranked[voice], rank)
+                meter = _measure_meter(m_events) if m_events else None
+                if meter is not None:
+                    votes[voice] = meter
+            if votes:
+                tally = Counter(votes.values())
+                meter, source = tally.most_common(1)[0][0], METER_DETECTED
+                if len(tally) > 1:
+                    flags.append({
+                        "kind": FLAG_METER_DISAGREEMENT, "page_index": key[0],
+                        "sys_idx": key[1], "bar": None, "voice": None,
+                        "expected_ticks": _bar_ticks(meter), "actual_ticks": None,
+                        "detail": f"voices read different meters for bar {rank + 1} of "
+                                  f"this system: {votes}; used {meter}",
+                        "action": "majority_meter", "review_needed": True,
+                        "system_bar_rank": rank})
+            elif previous is None:
+                meter, source = DEFAULT_TIME_SIGNATURE, METER_DEFAULT
+            else:
+                meter = previous[0]
+                # Within one system the source carries over (a change earlier in
+                # this strip still counts as read here); across a system break a
+                # read meter becomes inherited (AC7). A default stays default.
+                source = (previous[1] if bars or previous[1] == METER_DEFAULT
+                          else METER_INHERITED)
+            ticks = _bar_ticks(meter)
+            bars.append({"ticks": ticks, "time_signature": meter,
+                         "meter_source": source, "actual_ticks": ticks})
+            previous = (meter, source)
+
+        head = bars[0]["time_signature"] if bars else (
+            previous[0] if previous else opening)
+        layout[key] = {"time_signature": head, "bar_ticks": _bar_ticks(head),
                        "n_bars": n_bars, "voice_bars": n_by_voice,
-                       "voice_base": {v: voice_base[(key, v)] for v in n_by_voice}}
+                       "voice_base": voice_base, "bars": bars}
 
     # Voices whose shorter pickup is a dropped-leading-note suffix of the agreed
     # one: their length mismatch is informational (a list, so the report stays
     # JSON-serialisable).
     layout[first_key]["pickup_suffix_ok"] = sorted(suffix_ok)
 
+    # Resolution 9: a short final bar (often the complement of the pickup)
+    # keeps its actual length. Only bar-anchored voices count, and the longest
+    # of them wins, so one voice that dropped a note cannot shorten the bar.
+    last_key = max((k for k in layout if layout[k]["bars"]), default=None)
+    if last_key is not None and last_key == max(strips):
+        info = layout[last_key]
+        own = {v: t for v, t in _final_bar_ticks(strips).items()
+               if info["voice_bars"].get(v) == info["n_bars"]}
+        last = info["bars"][-1]
+        if own and 0 < max(own.values()) < last["ticks"]:
+            last["actual_ticks"] = max(own.values())
+
     running = pickup_ticks
     bar_no = 1
     for key in sorted(layout):
         layout[key]["start_tick"] = running
         layout[key]["first_bar"] = bar_no
-        running += layout[key]["n_bars"] * layout[key]["bar_ticks"]
+        running += sum(bar["ticks"] for bar in layout[key]["bars"])
         bar_no += layout[key]["n_bars"]
     return layout, pickup_ticks, voice_pickup
+
+
+def _bar_starts(info: dict[str, Any]) -> list[int]:
+    """Global start tick of every bar of a system, plus the system end as the last item."""
+    starts = [info["start_tick"]]
+    for bar in info["bars"]:
+        starts.append(starts[-1] + bar["ticks"])
+    return starts
 
 
 def _is_valid_pickup_length(ticks: int, bar_ticks: int) -> bool:
@@ -765,7 +894,9 @@ def _flag_midbar_breaks(strips: dict, layout: dict, flags: list) -> None:
     """
     keys = sorted(strips)
     for cur, nxt in zip(keys, keys[1:]):
-        bar_ticks = layout[cur]["bar_ticks"]
+        # The break splits the system's LAST bar, which may have its own meter.
+        bars = layout[cur]["bars"]
+        bar_ticks = bars[-1]["ticks"] if bars else layout[cur]["bar_ticks"]
         tails: dict = {}
         heads: dict = {}
         for voice in VOICES:
@@ -813,12 +944,23 @@ def _flag_tenor_range(events: list, flags: list) -> None:
                       "error", "action": "none", "review_needed": True})
 
 
-def _measure_span(events: list, bar_ticks: int) -> int:
+def _measure_span(events: list) -> int:
     """Bars a measure occupies: 1, or N for a multirest measure (Stage 3
-    bumps measure_index by N-1 after it, so the span is real bars)."""
-    if _is_multirest(events):
-        return max(1, round(_measure_ticks(events) / bar_ticks))
-    return 1
+    bumps measure_index by N-1 after it, so the span is real bars).
+
+    N is the count Stage 3 read (``multirest_bars``), not ticks divided by a
+    bar length: dividing a 3/4 multirest's ticks by a whole note was BUG-052.
+    Only events without the field fall back to dividing, by the measure's own
+    meter.
+    """
+    if not _is_multirest(events):
+        return 1
+    counts = [e["multirest_bars"] for e in events
+              if isinstance(e.get("multirest_bars"), int) and e["multirest_bars"] > 0]
+    if counts:
+        return max(counts)
+    meter = _measure_meter(events) or DEFAULT_TIME_SIGNATURE
+    return max(1, round(_measure_ticks(events) / _bar_ticks(meter)))
 
 
 # ── Placement onto the global timeline ─────────────────────────────────────────
@@ -836,32 +978,40 @@ def _place_voice_strip(
     Moves one voice-strip's events onto the global timeline.
 
     Bar mode (normal): the voice's bar count equals the cross-voice
-    consensus, so measure `rank` (measure_index - base) is anchored at
-    system_start + rank * bar_ticks, and each event keeps only its offset
-    inside its own measure. Duration errors are contained per bar; bars whose
-    total disagrees with the time signature are flagged (and overflow is
-    clipped so it cannot collide with the next bar).
+    consensus, so measure `rank` (measure_index - base) is anchored at the
+    start of the system's bar `rank` (bars may differ in length, PIYA-108
+    AC6), and each event keeps only its offset inside its own measure.
+    Duration errors are contained per bar; bars whose total disagrees with
+    their meter are flagged (and overflow is clipped so it cannot collide
+    with the next bar).
 
     Local mode (fallback): the voice's bar count disagrees with consensus (a
     dropped/hallucinated barline or multirest miscount) or it has no
     measure_index. Per-bar ranks cannot be trusted then, but its own running
     ticks still are; events are placed at system_start + local tick and the
     disagreement is flagged.
+
+    A repair that threw notes away marks its flag muted=True with the global
+    span Stage 5 silences (PIYA-108 AC8, PIYA-109 AC8).
     """
     page_index, sys_idx = key
     measures = _measures(events)
     start_tick = info["start_tick"]
-    bar_ticks = info["bar_ticks"]
+    starts = _bar_starts(info)
+    system_end = starts[-1]
 
     def flag(kind: str, bar: Optional[int], expected: Optional[int],
              actual: Optional[int], detail: str, action: str,
-             review_needed: bool = False) -> None:
+             review_needed: bool = False,
+             span: Optional[tuple[int, int]] = None) -> None:
         entry = {"kind": kind, "page_index": page_index,
                  "sys_idx": sys_idx, "bar": bar, "voice": voice,
                  "expected_ticks": expected, "actual_ticks": actual,
                  "detail": detail, "action": action}
         if review_needed:
             entry["review_needed"] = True
+        if span is not None and span[1] > span[0]:
+            entry.update(muted=True, start_tick=span[0], end_tick=span[1])
         flags.append(entry)
 
     if measures is None or info["voice_bars"].get(voice) != info["n_bars"]:
@@ -876,10 +1026,9 @@ def _place_voice_strip(
                  "placed_by_local_ticks")
         # Never before tick 0, even for a pickup voice longer than the agreed one.
         origin = max(0, start_tick - own_pickup_ticks)
-        system_end = start_tick + info["n_bars"] * bar_ticks
         kept_events: list[Event] = []
         dropped_desc: list[str] = []
-        trimmed = 0
+        trimmed_onsets: list[int] = []
         for e in events:
             e["tick_onset"] = origin + e["local_tick_onset"]
             e["global_bar"] = None
@@ -889,26 +1038,31 @@ def _place_voice_strip(
                 continue
             if e["tick_onset"] + e["duration_ticks"] > system_end:
                 e["duration_ticks"] = system_end - e["tick_onset"]
-                trimmed += 1
+                trimmed_onsets.append(e["tick_onset"])
             kept_events.append(e)
-        if dropped_desc or trimmed:
-            flag(FLAG_LOCAL_OVERRUN, None, info["n_bars"] * bar_ticks, None,
+        if dropped_desc or trimmed_onsets:
+            # Resolution 2: silence from the earliest cut note to the system
+            # end. Notes dropped past the end never sounded, so they need no span.
+            span = (min(trimmed_onsets), system_end) if trimmed_onsets else None
+            flag(FLAG_LOCAL_OVERRUN, None, system_end - start_tick, None,
                  f"locally placed voice ran past the system end (tick "
-                 f"{system_end}); trimmed {trimmed} event(s), dropped "
+                 f"{system_end}); trimmed {len(trimmed_onsets)} event(s), dropped "
                  f"{len(dropped_desc)} note(s): {dropped_desc}",
-                 ACTION_CLIPPED, review_needed=True)
+                 ACTION_CLIPPED, review_needed=True, span=span)
         return kept_events
 
     base = info["voice_base"][voice]
+    first_bar_ticks = info["bars"][0]["ticks"] if info["bars"] else info["bar_ticks"]
     placed: list = []
     for mi, m_events in measures.items():
-        _normalise_whole_rest(m_events, bar_ticks)
-        first_local = min(e["local_tick_onset"] for e in m_events)
-        total = _measure_ticks(m_events)
         if mi < base:
+            _normalise_whole_rest(m_events, first_bar_ticks)
+            first_local = min(e["local_tick_onset"] for e in m_events)
+            total = _measure_ticks(m_events)
             if abs(total - pickup_ticks) > DURATION_MISMATCH_TOLERANCE_TICKS:
                 own_total = total
                 review = True
+                span: Optional[tuple[int, int]] = None
                 if total > pickup_ticks:
                     # Right-aligning a longer bar would sound before tick 0:
                     # keep the LAST pickup_ticks (the notes leading into the
@@ -917,7 +1071,8 @@ def _place_voice_strip(
                         m_events, first_local, pickup_ticks)
                     first_local = min(e["local_tick_onset"] for e in m_events)
                     total = _measure_ticks(m_events)
-                    action = "trimmed_head_to_pickup"
+                    action = ACTION_TRIMMED_PICKUP
+                    span = (0, pickup_ticks)
                     how = (f"longer than the agreed pickup; kept the last "
                            f"{pickup_ticks} ticks, dropped {len(dropped)} "
                            f"note(s) from the head: {dropped}")
@@ -930,25 +1085,36 @@ def _place_voice_strip(
                               if not review else ""))
                 flag(FLAG_PICKUP_MISMATCH, 0, pickup_ticks, own_total,
                      f"this voice's first bar is {how}", action,
-                     review_needed=review)
+                     review_needed=review, span=span)
             origin = pickup_ticks - total
             bar_no: Optional[int] = 0
-            bar_end: Optional[int] = None
         else:
             rank = mi - base
-            origin = start_tick + rank * bar_ticks
+            span_bars = _measure_span(m_events)
+            origin = starts[rank]
+            bar_ticks = starts[min(rank + span_bars, len(info["bars"]))] - origin
             bar_no = info["first_bar"] + rank
-            bar_end = origin + bar_ticks
+            if _is_multirest(m_events):
+                # The rest lasts exactly the bars it covers, each at its own meter.
+                for e in m_events:
+                    if str(e.get("symbol", "")).startswith("multirest"):
+                        e["duration_ticks"] = bar_ticks
+            else:
+                _normalise_whole_rest(m_events, bar_ticks)
+            first_local = min(e["local_tick_onset"] for e in m_events)
+            total = _measure_ticks(m_events)
             if not _is_multirest(m_events):
                 if total < bar_ticks - DURATION_MISMATCH_TOLERANCE_TICKS:
                     flag(FLAG_BAR_UNDERFULL, bar_no, bar_ticks, total,
                          "bar shorter than the time signature (dropped "
                          "note/rest?); remainder plays as silence", "none")
                 elif total > bar_ticks + DURATION_MISMATCH_TOLERANCE_TICKS:
-                    m_events, kind, detail, action = _repair_overflow(
+                    m_events, kind, detail, action, n_dropped = _repair_overflow(
                         m_events, first_local, bar_ticks, total)
+                    lossy = kind in MUTED_FLAG_KINDS and n_dropped > 0
                     flag(kind, bar_no, bar_ticks, total, detail, action,
-                         review_needed=True)
+                         review_needed=True,
+                         span=(origin, origin + bar_ticks) if lossy else None)
         for e in m_events:
             e["tick_onset"] = origin + (e["local_tick_onset"] - first_local)
             e["global_bar"] = bar_no
@@ -1036,9 +1202,10 @@ def _rescale_slots(slots: list, i0: int, i1: int, target_total: int) -> None:
 def _repair_by_run(m_events: list[Event], slots: list[dict],
                    runs: list[tuple[int, int]], first_local: int,
                    bar_ticks: int, overshoot: int
-                   ) -> Optional[tuple[list[Event], str, str, str]]:
-    """Steps 1-4 of _repair_overflow. Returns (events, kind, detail, action)
-    or None when no run is a plausible culprit (caller goes to step 5)."""
+                   ) -> Optional[tuple[list[Event], str, str, str, int]]:
+    """Steps 1-4 of _repair_overflow. Returns (events, kind, detail, action,
+    notes dropped) or None when no run is a plausible culprit (caller goes to
+    step 5)."""
     def run_ticks_of(run: tuple) -> int:
         return sum(s["dur"] for s in slots[run[0]:run[1]])
 
@@ -1059,13 +1226,13 @@ def _repair_by_run(m_events: list[Event], slots: list[dict],
         # Not an assert: it would vanish under python -O and abort otherwise.
         landed = _measure_ticks(m_events)
         if landed == bar_ticks:
-            return m_events, kind, detail, action
+            return m_events, kind, detail, action, 0
         kept, dropped = _clip_to_bar(m_events, first_local, bar_ticks)
         return (kept, FLAG_BAR_INVARIANT,
                 f"run repair ({kind}) left the bar at {landed} ticks, not "
                 f"{bar_ticks}; clipped to the bar end, dropped {len(dropped)} "
                 f"note(s): {dropped}. Internal invariant failure: verify",
-                ACTION_CLIPPED)
+                ACTION_CLIPPED, len(dropped))
 
     # 2. Exact tuplet: the whole run is 3-in-the-time-of-2.
     if (n % 3 == 0 and abs(overshoot - run_ticks / 3)
@@ -1141,11 +1308,12 @@ def _clip_to_bar(m_events: list, first_local: int,
 
 
 def _repair_overflow(m_events: list, first_local: int, bar_ticks: int,
-                     total: int) -> tuple[list, str, str, str]:
+                     total: int) -> tuple[list, str, str, str, int]:
     """
     Repairs an over-long bar so nothing sounds past the bar end and nothing
     leaks into the next bar. The rest of the voice is never shifted. Returns
-    (events, flag_kind, detail, action).
+    (events, flag_kind, detail, action, notes dropped); the count decides
+    whether Stage 5 mutes the bar (PIYA-103 AC9, resolution 3).
 
     1-4. If the bar holds a run (>=3 consecutive same-duration slots, >=2 of
        them notes) that can absorb the overshoot (squeezing it by <= 1/3),
@@ -1181,7 +1349,7 @@ def _repair_overflow(m_events: list, first_local: int, bar_ticks: int,
                 f"bar holds {total} ticks = {k} bars' worth; a barline was "
                 "probably missed. Clipped to the first bar (not scaled), "
                 f"dropped {len(dropped)} note(s): {dropped}",
-                ACTION_CLIPPED)
+                ACTION_CLIPPED, len(dropped))
 
     remainder = overshoot % TUPLET_GRID_TICKS
     if (min(remainder, TUPLET_GRID_TICKS - remainder)
@@ -1196,7 +1364,7 @@ def _repair_overflow(m_events: list, first_local: int, bar_ticks: int,
                 f"bar is {overshoot} ticks over, not a multiple of "
                 f"{TUPLET_GRID_TICKS}; likely a tuplet read as plain values "
                 "(BUG-015). Scaled into the bar, nothing dropped.",
-                ACTION_COMPRESSED)
+                ACTION_COMPRESSED, 0)
 
     note_events = [e for e in m_events if e["type"] == "note"]
     if (not runs and note_events
@@ -1217,13 +1385,13 @@ def _repair_overflow(m_events: list, first_local: int, bar_ticks: int,
                     f"bar {overshoot} ticks over; dropped the lowest-"
                     f"confidence matching note {[_describe(victim)]} and "
                     "closed up (tie-broken by uncalibrated CRNN confidence "
-                    "-- a guess, verify)", ACTION_CLIPPED)
+                    "-- a guess, verify)", ACTION_CLIPPED, 1)
 
     kept, dropped = _clip_to_bar(m_events, first_local, bar_ticks)
     return (kept, FLAG_BAR_OVERFLOW,
             f"bar {overshoot} ticks over; durations trimmed to the bar end, "
             f"dropped {len(dropped)} note(s) starting after it: {dropped}",
-            ACTION_CLIPPED)
+            ACTION_CLIPPED, len(dropped))
 
 
 # ── Tie resolution ─────────────────────────────────────────────────────────────
