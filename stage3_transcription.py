@@ -764,7 +764,38 @@ TIME_SIG_TOKENS = {
     "metersign.C/": "2/2",
 }
 DEFAULT_TIME_SIGNATURE = "4/4"
- 
+
+# PIYA-107 AC9: whether an event's time_signature was read in its own strip or
+# is AC4's stamped default. Stage 4 inherits the previous meter over a default
+# instead of reading it as a change back to 4/4 (PIYA-108 AC7).
+TIME_SIG_SOURCE_DETECTED = "detected"
+TIME_SIG_SOURCE_DEFAULT = "default"
+
+# PIYA-107 AC8: Camera-PrIMuS engraves a numeric time signature ON the staff
+# (numerator on line 4, denominator on line 2) and a multirest's bar count
+# ABOVE it (space 5). Telling them apart by position, not by token order, is
+# what fixes BUG-035 / BUG-051. Checked against all 3,996 Camera-PrIMuS
+# .agnostic files (2026-10-09): every L4 digit is directly followed by an L2
+# digit and vice versa (1,606 pairs, 21 of them mid-strip after a barline),
+# and every run of S5 digits is directly followed by a multirest (962 runs,
+# 405 of them two digits long, e.g. "digit.1-S5 digit.0-S5" = 10 bars).
+#
+# Refined by ml-cv-lead 2026-10-09 (resolution 10 of
+# docs/decisions/meter-click-and-muting-gaps.md): a digit the parser cannot
+# place is never silently dropped, it flags the strip for review, because on a
+# real image it means a misread (a lone half of a meter, or an S5 run with no
+# multirest after it: a tuplet number or bar-number hallucination).
+METER_FLAG_UNPAIRED_DIGIT = "meter_digit_unpaired"
+METER_FLAG_ORPHAN_COUNT = "multirest_count_orphaned"
+# Tokens that are measure content: a meter with none of these after it in the
+# strip is a courtesy meter (it announces the next system) and changes nothing
+# in this one.
+BODY_CONTENT_PREFIXES = ("note.", "gracenote.", "rest.", "multirest")
+METER_NUMERATOR_POSITION = "L4"
+METER_DENOMINATOR_POSITION = "L2"
+MULTIREST_COUNT_POSITION = "S5"
+DECIMAL_BASE = 10
+
 SHARP_ORDER = ["F", "C", "G", "D", "A", "E", "B"]
 FLAT_ORDER  = ["B", "E", "A", "D", "G", "C", "F"]
  
@@ -781,6 +812,57 @@ NOTE_DURATION_TICKS = {
 }
  
 REST_DURATION_TICKS = NOTE_DURATION_TICKS
+
+
+def _parse_digit(sym: str) -> Optional[tuple[int, str]]:
+    """(value, staff position) of a ``digit.N-POS`` token, or None if it does not parse."""
+    try:
+        body, position = sym.split(".", 1)[1].split("-", 1)
+        return int(body), position
+    except (IndexError, ValueError):
+        return None
+
+
+def _meter_pair_at(symbols: list[str], idx: int) -> Optional[str]:
+    """``"N/D"`` if symbols[idx] is a numerator digit directly followed by a denominator digit.
+
+    Adjacency is required: in Camera-PrIMuS the two are always consecutive, so
+    anything else is an unpaired digit, which resolution 10 of
+    docs/decisions/meter-click-and-muting-gaps.md says never to guess a meter
+    from (it flags the strip instead).
+    """
+    if idx + 1 >= len(symbols):
+        return None
+    num, den = _parse_digit(symbols[idx]), _parse_digit(symbols[idx + 1])
+    if (num is None or den is None or num[1] != METER_NUMERATOR_POSITION
+            or den[1] != METER_DENOMINATOR_POSITION or num[0] <= 0 or den[0] <= 0):
+        return None
+    return f"{num[0]}/{den[0]}"
+
+
+def _is_multirest_count(sym: str) -> bool:
+    parsed = _parse_digit(sym) if sym.startswith("digit.") else None
+    return parsed is not None and parsed[1] == MULTIREST_COUNT_POSITION
+
+
+def _has_body_content_after(symbols: list[str], start: int) -> bool:
+    """True if any note/rest/multirest token sits at or after ``start`` (courtesy-meter test)."""
+    return any(sym.startswith(BODY_CONTENT_PREFIXES) for sym in symbols[start:])
+
+
+def _meter_bar_ticks(time_signature: str) -> int:
+    """Ticks in one bar of ``time_signature``; a whole note if it does not parse.
+
+    Mirrors stage4_reconstruction._bar_ticks (not imported: Stage 4 must stay
+    importable without torch, and Stage 3 imports torch).
+    """
+    try:
+        num, den = (int(part) for part in time_signature.split("/"))
+    except (ValueError, AttributeError):
+        return NOTE_DURATION_TICKS["whole"]
+    if num <= 0 or den <= 0:
+        return NOTE_DURATION_TICKS["whole"]
+    return num * NOTE_DURATION_TICKS["whole"] // den
 
 
 def _dotted_ticks(base_ticks: int, n_dots: int) -> int:
@@ -1066,8 +1148,8 @@ def infer_pitch(
         (clef dropped by CRNN)                   → infer clef was missed,
                                                    start counting, → "keysig"
       • accidental at wrong position             → inline if anchored, → "body"
-      • metersign / note / rest                  → warn, commit empty key sig,
-                                                   → "body", fall-through
+      • metersign / note / rest / multirest /    → warn, commit empty key sig,
+        S5 multirest count                         → "body", fall-through
  
     "keysig"
       Counting opening key-sig accidentals. No ambiguity — clef confirmed.
@@ -1076,13 +1158,16 @@ def infer_pitch(
       • mixed sharp+flat                         → CTC noise, skip
       • accidental.natural                       → CTC noise, skip
       • second clef                              → update reference, stay
-      • metersign                                → commit, → "body"
-      • note / rest                              → commit (no metersign on
+      • metersign                                → commit, → "body",
+                                                   fall-through (body reads it)
+      • note / rest / multirest / S5 count       → commit (no metersign on
                                                    continuation strips),
                                                    → "body", fall-through
  
     "body"
       Normal note / rest / accidental processing.
+      • metersign                                → meter change from here on
+      • S5 digit(s)                              → count for the next multirest
       On every barline                           → → "post_bar"
  
     "post_bar"
@@ -1100,8 +1185,17 @@ def infer_pitch(
       • clef                                     → ignored
       • accidental directly before a note on its position → inline, stay
       • other accidental                         → dropped, stay
-      • metersign / time-signature digits        → read time signature
-      • note / rest                              → → "body", fall-through
+      • metersign                                → read time signature, stay
+      • note / rest / multirest / S5 count       → → "body", fall-through
+
+    Meter digits, in every state (before the machine runs; PIYA-107 AC7/AC8)
+      • digit-L4 directly followed by digit-L2   → time signature N/D from here
+                                                   on, source "detected"
+      • any other non-S5 digit (lone L4 or L2)   → ignored (never a multirest
+                                                   count, never a meter)
+    Every event carries time_signature (its own measure's meter) and
+    time_signature_source ("detected" once a meter was read in this strip at
+    or before it, else "default" with AC4's 4/4).
     """
 
     # ── Initialise ────────────────────────────────────────────────────────
@@ -1145,10 +1239,12 @@ def infer_pitch(
     pending_multirest_bars = 1
     events                 = []
     current_tick           = 0
-    # PIYA-107 AC4/AC6: defaults to 4/4 until an explicit metersign token is
-    # consumed (see "keysig" stage below); every emitted event carries this
-    # value regardless of whether the note itself is decorated with one.
+    # PIYA-107 AC4/AC7/AC9: defaults to 4/4 until a meter is read (metersign or
+    # an L4+L2 digit pair, in the header or after a barline mid-strip); every
+    # emitted event carries the meter in effect at its own position, so an
+    # event's time_signature is the meter of the measure it sits in.
     time_signature         = DEFAULT_TIME_SIGNATURE
+    time_signature_source  = TIME_SIG_SOURCE_DEFAULT
     # 0-based measure counter, incremented on every barline. Barline tokens
     # themselves are never appended as events (they only drive the key-sig
     # state machine below), so this is the only place measure boundaries are
@@ -1161,17 +1257,13 @@ def infer_pitch(
     ks_flat         = 0
     key_alterations = {}
     header_dropped  = 0
-    # PIYA-107 AC4/AC6: Camera-PrIMuS encodes a numeric time signature (e.g.
-    # "3/4") as two consecutive digit.N tokens in the header, rather than a
-    # metersign.* token -- confirmed against ground truth: 1586/3996 (40%) of
-    # corpus samples carry no metersign token at all and rely solely on this
-    # digit-pair form. Only the first two header digit tokens are the time
-    # signature (numerator, then denominator); any further digit tokens
-    # before the first note/rest are unrelated noise and are ignored, same
-    # as prior (pre-PIYA-107) behaviour.
-    meter_digits = []
-    meter_seen   = False  # fixed_header: a metersign was read, so later digits are multirest counts
- 
+    meter_flags: list[str] = []     # strip-level review codes for digits the parser could not place
+    # Camera-PrIMuS writes a numeric meter (e.g. "3/4") as a digit.N-L4 +
+    # digit.N-L2 pair instead of a metersign.* token (1586/3996 corpus samples
+    # carry no metersign at all). Digits are classified by staff position
+    # before the state machine runs (PIYA-107 AC8): see the "Meter digits"
+    # block at the top of the main loop.
+
     # ── Commit helpers ────────────────────────────────────────────────────
  
     def _commit_opening(n_sharp, n_flat):
@@ -1218,6 +1310,7 @@ def infer_pitch(
             "reference_pitch": reference_pitch,
             "key_alterations": dict(key_alterations),
             "time_signature":  time_signature,
+            "time_signature_source": time_signature_source,
             "stage":           ks_stage,
             # A mid-piece key-signature burst is consumed by lookahead (skip_until), so its glyphs never
             # reach a stage of their own; this is the only way the viz can tell them from inline accidentals.
@@ -1238,6 +1331,47 @@ def infer_pitch(
         is_sharp = sym.startswith("accidental.sharp")
         is_flat  = sym.startswith("accidental.flat")
         is_acc   = sym.startswith("accidental.")
+
+        # ── Meter digits and counts (every state; PIYA-107 AC7/AC8) ──────
+        # Classified by staff position before the state machine, so the same
+        # rule holds in the header and the body (resolution 10 as refined by
+        # ml-cv-lead 2026-10-09):
+        #   • an L4+L2 pair is a meter wherever it appears, unless it is a
+        #     courtesy meter (no note/rest after it in this strip): that only
+        #     announces the next system and must not change this one;
+        #   • a lone L4/L2 digit changes nothing and flags the strip;
+        #   • an S5 run that ends at a multirest is that multirest's count and
+        #     goes on to the states below; any other S5 run (missing multirest,
+        #     or a tuplet / bar-number hallucination) is neither count nor
+        #     meter and flags the strip;
+        #   • a digit at any other position is not in VOCAB and is ignored.
+        if sym.startswith("digit."):
+            if _is_multirest_count(sym):
+                run_start = tok_idx
+                while run_start > 0 and _is_multirest_count(symbols[run_start - 1]):
+                    run_start -= 1
+                run_end = tok_idx
+                while run_end < len(symbols) and _is_multirest_count(symbols[run_end]):
+                    run_end += 1
+                if run_end < len(symbols) and symbols[run_end].startswith("multirest"):
+                    pass        # a real count: handled by the states / body below
+                else:
+                    if tok_idx == run_start:
+                        meter_flags.append(METER_FLAG_ORPHAN_COUNT)
+                    continue
+            else:
+                meter = _meter_pair_at(symbols, tok_idx)
+                if meter is not None:
+                    if _has_body_content_after(symbols, tok_idx + 2):
+                        time_signature        = meter
+                        time_signature_source = TIME_SIG_SOURCE_DETECTED
+                elif (_parse_digit(sym) or (0, ""))[1] in (
+                        METER_NUMERATOR_POSITION, METER_DENOMINATOR_POSITION) and not (
+                        tok_idx > 0 and _meter_pair_at(symbols, tok_idx - 1) is not None):
+                    meter_flags.append(METER_FLAG_UNPAIRED_DIGIT)
+                continue
+        elif sym.startswith("metersign") and not _has_body_content_after(symbols, tok_idx + 1):
+            continue    # courtesy metersign at the end of the strip: announces the next system only
 
         # ══════════════════════════════════════════════════════════════════
         # KEY-SIG STATE MACHINE
@@ -1270,17 +1404,15 @@ def infer_pitch(
                     ks_stage = "body"
                 continue
 
-            elif (sym.startswith("metersign") or
-                  sym.startswith("note.")     or
-                  sym.startswith("rest.")):
+            elif (sym.startswith(("metersign", "note.", "rest.", "multirest"))
+                  or _is_multirest_count(sym)):
+                # A multirest (or its S5 count) opening the strip is body
+                # content, not header: skipping it loses its bars (BUG-035).
                 print(f"[Stage 3] Warning: {voice} p{page_index}: "
                       f"no clef detected — using fallback {active_clef}, C major assumed")
                 key_alterations = _commit_opening(0, 0)
-                if sym.startswith("metersign"):
-                    time_signature = TIME_SIG_TOKENS.get(
-                        sym.split("-")[0], time_signature)
                 ks_stage        = "body"
-                # fall through to body processing below
+                # fall through to body processing below (metersign included)
  
             elif sym.startswith("slur.end"):
                 # Header slur.end = tie arriving from the previous system;
@@ -1290,8 +1422,8 @@ def infer_pitch(
                 continue
 
             else:
-                continue    # barline / digit / slur.start before clef — skip
- 
+                continue    # barline / slur.start before clef — skip
+
         # ── "fixed_header" ────────────────────────────────────────────────
         elif ks_stage == "fixed_header":
 
@@ -1307,19 +1439,12 @@ def infer_pitch(
             elif sym.startswith("metersign"):
                 # Stay in the header: an accidental after the metersign is still a misread key glyph
                 # unless it sits directly on the first note, and must not reach body's looser anchoring.
-                time_signature = TIME_SIG_TOKENS.get(sym.split("-")[0], time_signature)
-                meter_seen     = True
-                continue
-            elif sym.startswith("digit.") and not meter_seen and len(meter_digits) < 2:
-                try:
-                    meter_digits.append(int(sym.split(".")[1].split("-")[0]))
-                except ValueError:
-                    pass
+                meter = TIME_SIG_TOKENS.get(sym.split("-")[0])
+                if meter is not None:
+                    time_signature, time_signature_source = meter, TIME_SIG_SOURCE_DETECTED
                 continue
             elif sym.startswith(("note.", "rest.", "multirest", "digit.")):
-                # A digit here follows a complete meter, so it is a multirest count for body.
-                if len(meter_digits) == 2 and not meter_seen:
-                    time_signature = f"{meter_digits[0]}/{meter_digits[1]}"
+                # Only an S5 multirest count gets here as a digit (meter digits were consumed above).
                 ks_stage = "body"
                 # fall through to body processing below
             elif sym.startswith("slur.end"):
@@ -1350,25 +1475,14 @@ def infer_pitch(
                 continue
             elif sym.startswith("metersign"):
                 key_alterations = _commit_opening(ks_sharp, ks_flat)
-                time_signature  = TIME_SIG_TOKENS.get(
-                    sym.split("-")[0], time_signature)
                 ks_stage        = "body"
-                continue
-            elif sym.startswith("digit.") and len(meter_digits) < 2:
-                # Numeric time signature (e.g. "3/4"), Camera-PrIMuS's other
-                # encoding besides metersign.* -- see meter_digits comment
-                # at initialisation. A 3rd+ header digit (rare CTC noise /
-                # unrelated token) is left to the catch-all `else` below.
-                try:
-                    meter_digits.append(int(sym.split(".")[1].split("-")[0]))
-                except ValueError:
-                    pass
-                continue
-            elif sym.startswith("note.") or sym.startswith("rest."):
-                # No meter sign (continuation strip) — commit on first note
+                # fall through: body reads the metersign
+            elif (sym.startswith(("note.", "rest.", "multirest"))
+                  or _is_multirest_count(sym)):
+                # No metersign (continuation strip, or an L4+L2 digit meter
+                # already read above) — commit on the first body token. A
+                # multirest and its S5 count are body content (BUG-035).
                 key_alterations = _commit_opening(ks_sharp, ks_flat)
-                if len(meter_digits) == 2:
-                    time_signature = f"{meter_digits[0]}/{meter_digits[1]}"
                 ks_stage        = "body"
                 # fall through to body processing below
             elif sym.startswith("slur.end"):
@@ -1377,7 +1491,7 @@ def infer_pitch(
                 slur_end_pending = True
                 continue
             else:
-                continue    # barline / digit / slur.start in header — skip
+                continue    # barline / slur.start in header — skip
  
         # ── "post_bar" ────────────────────────────────────────────────────
         elif ks_stage == "post_bar":
@@ -1448,7 +1562,14 @@ def infer_pitch(
  
         if ks_stage != "body":
             continue
- 
+
+        # ── Metersign (header fall-through or mid-strip change, AC7) ──────
+        if sym.startswith("metersign"):
+            meter = TIME_SIG_TOKENS.get(sym.split("-")[0])
+            if meter is not None:
+                time_signature, time_signature_source = meter, TIME_SIG_SOURCE_DETECTED
+            continue
+
         # ── Clef change mid-piece ─────────────────────────────────────────
         if sym.startswith("clef."):
             if sym in CLEF_REFERENCE and not clef_fixed:
@@ -1509,6 +1630,7 @@ def infer_pitch(
                 "slur":           None,
                 "measure_index":  measure_index,
                 "time_signature": time_signature,
+                "time_signature_source": time_signature_source,
             })
             if with_conf:
                 events[-1]["confidence"] = tok_conf
@@ -1598,6 +1720,7 @@ def infer_pitch(
                                    else "middle" if slur_active else None),
                 "measure_index":  measure_index,
                 "time_signature": time_signature,
+                "time_signature_source": time_signature_source,
             })
             if with_conf:
                 events[-1]["confidence"] = note_conf
@@ -1622,11 +1745,19 @@ def infer_pitch(
             in_chord    = False
             ks_stage    = "post_bar"
             measure_index += 1
+            # A count is engraved directly over its own multirest, never across a barline.
+            pending_multirest_bars = 1
             continue
  
         # ── Multirest ─────────────────────────────────────────────────────
         if sym.startswith("multirest"):
-            ticks = NOTE_DURATION_TICKS["whole"] * pending_multirest_bars
+            # Each bar at its own meter's length (BUG-052): a 4-bar multirest
+            # in 3/4 is 4 x 1440, so the strip's later local ticks stay true.
+            # multirest_bars carries the count itself so Stage 4 never has to
+            # recover it by dividing ticks (PIYA-108 AC6).
+            # A lone "0" count is a misread; a multirest always spans at least one bar.
+            bars  = max(1, pending_multirest_bars)
+            ticks = _meter_bar_ticks(time_signature) * bars
             events.append({
                 "type":           "rest",
                 "pitch":          None,
@@ -1640,7 +1771,9 @@ def infer_pitch(
                 "slur":           None,
                 "measure_index":  measure_index,
                 "time_signature": time_signature,
+                "time_signature_source": time_signature_source,
             })
+            events[-1]["multirest_bars"] = bars
             if with_conf:
                 events[-1]["confidence"] = tok_conf
             current_tick += ticks
@@ -1653,17 +1786,20 @@ def infer_pitch(
             # voices that notate the same span as N separate measures. Bump
             # by (N-1), not N: the barline token that follows this multirest
             # still fires normally and supplies the final +1.
-            measure_index          += (pending_multirest_bars - 1)
+            measure_index          += (bars - 1)
             pending_multirest_bars  = 1
             in_chord                = False
             continue
  
-        # ── Digit (multirest count) ───────────────────────────────────────
+        # ── Digit (multirest count; only S5 digits reach here) ────────────
         if sym.startswith("digit."):
-            try:
-                pending_multirest_bars = int(sym.split(".")[1].split("-")[0])
-            except ValueError:
-                pass
+            parsed = _parse_digit(sym)
+            if parsed is not None:
+                # A count of 10+ is one S5 glyph per decimal digit ("1","0"),
+                # so a digit right after another S5 digit extends the number.
+                follows_count = tok_idx > 0 and _is_multirest_count(symbols[tok_idx - 1])
+                pending_multirest_bars = (pending_multirest_bars * DECIMAL_BASE + parsed[0]
+                                          if follows_count else parsed[0])
             continue
  
         # ── Slur ─────────────────────────────────────────────────────────
@@ -1693,6 +1829,12 @@ def infer_pitch(
     if header_dropped:
         print(f"[Stage 3] {voice} p{page_index} s{sys_idx}: dropped {header_dropped} CRNN header "
               "accidental(s) (key taken from header_override)")
+    strip_meter_flags = sorted(set(meter_flags))
+    if strip_meter_flags:
+        print(f"[Stage 3] {voice} p{page_index} s{sys_idx}: unplaced digit token(s): "
+              f"{', '.join(strip_meter_flags)} (strip flagged for review)")
+    for e in events:
+        e["meter_flags"] = list(strip_meter_flags)
     return events
  
  
@@ -2089,8 +2231,13 @@ def _token_role(symbols: List[str], idx: int, stage_before: str, entry: dict) ->
     if symbol.startswith("metersign"):
         return "meter"
     if symbol.startswith("digit."):
-        in_header = stage_before == stage_after and stage_after in ("keysig", "fixed_header")
-        return "meter" if in_header else "digit"
+        # Same position rule as infer_pitch (PIYA-107 AC8): an L4+L2 pair is a meter, an S5 digit a
+        # multirest count, anything else was ignored.
+        if _is_multirest_count(symbol):
+            return "digit"
+        if _meter_pair_at(symbols, idx) is not None or (idx > 0 and _meter_pair_at(symbols, idx - 1)):
+            return "meter"
+        return "other"
     for prefix, role in (("note.", "note"), ("rest.", "rest"), ("multirest", "rest"),
                          ("barline", "barline"), ("dot", "dot"), ("slur.", "slur"),
                          ("gracenote.", "grace")):
@@ -2167,7 +2314,7 @@ def build_strip_labels(
         elif role == "rest" and ev_idx:
             ev = events[ev_idx[0]]
             if ev["symbol"].startswith("multirest"):
-                text = f"rest x{ev['duration_ticks'] // NOTE_DURATION_TICKS['whole']} bars"
+                text = f"rest x{ev.get('multirest_bars', 1)} bars"
             else:
                 text = f"rest_{_duration_label(ev['duration_ticks'])}"
         elif role in ("accidental", "accidental_dropped"):
@@ -2180,7 +2327,7 @@ def build_strip_labels(
         elif role == "slur":
             text = "slur(" if sym.startswith("slur.start") else ")slur"
         elif role == "digit":
-            text = f"{sym.split('.')[1].split('-')[0]} bars"
+            text = f"count {sym.split('.')[1].split('-')[0]}"
         elif role == "grace":
             text = "grace (not played)"
         elif role == "barline":

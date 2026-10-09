@@ -38,8 +38,35 @@ PIYA-208-210 design decisions.
    = nothing read before it (4/4 assumed), `unknown` = reserved.
 9. **Short final bar.** `bars[].durTicks` of the last bar uses its actual
    length (`_final_bar_ticks()`), not the nominal one.
-10. **Unpaired meter digit** (a lone L4 or L2 digit) is ignored: no meter change,
-    and it is not read as a multirest count either.
+10. **Unpaired meter digit** (a lone L4 or L2 digit) changes no meter and is
+    not read as a multirest count either. *(Refined 2026-10-09 by ml-cv-lead,
+    verified on the Camera-PrIMuS `.agnostic` files and the Phase 1 recut
+    strips; replaces "is ignored".)* The full digit rule in Stage 3:
+    - A meter is `digit.<num>-L4 digit.<den>-L2` (a multi-digit number is ONE
+      token, e.g. `digit.12-L4`; L4 digits are never joined) or
+      `metersign.C-L3` / `metersign.C/-L3`, in the header or after a barline.
+    - A multirest count is a run of `digit.N-S5` tokens, one per decimal digit
+      (`digit.1-S5 digit.6-S5` = 16), ending directly at `multirest-L3`. A
+      header meter is often directly before it
+      (`digit.2-L4 digit.4-L2 digit.1-S5 digit.6-S5 multirest-L3`).
+    - A lone L4 or L2 digit: no meter change, and the strip is flagged for
+      review (`meter_digit_unpaired`), not silently dropped.
+    - An S5 run not followed by a multirest (a tuplet number, a bar-number
+      hallucination, or a multirest the CRNN missed) is neither count nor
+      meter, and the strip is flagged (`multirest_count_orphaned`).
+    - A courtesy meter at the end of a strip (meter tokens with no note, rest
+      or multirest after them) does not change the meter inside that strip;
+      it only announces the next system.
+    - Stage 4 votes the meter per measure across the voices; voices that read
+      different detected meters for the same measure raise a review flag
+      (`meter_disagreement`).
+    - Limitation: the CRNN vocabulary has no `digit.5-L4` or `digit.7-L4`, so
+      5/4, 7/4, 5/8 and 7/8 cannot be read at all. Such a piece gets whatever
+      meter was last read (or the 4/4 default). Not worked around.
+    - Scope of the claim: the parser interprets these tokens correctly when
+      the CRNN emits them. Whether the CRNN emits mid-strip meters on real
+      images is unverified (it saw about 17 mid-strip examples in training;
+      needs Phase 2 training).
 11. **Multirest bar count** (`_measure_span()` divides by `bar_ticks`, so a 4-bar
     multirest in 3/4 counts as 5) is logged as BUG-052 and fixed with PIYA-108
     AC6.
