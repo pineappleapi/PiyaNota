@@ -33,9 +33,18 @@ PIYA-208-210 design decisions.
    divisible by 2, else at beat (n+1)/2 + 1 (5 → 3+2, 7 → 4+3, compound 15/8 →
    3+2 beats). So 8/8 and 10/8 stress every other eighth. "None known" means a
    quarter grid from each barline with only the first click of the bar
-   accented; with no bars at all, the old unaccented grid. `detected` = read
-   in the bar's own strip, `inherited` = carried from an earlier bar, `default`
-   = nothing read before it (4/4 assumed), `unknown` = reserved.
+   accented. With no `bars` table, the fallback quarter grid still accents
+   bar starts, derived from the events' `bar` numbers. A `pickup` bar with no
+   trusted meter uses the first trusted meter after it, or else counts
+   quarters back from its end; its first click is never a downbeat.
+   `detected` = read in the bar's own strip (a change earlier in the same
+   strip still counts), `inherited` = carried from an earlier system,
+   `default` = nothing read before it (4/4 assumed), `unknown` = reserved.
+   The default groupings (5 = 3+2, 7 = 4+3, 8/8 stressing every other eighth)
+   follow MuseScore and can be wrong for a given piece: the real grouping
+   comes from beaming, which the pipeline does not read. A "wrong accent in
+   7/8" report is a known limitation, not a bug. *(Amended 2026-10-09,
+   review round.)*
 9. **Short final bar.** `bars[].durTicks` of the last bar uses its actual
    length (`_final_bar_ticks()`), not the nominal one.
 10. **Unpaired meter digit** (a lone L4 or L2 digit) changes no meter and is
@@ -59,7 +68,20 @@ PIYA-208-210 design decisions.
       it only announces the next system.
     - Stage 4 votes the meter per measure across the voices; voices that read
       different detected meters for the same measure raise a review flag
-      (`meter_disagreement`).
+      (`meter_disagreement`), one per contiguous run of bars, with `bar` to
+      `bar_end`.
+    - A meter or metersign read mid-measure (notes or rests before it in the
+      same measure) is not applied, and the strip is flagged
+      (`meter_mid_measure`). *(Added 2026-10-09, review round.)*
+    - A vote that would change the meter from the previous bar's is applied
+      only if a majority of the voices that have that bar back it, with at
+      least 2 (capped at the number of voices present). Otherwise the
+      previous meter is kept and a review flag is raised
+      (`meter_change_single_voice`): in open-score SATB every staff engraves
+      the meter, so one voice reading a change is far likelier a misread.
+      *(Added 2026-10-09, review round.)*
+    - Meter flags of a strip that produced no events reach `review.items`
+      through Stage 3's `strip_flags_out`.
     - Limitation: the CRNN vocabulary has no `digit.5-L4` or `digit.7-L4`, so
       5/4, 7/4, 5/8 and 7/8 cannot be read at all. Such a piece gets whatever
       meter was last read (or the 4/4 default). Not worked around.

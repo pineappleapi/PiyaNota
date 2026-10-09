@@ -80,6 +80,11 @@ FLAG_TENOR_RANGE = "tenor_range_suspect"
 FLAG_BAR_INVARIANT = "bar_length_invariant_failed"
 FLAG_LOCAL_OVERRUN = "local_placement_overrun"
 FLAG_METER_DISAGREEMENT = "meter_disagreement"
+# A meter change backed by too few voices (see MIN_METER_CHANGE_VOTES) is not
+# applied: in open-score SATB every staff engraves the meter, so one voice
+# reading a change the others do not is far likelier a misread.
+FLAG_METER_CHANGE_SINGLE = "meter_change_single_voice"
+MIN_METER_CHANGE_VOTES = 2
 # Repairs that threw notes away (PIYA-103 AC9 "muted reasons"). Such a flag
 # carries muted=True plus start_tick/end_tick (PIYA-108 AC8) only when its
 # repair actually dropped or cut notes: a clip that trimmed durations and
@@ -90,6 +95,22 @@ MUTED_FLAG_KINDS = frozenset({FLAG_BAR_OVERFLOW, FLAG_MISSING_BARLINE, FLAG_BAR_
                               FLAG_LOCAL_OVERRUN, FLAG_PICKUP_MISMATCH})
 # Flags that also carry review_needed=True ask the user to confirm/fix the
 # bar; a flag without the key is informational (treat as review_needed=False).
+
+# Job failure codes (PIYA-108 AC5, PIYA-109 AC9). Callers key on
+# ``PipelineFailure.failure_reason``, never on message text.
+FAILURE_INCOMPLETE_VOICE_SEQUENCE = "incomplete_voice_sequence"
+
+
+class PipelineFailure(ValueError):
+    """A job-level failure with a machine-readable ``failure_reason``.
+
+    Subclasses ValueError so callers that already catch ValueError for an
+    all-empty score keep working.
+    """
+
+    def __init__(self, failure_reason: str, message: str) -> None:
+        super().__init__(f"{failure_reason}: {message}")
+        self.failure_reason = failure_reason
 
 # -- Calibration status of every threshold below ---------------------------
 # ALL thresholds and weights in this module are hand-set priors, NOT fit to
@@ -213,18 +234,19 @@ def reconstruct_satb_with_report(voice_events: dict) -> tuple[dict, dict]:
         meter_source and actual_ticks, PIYA-108 AC6/AC7).
 
     Raises:
-        ValueError if all four voice sequences are missing or empty. One to
-        three empty voices are reported in failed_voices and the rest are
-        reconstructed (PIYA-108 AC4/AC5).
+        PipelineFailure (a ValueError) with failure_reason
+        ``incomplete_voice_sequence`` if all four voice sequences are missing
+        or empty. One to three empty voices are reported in failed_voices and
+        the rest are reconstructed (PIYA-108 AC4/AC5).
     """
     print("\n[Stage 4] Reconstructing SATB part sequences...")
 
     failed = [v for v in VOICES if not voice_events.get(v)]
     if len(failed) == len(VOICES):
-        raise ValueError(
+        raise PipelineFailure(
+            FAILURE_INCOMPLETE_VOICE_SEQUENCE,
             "[Stage 4] All four voice sequences are missing or empty. "
-            "Check Stage 2/3 outputs or recapture the score."
-        )
+            "Check Stage 2/3 outputs or recapture the score.")
     if failed:
         print(f"[Stage 4] WARNING: no events for {failed}; continuing with the "
               "other voices (reported as failed voices)")
@@ -446,34 +468,37 @@ def _plan_layout(strips: dict, flags: list) -> tuple[dict, int, dict]:
             v for v in VOICES if v in ranked]
 
         bars: list[dict[str, Any]] = []
+        notes: list[tuple[str, int, dict[str, str], str]] = []   # (kind, rank, votes, meter used)
         for rank in range(n_bars):
             votes: dict[str, str] = {}
+            have = 0
             for voice in voters:
                 m_events = _measure_at(ranked[voice], rank)
+                if m_events:
+                    have += 1
                 meter = _measure_meter(m_events) if m_events else None
                 if meter is not None:
                     votes[voice] = meter
+            if previous is None:
+                kept = (DEFAULT_TIME_SIGNATURE, METER_DEFAULT)
+            else:
+                # Within one system the source carries over (a change earlier in
+                # this strip still counts as read here); across a system break a
+                # read meter becomes inherited (AC7). A default stays default.
+                kept = (previous[0], previous[1] if bars or previous[1] == METER_DEFAULT
+                        else METER_INHERITED)
             if votes:
                 tally = Counter(votes.values())
                 meter, source = tally.most_common(1)[0][0], METER_DETECTED
                 if len(tally) > 1:
-                    flags.append({
-                        "kind": FLAG_METER_DISAGREEMENT, "page_index": key[0],
-                        "sys_idx": key[1], "bar": None, "voice": None,
-                        "expected_ticks": _bar_ticks(meter), "actual_ticks": None,
-                        "detail": f"voices read different meters for bar {rank + 1} of "
-                                  f"this system: {votes}; used {meter}",
-                        "action": "majority_meter", "review_needed": True,
-                        "system_bar_rank": rank})
-            elif previous is None:
-                meter, source = DEFAULT_TIME_SIGNATURE, METER_DEFAULT
+                    notes.append((FLAG_METER_DISAGREEMENT, rank, votes, meter))
+                # The cap keeps a score with only one voice left able to change meter.
+                needed = min(max(MIN_METER_CHANGE_VOTES, have // 2 + 1), have)
+                if previous is not None and meter != previous[0] and tally[meter] < needed:
+                    notes.append((FLAG_METER_CHANGE_SINGLE, rank, votes, kept[0]))
+                    meter, source = kept
             else:
-                meter = previous[0]
-                # Within one system the source carries over (a change earlier in
-                # this strip still counts as read here); across a system break a
-                # read meter becomes inherited (AC7). A default stays default.
-                source = (previous[1] if bars or previous[1] == METER_DEFAULT
-                          else METER_INHERITED)
+                meter, source = kept
             ticks = _bar_ticks(meter)
             bars.append({"ticks": ticks, "time_signature": meter,
                          "meter_source": source, "actual_ticks": ticks})
@@ -483,7 +508,13 @@ def _plan_layout(strips: dict, flags: list) -> tuple[dict, int, dict]:
             previous[0] if previous else opening)
         layout[key] = {"time_signature": head, "bar_ticks": _bar_ticks(head),
                        "n_bars": n_bars, "voice_bars": n_by_voice,
-                       "voice_base": voice_base, "bars": bars}
+                       "voice_base": voice_base, "bars": bars, "_meter_notes": notes}
+
+    # PIYA-117 AC9: the pickup row carries the meter the opening measure was
+    # engraved under, which _decide_pickups measured it against.
+    layout[first_key]["opening_meter"] = {
+        "time_signature": opening,
+        "meter_source": METER_DETECTED if _opening_meter(strips, first_key) else METER_DEFAULT}
 
     # Voices whose shorter pickup is a dropped-leading-note suffix of the agreed
     # one: their length mismatch is informational (a list, so the report stays
@@ -509,7 +540,38 @@ def _plan_layout(strips: dict, flags: list) -> tuple[dict, int, dict]:
         layout[key]["first_bar"] = bar_no
         running += sum(bar["ticks"] for bar in layout[key]["bars"])
         bar_no += layout[key]["n_bars"]
+        _flag_meter_runs(key, layout[key], flags)
     return layout, pickup_ticks, voice_pickup
+
+
+def _flag_meter_runs(key: tuple, info: dict[str, Any], flags: list) -> None:
+    """One review flag per contiguous run of bars with the same meter conflict.
+
+    A misread stamps every later measure of that strip, so one flag per bar
+    would bury the review list; ``bar``..``bar_end`` give the run.
+    """
+    notes = info.pop("_meter_notes")
+    run: Optional[list] = None
+    runs: list[list] = []
+    for kind, rank, votes, meter in notes:
+        if run and run[0] == kind and run[2] == votes and run[3] == meter and run[4] == rank - 1:
+            run[4] = rank
+        else:
+            run = [kind, rank, votes, meter, rank]
+            runs.append(run)
+    for kind, first, votes, meter, last in runs:
+        if kind == FLAG_METER_DISAGREEMENT:
+            detail, action = f"voices read different meters: {votes}; used {meter}", "majority_meter"
+        else:
+            detail = (f"meter change read by too few voices: {votes}; kept {meter} "
+                      f"(every staff engraves the meter in open score)")
+            action = "kept_previous_meter"
+        flags.append({
+            "kind": kind, "page_index": key[0], "sys_idx": key[1],
+            "bar": info["first_bar"] + first, "bar_end": info["first_bar"] + last,
+            "voice": None, "expected_ticks": _bar_ticks(meter), "actual_ticks": None,
+            "detail": detail, "action": action, "review_needed": True,
+            "system_bar_rank": first})
 
 
 def _bar_starts(info: dict[str, Any]) -> list[int]:
@@ -552,7 +614,9 @@ def _first_bar_observations(strips: dict, first_key: tuple,
     kind is "sounding" (has a pitched note), "rest" (short, rests only) or
     "full" (a full bar or a multirest: evidence that the voice has NO
     pickup). Voices with fewer than two measures give no observation. Other
-    fields: ticks (own length), conf (mean note confidence, None unless every
+    fields: whole_rest (the bar is a lone whole rest, which is "full" for
+    scoring but, once a pickup is accepted, a rest through it), ticks (own
+    length), conf (mean note confidence, None unless every
     note has one; informational only), weight (constant), offsets/durs (onset offsets and slot durations
     inside the bar).
     """
@@ -579,6 +643,7 @@ def _first_bar_observations(strips: dict, first_key: tuple,
             kind = "rest"
         obs[voice] = {
             "kind": kind, "ticks": own, "conf": conf,
+            "whole_rest": _is_lone_whole_rest(first),
             "weight": PICKUP_VOTE_WEIGHT,
             "offsets": tuple(s["start"] - first_local for s in slots),
             "durs": tuple(s["dur"] for s in slots)}
@@ -850,6 +915,12 @@ def _decide_pickups(strips: dict, meters: dict, first_key: tuple,
     for voice, o in obs.items():
         if o["kind"] == "full" and excess and voice in excess["reference"]:
             continue        # rests through the pickup; bar 1 starts at the downbeat
+        if o["kind"] == "full" and o["whole_rest"]:
+            # A voice silent through the anacrusis is often engraved with a
+            # whole rest in the pickup bar; it is that voice's pickup, not a
+            # full bar 1 (placement normalises the rest to the pickup length).
+            voice_pickup[voice] = agreed
+            continue
         if o["kind"] == "full":
             deviants.append(voice)
             flag(FLAG_PICKUP_MISMATCH, voice,
@@ -1038,15 +1109,17 @@ def _place_voice_strip(
                 continue
             if e["tick_onset"] + e["duration_ticks"] > system_end:
                 e["duration_ticks"] = system_end - e["tick_onset"]
-                trimmed_onsets.append(e["tick_onset"])
+                if e["type"] == "note":
+                    trimmed_onsets.append(e["tick_onset"])
             kept_events.append(e)
         if dropped_desc or trimmed_onsets:
-            # Resolution 2: silence from the earliest cut note to the system
-            # end. Notes dropped past the end never sounded, so they need no span.
+            # Resolution 2: silence from the earliest cut NOTE to the system
+            # end. Notes dropped past the end never sounded, so they need no
+            # span, and a shortened rest lost nothing (resolution 3).
             span = (min(trimmed_onsets), system_end) if trimmed_onsets else None
             flag(FLAG_LOCAL_OVERRUN, None, system_end - start_tick, None,
                  f"locally placed voice ran past the system end (tick "
-                 f"{system_end}); trimmed {len(trimmed_onsets)} event(s), dropped "
+                 f"{system_end}); trimmed {len(trimmed_onsets)} note(s), dropped "
                  f"{len(dropped_desc)} note(s): {dropped_desc}",
                  ACTION_CLIPPED, review_needed=True, span=span)
         return kept_events
@@ -1056,7 +1129,10 @@ def _place_voice_strip(
     placed: list = []
     for mi, m_events in measures.items():
         if mi < base:
-            _normalise_whole_rest(m_events, first_bar_ticks)
+            # A pickup that is only a whole rest is a rest for the pickup, not a
+            # full bar: normalising it to a bar would read as a too-long pickup
+            # and trim (mute) it.
+            _normalise_whole_rest(m_events, pickup_ticks or first_bar_ticks)
             first_local = min(e["local_tick_onset"] for e in m_events)
             total = _measure_ticks(m_events)
             if abs(total - pickup_ticks) > DURATION_MISMATCH_TOLERANCE_TICKS:
@@ -1122,12 +1198,17 @@ def _place_voice_strip(
     return placed
 
 
+def _is_lone_whole_rest(m_events: list) -> bool:
+    return (len(m_events) == 1 and m_events[0]["type"] == "rest"
+            and str(m_events[0].get("symbol", "")).startswith("rest.whole"))
+
+
 def _normalise_whole_rest(m_events: list, bar_ticks: int) -> None:
     """A measure holding only a whole rest is a full-bar rest whatever the
     meter (a 3/4 bar rest is engraved as a whole rest), but Stage 3 always
-    gives rest.whole 1920 ticks."""
-    if (len(m_events) == 1 and m_events[0]["type"] == "rest"
-            and str(m_events[0].get("symbol", "")).startswith("rest.whole")):
+    gives rest.whole 1920 ticks. In a pickup bar ``bar_ticks`` is the pickup
+    length."""
+    if _is_lone_whole_rest(m_events):
         m_events[0]["duration_ticks"] = bar_ticks
 
 
