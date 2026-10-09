@@ -130,6 +130,7 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
 6. Once complete, the response includes a `review` object. `reviewNeeded` is true whenever any Stage 3 strip flag or Stage 4 reconstruction flag carries `review_needed`, or the clef/key classifier was disabled. `reasons` lists the distinct flag codes. `items` holds at most 200 entries, each with `code`, `voice`, `pageIndex`, `systemIndex`, `bar`, and `truncated` is set when entries were left out. `reviewNeeded: false` means no flag was raised, not that the transcription is verified correct. Model provenance (checkpoint hash, gate status) is never included in the response. *(Added 2026-09-29, backend-lead review. While the clef/key classifier has not passed its real-photo gate (BUG-021), every job carries the reason `clef_key_unvalidated`, so `reviewNeeded` is always true. The pipeline side is `stage5_synthesis.run_full_pipeline_with_report()` / `build_review()`; flag codes stay snake_case, voice is lowercase.)*
 
 7. Once complete, the response includes `title` (always present) and `arranger` (omitted when absent, never `null`), read from the job's `scores` row (PIYA-321), so Playback (PIYA-208) can show its header ("arr. by <arranger>") when opened straight from Processing without a library fetch. *(Added 2026-10-09, user decision — closes the "PIYA-103 result has no title/composer" contract gap reported by frontend-lead; the field is `arranger`, not `composer`.)*
+8. Once complete, the response includes `tempoBpm`, the tempo the four tracks were rendered at (the stored `tempo_bpm`, 90 when none was submitted; same quarter-note-per-minute meaning as PIYA-101 AC8). The Speed modal (PIYA-210) shows speed in BPM, so the client plays at rate = chosen BPM ÷ `tempoBpm`, and the metronome click (PIYA-209/210) is generated client-side at the chosen BPM. *(Added 2026-10-09, user decision for PIYA-210.)*
 
 *(2026-10-09: open gap. This endpoint is keyed by `job_id`, but the library opens scores by `scoreId`. See PIYA-308 AC8 in `module3-backend.md`. Playback (PIYA-208) is currently built against a fake keyed by score. `review.items[].pageIndex` / `systemIndex` are also affected by the index-base question under PIYA-117.)*
 
@@ -141,6 +142,7 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
     "scoreId": 552,
     "title": "Bayan Ko",
     "arranger": "Constancio de Guzman",
+    "tempoBpm": 90,
     "audioTracks": {
       "soprano": "https://cdn.piyanota.app/audio/job_8841_soprano.mp3",
       "alto": "https://cdn.piyanota.app/audio/job_8841_alto.mp3",

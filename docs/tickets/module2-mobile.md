@@ -202,6 +202,11 @@ _Covers: UI tickets (Onboarding, Account, Score Library, Playback, Settings, Sys
 6. Mixer settings persist for the duration of the playback session but reset to default when reopened later, unless otherwise specified.
 7. Modal dismissible via close (X) button, returns to Playback without interrupting active playback.
 
+**Design decisions (2026-10-09, user):**
+- Each row has a Solo checkbox. When any row is soloed, only soloed rows are heard; Mute still wins over Solo.
+- The Metronome Click row sets the click's volume and Mute only. Whether the click plays at all is the Speed modal's toggle (PIYA-210 AC3). The click is heard only when that toggle is on and the row is not muted.
+- Mixer volumes stack with the Playback voice chips (PIYA-208): an unselected chip is silent whatever its slider says.
+
 ---
 
 ### PIYA-210 — Playback Speed Modal UI
@@ -218,6 +223,11 @@ _Covers: UI tickets (Onboarding, Account, Score Library, Playback, Settings, Sys
 3. Displays a Metronome Click toggle, independent of the Voice Mixer's metronome control, adding an audible click track synced to current tempo.
 4. Speed changes apply immediately if audio is currently playing, without requiring restart.
 5. Modal dismissible via close (X) button, returns to Playback without interrupting playback.
+
+**Design decisions (2026-10-09, user):**
+- The slider is in BPM, range 30–240 (same as the tempo field at capture, PIYA-101 AC8). It opens at the score's `tempoBpm` (PIYA-103 AC8), which is 90 unless another tempo was entered. Playback rate = chosen BPM ÷ `tempoBpm`, with pitch kept.
+- The Metronome Click checkbox turns the click on or off (off by default). Its volume and Mute live in the Voice Mixer (PIYA-209). The click is generated in the app at the chosen BPM, one click per quarter note, and stays aligned to the start of bar 1.
+- Speed and metronome settings last while the Playback screen is open and reset when the score is reopened, like the mixer (PIYA-209 AC6).
 
 ---
 
