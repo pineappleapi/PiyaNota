@@ -60,9 +60,9 @@ void main() {
         null,
         'Pasko Na Naman',
       ]);
-      final noComposer = scores.last;
-      expect(noComposer.composer, isNull);
-      expect(noComposer.pageCount, isNull);
+      final noArranger = scores.last;
+      expect(noArranger.arranger, isNull);
+      expect(noArranger.pageCount, isNull);
     },
   );
 
@@ -111,7 +111,7 @@ void main() {
     expect(scores.map((s) => s.scoreId), [103]);
   });
 
-  test('search also matches composer and the displayed date (AC4)', () async {
+  test('search also matches arranger and the displayed date (AC4)', () async {
     final h = _Harness();
     await h.logIn(FakeAuthApi.demoEmail, FakeAuthApi.demoPassword);
     Future<List<int>> ids(String q) async =>

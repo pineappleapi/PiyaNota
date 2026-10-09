@@ -140,7 +140,7 @@ void main() {
           'soprano.wav',
         );
         expect(result.review.reviewNeeded, isTrue);
-        expect(result.composer, 'Robert Delgado');
+        expect(result.arranger, 'Robert Delgado');
         expect(
           result.pageSizeAt(0),
           const Size(

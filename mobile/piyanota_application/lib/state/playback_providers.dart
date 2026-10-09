@@ -72,7 +72,7 @@ class PlaybackState {
     this.error,
     this.result,
     this.timeline,
-    this.composer,
+    this.arranger,
     this.selected = const {},
     this.volumes = const {},
     this.playing = false,
@@ -87,7 +87,7 @@ class PlaybackState {
   final PlaybackError? error;
   final ScoreResult? result;
   final ScoreTimeline? timeline;
-  final String? composer;
+  final String? arranger;
 
   /// Voices the user hears (AC2). Never empty once ready.
   final Set<VoicePart> selected;
@@ -126,7 +126,7 @@ class PlaybackState {
     bool clearError = false,
     ScoreResult? result,
     ScoreTimeline? timeline,
-    String? composer,
+    String? arranger,
     Set<VoicePart>? selected,
     Map<VoicePart, double>? volumes,
     bool? playing,
@@ -139,7 +139,7 @@ class PlaybackState {
     error: clearError ? null : error ?? this.error,
     result: result ?? this.result,
     timeline: timeline ?? this.timeline,
-    composer: composer ?? this.composer,
+    arranger: arranger ?? this.arranger,
     selected: selected ?? this.selected,
     volumes: volumes ?? this.volumes,
     playing: playing ?? this.playing,
@@ -255,7 +255,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       phase: PlaybackPhase.ready,
       result: result,
       timeline: timeline,
-      composer: result.composer ?? _libraryComposer(),
+      arranger: result.arranger ?? _libraryArranger(),
       selected: selected,
       volumes: volumes,
       duration: engine.duration,
@@ -365,15 +365,16 @@ class PlaybackController extends Notifier<PlaybackState> {
     return available;
   }
 
-  /// PIYA-103 has no composer; reuse the library row the user tapped, if
+  /// For a result without `arranger` (PIYA-103 AC7 omits it when absent, and
+  /// older servers lack it): reuse the library row the user tapped, if
   /// the library is still loaded underneath (never fetch it just for this).
-  String? _libraryComposer() {
+  String? _libraryArranger() {
     if (!ref.exists(scoreLibraryProvider)) return null;
     final scores = ref.read(scoreLibraryProvider).value;
     return scores
         ?.where((score) => score.scoreId == scoreId)
         .firstOrNull
-        ?.composer;
+        ?.arranger;
   }
 
   void _fail(PlaybackError error) {

@@ -6,7 +6,7 @@ import '../../state/playback_providers.dart';
 class PlaybackMessages {
   PlaybackMessages._();
 
-  static String arrangedBy(String composer) => 'arr. by $composer';
+  static String arrangedBy(String arranger) => 'arr. by $arranger';
   static const String selectVoices = 'Select voice/s to hear.';
   static const String keepOneVoice = 'Keep at least one voice selected.';
   static const String voiceUnavailable = 'not available for this score';

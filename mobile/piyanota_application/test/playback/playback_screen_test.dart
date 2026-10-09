@@ -36,14 +36,14 @@ void main() {
   }
 
   group('loading and default voice (AC1, AC3)', () {
-    testWidgets('shows title, composer, page and all four voices by default', (
+    testWidgets('shows title, arranger, page and all four voices by default', (
       tester,
     ) async {
       final harness = ready();
       await pumpPlayback(tester, harness);
 
       expect(find.text(kTitle), findsOneWidget);
-      expect(find.text(PlaybackMessages.arrangedBy(kComposer)), findsOneWidget);
+      expect(find.text(PlaybackMessages.arrangedBy(kArranger)), findsOneWidget);
       expect(find.byKey(const ValueKey('score-scroll')), findsOneWidget);
       for (final voice in VoicePart.values) {
         expect(chipSelected(tester, voice), isTrue, reason: voice.name);

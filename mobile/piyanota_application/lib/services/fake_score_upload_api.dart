@@ -113,11 +113,11 @@ class FakeScoreUploadApi implements ScoreUploadApi {
           );
       }
     }
-    final composer = details.composer.trim();
+    final arranger = details.arranger.trim();
     final scoreId = _library.addSubmittedScore(
       account: account,
       title: details.title.trim(),
-      composer: composer.isEmpty ? null : composer,
+      arranger: arranger.isEmpty ? null : arranger,
       pageCount: pageCount,
     );
     final jobId = 'fake-job-${_nextJob++}';

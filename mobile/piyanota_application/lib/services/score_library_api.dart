@@ -37,7 +37,7 @@ class ScoreLibraryServerException extends ScoreLibraryException {
 }
 
 abstract interface class ScoreLibraryApi {
-  /// PIYA-308. [query] filters by title, composer and last-opened date
+  /// PIYA-308. [query] filters by title, arranger and last-opened date
   /// server-side (AC4); null or blank
   /// fetches the whole library. Returns an empty list, not an error, for a
   /// user with no scores (AC5).
@@ -88,7 +88,7 @@ class HttpScoreLibraryApi implements ScoreLibraryApi {
     final parsed = <ScoreSummary>[];
     for (final entry in scores) {
       // Logs the type or id only: entries carry user content (titles,
-      // composers) that has no place in device logs.
+      // arrangers) that has no place in device logs.
       if (entry is! Map<String, dynamic>) {
         if (kDebugMode) {
           debugPrint(

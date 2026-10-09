@@ -119,7 +119,7 @@ void main() {
         scoreFormFields(
           const ScoreDetails(
             title: 'Pasko Na Naman',
-            composer: ' F. Santiago ',
+            arranger: ' F. Santiago ',
             keySignature: KeySignature.bFlat,
             timeSignature: TimeSignature.sixEight,
             tempoBpm: 96,
@@ -128,18 +128,18 @@ void main() {
       );
       expect(fields, {
         'title': 'Pasko Na Naman',
-        'composer': 'F. Santiago',
+        'arranger': 'F. Santiago',
         'tempoBpm': '96',
         'keySignature': 'Bb',
         'timeSignature': '6/8',
       });
     });
 
-    test('"Other" time and blank composer are omitted', () {
+    test('"Other" time and blank arranger are omitted', () {
       final keys = scoreFormFields(
         const ScoreDetails(
           title: 'X',
-          composer: '   ',
+          arranger: '   ',
           timeSignature: TimeSignature.other,
         ),
       ).map((e) => e.key);
@@ -480,13 +480,13 @@ void main() {
     test('a submit adds the score to the library', () async {
       final (upload, library) = build(ok);
       final job = await upload.submitImages(
-        details: const ScoreDetails(title: ' Ave ', composer: 'Schubert'),
+        details: const ScoreDetails(title: ' Ave ', arranger: 'Schubert'),
         imagePaths: const ['a', 'b'],
       );
       expect(job.jobId, startsWith('fake-job-'));
       final scores = await library.fetchLibrary();
       expect(scores.last.title, 'Ave');
-      expect(scores.last.composer, 'Schubert');
+      expect(scores.last.arranger, 'Schubert');
       expect(scores.last.pageCount, 2);
     });
 

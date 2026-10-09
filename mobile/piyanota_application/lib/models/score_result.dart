@@ -70,7 +70,7 @@ class ScoreResult {
     this.jobId,
     this.timingMetadataUrl,
     this.pageSizes = const [],
-    this.composer,
+    this.arranger,
   });
 
   final int scoreId;
@@ -93,9 +93,9 @@ class ScoreResult {
   /// sends the image the coordinates were measured on, never a downscale.
   final List<Size?> pageSizes;
 
-  /// NOT in PIYA-103 either; only the fake sends it. Playback falls back
-  /// to the library entry's composer.
-  final String? composer;
+  /// PIYA-103 AC7 (added 2026-10-09), omitted when absent. Playback falls back
+  /// to the library entry's arranger.
+  final String? arranger;
 
   /// Parses `data` (the envelope is unwrapped by the API). Throws
   /// [FormatException] when no audio track or score id is usable, since
@@ -127,7 +127,7 @@ class ScoreResult {
     }
     final rawSizes = data['scoreImageSizes'];
     final jobId = data['jobId'];
-    final composer = data['composer'];
+    final arranger = data['arranger'];
     return ScoreResult(
       scoreId: scoreId,
       jobId: jobId is String ? jobId : null,
@@ -139,8 +139,8 @@ class ScoreResult {
         if (rawSizes is List)
           for (final size in rawSizes) _size(size),
       ],
-      composer: composer is String && composer.trim().isNotEmpty
-          ? composer.trim()
+      arranger: arranger is String && arranger.trim().isNotEmpty
+          ? arranger.trim()
           : null,
     );
   }

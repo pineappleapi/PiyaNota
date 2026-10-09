@@ -90,11 +90,11 @@ class FakeScoreResultApi implements ScoreResultApi {
         'items': const <Object>[],
         'truncated': false,
       },
-      // Not in PIYA-103 (proposed): see ScoreResult.pageSizes / composer.
+      // Not in PIYA-103 (proposed): see ScoreResult.pageSizes.
       'scoreImageSizes': [
         {'width': PlaybackDemo.pageWidth, 'height': PlaybackDemo.pageHeight},
       ],
-      'composer': ?score.composer,
+      'arranger': ?score.arranger,
     });
   }
 

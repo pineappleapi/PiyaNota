@@ -120,10 +120,10 @@ const String pageNotRetakeableCode = 'page_not_retakeable';
 /// never sent empty or as "null" — and "Other" time also leaves its field
 /// out.
 List<MapEntry<String, String>> scoreFormFields(ScoreDetails details) {
-  final composer = details.composer.trim();
+  final arranger = details.arranger.trim();
   return [
     MapEntry('title', details.title.trim()),
-    if (composer.isNotEmpty) MapEntry('composer', composer),
+    if (arranger.isNotEmpty) MapEntry('arranger', arranger),
     if (details.tempoBpm case final tempo?)
       MapEntry('tempoBpm', tempo.toString()),
     if (details.keySignature case final key?)

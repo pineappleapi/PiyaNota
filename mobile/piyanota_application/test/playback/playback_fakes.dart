@@ -194,7 +194,7 @@ class ScriptedScoreResultApi implements ScoreResultApi {
 
 const kScoreId = 42;
 const kTitle = 'Bituin Walang Ningning';
-const kComposer = 'Robert Delgado';
+const kArranger = 'Robert Delgado';
 const kLibrary = 'ROUTE:library';
 const kLogin = 'ROUTE:login';
 
@@ -257,7 +257,7 @@ List<TimingEvent> testTiming() {
 ScoreResult testResult({
   Set<VoicePart> voices = const {...VoicePart.values},
   bool reviewNeeded = true,
-  String? composer = kComposer,
+  String? arranger = kArranger,
 }) => ScoreResult(
   scoreId: kScoreId,
   jobId: 'job-1',
@@ -271,7 +271,7 @@ ScoreResult testResult({
   timingMetadataUrl: Uri.parse('https://cdn.test/timing.json'),
   review: ReviewSummary(reviewNeeded: reviewNeeded),
   pageSizes: const [Size(1000, 1400)],
-  composer: composer,
+  arranger: arranger,
 );
 
 ProviderContainer appContainer(WidgetTester tester) =>

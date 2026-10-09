@@ -258,7 +258,7 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
             children: [
               _Header(
                 title: widget.title,
-                composer: state.composer,
+                arranger: state.arranger,
                 onBack: () => unawaited(_back()),
                 onDownload: ready
                     ? () => _openPlaceholder(PlaybackMessages.exportSheetTitle)
@@ -311,13 +311,13 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
 class _Header extends StatelessWidget {
   const _Header({
     required this.title,
-    required this.composer,
+    required this.arranger,
     required this.onBack,
     required this.onDownload,
   });
 
   final String title;
-  final String? composer;
+  final String? arranger;
   final VoidCallback onBack;
   final VoidCallback? onDownload;
 
@@ -355,10 +355,10 @@ class _Header extends StatelessWidget {
                       ),
                     ),
                   ),
-                  if (composer case final composer?) ...[
+                  if (arranger case final arranger?) ...[
                     const SizedBox(height: 2),
                     Text(
-                      PlaybackMessages.arrangedBy(composer),
+                      PlaybackMessages.arrangedBy(arranger),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.center,

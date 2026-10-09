@@ -78,7 +78,7 @@ final _scores = [
     scoreId: 101,
     title: 'Bituin Walang Ningning',
     lastActivityAt: DateTime(2026, 10, 3, 12),
-    composer: 'Robert Delgado',
+    arranger: 'Robert Delgado',
     pageCount: 10,
   ),
   ScoreSummary(
@@ -400,7 +400,7 @@ void main() {
 
       expect(find.text(LibraryMessages.noResultsTitle), findsOneWidget);
       expect(
-        find.text('Nothing matches "zzz". Try a title, composer or date.'),
+        find.text('Nothing matches "zzz". Try a title, arranger or date.'),
         findsOneWidget,
       );
       expect(find.text(LibraryMessages.emptySubtitle), findsNothing);
@@ -645,7 +645,7 @@ void main() {
             title: 'New Score',
             lastActivityAt: DateTime(2026, 10, 4, 12),
           ),
-          const ScoreSummary(scoreId: 3, composer: 'Ryan Cayabyab'),
+          const ScoreSummary(scoreId: 3, arranger: 'Ryan Cayabyab'),
           ScoreSummary(
             scoreId: 4,
             title: 'Paraiso',
@@ -661,7 +661,7 @@ void main() {
         'Paraiso',
         'New Score (2)',
       ]);
-      // No date and no pages: just the composer, no stray separator.
+      // No date and no pages: just the arranger, no stray separator.
       expect(find.text('Ryan Cayabyab'), findsOneWidget);
       expect(
         find.textContaining('•'),
@@ -695,7 +695,7 @@ void main() {
   });
 
   group('wider search', () {
-    testWidgets('matches composer and the displayed date', (tester) async {
+    testWidgets('matches arranger and the displayed date', (tester) async {
       await _pumpLibrary(tester, _apiReturning(_scores));
       await tester.pumpAndSettle();
 

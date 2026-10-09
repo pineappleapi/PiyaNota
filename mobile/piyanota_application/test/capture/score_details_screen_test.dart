@@ -9,7 +9,7 @@ import 'package:piyanota_application/screens/capture/score_details_screen.dart';
 import 'capture_fakes.dart';
 
 Finder get _titleField => find.byType(TextField).first;
-Finder get _composerField => find.byType(TextField).at(1);
+Finder get _arrangerField => find.byType(TextField).at(1);
 
 ElevatedButton _next(WidgetTester tester) => tester.widget<ElevatedButton>(
   find.ancestor(
@@ -64,16 +64,16 @@ void main() {
     expect(_next(tester).onPressed, isNotNull);
   });
 
-  testWidgets('title and composer stop at 120 code points', (tester) async {
+  testWidgets('title and arranger stop at 120 code points', (tester) async {
     await pumpCapture(tester, CaptureHarness(), startOnDetails: true);
     // Each "𝄞" is one code point but two UTF-16 units.
     await tester.enterText(_titleField, '𝄞' * 130);
-    await tester.enterText(_composerField, 'a' * 130);
+    await tester.enterText(_arrangerField, 'a' * 130);
     await tester.pump();
     final title = tester.widget<TextField>(_titleField).controller!.text;
-    final composer = tester.widget<TextField>(_composerField).controller!.text;
+    final arranger = tester.widget<TextField>(_arrangerField).controller!.text;
     expect(ScoreDetails.codePointLength(title), ScoreDetails.maxTextLength);
-    expect(composer.length, ScoreDetails.maxTextLength);
+    expect(arranger.length, ScoreDetails.maxTextLength);
   });
 
   test('CodePointLimitFormatter never splits a surrogate pair', () {
@@ -88,7 +88,7 @@ void main() {
   testWidgets('answers reach Capture and survive coming back', (tester) async {
     await pumpCapture(tester, CaptureHarness(), startOnDetails: true);
     await tester.enterText(_titleField, '  Ave Maria ');
-    await tester.enterText(_composerField, 'Schubert');
+    await tester.enterText(_arrangerField, 'Schubert');
     await _choose(tester, CaptureMessages.keyTile, KeySignature.d.label);
     await _choose(
       tester,
@@ -123,7 +123,7 @@ void main() {
     await _tapNext(tester);
     final capture = tester.widget<CaptureScreen>(find.byType(CaptureScreen));
     expect(capture.details.title, 'Ave Maria');
-    expect(capture.details.composer, 'Schubert');
+    expect(capture.details.arranger, 'Schubert');
     expect(capture.details.keySignature, KeySignature.d);
     expect(capture.details.timeSignature, TimeSignature.threeFour);
     expect(capture.details.tempoBpm, ScoreDetails.defaultTempo + 1);

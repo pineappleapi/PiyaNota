@@ -105,7 +105,7 @@ void main() {
     expect(navigator.canPop(), isFalse);
 
     // AC7 through the real route table: Playback (PIYA-208) opens the
-    // tapped score, composer from the fake result.
+    // tapped score, arranger from the fake result.
     await tester.tap(find.text('Paraiso'));
     await tester.pump();
     await tester.pump(settle);
