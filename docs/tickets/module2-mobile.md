@@ -121,6 +121,8 @@ _Covers: UI tickets (Onboarding, Account, Score Library, Playback, Settings, Sys
 7. Non-PDF, non-image file types rejected immediately at selection time with a clear error message.
 8. Tapping Submit/Confirm calls PIYA-101 (camera/gallery input) or PIYA-310 (PDF input), routing to Processing in either case — client selects correct endpoint based on input method, not a single hardcoded call.
 
+*(2026-10-09, user decision: the optional name field on the score-details screen (the PIYA-101 AC8 metadata sent at submit) holds the **arranger**, not the composer. It is sent as `arranger` (renamed from `composer`, with error codes `arranger_too_long` / `arranger_invalid`) and labelled as the arranger in the UI.)*
+
 ---
 
 ### PIYA-207 — Processing Status UI
@@ -170,6 +172,17 @@ _Covers: UI tickets (Onboarding, Account, Score Library, Playback, Settings, Sys
 7. Tapping/dragging the seek bar updates the playback indicator's position within 200ms.
 8. Voice Mixer and Speed controls accessible from this screen without navigating away.
 
+**Design decisions (2026-10-09, user):** these refine the ACs above without replacing them.
+- Transport: ±5 s buttons (Netflix-style), plus ⏮, which jumps to the start of the first measure (m.1), and ⏭, which jumps to the **start** of the last measure (e.g. m.15 of 15). This needs `bar` on every timing event (PIYA-117 AC7). When the piece opens with a pickup (`bar: 0`), ⏮ goes to the very start (t=0) so the pickup is heard. When no event has a `bar`, ⏮ goes to t=0 and ⏭ to the last event.
+- The playback indicator band spans the whole system (all four staves), not a single staff (see PIYA-117 AC8).
+- Grey text and chip text are darkened just enough to meet WCAG AA contrast.
+- A dismissible "automatic transcription — some notes may be wrong" banner appears when PIYA-103 `review.reviewNeeded` is true (see PIYA-216 AC4).
+- Mixer, Speed and Download open placeholder sheets until PIYA-209, PIYA-210 and PIYA-211 land.
+- The header shows the title and, when present, "arr. by <arranger>" (matches the mockup). The value is the score's `arranger` field (PIYA-101 AC8 / PIYA-103 AC7 / PIYA-308 AC3); with no arranger the line is left out. *(2026-10-09: the field was renamed from `composer`, user decision — it holds the arranger.)*
+- Audio plays only while the Playback screen is open. Leaving the screen or sending the app to the background pauses/stops playback. Offline or background listening is what Export (PIYA-211) downloads are for.
+- If one voice's track fails to load or drops out, the other voices keep playing; that voice's chip is disabled with a short notice. The score fails as a whole only if no track can play.
+- Bundled demo data (the fake API) exists in debug/fake builds only, never in release builds.
+
 ---
 
 ### PIYA-209 — Voice Mixer Modal UI
@@ -189,6 +202,11 @@ _Covers: UI tickets (Onboarding, Account, Score Library, Playback, Settings, Sys
 6. Mixer settings persist for the duration of the playback session but reset to default when reopened later, unless otherwise specified.
 7. Modal dismissible via close (X) button, returns to Playback without interrupting active playback.
 
+**Design decisions (2026-10-09, user):**
+- Each row has a Solo checkbox. When any row is soloed, only soloed rows are heard; Mute still wins over Solo.
+- The Metronome Click row sets the click's volume and Mute only. Whether the click plays at all is the Speed modal's toggle (PIYA-210 AC3). The click is heard only when that toggle is on and the row is not muted.
+- Mixer volumes stack with the Playback voice chips (PIYA-208): an unselected chip is silent whatever its slider says.
+
 ---
 
 ### PIYA-210 — Playback Speed Modal UI
@@ -205,6 +223,11 @@ _Covers: UI tickets (Onboarding, Account, Score Library, Playback, Settings, Sys
 3. Displays a Metronome Click toggle, independent of the Voice Mixer's metronome control, adding an audible click track synced to current tempo.
 4. Speed changes apply immediately if audio is currently playing, without requiring restart.
 5. Modal dismissible via close (X) button, returns to Playback without interrupting playback.
+
+**Design decisions (2026-10-09, user):**
+- The slider is in BPM, range 30–240 (same as the tempo field at capture, PIYA-101 AC8). It opens at the score's `tempoBpm` (PIYA-103 AC8), which is 90 unless another tempo was entered. Playback rate = chosen BPM ÷ `tempoBpm`, with pitch kept.
+- The Metronome Click checkbox turns the click on or off (off by default). Its volume and Mute live in the Voice Mixer (PIYA-209). The click is generated in the app at the chosen BPM, one click per quarter note, and stays aligned to the start of bar 1.
+- Speed and metronome settings last while the Playback screen is open and reset when the score is reopened, like the mixer (PIYA-209 AC6).
 
 ---
 
@@ -321,7 +344,7 @@ Wires Login (PIYA-202), Sign-Up (PIYA-203), and Password Reset (PIYA-204) screen
 Wires Score Library (PIYA-205) and Capture/Add Score (PIYA-206) to PIYA-101, PIYA-308, PIYA-309, PIYA-310.
 
 **Acceptance Criteria:**
-1. Score Library calls PIYA-308 on load, rendering loading/empty/error states exactly as defined in PIYA-205. The search bar filters the already-fetched list on the phone (title, composer, displayed last-opened date and "New Score (n)" label) and does not call PIYA-308 per keystroke. PIYA-308's server-side `search` matches title and composer only (PIYA-308 AC4). *(Amended 2026-10-08, backend-lead; replaces "calls PIYA-308 on load and on each search-bar keystroke (debounced)".)*
+1. Score Library calls PIYA-308 on load, rendering loading/empty/error states exactly as defined in PIYA-205. The search bar filters the already-fetched list on the phone (title, arranger, displayed last-opened date and "New Score (n)" label) and does not call PIYA-308 per keystroke. PIYA-308's server-side `search` matches title and arranger only (PIYA-308 AC4). *(Amended 2026-10-08, backend-lead; replaces "calls PIYA-308 on load and on each search-bar keystroke (debounced)".)* *(2026-10-09: renamed from `composer`, user decision — the field holds the arranger.)*
 2. Score deletion calls PIYA-309 and removes the entry from the displayed list only after a 200 response, not optimistically before confirmation.
 3. Capture/Add Score routes to PIYA-101 or PIYA-310 per PIYA-206's logic, surfaces PIYA-101/310's 400/415/429 responses as the specific UI errors PIYA-206 defines.
 
@@ -335,6 +358,9 @@ Wires Processing Status (PIYA-207) and Score Playback (PIYA-208) to PIYA-102 and
 1. Processing Status polls PIYA-102 at the fixed interval defined in PIYA-207, maps status/percentComplete/failureReason directly to the UI states already specified there.
 2. On `status: complete`, Playback calls PIYA-103 and binds `audioTracks`, `scoreImages`, `timingMetadataUrl` to the player, seek bar, and playback-indicator overlay as defined in PIYA-208.
 3. A 409 response from PIYA-103 (job not yet complete) is handled defensively even though the UI shouldn't normally trigger it before `complete` status.
+4. Playback shows its dismissible review banner (PIYA-208 design decisions) exactly when PIYA-103 returns `review.reviewNeeded: true`. While BUG-021 is open, that is every score. *(Added 2026-10-09.)*
+
+*(2026-10-09: opening a saved score from the library is blocked on the open gap that PIYA-103 is keyed by `job_id`, while the library has only `scoreId`. See PIYA-308 AC8 in `module3-backend.md`. Until that is resolved, Playback runs against a fake keyed by score.)*
 
 ---
 

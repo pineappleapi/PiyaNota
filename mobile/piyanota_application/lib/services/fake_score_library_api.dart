@@ -34,27 +34,27 @@ class FakeScoreLibraryApi implements ScoreLibraryApi {
 
   /// The mockup's three scores, plus two incomplete entries so the
   /// broken-data handling (PIYA-308 client handling, 2026-10-08) is visible
-  /// in the demo: one untitled, one with no composer or page count.
+  /// in the demo: one untitled, one with no arranger or page count.
   static final List<ScoreSummary> demoScores = List.unmodifiable([
     ScoreSummary(
       scoreId: 101,
       title: 'Bituin Walang Ningning',
       lastActivityAt: DateTime.utc(2026, 10, 3, 14, 22),
-      composer: 'Robert Delgado',
+      arranger: 'Robert Delgado',
       pageCount: 10,
     ),
     ScoreSummary(
       scoreId: 102,
       title: 'Paraiso',
       lastActivityAt: DateTime.utc(2026, 9, 28, 9, 5),
-      composer: 'Ryan Cayabyab',
+      arranger: 'Ryan Cayabyab',
       pageCount: 14,
     ),
     ScoreSummary(
       scoreId: 103,
       title: 'Bahay Kubo',
       lastActivityAt: DateTime.utc(2026, 9, 21, 18, 40),
-      composer: 'A.O. Veneracion/C.Borela',
+      arranger: 'A.O. Veneracion/C.Borela',
       pageCount: 7,
     ),
     ScoreSummary(
@@ -129,7 +129,7 @@ class FakeScoreLibraryApi implements ScoreLibraryApi {
     required String account,
     required String title,
     required int? pageCount,
-    String? composer,
+    String? arranger,
   }) {
     final scores = _scoresFor(account);
     final highest = scores.fold<int>(
@@ -142,7 +142,7 @@ class FakeScoreLibraryApi implements ScoreLibraryApi {
         scoreId: scoreId,
         title: title,
         lastActivityAt: _clock().toUtc(),
-        composer: composer,
+        arranger: arranger,
         pageCount: pageCount,
       ),
     );
@@ -153,6 +153,16 @@ class FakeScoreLibraryApi implements ScoreLibraryApi {
   /// being removed (scan-status spec §3). Silent if it's already gone.
   void removeSubmittedScore({required String account, required int scoreId}) {
     _scoresFor(account).removeWhere((score) => score.scoreId == scoreId);
+  }
+
+  /// [scoreId] as [account] sees it, or null if that account has no such
+  /// score. Lets the fake PIYA-103 result scope by account like the real
+  /// one and reuse the entry's arranger.
+  ScoreSummary? scoreFor({required String account, required int scoreId}) {
+    for (final score in _scoresFor(account)) {
+      if (score.scoreId == scoreId) return score;
+    }
+    return null;
   }
 
   Future<String> _currentAccount() async {

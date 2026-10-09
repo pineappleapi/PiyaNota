@@ -185,7 +185,7 @@ void main() {
                   'scoreId': 103,
                   'title': '',
                   'lastAccessedAt': 'yesterday',
-                  'composer': 7,
+                  'arranger': 7,
                   'pageCount': 'many',
                   'thumbnailUrl': false,
                 },
@@ -198,7 +198,7 @@ void main() {
         final bare = scores.last;
         expect(bare.title, isNull);
         expect(bare.lastActivityAt, isNull);
-        expect(bare.composer, isNull);
+        expect(bare.arranger, isNull);
         expect(bare.pageCount, isNull);
         expect(bare.thumbnailUrl, isNull);
       },

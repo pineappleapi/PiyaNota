@@ -13,10 +13,10 @@ class CaptureMessages {
   static const String detailsStep = 'Step 1 of 2 · About the song';
   static const String titleLabel = 'Song title';
   static const String titleHint = 'e.g. Bituin Walang Ningning';
-  static const String composerLabel = 'Composer or arranger (optional)';
-  static const String composerHint = 'e.g. Ryan Cayabyab';
+  static const String arrangerLabel = 'Arranger (optional)';
+  static const String arrangerHint = 'e.g. Ryan Cayabyab';
   static const String titleTooLong = 'Use 120 characters or fewer.';
-  static const String composerTooLong = 'Use 120 characters or fewer.';
+  static const String arrangerTooLong = 'Use 120 characters or fewer.';
   static const String musicSection =
       'Music details (optional, you can skip these)';
   static const String musicSectionHint =
@@ -202,8 +202,8 @@ class CaptureMessages {
         'title_required',
         'title_too_long',
         'title_invalid',
-        'composer_too_long',
-        'composer_invalid',
+        'arranger_too_long',
+        'arranger_invalid',
         'invalid_tempo',
         'invalid_key_signature',
         'invalid_time_signature',
@@ -228,11 +228,11 @@ class CaptureMessages {
       'title_invalid' =>
         'The song title has characters PiyaNota can\'t save. Tap Edit '
             'details and retype it.',
-      'composer_too_long' =>
-        'The composer name is too long. Tap Edit details and shorten it to '
+      'arranger_too_long' =>
+        'The arranger name is too long. Tap Edit details and shorten it to '
             '120 characters or fewer.',
-      'composer_invalid' =>
-        'The composer name has characters PiyaNota can\'t save. Tap Edit '
+      'arranger_invalid' =>
+        'The arranger name has characters PiyaNota can\'t save. Tap Edit '
             'details and retype it.',
       'invalid_tempo' || 'invalid_key_signature' || 'invalid_time_signature' =>
         'One of the music details wasn\'t accepted. Tap Edit details and '

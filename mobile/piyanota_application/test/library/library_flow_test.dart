@@ -5,12 +5,33 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:piyanota_application/app.dart';
+import 'package:piyanota_application/models/voice_part.dart';
+import 'package:piyanota_application/services/demo/playback_demo.dart';
 import 'package:piyanota_application/services/fake_auth_api.dart';
 import 'package:piyanota_application/services/fake_score_library_api.dart';
+import 'package:piyanota_application/services/fake_score_result_api.dart';
 import 'package:piyanota_application/state/auth_providers.dart';
+import 'package:piyanota_application/state/playback_providers.dart';
+import 'package:piyanota_application/state/processing_providers.dart';
+import 'package:piyanota_application/state/score_library_providers.dart';
+
+import '../playback/playback_fakes.dart';
 
 /// Full app with the real fakes: logging in lands on the real library, the
 /// demo account sees its scores, and back does not return to Login.
+/// Where the demo would be; nothing is read from it here (the engine is
+/// fake, and a missing page or timing file only costs the indicator). The
+/// timing URL isn't a file, so it fails at once instead of waiting on real
+/// file IO the test clock never runs.
+final _unwrittenDemo = PlaybackDemoFiles(
+  tracks: {
+    for (final voice in VoicePart.values)
+      voice: Uri.file('/unwritten/${voice.name}.wav'),
+  },
+  page: Uri.file('/unwritten/score_page_1.png'),
+  timing: Uri.parse('https://unwritten.test/timing.json'),
+);
+
 void main() {
   // The fakes' latency runs on the fake test clock, so these generous pumps
   // cost nothing in wall time.
@@ -28,6 +49,22 @@ void main() {
         overrides: [
           fakeAuthApiProvider.overrideWithValue(
             FakeAuthApi(latency: Duration.zero),
+          ),
+          // No platform audio in widget tests; the real fake result API
+          // still runs, minus writing the demo files (no path_provider or
+          // real file IO under the test clock).
+          playbackEngineFactoryProvider.overrideWithValue(
+            FakePlaybackEngine.new,
+          ),
+          scoreResultApiProvider.overrideWith(
+            (ref) => FakeScoreResultApi(
+              sessionStorage: ref.watch(sessionStorageProvider),
+              accountForToken: ref.watch(fakeAuthApiProvider).accountForToken,
+              library:
+                  ref.watch(scoreLibraryApiProvider) as FakeScoreLibraryApi,
+              processing: ref.watch(fakeProcessingApiProvider),
+              demoFiles: () async => _unwrittenDemo,
+            ),
           ),
         ],
         child: const PiyaNotaApp(),
@@ -67,11 +104,13 @@ void main() {
     final navigator = tester.state<NavigatorState>(find.byType(Navigator));
     expect(navigator.canPop(), isFalse);
 
-    // AC7 through the real route table: the placeholder shows the id.
+    // AC7 through the real route table: Playback (PIYA-208) opens the
+    // tapped score, arranger from the fake result.
     await tester.tap(find.text('Paraiso'));
     await tester.pump();
     await tester.pump(settle);
-    expect(find.text('Playback — coming soon'), findsOneWidget);
-    expect(find.text('Paraiso (score #102)'), findsOneWidget);
+    expect(find.text('Paraiso'), findsOneWidget);
+    expect(find.text('arr. by Ryan Cayabyab'), findsOneWidget);
+    expect(find.byKey(const ValueKey('play-pause')), findsOneWidget);
   });
 }

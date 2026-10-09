@@ -27,7 +27,7 @@ class ScoreDetailsScreen extends StatefulWidget {
 
 class _ScoreDetailsScreenState extends State<ScoreDetailsScreen> {
   final _title = TextEditingController();
-  final _composer = TextEditingController();
+  final _arranger = TextEditingController();
   KeySignature? _key;
   TimeSignature? _time;
   int? _tempo;
@@ -49,7 +49,7 @@ class _ScoreDetailsScreenState extends State<ScoreDetailsScreen> {
 
   void _apply(ScoreDetails details) {
     _title.text = details.title;
-    _composer.text = details.composer;
+    _arranger.text = details.arranger;
     _key = details.keySignature;
     _time = details.timeSignature;
     _tempo = details.tempoBpm;
@@ -60,7 +60,7 @@ class _ScoreDetailsScreenState extends State<ScoreDetailsScreen> {
     _title
       ..removeListener(_onTitleChanged)
       ..dispose();
-    _composer.dispose();
+    _arranger.dispose();
     super.dispose();
   }
 
@@ -73,7 +73,7 @@ class _ScoreDetailsScreenState extends State<ScoreDetailsScreen> {
 
   ScoreDetails get _details => ScoreDetails(
     title: _title.text.trim(),
-    composer: _composer.text.trim(),
+    arranger: _arranger.text.trim(),
     keySignature: _key,
     timeSignature: _time,
     tempoBpm: _tempo,
@@ -126,10 +126,10 @@ class _ScoreDetailsScreenState extends State<ScoreDetailsScreen> {
       ),
       const SizedBox(height: 16),
       _LabelledField(
-        label: CaptureMessages.composerLabel,
+        label: CaptureMessages.arrangerLabel,
         child: _DetailsTextField(
-          controller: _composer,
-          hint: CaptureMessages.composerHint,
+          controller: _arranger,
+          hint: CaptureMessages.arrangerHint,
           icon: Icons.person_outline_rounded,
           textInputAction: TextInputAction.done,
           onSubmitted: (_) => _next(),

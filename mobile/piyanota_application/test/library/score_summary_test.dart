@@ -25,16 +25,16 @@ void main() {
       expect(score.lastActivityAt, DateTime.utc(2026, 9, 1));
     });
 
-    test('reads composer and pageCount as contract fields', () {
+    test('reads arranger and pageCount as contract fields', () {
       final score = ScoreSummary.fromJson({
         'scoreId': 552,
         'title': 'Bayan Ko',
         'lastAccessedAt': '2026-09-03T14:22:00Z',
-        'composer': 'Constancio de Guzman',
+        'arranger': 'Constancio de Guzman',
         'pageCount': 4,
         'thumbnailUrl': 'https://cdn.piyanota.app/thumbs/552.png',
       });
-      expect(score.composer, 'Constancio de Guzman');
+      expect(score.arranger, 'Constancio de Guzman');
       expect(score.pageCount, 4);
       expect(score.thumbnailUrl, 'https://cdn.piyanota.app/thumbs/552.png');
     });
@@ -45,13 +45,13 @@ void main() {
         'title': '   ',
         'lastAccessedAt': 'yesterday',
         'thumbnailUrl': 42,
-        'composer': '',
+        'arranger': '',
         'pageCount': '14',
       });
       expect(score.title, isNull);
       expect(score.lastActivityAt, isNull);
       expect(score.thumbnailUrl, isNull);
-      expect(score.composer, isNull);
+      expect(score.arranger, isNull);
       expect(score.pageCount, isNull);
     });
 
@@ -193,18 +193,18 @@ void main() {
     });
   });
 
-  group('filterLibraryEntries (title, composer, date)', () {
+  group('filterLibraryEntries (title, arranger, date)', () {
     final entries = buildLibraryEntries([
       ScoreSummary(
         scoreId: 1,
         title: 'Bahay Kubo',
-        composer: 'A.O. Veneracion',
+        arranger: 'A.O. Veneracion',
         lastActivityAt: DateTime(2026, 9, 21, 12),
       ),
       ScoreSummary(
         scoreId: 2,
         title: 'Paraiso',
-        composer: 'Ryan Cayabyab',
+        arranger: 'Ryan Cayabyab',
         lastActivityAt: DateTime(2026, 10, 3, 12),
       ),
       ScoreSummary(scoreId: 3, lastActivityAt: DateTime(2025, 1, 5, 12)),
@@ -222,7 +222,7 @@ void main() {
       expect(ids('rai'), [2]);
     });
 
-    test('matches composer', () {
+    test('matches arranger', () {
       expect(ids('cayab'), [2]);
       expect(ids('veneracion'), [1]);
     });
@@ -254,7 +254,7 @@ void main() {
         scoreId: 2,
         title: 'y',
         lastActivityAt: DateTime(2026, 9, 28, 12),
-        composer: 'Ryan Cayabyab',
+        arranger: 'Ryan Cayabyab',
         pageCount: 1,
       );
       expect(LibraryMessages.cardSubtitle(bare), 'Oct 3, 2026');
@@ -267,7 +267,7 @@ void main() {
     test('no stray separator when parts are missing', () {
       expect(
         LibraryMessages.cardSubtitle(
-          const ScoreSummary(scoreId: 1, composer: 'Ryan Cayabyab'),
+          const ScoreSummary(scoreId: 1, arranger: 'Ryan Cayabyab'),
         ),
         'Ryan Cayabyab',
       );

@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart';
 class ScoreDetails {
   const ScoreDetails({
     required this.title,
-    this.composer = '',
+    this.arranger = '',
     this.keySignature,
     this.timeSignature,
     this.tempoBpm,
@@ -17,7 +17,7 @@ class ScoreDetails {
   final String title;
 
   /// Trimmed; empty means "not given", and the field is then omitted.
-  final String composer;
+  final String arranger;
 
   /// Null is "Not sure".
   final KeySignature? keySignature;

@@ -12,7 +12,7 @@ class ScoreSummary {
     this.title,
     this.lastActivityAt,
     this.thumbnailUrl,
-    this.composer,
+    this.arranger,
     this.pageCount,
   });
 
@@ -29,7 +29,7 @@ class ScoreSummary {
   final DateTime? lastActivityAt;
 
   final String? thumbnailUrl;
-  final String? composer;
+  final String? arranger;
   final int? pageCount;
 
   ScoreSummary copyWith({DateTime? lastActivityAt}) => ScoreSummary(
@@ -37,7 +37,7 @@ class ScoreSummary {
     title: title,
     lastActivityAt: lastActivityAt ?? this.lastActivityAt,
     thumbnailUrl: thumbnailUrl,
-    composer: composer,
+    arranger: arranger,
     pageCount: pageCount,
   );
 
@@ -60,7 +60,7 @@ class ScoreSummary {
           _parseDate(json['lastAccessedAt']) ??
           _parseDate(json['lastProcessedAt']),
       thumbnailUrl: _nonBlankString(json['thumbnailUrl']),
-      composer: _nonBlankString(json['composer']),
+      arranger: _nonBlankString(json['arranger']),
       pageCount: switch (json['pageCount']) {
         final int pages when pages > 0 => pages,
         _ => null,

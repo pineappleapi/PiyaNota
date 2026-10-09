@@ -114,7 +114,7 @@ int _compareForLibrary(ScoreSummary a, ScoreSummary b) {
 }
 
 /// Case-insensitive, partial match on what the card shows: the display
-/// title (so "new score" finds untitled entries), the composer and the
+/// title (so "new score" finds untitled entries), the arranger and the
 /// formatted date ("oct", "2026", "oct 3"). Keeps the input order, i.e.
 /// newest-opened first. PIYA-215 AC1 moves search to a debounced PIYA-308
 /// call, which must keep these semantics (PIYA-308 AC4).
@@ -137,7 +137,7 @@ bool scoreMatchesQuery(ScoreSummary score, String needle, {String? title}) {
   final when = score.lastActivityAt;
   return [
     title ?? score.title ?? untitledScoreLabel,
-    ?score.composer,
+    ?score.arranger,
     if (when != null) formatScoreDate(when),
   ].any((field) => field.toLowerCase().contains(needle));
 }

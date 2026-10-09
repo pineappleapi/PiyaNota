@@ -43,7 +43,7 @@ class LibraryMessages {
 
   static const String noResultsTitle = 'No results';
   static String noResultsHint(String query) =>
-      'Nothing matches "${query.trim()}". Try a title, composer or date.';
+      'Nothing matches "${query.trim()}". Try a title, arranger or date.';
   static const String clearSearch = 'Clear search';
 
   static String deleteDialogBody(String title) =>
@@ -58,14 +58,14 @@ class LibraryMessages {
   static const String deleting = 'Deleting…';
 
   /// Card subtitle. The date comes first so it is the part that survives
-  /// ellipsis; composer and page count follow when known. Missing parts are
+  /// ellipsis; arranger and page count follow when known. Missing parts are
   /// left out entirely, so there is never a dangling "•".
   static String cardSubtitle(ScoreSummary score) {
     final pages = score.pageCount;
     final when = score.lastActivityAt;
     return [
       if (when != null) formatScoreDate(when),
-      ?score.composer,
+      ?score.arranger,
       if (pages != null) '$pages ${pages == 1 ? 'page' : 'pages'}',
     ].join(' • ');
   }
