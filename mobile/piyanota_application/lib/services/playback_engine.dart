@@ -86,6 +86,12 @@ abstract interface class PlaybackEngine {
   /// position, playing if the voices are. True if it is now attached.
   Future<bool> attachClick(Uri track);
 
+  /// Removes the click track (to attach a re-planned one, PIYA-210 "Speed
+  /// changes"). An [attachClick] still in flight then returns false, and
+  /// nothing the old track does afterwards reaches [clickFailures]. The
+  /// last [setClickVolume] is kept for the next one.
+  Future<void> detachClick();
+
   /// 0 (silent) to 1 (full); the click's gain after the Speed toggle and
   /// the Mixer's Mute and Solo (see the controller). Remembered if no
   /// click is attached yet.
@@ -183,7 +189,9 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
   final List<StreamSubscription<Object?>> _subscriptions = [];
 
   /// Stands for the click track wherever a key is a voice or the click.
-  static const Object _clickKey = #metronomeClick;
+  /// A new one per attached track: a call or error of a detached track
+  /// carries the old key, so it can't fail the new one.
+  Object _clickKey = Object();
   AudioPlayer? _click;
 
   /// Set once the click is loaded and caught up with the master; until
@@ -406,6 +414,9 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
   Future<bool> attachClick(Uri track) async {
     if (_disposed || _master == null || _click != null) return false;
     final player = _click = _playerFactory();
+    final key = _clickKey;
+    // Detached (or failed) while an await below was in flight.
+    bool gone() => _disposed || _clickDead || !identical(key, _clickKey);
     var speed = _speed;
     var volume = _clickVolume;
     try {
@@ -413,38 +424,39 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
       await player.setVolume(volume);
       await player.setSpeed(speed);
     } on Object catch (e) {
-      _failClick(e);
+      _failClick(e, key);
       return false;
     }
-    if (_disposed || _clickDead) return false;
-    _subscriptions.add(
-      player.errorStream.listen(_failClick, onError: _failClick),
-    );
+    if (gone()) return false;
+    void onError(Object error) => _failClick(error, key);
+    _subscriptions.add(player.errorStream.listen(onError, onError: onError));
     // Catch up with the voices. Until _clickReady the transport leaves the
     // click alone, so whatever it did during an await here is redone
     // before the click joins it (see clickSettleRounds).
     for (var round = 1; ; round++) {
       if (_speed != speed) {
         speed = _speed;
-        if (!await _guard(_clickKey, player.setSpeed(speed))) return false;
+        if (!await _guard(key, player.setSpeed(speed)) || gone()) return false;
       }
       if (_clickVolume != volume) {
         volume = _clickVolume;
-        if (!await _guard(_clickKey, player.setVolume(volume))) return false;
+        if (!await _guard(key, player.setVolume(volume)) || gone()) {
+          return false;
+        }
       }
       final master = _master;
-      if (_disposed || _clickDead || master == null) return false;
+      if (gone() || master == null) return false;
       final seeks = _seekGeneration;
       final transport = _transport;
       final wasPlaying = master.playing;
       // Playing, the master moves on while the seek lands: aim ahead.
       final target = wasPlaying ? master.position + _seekLead : master.position;
       final watch = clock.stopwatch()..start();
-      if (!await _guard(_clickKey, player.seek(target))) return false;
+      if (!await _guard(key, player.seek(target))) return false;
       // A completed seek is a latency sample like a resync's, and the
       // next round's lead (if the master started meanwhile) needs it.
       _noteSeekLatency(watch.elapsed);
-      if (_disposed || _clickDead) return false;
+      if (gone()) return false;
       final settled =
           _speed == speed &&
           _clickVolume == volume &&
@@ -465,10 +477,22 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
     // reaches the click before it is ready) and an unaligned position is
     // fixed by the next play() or the drift check, but a stale speed would
     // never be corrected. Not awaited: nothing may await before the flag.
-    if (_speed != speed) unawaited(_guard(_clickKey, player.setSpeed(_speed)));
+    if (_speed != speed) unawaited(_guard(key, player.setSpeed(_speed)));
     _clickReady = true;
-    if (master.playing) unawaited(_guard(_clickKey, player.play()));
+    if (master.playing) unawaited(_guard(key, player.play()));
     return true;
+  }
+
+  @override
+  Future<void> detachClick() async {
+    final click = _click;
+    _strikes.remove(_clickKey);
+    _resyncing.remove(_clickKey);
+    _clickKey = Object();
+    _click = null;
+    _clickReady = false;
+    _clickDead = false;
+    if (click != null) await _quietly(click.dispose());
   }
 
   void _noteSeekLatency(Duration took) {
@@ -494,8 +518,10 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
   @override
   Stream<Object> get clickFailures => _clickFailures.stream;
 
-  void _failClick(Object error) {
-    if (_disposed || _clickDead) return;
+  /// [key] is the attachment the failure came from; one from a detached
+  /// track is ignored.
+  void _failClick(Object error, Object key) {
+    if (_disposed || _clickDead || !identical(key, _clickKey)) return;
     _clickDead = true;
     debugPrint('Playback: metronome click failed: $error');
     _strikes.remove(_clickKey);
@@ -537,7 +563,7 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
       if (key is VoicePart) {
         _fail(key, e);
       } else {
-        _failClick(e);
+        _failClick(e, key);
       }
       return false;
     }

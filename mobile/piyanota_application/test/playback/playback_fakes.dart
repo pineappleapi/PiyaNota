@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:piyanota_application/models/measure_table.dart';
 import 'package:piyanota_application/models/score_result.dart';
 import 'package:piyanota_application/models/voice_part.dart';
 import 'package:piyanota_application/routes/app_routes.dart';
@@ -178,7 +179,18 @@ class FakePlaybackEngine implements PlaybackEngine {
       if (!await gate.future) return false;
     }
     click = track;
+    attachedClicks.add(track);
     return true;
+  }
+
+  /// Every click track attached, in order (a re-plan attaches another).
+  final List<Uri> attachedClicks = [];
+  int detachCalls = 0;
+
+  @override
+  Future<void> detachClick() async {
+    detachCalls++;
+    click = null;
   }
 
   @override
@@ -206,11 +218,14 @@ class FakePlaybackEngine implements PlaybackEngine {
 /// Answers result fetches from a script: each entry is a [ScoreResult] or
 /// a [ScoreResultException] to throw; the last entry repeats.
 class ScriptedScoreResultApi implements ScoreResultApi {
-  ScriptedScoreResultApi(List<Object> script, {this.timing})
+  ScriptedScoreResultApi(List<Object> script, {this.timing, this.bars})
     : script = [...script];
 
   final List<Object> script;
   List<TimingEvent>? timing;
+
+  /// The timing file's measure table (PIYA-117 AC9); none when null.
+  List<BarInfo>? bars;
   Object? _last;
   int fetches = 0;
 
@@ -231,10 +246,10 @@ class ScriptedScoreResultApi implements ScoreResultApi {
   }
 
   @override
-  Future<List<TimingEvent>> fetchTiming(Uri url) async {
+  Future<TimingFile> fetchTiming(Uri url) async {
     final events = timing;
     if (events == null) throw const ScoreResultNotFoundException();
-    return events;
+    return TimingFile(events: events, bars: bars ?? const []);
   }
 }
 
@@ -306,6 +321,8 @@ ScoreResult testResult({
   String? arranger = kArranger,
   int tempoBpm = 90,
   bool tempoKnown = true,
+  Set<VoicePart> failedVoices = const {},
+  List<MutedMeasure> mutedMeasures = const [],
 }) => ScoreResult(
   scoreId: kScoreId,
   jobId: 'job-1',
@@ -322,6 +339,8 @@ ScoreResult testResult({
   arranger: arranger,
   tempoBpm: tempoBpm,
   tempoKnown: tempoKnown,
+  declaredFailedVoices: failedVoices,
+  mutedMeasures: mutedMeasures,
 );
 
 ProviderContainer appContainer(WidgetTester tester) =>
@@ -399,10 +418,12 @@ Future<void> pumpPlayback(
   VoicePart? defaultVoice,
   Size size = const Size(412, 917),
   double textScale = 1,
+  Map<String, Object> prefs = const {},
 }) async {
   SharedPreferences.setMockInitialValues({
     'onboarding_completed': true,
     'onboarding_default_voice': ?defaultVoice?.name,
+    ...prefs,
   });
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;

@@ -150,8 +150,10 @@ void main() {
           ),
         );
 
-        final events = await f.api.fetchTiming(result.timingMetadataUrl!);
+        final timing = await f.api.fetchTiming(result.timingMetadataUrl!);
+        final events = timing.events;
         expect(events, isNotEmpty);
+        expect(timing.bars, hasLength(PlaybackDemo.barCount));
         for (final event in events) {
           expect(event.pageIndex, 0);
           expect(event.x, lessThan(PlaybackDemo.pageWidth));
@@ -159,6 +161,11 @@ void main() {
         }
         expect(events.map((e) => e.voice).toSet(), {...VoicePart.values});
         expect(events, hasLength(PlaybackDemo.notes().length));
+
+        // Every demo score has the muted Bass measure; none failed.
+        expect(result.mutedMeasures.single.voice, VoicePart.bass);
+        expect(result.mutedMeasures.single.bar, PlaybackDemo.mutedBar);
+        expect(result.failedVoices, isEmpty);
 
         // Generated once: a second fetch reuses the same files.
         final page = File.fromUri(result.scoreImages.single!);
@@ -168,6 +175,39 @@ void main() {
         expect(page.lastModifiedSync(), written);
       },
     );
+
+    test('score 102 comes back with the Tenor failed on the server', () async {
+      final f = _Fakes();
+      await f.signIn(FakeAuthApi.demoEmail);
+      final result = await f.api.fetchResult(
+        FakeScoreResultApi.failedOnServerScoreId,
+      );
+      expect(result.declaredFailedVoices, {VoicePart.tenor});
+      expect(result.failedVoices, {VoicePart.tenor});
+      expect(result.audioTracks.keys, isNot(contains(VoicePart.tenor)));
+      expect(result.review.reasons, contains('voice_failed'));
+      final timing = await f.api.fetchTiming(result.timingMetadataUrl!);
+      expect(timing.events.where((e) => e.voice == VoicePart.tenor), isEmpty);
+      expect(timing.bars, hasLength(PlaybackDemo.barCount));
+    });
+
+    test('score 103 has an Alto file that is not there', () async {
+      final f = _Fakes();
+      await f.signIn(FakeAuthApi.demoEmail);
+      final result = await f.api.fetchResult(
+        FakeScoreResultApi.failsOnDeviceScoreId,
+      );
+      expect(result.failedVoices, isEmpty);
+      expect(result.audioTracks.keys.toSet(), {...VoicePart.values});
+      expect(
+        File.fromUri(result.audioTracks[VoicePart.alto]!).existsSync(),
+        isFalse,
+      );
+      expect(
+        File.fromUri(result.audioTracks[VoicePart.bass]!).existsSync(),
+        isTrue,
+      );
+    });
 
     test('a timing URL outside the demo is a 404', () async {
       final f = _Fakes();
@@ -288,9 +328,10 @@ void main() {
           ],
         }),
       );
-      final events = await _http(adapter)
+      final timing = await _http(adapter)
           .fetchTiming(Uri.parse('https://cdn.test/timing.json'));
-      expect(events.single.voice, VoicePart.alto);
+      expect(timing.events.single.voice, VoicePart.alto);
+      expect(timing.bars, isEmpty);
       expect(adapter.lastRequest!.headers['Authorization'], isNull);
     });
   });

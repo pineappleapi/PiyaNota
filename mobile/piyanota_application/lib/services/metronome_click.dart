@@ -6,47 +6,232 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../models/measure_table.dart';
 import '../models/score_result.dart';
 
-/// When the metronome clicks (PIYA-209/210, user decisions 2026-10-09),
-/// in the time of the rendered tracks: one click per quarter note at the
-/// score's `tempoBpm`, so the engine's speed change (rate = chosen BPM /
-/// `tempoBpm`) turns it into a click at the chosen BPM.
-@immutable
-class ClickPlan {
-  const ClickPlan({
-    required this.clicks,
-    required this.accents,
-    required this.length,
-  });
+/// How strongly a click sounds (PIYA-210 "Accent levels", loudest first).
+/// Each is a distinct pitch and level, so they can be told apart by ear.
+enum ClickLevel {
+  /// Offset 0 of a measure.
+  downbeat,
 
-  /// Onsets in order, from the first grid point at or after 0.
+  /// The first click of each later group: beat 3 of 4/4 and 12/8, the
+  /// second group of 5 and 7.
+  secondary,
+
+  /// Any other beat click.
+  beat,
+
+  /// A unit that is not on a beat (only in a slow compound meter).
+  subdivision,
+}
+
+/// When the metronome clicks (PIYA-209/210), in the time of the rendered
+/// tracks (the score's `tempoBpm`), so the engine's speed change (rate =
+/// chosen BPM / `tempoBpm`) turns tick `t` into `t x 60000 / (480 x
+/// chosen BPM)` ms, as PIYA-210 asks. Not `@immutable`: its constructor
+/// checks the two lists line up, which a const one can't.
+class ClickPlan {
+  ClickPlan({required this.clicks, required this.levels, required this.length})
+    : assert(clicks.length == levels.length, 'one level per click');
+
+  /// Onsets in order, all at or after 0 and before [length].
   final List<Duration> clicks;
 
-  /// Indexes into [clicks] that start a bar (the higher, louder click).
-  final Set<int> accents;
+  /// The level of each click in [clicks].
+  final List<ClickLevel> levels;
 
   /// The track's length: the longest voice, so the click never outlasts
   /// the music nor stops before it.
   final Duration length;
+
+  /// Indexes of the downbeat clicks.
+  Set<int> get downbeats => {
+    for (var i = 0; i < levels.length; i++)
+      if (levels[i] == ClickLevel.downbeat) i,
+  };
+}
+
+/// Ticks per quarter note in the timing file and the rendered MIDI.
+const int ticksPerQuarter = 480;
+const int _ticksPerWhole = ticksPerQuarter * 4;
+
+/// PIYA-210: a compound beat at or above this many per minute is clicked
+/// once per beat; below it every unit is clicked.
+const double compoundBeatThreshold = 60;
+
+/// Two clicks closer than this (a pickup's last click and bar 1's
+/// downbeat after rounding, say) are one click: the louder one stays.
+const Duration clickMergeWindow = Duration(milliseconds: 5);
+
+/// Lays the click out per measure from the timing file's `bars` (PIYA-117
+/// AC9) by the PIYA-210 "Metronome click layout" rules. [chosenBpm] only
+/// decides whether slow compound beats are subdivided; the times are in
+/// rendered time at [tempoBpm]. With no [bars] it falls back to
+/// [planQuarterGrid] on [events].
+ClickPlan planClicks({
+  required List<BarInfo> bars,
+  required List<TimingEvent> events,
+  required int tempoBpm,
+  required int chosenBpm,
+  required Duration length,
+}) {
+  if (bars.isEmpty) {
+    return planQuarterGrid(events: events, tempoBpm: tempoBpm, length: length);
+  }
+  final usPerTick =
+      Duration.microsecondsPerMinute / (ticksPerQuarter * tempoBpm);
+  final lengthUs = length.inMicroseconds;
+  final raw = <({int us, ClickLevel level})>[];
+  for (final (bar, meter) in resolveMeters(bars)) {
+    for (final (tick, level) in _barClicks(bar, meter, chosenBpm)) {
+      final us = ((bar.startTick + tick) * usPerTick).round();
+      if (us >= 0 && us < lengthUs) raw.add((us: us, level: level));
+    }
+  }
+  mergeSort(raw, compare: (a, b) => a.us - b.us);
+  final clicks = <Duration>[];
+  final levels = <ClickLevel>[];
+  for (final click in raw) {
+    if (clicks.isNotEmpty &&
+        click.us - clicks.last.inMicroseconds <
+            clickMergeWindow.inMicroseconds) {
+      if (click.level.index < levels.last.index) levels.last = click.level;
+      continue;
+    }
+    clicks.add(Duration(microseconds: click.us));
+    levels.add(click.level);
+  }
+  return ClickPlan(clicks: clicks, levels: levels, length: length);
+}
+
+/// A meter as the click uses it.
+typedef Meter = ({int numerator, int denominator});
+
+/// Pairs each bar with the meter its clicks use (PIYA-210 "Unknown
+/// meter"): its own when [MeterSource.trusted], else the last trusted
+/// meter before it, else null (a plain quarter grid).
+List<(BarInfo, Meter?)> resolveMeters(List<BarInfo> bars) {
+  Meter? last;
+  final resolved = <(BarInfo, Meter?)>[];
+  for (final bar in bars) {
+    if (bar.meterSource.trusted && bar.hasMeter) {
+      last = (numerator: bar.numerator!, denominator: bar.denominator!);
+    }
+    resolved.add((bar, last));
+  }
+  return resolved;
+}
+
+/// The compound measures (by index in [bars]) that are clicked on every
+/// unit at [chosenBpm]. The plan only changes with speed when this set
+/// does (PIYA-210 "Speed changes"), so the controller re-plans only then.
+Set<int> subdividedBars(List<BarInfo> bars, int chosenBpm) {
+  final resolved = resolveMeters(bars);
+  return {
+    for (var i = 0; i < resolved.length; i++)
+      if (resolved[i].$2 case final meter?)
+        if (_isCompound(meter) && _subdivides(meter, chosenBpm)) i,
+  };
+}
+
+bool _isCompound(Meter meter) =>
+    meter.numerator > 3 && meter.numerator % 3 == 0;
+
+/// The beat tempo of a compound meter is chosen BPM x denominator / 12
+/// (6/8 at quarter = 90 is 60 beats a minute).
+bool _subdivides(Meter meter, int chosenBpm) =>
+    chosenBpm * meter.denominator / 12 < compoundBeatThreshold;
+
+/// MuseScore's `stressEvery` on beats per bar (gap doc item 8): every 3rd
+/// beat if divisible by 3, else every 2nd if divisible by 2, else one at
+/// beat (n+1)/2 + 1 (1-based), so 5 = 3+2 and 7 = 4+3.
+Set<int> _secondaryBeats(int beats) {
+  if (beats % 3 == 0) return {for (var b = 3; b < beats; b += 3) b};
+  if (beats % 2 == 0) return {for (var b = 2; b < beats; b += 2) b};
+  if (beats >= 5) return {(beats + 1) ~/ 2};
+  return const {};
+}
+
+/// One full measure of [meter]: each click's offset from the barline in
+/// ticks, and its level.
+List<(int, ClickLevel)> _fullBar(Meter meter, int chosenBpm) {
+  final unit = _ticksPerWhole ~/ meter.denominator;
+  final compound = _isCompound(meter);
+  final beatUnits = compound ? 3 : 1;
+  final secondary = _secondaryBeats(meter.numerator ~/ beatUnits);
+  final subdivide = compound && _subdivides(meter, chosenBpm);
+  return [
+    for (var u = 0; u < meter.numerator; u++)
+      if (u % beatUnits == 0)
+        (
+          u * unit,
+          u == 0
+              ? ClickLevel.downbeat
+              : secondary.contains(u ~/ beatUnits)
+              ? ClickLevel.secondary
+              : ClickLevel.beat,
+        )
+      else if (subdivide)
+        (u * unit, ClickLevel.subdivision),
+  ];
+}
+
+/// [bar]'s clicks as (offset from its barline in ticks, level).
+List<(int, ClickLevel)> _barClicks(BarInfo bar, Meter? meter, int chosenBpm) {
+  final length = bar.durTicks;
+  if (meter == null) {
+    // No meter known: quarters from the barline, only the first accented.
+    // A pickup's quarters are counted back from its end instead, so they
+    // land on bar 1's grid, and none is a downbeat.
+    if (bar.pickup) {
+      return [
+        for (var t = length - ticksPerQuarter; t >= 0; t -= ticksPerQuarter)
+          (t, ClickLevel.beat),
+      ].reversed.toList();
+    }
+    return [
+      for (var t = 0; t < length; t += ticksPerQuarter)
+        (t, t == 0 ? ClickLevel.downbeat : ClickLevel.beat),
+    ];
+  }
+  final pattern = _fullBar(meter, chosenBpm);
+  final full = meter.numerator * (_ticksPerWhole ~/ meter.denominator);
+  if (bar.pickup) {
+    // The end of a full bar: the pickup starts `skip` ticks into it, and
+    // each click keeps that position's accent. Never a downbeat (a pickup
+    // as long as a full bar, not expected, gets a plain beat there).
+    final skip = full - length;
+    return [
+      for (final (offset, level) in pattern)
+        if (offset >= skip)
+          (
+            offset - skip,
+            level == ClickLevel.downbeat ? ClickLevel.beat : level,
+          ),
+    ];
+  }
+  // A short final bar stops at its end; a bar longer than its meter (not
+  // expected) repeats the pattern rather than going silent.
+  return [
+    for (var start = 0; start < length; start += full)
+      for (final (offset, level) in pattern)
+        if (start + offset < length) (start + offset, level),
+  ];
 }
 
 /// The grid of quarter notes at [tempoBpm], anchored on the start of bar 1
 /// (the earliest timestamp of any event with `bar == 1`) and extended
 /// backwards into a pickup, so the pickup is counted in too. With no bar
-/// numbers at all the grid starts at t = 0.
+/// numbers at all the grid starts at t = 0. Used only for a timing file
+/// without a `bars` table (PIYA-210: "It remains only as the fallback for
+/// a timing file with no `bars`.").
 ///
-/// Accents: the grid point nearest the first timestamp of each bar from 1
-/// on (bar 0 is a pickup, which starts mid-bar). With no bar numbers, no
-/// accents: the meter is unknown, so every click is the same. A bar whose
-/// first timestamp falls outside the clicks (before the grid starts, or at
-/// or past the end) gets no accent rather than one on the edge click.
-///
-/// A bar's first timestamp is its first *event*. That is its downbeat
-/// because PIYA-117 AC7 includes rest events, so a bar that opens on a
-/// rest still has an event there. (A timing file without rest events
-/// would put such a bar's accent on its first note instead.)
-ClickPlan planClicks({
+/// Downbeats: the grid point nearest the first timestamp of each bar from
+/// 1 on (bar 0 is a pickup, which starts mid-bar). With no bar numbers,
+/// none: every click is a plain beat. A bar whose first timestamp falls
+/// outside the clicks gets no downbeat rather than one on the edge click.
+ClickPlan planQuarterGrid({
   required List<TimingEvent> events,
   required int tempoBpm,
   required Duration length,
@@ -73,12 +258,20 @@ ClickPlan planClicks({
     for (final ms in firstOfBar.values)
       if (ms * 1000 >= startUs && ms * 1000 < lengthUs)
         ((ms * 1000 - startUs) / periodUs).round(),
-  }..removeWhere((index) => index >= clicks.length);
-  return ClickPlan(clicks: clicks, accents: accents, length: length);
+  };
+  return ClickPlan(
+    clicks: clicks,
+    levels: [
+      for (var i = 0; i < clicks.length; i++)
+        accents.contains(i) ? ClickLevel.downbeat : ClickLevel.beat,
+    ],
+    length: length,
+  );
 }
 
 /// The click track as 16-bit mono PCM WAV. Each click is a short decaying
-/// sine (a woodblock-ish tick); a bar start is higher and louder.
+/// sine (a woodblock-ish tick); its pitch and level follow its
+/// [ClickLevel], so the four levels sound distinct.
 @visibleForTesting
 Uint8List renderClickWav(ClickPlan plan) {
   const sampleRate = clickSampleRate;
@@ -86,9 +279,8 @@ Uint8List renderClickWav(ClickPlan plan) {
   final pcm = ByteData(total * 2);
   final clickSamples = (_clickSeconds * sampleRate).round();
   for (var index = 0; index < plan.clicks.length; index++) {
-    final accent = plan.accents.contains(index);
-    final freq = accent ? _accentHz : _beatHz;
-    final gain = (accent ? _accentLevel : _beatLevel) * _pcmMax;
+    final (freq, level) = _voicing[plan.levels[index]]!;
+    final gain = level * _pcmMax;
     final start = (plan.clicks[index].inMicroseconds * sampleRate / 1e6)
         .round();
     for (var i = 0; i < clickSamples && start + i < total; i++) {
@@ -104,10 +296,14 @@ Uint8List renderClickWav(ClickPlan plan) {
 const int clickSampleRate = 22050;
 const double _clickSeconds = 0.04;
 const double _decaySeconds = 0.008;
-const double _beatHz = 1000;
-const double _accentHz = 1600;
-const double _beatLevel = 0.55;
-const double _accentLevel = 0.85;
+
+/// (Hz, level 0-1) per click level: higher and louder for stronger ones.
+const Map<ClickLevel, (double, double)> _voicing = {
+  ClickLevel.downbeat: (1600, 0.9),
+  ClickLevel.secondary: (1300, 0.7),
+  ClickLevel.beat: (1000, 0.55),
+  ClickLevel.subdivision: (800, 0.3),
+};
 const int _pcmMax = 32767;
 
 Uint8List _wavFile(Uint8List pcm, int sampleRate) {

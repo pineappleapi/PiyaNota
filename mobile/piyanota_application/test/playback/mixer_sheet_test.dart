@@ -426,6 +426,10 @@ void main() {
     final handle = tester.ensureSemantics();
     final harness = ready(failAtLoad: {VoicePart.alto});
     await pumpPlayback(tester, harness);
+    // Item 6: the failed-voice alert comes up first.
+    expect(find.byKey(const ValueKey('failed-voices-alert')), findsOneWidget);
+    await tester.tap(find.text(PlaybackMessages.ok));
+    await tester.pumpAndSettle();
     await openMixer(tester);
     final alto = voiceRow(VoicePart.alto);
     expect(alto, findsOneWidget);
@@ -433,7 +437,7 @@ void main() {
     expect(tester.widget<SheetCheckbox>(soloIn(alto)).onChanged, isNull);
     expect(
       find.bySemanticsLabel(
-        PlaybackMessages.rowUnavailable(VoicePart.alto.label),
+        RegExp('^${PlaybackMessages.rowUnavailable(VoicePart.alto.label)}'),
       ),
       findsOneWidget,
     );

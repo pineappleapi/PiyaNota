@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../config/api_config.dart';
+import '../models/measure_table.dart';
 import '../models/score_details.dart';
 import '../models/score_result.dart';
 import '../models/score_timeline.dart';
@@ -156,9 +157,11 @@ class PlaybackState {
   /// position indicator. The screen says so once, quietly.
   final bool timingUnavailable;
 
-  /// Voices whose audio failed to load or dropped out mid-play. The others
-  /// keep playing (user decision 2026-10-09); these chips show as
-  /// unavailable, like a missing track.
+  /// Voices that can't play: failed on the server (PIYA-103 AC10
+  /// `failedVoices`, or missing from `audioTracks`, PIYA-216 AC5), failed
+  /// to load on the device, or dropped out mid-play. The others keep
+  /// playing (user decision 2026-10-09); these chips and Mixer rows are
+  /// disabled and the screen names them in the failed-voice alert.
   final Set<VoicePart> failedVoices;
 
   /// Voices that can be heard: in the result, and not failed.
@@ -280,6 +283,18 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// The generated click file of the current engine; deleted with it.
   Uri? _clickFile;
 
+  /// The timing file's measure table (PIYA-117 AC9); empty without one.
+  List<BarInfo> _bars = const [];
+
+  /// [subdividedBars] the current click was planned for. A speed change
+  /// that leaves it the same only rescales the click (the engine's speed
+  /// does that); one that changes it re-plans (PIYA-210 "Speed changes").
+  Set<int>? _plannedSubdivisions;
+
+  /// Bumped by every click plan, so an older one still being written or
+  /// attached gives way to a newer one.
+  int _clickGeneration = 0;
+
   /// Gains last sent to the current engine, by voice or [_clickGainKey],
   /// so a slider drag only sends what changed.
   final Map<Object, double> _sentGains = {};
@@ -332,7 +347,7 @@ class PlaybackController extends Notifier<PlaybackState> {
     }
     if (!current()) return;
 
-    final (timeline, timingFailed) = await _loadTimeline(api, result);
+    final (timeline, bars, timingFailed) = await _loadTimeline(api, result);
     if (!current()) return;
 
     PlaybackEngine? engine;
@@ -352,7 +367,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       return;
     }
 
-    final failedVoices = {...engine.unavailableVoices};
+    final failedVoices = {...result.failedVoices, ...engine.unavailableVoices};
     final playable = result.audioTracks.keys.toSet().difference(failedVoices);
     final selected = await _defaultSelection(playable);
     if (!current()) {
@@ -360,6 +375,8 @@ class PlaybackController extends Notifier<PlaybackState> {
       return;
     }
     _engine = engine;
+    _bars = bars;
+    _plannedSubdivisions = null;
     _playingSub = engine.playingChanges.listen((playing) {
       if (ref.mounted) state = state.copyWith(playing: playing);
     });
@@ -392,17 +409,34 @@ class PlaybackController extends Notifier<PlaybackState> {
     if (result.tempoKnown) unawaited(_prepareClick(engine, generation));
   }
 
-  /// Generates the click for this score and adds it to [engine] as a
-  /// follower track. Done after the voices are ready so it never delays
-  /// them; a failure only disables the metronome controls.
-  Future<void> _prepareClick(PlaybackEngine engine, int generation) async {
+  /// Generates the click for this score at the current speed and adds it
+  /// to [engine] as a follower track. Done after the voices are ready so
+  /// it never delays them; a failure only disables the metronome controls.
+  ///
+  /// [replace]: a re-plan after a speed change (see [commitBpm]). The old
+  /// click keeps playing until the new file is written, then is swapped
+  /// out; the status stays ready throughout, so a soloed click doesn't
+  /// hand the voices back for the moment of the swap.
+  Future<void> _prepareClick(
+    PlaybackEngine engine,
+    int generation, {
+    bool replace = false,
+  }) async {
+    final clickGeneration = ++_clickGeneration;
     bool current() =>
-        ref.mounted && generation == _generation && identical(_engine, engine);
+        ref.mounted &&
+        generation == _generation &&
+        identical(_engine, engine) &&
+        clickGeneration == _clickGeneration;
+    final chosenBpm = state.chosenBpm;
+    _plannedSubdivisions = subdividedBars(_bars, chosenBpm);
     final Uri file;
     try {
       final plan = planClicks(
+        bars: _bars,
         events: _eventsOf(state.timeline),
         tempoBpm: state.tempoBpm,
+        chosenBpm: chosenBpm,
         length: engine.duration,
       );
       file = await ref.read(clickTrackWriterProvider)(plan);
@@ -415,6 +449,16 @@ class PlaybackController extends Notifier<PlaybackState> {
       unawaited(_deleteQuietly(file));
       return;
     }
+    if (replace) {
+      final old = _clickFile;
+      _clickFile = null;
+      await engine.detachClick();
+      unawaited(_deleteQuietly(old));
+      if (!current()) {
+        unawaited(_deleteQuietly(file));
+        return;
+      }
+    }
     _clickFile = file;
     final attached = await engine.attachClick(file);
     if (!current()) return;
@@ -424,6 +468,22 @@ class PlaybackController extends Notifier<PlaybackState> {
     }
     state = state.copyWith(clickStatus: ClickStatus.ready);
     _applyGains();
+  }
+
+  /// The Speed slider was let go (or stepped by a screen reader). Re-plans
+  /// the click only when a compound measure's beat tempo crossed 60 a
+  /// minute (PIYA-210 "Speed changes"): that is the only time the click
+  /// pattern changes, and re-planning on every drag tick would swap the
+  /// click track dozens of times a second.
+  void commitBpm() {
+    final engine = _engine;
+    if (engine == null || state.phase != PlaybackPhase.ready) return;
+    if (state.clickStatus == ClickStatus.unavailable) return;
+    final planned = _plannedSubdivisions;
+    // Not planned yet: the first plan reads the speed when it starts.
+    if (planned == null) return;
+    if (setEquals(planned, subdividedBars(_bars, state.chosenBpm))) return;
+    unawaited(_prepareClick(engine, _generation, replace: true));
   }
 
   void _clickFailed() {
@@ -450,18 +510,25 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// bar-based skipping), not the audio, so it doesn't fail the screen;
   /// the flag lets the screen say so once. No timing URL at all is not a
   /// failure (nothing to show).
-  Future<(ScoreTimeline, bool)> _loadTimeline(
+  ///
+  /// The measure table is kept whole even for pages without an image: it
+  /// times the click, which doesn't depend on drawing anything.
+  Future<(ScoreTimeline, List<BarInfo>, bool)> _loadTimeline(
     ScoreResultApi api,
     ScoreResult result,
   ) async {
     final url = result.timingMetadataUrl;
-    if (url == null) return (ScoreTimeline.empty, false);
+    if (url == null) return (ScoreTimeline.empty, const <BarInfo>[], false);
     try {
-      final events = await api.fetchTiming(url);
-      return (ScoreTimeline(onExistingPages(events, result.hasPage)), false);
+      final file = await api.fetchTiming(url);
+      return (
+        ScoreTimeline(onExistingPages(file.events, result.hasPage)),
+        file.bars,
+        false,
+      );
     } on Object catch (e, stack) {
       debugPrint('Playback: timing unavailable: $e\n$stack');
-      return (ScoreTimeline.empty, true);
+      return (ScoreTimeline.empty, const <BarInfo>[], true);
     }
   }
 
@@ -708,6 +775,9 @@ class PlaybackController extends Notifier<PlaybackState> {
   }
 
   void _releaseEngine() {
+    _clickGeneration++;
+    _bars = const [];
+    _plannedSubdivisions = null;
     unawaited(_playingSub?.cancel());
     unawaited(_failureSub?.cancel());
     unawaited(_clickFailureSub?.cancel());

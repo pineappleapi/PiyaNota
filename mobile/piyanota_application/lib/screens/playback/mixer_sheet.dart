@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/voice_part.dart';
 import '../../state/playback_providers.dart';
 import '../../theme/app_theme.dart';
+import 'playback_alerts.dart';
 import 'playback_messages.dart';
 import 'sheet_parts.dart';
 
@@ -38,9 +39,8 @@ class VoiceMixerSheet extends ConsumerWidget {
         : PlaybackMessages.metronomeUnavailable;
     final rows = <Widget>[];
     for (final voice in VoicePart.values) {
-      // A voice the result never had has no row; one that failed keeps
-      // its row, disabled (partial failure, user decision 2026-10-09).
-      if (!(state.result?.audioTracks.containsKey(voice) ?? false)) continue;
+      // Every voice keeps its row; one that can't play (failed on the
+      // server or on the device) is disabled (user decision 2026-10-09).
       final usable = state.available.contains(voice);
       rows
         ..add(
@@ -53,7 +53,7 @@ class VoiceMixerSheet extends ConsumerWidget {
             soloed: state.soloed.contains(voice),
             muted: state.muted.contains(voice),
             volume: state.volumes[voice] ?? PlaybackController.fullVolume,
-            onSolo: (on) => controller.setVoiceSoloed(voice, soloed: on),
+            onSolo: (on) => _solo(context, ref, scoreId, voice, soloed: on),
             onMute: (on) => controller.setVoiceMuted(voice, muted: on),
             onVolume: (level) => controller.setVoiceVolume(voice, level),
           ),
@@ -98,6 +98,32 @@ class VoiceMixerSheet extends ConsumerWidget {
       children: rows,
     );
   }
+}
+
+/// Solo on a voice whose Playback chip is off would be silent, so it asks
+/// first (PIYA-209, user decision 2026-10-09: a system alert, not just a
+/// hint). "Turn `<Voice>` on" turns the chip on and solos; Cancel leaves
+/// both as they were.
+Future<void> _solo(
+  BuildContext context,
+  WidgetRef ref,
+  int scoreId,
+  VoicePart voice, {
+  required bool soloed,
+}) async {
+  final provider = playbackControllerProvider(scoreId);
+  final controller = ref.read(provider.notifier);
+  if (!soloed || ref.read(provider).selected.contains(voice)) {
+    controller.setVoiceSoloed(voice, soloed: soloed);
+    return;
+  }
+  final turnOn = await showSoloChipOffAlert(context, voice: voice);
+  if (!turnOn || !context.mounted) return;
+  // The sheet may have closed, or the voice failed, while it was open.
+  final state = ref.read(provider);
+  if (!state.available.contains(voice)) return;
+  if (!state.selected.contains(voice)) controller.toggleVoice(voice);
+  controller.setVoiceSoloed(voice, soloed: true);
 }
 
 class _VoicePill extends StatelessWidget {

@@ -1,3 +1,4 @@
+import '../../models/score_result.dart';
 import '../../models/voice_part.dart';
 import '../../state/playback_providers.dart';
 
@@ -11,9 +12,64 @@ class PlaybackMessages {
   static const String keepOneVoice = 'Keep at least one voice selected.';
   static const String voiceUnavailable = 'not available for this score';
 
-  /// A voice whose audio failed to load or dropped out; the rest play on.
-  static String audioUnavailable(List<VoicePart> voices) =>
-      '${voices.map((voice) => voice.label).join(', ')} audio unavailable';
+  // Failed-voice alert (PIYA-208, user decision 2026-10-09).
+  static String failedVoicesTitle(List<VoicePart> voices) =>
+      '${_names(voices)} can’t be played';
+  static String failedVoicesBody(List<VoicePart> voices, int remaining) {
+    final which = voices.length == 1
+        ? 'The ${voices.single.label} part of this score is'
+        : 'The ${_names(voices)} parts of this score are';
+    final rest = switch (remaining) {
+      1 => 'The other voice will play.',
+      _ => 'The other ${_count(remaining)} voices will play.',
+    };
+    return '$which corrupted and can’t be played at all. $rest';
+  }
+
+  static const String ok = 'OK';
+
+  // Muted-measures alert (PIYA-207 AC10 / PIYA-208).
+  static const String mutedTitle = 'Some measures will be silent';
+  static const String mutedBody =
+      'These measures were too damaged to play, so they will be silent. '
+      'Everything else plays as normal.';
+  static const String dontShowAgain = 'Don’t show again for this score';
+
+  /// "Bass: m. 4", or "Bass: page 1, system 2" (counting from 1) when the
+  /// measure couldn't be numbered.
+  static String mutedLine(MutedMeasure measure) {
+    final bar = measure.bar;
+    if (bar != null) {
+      return '${measure.voice.label}: ${bar == 0 ? 'pickup' : 'm. $bar'}';
+    }
+    final page = (measure.pageIndex ?? 0) + 1;
+    final system = measure.systemIndex;
+    return system == null
+        ? '${measure.voice.label}: page $page'
+        : '${measure.voice.label}: page $page, system ${system + 1}';
+  }
+
+  // Solo on a voice whose chip is off (PIYA-209, user decision 2026-10-09).
+  static String soloChipOffTitle(VoicePart voice) =>
+      '${voice.label} is turned off';
+  static String soloChipOffBody(VoicePart voice) =>
+      'You won’t hear ${voice.label} while its voice button on the '
+      'Playback screen is off, even when it’s soloed.';
+  static String turnOn(VoicePart voice) => 'Turn ${voice.label} on';
+  static const String cancel = 'Cancel';
+
+  static String _names(List<VoicePart> voices) {
+    final labels = [for (final voice in voices) voice.label];
+    if (labels.length < 3) return labels.join(' and ');
+    return '${labels.sublist(0, labels.length - 1).join(', ')} and '
+        '${labels.last}';
+  }
+
+  static String _count(int n) => switch (n) {
+    2 => 'two',
+    3 => 'three',
+    _ => '$n',
+  };
   static const String loading = 'Loading your score…';
   static const String back = 'Back';
   static const String download = 'Download audio';
@@ -71,7 +127,9 @@ class PlaybackMessages {
   static const String metronomeHint =
       'Listen along with a click to stay on beat';
   static const String playbackSpeed = 'Playback Speed';
-  static String bpmValue(int bpm) => '$bpm';
+
+  /// Quarter-note BPM whatever the meter (user decision 2026-10-09).
+  static String bpmValue(int bpm) => '♩ = $bpm';
   static String bpmSpoken(int bpm) => '$bpm beats per minute';
 
   // Review banner (PIYA-103 `review.reviewNeeded`).

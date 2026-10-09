@@ -17,6 +17,7 @@ import '../../state/session_actions.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/primary_pill_button.dart';
 import 'mixer_sheet.dart';
+import 'playback_alerts.dart';
 import 'playback_messages.dart';
 import 'sheet_parts.dart';
 import 'speed_sheet.dart';
@@ -162,20 +163,74 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
         .pushNamedAndRemoveUntil(AppRoutes.login, (_) => false);
   }
 
-  /// One short note per voice that drops out; the chip itself stays
-  /// struck through for as long as the screen is open.
-  void _onVoicesFailed(Set<VoicePart>? before, Set<VoicePart> now) {
-    final added = now.difference(before ?? const {});
-    if (added.isEmpty || !mounted) return;
-    final voices = [
+  /// Voices already named in a failed-voice alert on this screen.
+  final Set<VoicePart> _announcedFailures = {};
+
+  /// The muted-measures alert was considered for this screen (shown,
+  /// hidden by "Don't show again", or nothing to show).
+  bool _mutedChecked = false;
+
+  /// Alerts are shown one after another, never stacked: the failed-voice
+  /// alert first, then the muted-measures one (gap doc item 6).
+  Future<void> _alerts = Future.value();
+
+  void _queueAlert(Future<void> Function() show) {
+    _alerts = _alerts.then((_) async {
+      if (!mounted || _leaving) return;
+      try {
+        await show();
+      } on Object catch (e, stack) {
+        debugPrint('Playback: alert failed: $e\n$stack');
+      }
+    });
+  }
+
+  /// Once the score is ready, and again whenever a voice drops out: the
+  /// failed-voice alert for voices not named yet (at open, PIYA-208
+  /// "Whole-voice failure alert"; mid-play, gap doc item 7), then, once
+  /// per screen, the muted-measures alert (PIYA-207 AC10 / PIYA-208). The
+  /// chip stays disabled for as long as the screen is open.
+  void _onAlertState(PlaybackState state) {
+    if (state.phase != PlaybackPhase.ready) return;
+    final fresh = [
       for (final voice in VoicePart.values)
-        if (added.contains(voice)) voice,
+        if (state.failedVoices.contains(voice) &&
+            !_announcedFailures.contains(voice))
+          voice,
     ];
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(content: Text(PlaybackMessages.audioUnavailable(voices))),
+    if (fresh.isNotEmpty) {
+      _announcedFailures.addAll(fresh);
+      final remaining = state.available.length;
+      _queueAlert(
+        () =>
+            showFailedVoicesAlert(context, voices: fresh, remaining: remaining),
       );
+    }
+    if (!_mutedChecked) {
+      _mutedChecked = true;
+      final measures = state.result?.mutedMeasures ?? const [];
+      if (measures.isNotEmpty) _queueAlert(() => _showMuted(measures));
+    }
+  }
+
+  /// Shown each time Playback opens unless "Don't show again for this
+  /// score" was ticked. Processing routes here on completion without
+  /// showing it itself (gap doc item 5), so a score opened straight from
+  /// Processing sees it exactly once.
+  Future<void> _showMuted(List<MutedMeasure> measures) async {
+    if (await MutedAlertPrefs.isHidden(widget.scoreId)) return;
+    if (!mounted || _leaving) return;
+    // A voice that has since failed as a whole is in the other alert.
+    final failed = ref
+        .read(playbackControllerProvider(widget.scoreId))
+        .failedVoices;
+    final shown = [
+      for (final measure in measures)
+        if (!failed.contains(measure.voice)) measure,
+    ];
+    if (shown.isEmpty) return;
+    final hide = await showMutedMeasuresAlert(context, measures: shown);
+    if (hide) await MutedAlertPrefs.hide(widget.scoreId);
   }
 
   void _toggleVoice(VoicePart voice) {
@@ -218,7 +273,10 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
     ref.listen(provider.select((s) => s.error), (_, error) {
       if (error == PlaybackError.sessionExpired) unawaited(_toLogin());
     });
-    ref.listen(provider.select((s) => s.failedVoices), _onVoicesFailed);
+    ref.listen(
+      provider.select((s) => (s.phase, s.failedVoices)),
+      (_, _) => _onAlertState(ref.read(provider)),
+    );
     final state = ref.watch(provider);
     final ready = state.phase == PlaybackPhase.ready;
     final error = state.error ?? PlaybackError.server;

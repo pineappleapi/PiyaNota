@@ -30,6 +30,7 @@ final _unwrittenDemo = PlaybackDemoFiles(
   },
   page: Uri.file('/unwritten/score_page_1.png'),
   timing: Uri.parse('https://unwritten.test/timing.json'),
+  timingWithoutTenor: Uri.parse('https://unwritten.test/timing_t.json'),
 );
 
 void main() {

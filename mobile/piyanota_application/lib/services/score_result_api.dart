@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../config/api_config.dart';
+import '../models/measure_table.dart';
 import '../models/score_result.dart';
 import 'session_storage.dart';
 
@@ -44,8 +45,9 @@ abstract interface class ScoreResultApi {
   /// PIYA-103 for [scoreId].
   Future<ScoreResult> fetchResult(int scoreId);
 
-  /// The PIYA-117 timing file at a result's `timingMetadataUrl`.
-  Future<List<TimingEvent>> fetchTiming(Uri url);
+  /// The PIYA-117 timing file at a result's `timingMetadataUrl`: its
+  /// events, and its `bars` table (AC9) when it has one.
+  Future<TimingFile> fetchTiming(Uri url);
 }
 
 class HttpScoreResultApi implements ScoreResultApi {
@@ -81,7 +83,7 @@ class HttpScoreResultApi implements ScoreResultApi {
   /// the session token, and the bearer token must not leak to a CDN.
   /// Reconcile in PIYA-216.
   @override
-  Future<List<TimingEvent>> fetchTiming(Uri url) async {
+  Future<TimingFile> fetchTiming(Uri url) async {
     final Response<dynamic> response;
     try {
       response = await _dio.getUri<dynamic>(url);
@@ -107,9 +109,9 @@ class HttpScoreResultApi implements ScoreResultApi {
   /// dio decodes JSON only when the response says it is JSON; a CDN may
   /// serve the file as text.
   @visibleForTesting
-  static List<TimingEvent> parseTiming(Object? body) {
+  static TimingFile parseTiming(Object? body) {
     try {
-      return parseTimingEvents(body is String ? jsonDecode(body) : body);
+      return TimingFile.parse(body is String ? jsonDecode(body) : body);
     } on FormatException {
       throw const ScoreResultServerException();
     }
