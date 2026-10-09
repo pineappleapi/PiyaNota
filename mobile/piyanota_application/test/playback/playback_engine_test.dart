@@ -808,6 +808,31 @@ void main() {
       });
     });
 
+    test('a speed change in every catch-up round still reaches the click', () {
+      fakeAsync((async) {
+        final r = rig(click: FakeAudioPlayer());
+        r.click.seekDelay = const Duration(milliseconds: 100);
+        unawaited(r.engine.load(tracks()));
+        async.flushMicrotasks();
+        bool? attached;
+        unawaited(r.engine.attachClick(_clickUri).then((v) => attached = v));
+        // One change per catch-up seek, as a slider drag would send: the
+        // last lands during the final round, after its speed check.
+        for (final speed in [1.2, 1.4, 1.6]) {
+          async.elapse(const Duration(milliseconds: 50));
+          unawaited(r.engine.setSpeed(speed));
+          async.elapse(const Duration(milliseconds: 50));
+        }
+        async.elapse(const Duration(milliseconds: 100));
+        expect(attached, isTrue);
+        expect(
+          r.click.seeks,
+          hasLength(JustAudioPlaybackEngine.clickSettleRounds),
+        );
+        expect(r.click.speedSet, 1.6);
+      });
+    });
+
     test('play() while the click is attaching starts it once, aligned', () {
       fakeAsync((async) {
         // The alto's slow seek keeps play() in its alignment step while

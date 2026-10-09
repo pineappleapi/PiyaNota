@@ -460,6 +460,12 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
     // (and the click starts here).
     final master = _master;
     if (master == null) return false;
+    // A slider drag can change the speed during every round, so the last
+    // round may end unsettled. Volume needs no catch-up (setClickVolume
+    // reaches the click before it is ready) and an unaligned position is
+    // fixed by the next play() or the drift check, but a stale speed would
+    // never be corrected. Not awaited: nothing may await before the flag.
+    if (_speed != speed) unawaited(_guard(_clickKey, player.setSpeed(_speed)));
     _clickReady = true;
     if (master.playing) unawaited(_guard(_clickKey, player.play()));
     return true;

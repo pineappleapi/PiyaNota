@@ -181,7 +181,7 @@ class ScoreResult {
       arranger: arranger is String && arranger.trim().isNotEmpty
           ? arranger.trim()
           : null,
-      tempoBpm: tempoKnown ? tempo : ScoreDetails.defaultTempo,
+      tempoBpm: tempo is int && tempoKnown ? tempo : ScoreDetails.defaultTempo,
       tempoKnown: tempoKnown,
     );
   }

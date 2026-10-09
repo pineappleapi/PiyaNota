@@ -60,16 +60,16 @@ void main() {
 
     test('a bar starting outside the clicks gets no accent, not the edge '
         'click', () {
-      // Bar 1 at 1.0 s puts the grid at 0, 1, 2 s (60 BPM, 3 s long). Bar 2
-      // stamped before the grid (malformed) and bar 3 at the very end have
-      // no click of their own.
+      // Bar 1 at 1.5 s puts the grid at 0.5, 1.5, 2.5 s (60 BPM, 3 s long).
+      // Bar 2 stamped at 0.1 s (malformed) falls before the first click;
+      // a clamp would put its accent on that click.
       final early = planClicks(
-        events: [_at(1000, 1), _at(2000, 2), _at(3000, 3)],
+        events: [_at(1500, 1), _at(100, 2)],
         tempoBpm: 60,
         length: const Duration(seconds: 3),
       );
-      expect(_ms(early), [0, 1000, 2000]);
-      expect(early.accents, {1, 2});
+      expect(_ms(early), [500, 1500, 2500]);
+      expect(early.accents, {1});
 
       final past = planClicks(
         events: [_at(500, 1), _at(2900, 2)],
