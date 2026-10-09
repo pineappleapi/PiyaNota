@@ -137,6 +137,21 @@ void main() {
       );
     });
 
+    test('tempoBpm (PIYA-103 AC8): 30-240 int, else 90', () {
+      ScoreResult parse(Object? tempo) => ScoreResult.fromJson({
+        'scoreId': 7,
+        'audioTracks': {'soprano': 'https://cdn/s.mp3'},
+        'tempoBpm': ?tempo,
+      });
+      expect(parse(null).tempoBpm, 90);
+      expect(parse(120).tempoBpm, 120);
+      expect(parse(30).tempoBpm, 30);
+      expect(parse(240).tempoBpm, 240);
+      for (final bad in [29, 241, 0, -5, 90.5, '120']) {
+        expect(parse(bad).tempoBpm, 90, reason: '$bad');
+      }
+    });
+
     test('an explicit reviewNeeded false is respected', () {
       final review = ReviewSummary.fromJson({'reviewNeeded': false});
       expect(review.reviewNeeded, isFalse);

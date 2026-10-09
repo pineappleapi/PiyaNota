@@ -2,6 +2,7 @@ import 'dart:ui' show Size;
 
 import 'package:flutter/foundation.dart';
 
+import 'score_details.dart';
 import 'voice_part.dart';
 
 /// Reads a voice name from either contract: PIYA-103 keys its audio tracks
@@ -71,6 +72,7 @@ class ScoreResult {
     this.timingMetadataUrl,
     this.pageSizes = const [],
     this.arranger,
+    this.tempoBpm = ScoreDetails.defaultTempo,
   });
 
   final int scoreId;
@@ -96,6 +98,14 @@ class ScoreResult {
   /// PIYA-103 AC7 (added 2026-10-09), omitted when absent. Playback falls back
   /// to the library entry's arranger.
   final String? arranger;
+
+  /// PIYA-103 AC8: the tempo the tracks were rendered at, in quarter notes
+  /// per minute (PIYA-101 AC8). The Speed modal (PIYA-210) plays at
+  /// chosen BPM / this, and the metronome click is laid out on it. Absent,
+  /// not an int, or outside [ScoreDetails.minTempo]–[ScoreDetails.maxTempo]
+  /// reads as [ScoreDetails.defaultTempo] (90), the value the server
+  /// renders at when none was submitted.
+  final int tempoBpm;
 
   /// Parses `data` (the envelope is unwrapped by the API). Throws
   /// [FormatException] when no audio track or score id is usable, since
@@ -128,6 +138,7 @@ class ScoreResult {
     final rawSizes = data['scoreImageSizes'];
     final jobId = data['jobId'];
     final arranger = data['arranger'];
+    final tempo = data['tempoBpm'];
     return ScoreResult(
       scoreId: scoreId,
       jobId: jobId is String ? jobId : null,
@@ -142,6 +153,12 @@ class ScoreResult {
       arranger: arranger is String && arranger.trim().isNotEmpty
           ? arranger.trim()
           : null,
+      tempoBpm:
+          tempo is int &&
+              tempo >= ScoreDetails.minTempo &&
+              tempo <= ScoreDetails.maxTempo
+          ? tempo
+          : ScoreDetails.defaultTempo,
     );
   }
 

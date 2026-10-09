@@ -15,7 +15,9 @@ import '../../state/playback_providers.dart';
 import '../../state/session_actions.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/primary_pill_button.dart';
+import 'mixer_sheet.dart';
 import 'playback_messages.dart';
+import 'sheet_parts.dart';
 
 /// Score Playback & Rehearsal (PIYA-208): the original page image with an
 /// indicator band that follows the audio, S/A/T/B chips, and the transport.
@@ -186,17 +188,17 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
     }
   }
 
-  /// PIYA-209/210/211 land later. A modal sheet, not a route push, so the
+  /// PIYA-210/211 land later. A modal sheet, not a route push, so the
   /// music keeps playing underneath (user decision 2026-10-09).
   void _openPlaceholder(String title) {
     unawaited(
-      showModalBottomSheet<void>(
-        context: context,
-        backgroundColor: Colors.white,
-        builder: (_) => _ComingSoonSheet(title: title),
-      ),
+      showPlaybackSheet(context, (_) => _ComingSoonSheet(title: title)),
     );
   }
+
+  void _openMixer() => unawaited(
+    showPlaybackSheet(context, (_) => VoiceMixerSheet(scoreId: widget.scoreId)),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -297,10 +299,8 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
                   _display.value = value;
                 },
                 onSeekEnd: (value) => unawaited(_onSeekEnd(value)),
-                onMixer: () =>
-                    _openPlaceholder(PlaybackMessages.mixerSheetTitle),
-                onSpeed: () =>
-                    _openPlaceholder(PlaybackMessages.speedSheetTitle),
+                onMixer: _openMixer,
+                onSpeed: () => _openPlaceholder(PlaybackMessages.playbackSpeed),
               )
             : null,
       ),

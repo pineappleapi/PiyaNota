@@ -322,9 +322,7 @@ void main() {
       final harness = ready();
       await pumpPlayback(tester, harness);
       final container = appContainer(tester);
-      await container
-          .read(playbackControllerProvider(kScoreId).notifier)
-          .setSpeed(2);
+      container.read(playbackControllerProvider(kScoreId).notifier).setBpm(180);
       expect(harness.engine.speed, 2);
 
       await tester.tap(find.byKey(const ValueKey('play-pause')));
@@ -366,12 +364,8 @@ void main() {
 
       for (final (open, title) in [
         (
-          find.bySemanticsLabel(PlaybackMessages.voiceMixer),
-          PlaybackMessages.mixerSheetTitle,
-        ),
-        (
           find.bySemanticsLabel(PlaybackMessages.speed),
-          PlaybackMessages.speedSheetTitle,
+          PlaybackMessages.playbackSpeed,
         ),
         (
           find.byTooltip(PlaybackMessages.download),

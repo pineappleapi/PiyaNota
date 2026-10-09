@@ -11,6 +11,7 @@ import 'package:piyanota_application/models/score_result.dart';
 import 'package:piyanota_application/models/voice_part.dart';
 import 'package:piyanota_application/routes/app_routes.dart';
 import 'package:piyanota_application/screens/playback/playback_screen.dart';
+import 'package:piyanota_application/services/metronome_click.dart';
 import 'package:piyanota_application/services/playback_engine.dart';
 import 'package:piyanota_application/services/score_result_api.dart';
 import 'package:piyanota_application/services/session_storage.dart';
@@ -29,6 +30,7 @@ class FakePlaybackEngine implements PlaybackEngine {
     this.trackDuration = const Duration(seconds: 10),
     this.loadError,
     this.failAtLoad = const {},
+    this.clickAttachFails = false,
   });
 
   final Duration trackDuration;
@@ -41,6 +43,15 @@ class FakePlaybackEngine implements PlaybackEngine {
   final StreamController<bool> _changes = StreamController.broadcast();
   final StreamController<PlaybackFailure> _failures =
       StreamController.broadcast();
+  final StreamController<Object> _clickFailures = StreamController.broadcast();
+
+  /// [attachClick] returns false, as if the click track would not load.
+  final bool clickAttachFails;
+
+  /// The click track attached, if any, and its last volume.
+  Uri? click;
+  double clickVolume = 1;
+  final List<double> clickVolumes = [];
 
   /// When set, the next seek is recorded at once but completes only when
   /// this does (to see what the screen shows while a seek is in flight).
@@ -146,7 +157,33 @@ class FakePlaybackEngine implements PlaybackEngine {
   }
 
   @override
-  Future<void> setSpeed(double speed) async => this.speed = speed;
+  Future<void> setSpeed(double speed) async {
+    // Keep the position reached so far, like a real speed change.
+    if (playing) {
+      _anchor = position;
+      _startedAt = clock.now();
+    }
+    this.speed = speed;
+  }
+
+  @override
+  Future<bool> attachClick(Uri track) async {
+    if (clickAttachFails) return false;
+    click = track;
+    return true;
+  }
+
+  @override
+  Future<void> setClickVolume(double volume) async {
+    clickVolume = volume;
+    clickVolumes.add(volume);
+  }
+
+  @override
+  Stream<Object> get clickFailures => _clickFailures.stream;
+
+  /// The click player failed after attaching.
+  void failClick() => _clickFailures.add('test click failure');
 
   @override
   Future<void> dispose() async {
@@ -154,6 +191,7 @@ class FakePlaybackEngine implements PlaybackEngine {
     _startedAt = null;
     await _changes.close();
     await _failures.close();
+    await _clickFailures.close();
   }
 }
 
@@ -258,6 +296,7 @@ ScoreResult testResult({
   Set<VoicePart> voices = const {...VoicePart.values},
   bool reviewNeeded = true,
   String? arranger = kArranger,
+  int tempoBpm = 90,
 }) => ScoreResult(
   scoreId: kScoreId,
   jobId: 'job-1',
@@ -272,6 +311,7 @@ ScoreResult testResult({
   review: ReviewSummary(reviewNeeded: reviewNeeded),
   pageSizes: const [Size(1000, 1400)],
   arranger: arranger,
+  tempoBpm: tempoBpm,
 );
 
 ProviderContainer appContainer(WidgetTester tester) =>
@@ -287,6 +327,8 @@ class PlaybackHarness {
     this.engineLoadError,
     this.engineCreateError,
     this.engineFailAtLoad = const {},
+    this.clickAttachFails = false,
+    this.clickWriteError,
   });
 
   final ScriptedScoreResultApi api;
@@ -298,6 +340,13 @@ class PlaybackHarness {
 
   /// Thrown by the engine factory itself (e.g. a missing audio plugin).
   final Object? engineCreateError;
+  final bool clickAttachFails;
+
+  /// Thrown by the click track writer.
+  final Object? clickWriteError;
+
+  /// Click plans the writer was asked for.
+  final List<ClickPlan> clickPlans = [];
   final List<FakePlaybackEngine> engines = [];
   final secureStorage = FaultySecureStorage({'session_token': 'sess_t'});
 
@@ -311,9 +360,16 @@ class PlaybackHarness {
         trackDuration: engineDuration,
         loadError: engineLoadError,
         failAtLoad: engineFailAtLoad,
+        clickAttachFails: clickAttachFails,
       );
       engines.add(engine);
       return engine;
+    }),
+    clickTrackWriterProvider.overrideWithValue((plan) async {
+      clickPlans.add(plan);
+      if (clickWriteError case final error?) throw error;
+      // Not a file, so nothing is written or deleted.
+      return Uri.parse('test://click.wav');
     }),
     sessionStorageProvider.overrideWithValue(SessionStorage(secureStorage)),
   ];
@@ -358,9 +414,14 @@ Future<void> pumpPlayback(
       ),
     ),
   );
+  await reopenPlayback(tester);
+}
+
+/// Pushes Playback for the test score (again) over the library.
+Future<void> reopenPlayback(WidgetTester tester) async {
   unawaited(
     tester
-        .state<NavigatorState>(find.byType(Navigator))
+        .state<NavigatorState>(find.byType(Navigator).first)
         .pushNamed(
           AppRoutes.playback,
           arguments: const PlaybackArguments(scoreId: kScoreId, title: kTitle),

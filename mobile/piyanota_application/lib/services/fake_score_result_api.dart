@@ -95,6 +95,8 @@ class FakeScoreResultApi implements ScoreResultApi {
         {'width': PlaybackDemo.pageWidth, 'height': PlaybackDemo.pageHeight},
       ],
       'arranger': ?score.arranger,
+      // PIYA-103 AC8; the demo is rendered at this tempo.
+      'tempoBpm': PlaybackDemo.bpm,
     });
   }
 

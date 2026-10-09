@@ -165,25 +165,41 @@ Map<VoicePart, Uri> tracks([
   Map<VoicePart, FakeAudioPlayer> players,
   List<bool> playing,
   List<PlaybackFailure> failures,
+  FakeAudioPlayer click,
+  List<Object> clickFailures,
 })
-rig({Map<VoicePart, FakeAudioPlayer> overrides = const {}}) {
+rig({
+  Map<VoicePart, FakeAudioPlayer> overrides = const {},
+  FakeAudioPlayer? click,
+}) {
   final players = {
     for (final voice in VoicePart.values)
       voice: overrides[voice] ?? FakeAudioPlayer(),
   };
-  final queue = [for (final voice in VoicePart.values) players[voice]!];
+  final clickPlayer = click ?? FakeAudioPlayer();
+  // The click player is made last, by attachClick after load.
+  final queue = [
+    for (final voice in VoicePart.values) players[voice]!,
+    clickPlayer,
+  ];
   final engine = JustAudioPlaybackEngine(playerFactory: queue.removeAt0);
   final playing = <bool>[];
   final failures = <PlaybackFailure>[];
+  final clickFailures = <Object>[];
   engine.playingChanges.listen(playing.add);
   engine.failures.listen(failures.add);
+  engine.clickFailures.listen(clickFailures.add);
   return (
     engine: engine,
     players: players,
     playing: playing,
     failures: failures,
+    click: clickPlayer,
+    clickFailures: clickFailures,
   );
 }
+
+final Uri _clickUri = Uri.file('/tmp/click.wav');
 
 extension on List<FakeAudioPlayer> {
   FakeAudioPlayer removeAt0() => removeAt(0);
@@ -670,6 +686,148 @@ void main() {
         bass.seeks.clear();
         async.elapse(const Duration(seconds: 6));
         expect(bass.seeks, isEmpty);
+      });
+    });
+  });
+
+  group('click track (PIYA-209/210)', () {
+    test('attached mid-play: caught up, at speed and volume, then driven '
+        'by the transport like a follower', () {
+      fakeAsync((async) {
+        final r = rig();
+        unawaited(r.engine.load(tracks()));
+        async.flushMicrotasks();
+        unawaited(r.engine.setSpeed(1.5));
+        unawaited(r.engine.setClickVolume(0.4));
+        unawaited(r.engine.play());
+        async.elapse(const Duration(seconds: 2));
+
+        bool? attached;
+        unawaited(r.engine.attachClick(_clickUri).then((v) => attached = v));
+        async.flushMicrotasks();
+        expect(attached, isTrue);
+        expect(r.click.loadedUri, _clickUri);
+        expect(r.click.speedSet, 1.5);
+        expect(r.click.volumeSet, 0.4);
+        expect(r.click.seeks.single, const Duration(seconds: 3));
+        expect(r.click.playing, isTrue);
+        expect(r.engine.masterVoice, VoicePart.soprano);
+
+        unawaited(r.engine.pause());
+        async.flushMicrotasks();
+        expect(r.click.playing, isFalse);
+        unawaited(r.engine.seek(const Duration(seconds: 1)));
+        unawaited(r.engine.setSpeed(0.5));
+        unawaited(r.engine.setClickVolume(0.8));
+        async.flushMicrotasks();
+        expect(r.click.seeks.last, const Duration(seconds: 1));
+        expect(r.click.speedSet, 0.5);
+        expect(r.click.volumeSet, 0.8);
+        unawaited(r.engine.play());
+        async.flushMicrotasks();
+        expect(r.click.playing, isTrue);
+
+        unawaited(r.engine.dispose());
+        async.flushMicrotasks();
+        expect(r.click.disposed, isTrue);
+      });
+    });
+
+    test('attached while paused: placed at the position, not started', () {
+      fakeAsync((async) {
+        final r = rig();
+        unawaited(r.engine.load(tracks()));
+        async.flushMicrotasks();
+        unawaited(r.engine.seek(const Duration(seconds: 4)));
+        async.flushMicrotasks();
+        unawaited(r.engine.attachClick(_clickUri));
+        async.flushMicrotasks();
+        expect(r.click.seeks.single, const Duration(seconds: 4));
+        expect(r.click.playing, isFalse);
+      });
+    });
+
+    test('a drifting click is pulled back, but is never the master', () {
+      fakeAsync((async) {
+        final r = rig(
+          click: FakeAudioPlayer(
+            length: const Duration(seconds: 30),
+            rate: 1.1,
+          ),
+        );
+        unawaited(r.engine.load(tracks()));
+        async.flushMicrotasks();
+        unawaited(r.engine.attachClick(_clickUri));
+        unawaited(r.engine.play());
+        async.elapse(const Duration(seconds: 6));
+        expect(r.engine.resyncCount, greaterThan(0));
+        expect(r.engine.masterVoice, VoicePart.soprano);
+        expect(r.engine.duration, const Duration(seconds: 10));
+        expect(
+          (r.click.position - r.engine.position).abs(),
+          lessThanOrEqualTo(
+            JustAudioPlaybackEngine.resyncTrigger +
+                JustAudioPlaybackEngine.inStepTolerance,
+          ),
+        );
+      });
+    });
+
+    test('a click that will not load is a click failure only', () {
+      fakeAsync((async) {
+        final r = rig(click: FakeAudioPlayer(loadError: StateError('codec')));
+        unawaited(r.engine.load(tracks()));
+        async.flushMicrotasks();
+        unawaited(r.engine.play());
+        bool? attached;
+        unawaited(r.engine.attachClick(_clickUri).then((v) => attached = v));
+        async.flushMicrotasks();
+        expect(attached, isFalse);
+        expect(r.clickFailures, hasLength(1));
+        expect(r.failures, isEmpty);
+        expect(r.engine.unavailableVoices, isEmpty);
+        expect(r.players.values.every((p) => p.playing), isTrue);
+        unawaited(r.engine.dispose());
+        async.flushMicrotasks();
+        expect(r.click.disposed, isTrue);
+      });
+    });
+
+    test('the click failing mid-play leaves the voices playing', () {
+      fakeAsync((async) {
+        final r = rig();
+        unawaited(r.engine.load(tracks()));
+        async.flushMicrotasks();
+        unawaited(r.engine.attachClick(_clickUri));
+        unawaited(r.engine.play());
+        async.elapse(const Duration(seconds: 1));
+        expect(r.click.playing, isTrue);
+
+        r.click.raise();
+        async.flushMicrotasks();
+        expect(r.clickFailures, hasLength(1));
+        expect(r.failures, isEmpty);
+        expect(r.engine.playing, isTrue);
+        expect(r.players.values.every((p) => p.playing), isTrue);
+        // No longer driven: a seek leaves it alone.
+        final seeks = r.click.seeks.length;
+        unawaited(r.engine.seek(const Duration(seconds: 2)));
+        async.flushMicrotasks();
+        expect(r.click.seeks, hasLength(seeks));
+      });
+    });
+
+    test('a second click is refused (one per engine)', () {
+      fakeAsync((async) {
+        final r = rig();
+        unawaited(r.engine.load(tracks()));
+        async.flushMicrotasks();
+        final results = <bool>[];
+        unawaited(r.engine.attachClick(_clickUri).then(results.add));
+        async.flushMicrotasks();
+        unawaited(r.engine.attachClick(_clickUri).then(results.add));
+        async.flushMicrotasks();
+        expect(results, [true, false]);
       });
     });
   });

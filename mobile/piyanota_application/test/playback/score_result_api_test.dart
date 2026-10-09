@@ -141,6 +141,7 @@ void main() {
         );
         expect(result.review.reviewNeeded, isTrue);
         expect(result.arranger, 'Robert Delgado');
+        expect(result.tempoBpm, PlaybackDemo.bpm);
         expect(
           result.pageSizeAt(0),
           const Size(
