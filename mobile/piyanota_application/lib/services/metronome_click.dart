@@ -38,7 +38,9 @@ class ClickPlan {
 ///
 /// Accents: the grid point nearest the first timestamp of each bar from 1
 /// on (bar 0 is a pickup, which starts mid-bar). With no bar numbers, no
-/// accents: the meter is unknown, so every click is the same.
+/// accents: the meter is unknown, so every click is the same. A bar whose
+/// first timestamp falls outside the clicks (before the grid starts, or at
+/// or past the end) gets no accent rather than one on the edge click.
 ///
 /// A bar's first timestamp is its first *event*. That is its downbeat
 /// because PIYA-117 AC7 includes rest events, so a bar that opens on a
@@ -69,9 +71,9 @@ ClickPlan planClicks({
   ];
   final accents = <int>{
     for (final ms in firstOfBar.values)
-      if (clicks.isNotEmpty)
-        ((ms * 1000 - startUs) / periodUs).round().clamp(0, clicks.length - 1),
-  };
+      if (ms * 1000 >= startUs && ms * 1000 < lengthUs)
+        ((ms * 1000 - startUs) / periodUs).round(),
+  }..removeWhere((index) => index >= clicks.length);
   return ClickPlan(clicks: clicks, accents: accents, length: length);
 }
 

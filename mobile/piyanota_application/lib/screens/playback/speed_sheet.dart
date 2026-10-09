@@ -25,6 +25,9 @@ class PlaybackSpeedSheet extends ConsumerWidget {
     final controller = ref.read(provider.notifier);
     final textTheme = Theme.of(context).textTheme;
     final clickUsable = state.clickStatus != ClickStatus.unavailable;
+    final unavailableNote = state.clickNeedsTempo
+        ? PlaybackMessages.metronomeNeedsTempo
+        : PlaybackMessages.metronomeUnavailable;
     final bpm = state.chosenBpm;
 
     final metronome = Row(
@@ -82,11 +85,10 @@ class PlaybackSpeedSheet extends ConsumerWidget {
         else
           Semantics(
             container: true,
-            label: PlaybackMessages.metronomeUnavailable,
+            label: unavailableNote,
             child: Opacity(opacity: 0.38, child: metronome),
           ),
-        if (!clickUsable)
-          const SheetNote(PlaybackMessages.metronomeUnavailable),
+        if (!clickUsable) SheetNote(unavailableNote),
         const SizedBox(height: 8),
         const Divider(height: 1, color: AppTheme.sheetDivider),
         const SizedBox(height: 12),

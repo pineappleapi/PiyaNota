@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:piyanota_application/models/score_result.dart';
 import 'package:piyanota_application/models/voice_part.dart';
 import 'package:piyanota_application/screens/playback/playback_messages.dart';
 import 'package:piyanota_application/screens/playback/playback_screen.dart';
@@ -723,12 +724,21 @@ void main() {
 
   group('timing pages', () {
     test('events on pages the result has no image for are dropped', () {
+      // Page 1's URL was rejected (a null slot); page 3 doesn't exist.
+      final result = ScoreResult(
+        scoreId: kScoreId,
+        audioTracks: {VoicePart.soprano: Uri.parse('https://cdn.test/s.mp3')},
+        scoreImages: [Uri.parse('test://p0'), null, Uri.parse('test://p2')],
+        review: const ReviewSummary(reviewNeeded: false),
+      );
       final kept = PlaybackController.onExistingPages([
         ev(0, 10, 10),
         ev(100, 10, 10, page: 1),
         ev(200, 10, 10, page: -1),
-      ], 1);
-      expect(kept.map((e) => e.timestampMs), [0]);
+        ev(300, 10, 10, page: 2),
+        ev(400, 10, 10, page: 3),
+      ], result.hasPage);
+      expect(kept.map((e) => e.timestampMs), [0, 300]);
     });
 
     testWidgets('an out-of-range page in the timing does not break the band', (

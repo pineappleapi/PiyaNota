@@ -75,6 +75,7 @@ class ScoreResult {
     this.pageSizes = const [],
     this.arranger,
     this.tempoBpm = ScoreDetails.defaultTempo,
+    this.tempoKnown = true,
   });
 
   final int scoreId;
@@ -86,7 +87,9 @@ class ScoreResult {
 
   /// One original preprocessed page image per page, in page order
   /// (`pageIndex` 0 is the first). FR-8: never a re-engraved rendering.
-  final List<Uri> scoreImages;
+  /// A page whose URL was unusable keeps its slot as null, so the pages
+  /// after it keep their `pageIndex`; it shows blank, without the band.
+  final List<Uri?> scoreImages;
   final Uri? timingMetadataUrl;
   final ReviewSummary review;
 
@@ -108,6 +111,17 @@ class ScoreResult {
   /// reads as [ScoreDetails.defaultTempo] (90), the value the server
   /// renders at when none was submitted.
   final int tempoBpm;
+
+  /// False when the server sent no usable `tempoBpm` and [tempoBpm] is the
+  /// assumed 90. The Speed slider still works on that, but the metronome
+  /// is unavailable: a click off the music's real beat is worse than none.
+  final bool tempoKnown;
+
+  /// Whether page [pageIndex] has an image to draw on.
+  bool hasPage(int pageIndex) =>
+      pageIndex >= 0 &&
+      pageIndex < scoreImages.length &&
+      scoreImages[pageIndex] != null;
 
   /// Parses `data` (the envelope is unwrapped by the API). Throws
   /// [FormatException] when no audio track or score id is usable, since
@@ -138,18 +152,21 @@ class ScoreResult {
     if (tracks.isEmpty) {
       throw const FormatException('PIYA-103 result without audio tracks');
     }
-    final images = <Uri>[];
     final rawImages = data['scoreImages'];
-    if (rawImages is List) {
-      for (final image in rawImages) {
-        final page = uri(image);
-        if (page != null) images.add(page);
-      }
-    }
+    // Rejected entries stay as null: dropping them would shift every later
+    // page onto the wrong timing events.
+    final images = <Uri?>[
+      if (rawImages is List)
+        for (final image in rawImages) uri(image),
+    ];
     final rawSizes = data['scoreImageSizes'];
     final jobId = data['jobId'];
     final arranger = data['arranger'];
     final tempo = data['tempoBpm'];
+    final tempoKnown =
+        tempo is int &&
+        tempo >= ScoreDetails.minTempo &&
+        tempo <= ScoreDetails.maxTempo;
     return ScoreResult(
       scoreId: scoreId,
       jobId: jobId is String ? jobId : null,
@@ -164,12 +181,8 @@ class ScoreResult {
       arranger: arranger is String && arranger.trim().isNotEmpty
           ? arranger.trim()
           : null,
-      tempoBpm:
-          tempo is int &&
-              tempo >= ScoreDetails.minTempo &&
-              tempo <= ScoreDetails.maxTempo
-          ? tempo
-          : ScoreDetails.defaultTempo,
+      tempoBpm: tempoKnown ? tempo : ScoreDetails.defaultTempo,
+      tempoKnown: tempoKnown,
     );
   }
 

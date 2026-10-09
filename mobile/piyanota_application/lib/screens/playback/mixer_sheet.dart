@@ -33,6 +33,9 @@ class VoiceMixerSheet extends ConsumerWidget {
     // Toggle off: the row still takes level, Mute and Solo (they apply
     // once it is on), but looks inactive and says where to turn it on.
     final clickOff = clickUsable && !state.metronomeOn;
+    final unavailableNote = state.clickNeedsTempo
+        ? PlaybackMessages.metronomeNeedsTempo
+        : PlaybackMessages.metronomeUnavailable;
     final rows = <Widget>[];
     for (final voice in VoicePart.values) {
       // A voice the result never had has no row; one that failed keeps
@@ -69,7 +72,7 @@ class VoiceMixerSheet extends ConsumerWidget {
         ),
         enabled: clickUsable,
         inactive: clickOff,
-        disabledNote: PlaybackMessages.metronomeUnavailable,
+        disabledNote: unavailableNote,
         soloed: state.clickSoloed,
         muted: state.clickMuted,
         volume: state.clickVolume,
@@ -79,7 +82,7 @@ class VoiceMixerSheet extends ConsumerWidget {
       ),
     );
     if (!clickUsable) {
-      rows.add(const SheetNote(PlaybackMessages.metronomeUnavailable));
+      rows.add(SheetNote(unavailableNote));
     } else if (clickOff) {
       rows.add(
         const SheetNote(

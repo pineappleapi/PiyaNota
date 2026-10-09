@@ -772,7 +772,8 @@ class _ScoreViewState extends State<_ScoreView> {
     super.dispose();
   }
 
-  static ImageProvider? _imageFor(Uri uri) => scoreImageFor(uri);
+  static ImageProvider? _imageFor(Uri? uri) =>
+      uri == null ? null : scoreImageFor(uri);
 
   /// Pages without a server-given size are measured from the decoded
   /// image (see ScoreResult.pageSizes).
@@ -888,7 +889,7 @@ class _ScoreViewState extends State<_ScoreView> {
   @override
   Widget build(BuildContext context) {
     final images = widget.result.scoreImages;
-    if (images.isEmpty) {
+    if (images.every((image) => image == null)) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),

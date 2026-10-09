@@ -174,6 +174,10 @@ class PlaybackState {
   /// Playback rate: chosen BPM / the tempo the tracks were rendered at.
   double get speed => chosenBpm / tempoBpm;
 
+  /// The metronome is off for good because the server gave no tempo (see
+  /// ScoreResult.tempoKnown); the sheets say so instead of the generic note.
+  bool get clickNeedsTempo => !(result?.tempoKnown ?? true);
+
   /// The click can sound: the Speed toggle is on and the track is loaded.
   bool get clickLive => metronomeOn && clickStatus == ClickStatus.ready;
 
@@ -378,9 +382,14 @@ class PlaybackController extends Notifier<PlaybackState> {
       timingUnavailable: timingFailed,
       failedVoices: failedVoices,
       bpm: result.tempoBpm,
+      // No tempo, no grid to lay the click on (coordinator decision
+      // 2026-10-09); the slider still runs relative to the assumed 90.
+      clickStatus: result.tempoKnown
+          ? ClickStatus.preparing
+          : ClickStatus.unavailable,
     );
     _applyGains();
-    unawaited(_prepareClick(engine, generation));
+    if (result.tempoKnown) unawaited(_prepareClick(engine, generation));
   }
 
   /// Generates the click for this score and adds it to [engine] as a
@@ -449,10 +458,7 @@ class PlaybackController extends Notifier<PlaybackState> {
     if (url == null) return (ScoreTimeline.empty, false);
     try {
       final events = await api.fetchTiming(url);
-      return (
-        ScoreTimeline(onExistingPages(events, result.scoreImages.length)),
-        false,
-      );
+      return (ScoreTimeline(onExistingPages(events, result.hasPage)), false);
     } on Object catch (e, stack) {
       debugPrint('Playback: timing unavailable: $e\n$stack');
       return (ScoreTimeline.empty, true);
@@ -460,20 +466,21 @@ class PlaybackController extends Notifier<PlaybackState> {
   }
 
   /// Events pointing at a page the result has no image for can't be drawn;
-  /// placing them would mean inventing heights for pages that don't exist.
+  /// placing them would mean inventing heights for pages that don't exist
+  /// (or a band over a blank page).
   @visibleForTesting
   static List<TimingEvent> onExistingPages(
     List<TimingEvent> events,
-    int pageCount,
+    bool Function(int pageIndex) hasPage,
   ) {
     final kept = [
       for (final event in events)
-        if (event.pageIndex >= 0 && event.pageIndex < pageCount) event,
+        if (hasPage(event.pageIndex)) event,
     ];
     if (kept.length != events.length) {
       debugPrint(
         'Playback: dropped ${events.length - kept.length} timing events '
-        'outside the $pageCount score page(s)',
+        'on pages without an image',
       );
     }
     return kept;

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -16,11 +18,16 @@ void main() {
     Set<VoicePart> failAtLoad = const {},
     bool clickAttachFails = false,
     Object? clickWriteError,
+    Completer<bool>? clickAttachGate,
+    bool tempoKnown = true,
   }) => PlaybackHarness(
-    ScriptedScoreResultApi([testResult()], timing: testTiming()),
+    ScriptedScoreResultApi([
+      testResult(tempoKnown: tempoKnown),
+    ], timing: testTiming()),
     engineFailAtLoad: failAtLoad,
     clickAttachFails: clickAttachFails,
     clickWriteError: clickWriteError,
+    clickAttachGate: clickAttachGate,
   );
 
   Finder row(String name) => find.byKey(ValueKey('mixer-row-$name'));
@@ -326,22 +333,42 @@ void main() {
       expect(engine.clickVolume, 0);
     });
 
-    testWidgets('a soloed click still preparing does not silence the voices', (
-      tester,
-    ) async {
-      final harness = ready();
+    testWidgets('a soloed click still preparing does not silence the '
+        'voices; once it is ready the solo applies', (tester) async {
+      final gate = Completer<bool>();
+      final harness = ready(clickAttachGate: gate);
       await pumpPlayback(tester, harness);
       final c = controller(tester)
         ..setMetronomeOn(on: true)
         ..setClickSoloed(soloed: true);
-      expect(c.state.clickLive, isTrue);
+      await tester.pump();
+      expect(c.state.clickStatus, ClickStatus.preparing);
+      expect(c.state.clickLive, isFalse);
+      expect(harness.engine.volumes.values.every((v) => v == 1), isTrue);
+      expect(harness.engine.clickVolume, 0);
+
+      gate.complete(true);
+      await tester.pump();
+      expect(c.state.clickStatus, ClickStatus.ready);
       expect(harness.engine.volumes.values.every((v) => v == 0), isTrue);
-      // The same state before the click loaded would not be live.
-      final preparing = c.state.copyWith(clickStatus: ClickStatus.preparing);
-      expect(preparing.clickLive, isFalse);
-      expect(preparing.anySoloed, isFalse);
-      expect(preparing.voiceGain(VoicePart.soprano), 1);
-      expect(preparing.clickGain, 0);
+      expect(harness.engine.clickVolume, 1);
+    });
+
+    testWidgets('no tempo from the server: metronome row disabled with its '
+        'own note; the voices are unaffected', (tester) async {
+      final harness = ready(tempoKnown: false);
+      await pumpPlayback(tester, harness);
+      await openMixer(tester);
+      expect(controller(tester).state.clickStatus, ClickStatus.unavailable);
+      expect(harness.clickPlans, isEmpty);
+      expect(harness.engine.click, isNull);
+      expect(find.text(PlaybackMessages.metronomeNeedsTempo), findsOneWidget);
+      expect(find.text(PlaybackMessages.metronomeUnavailable), findsNothing);
+      expect(tester.widget<Slider>(sliderIn(metronomeRow)).onChanged, isNull);
+      expect(
+        tester.widget<Slider>(sliderIn(voiceRow(VoicePart.alto))).onChanged,
+        isNotNull,
+      );
     });
 
     testWidgets('a click that fails mid-play disables its row, with a note; '

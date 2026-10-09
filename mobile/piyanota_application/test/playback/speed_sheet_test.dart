@@ -189,6 +189,25 @@ void main() {
       expect(harness.engine.speed, 1.25);
     });
 
+    testWidgets('no tempo from the server: slider works against the '
+        'assumed 90, metronome unavailable with its own note', (tester) async {
+      final harness = PlaybackHarness(
+        ScriptedScoreResultApi([
+          testResult(tempoKnown: false),
+        ], timing: testTiming()),
+      );
+      await pumpPlayback(tester, harness);
+      await openSpeed(tester);
+      expect(harness.clickPlans, isEmpty);
+      expect(tester.widget<SheetCheckbox>(toggle).onChanged, isNull);
+      expect(find.text(PlaybackMessages.metronomeNeedsTempo), findsOneWidget);
+      expect(find.text(PlaybackMessages.metronomeUnavailable), findsNothing);
+      expect(sliderValue(tester), 90);
+      expect(tester.widget<Slider>(slider).onChanged, isNotNull);
+      controller(tester).setBpm(135);
+      expect(harness.engine.speed, 1.5);
+    });
+
     testWidgets('a click that will not load: toggle disabled, with a note', (
       tester,
     ) async {

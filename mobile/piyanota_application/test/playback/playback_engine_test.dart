@@ -783,6 +783,83 @@ void main() {
       });
     });
 
+    test('a seek, speed or level change during the catch-up seek reaches '
+        'the click', () {
+      fakeAsync((async) {
+        final r = rig(click: FakeAudioPlayer());
+        r.click.seekDelay = const Duration(milliseconds: 100);
+        unawaited(r.engine.load(tracks()));
+        async.flushMicrotasks();
+        bool? attached;
+        unawaited(r.engine.attachClick(_clickUri).then((v) => attached = v));
+        async.elapse(const Duration(milliseconds: 50));
+        // The catch-up seek (to 0) is in flight: the transport skips the
+        // click for now.
+        expect(r.click.seeks, [Duration.zero]);
+        unawaited(r.engine.setSpeed(1.5));
+        unawaited(r.engine.setClickVolume(0.3));
+        unawaited(r.engine.seek(const Duration(seconds: 4)));
+        async.elapse(const Duration(milliseconds: 300));
+        expect(attached, isTrue);
+        expect(r.click.speedSet, 1.5);
+        expect(r.click.volumeSet, 0.3);
+        expect(r.click.seeks.last, const Duration(seconds: 4));
+        expect(r.click.position, r.engine.position);
+      });
+    });
+
+    test('play() while the click is attaching starts it once, aligned', () {
+      fakeAsync((async) {
+        // The alto's slow seek keeps play() in its alignment step while
+        // the click's catch-up seek lands.
+        final alto = FakeAudioPlayer()
+          ..seekDelay = const Duration(milliseconds: 300);
+        final r = rig(overrides: {VoicePart.alto: alto});
+        r.click.seekDelay = const Duration(milliseconds: 100);
+        unawaited(r.engine.load(tracks()));
+        async.flushMicrotasks();
+        unawaited(r.engine.seek(const Duration(seconds: 2)));
+        async.elapse(const Duration(milliseconds: 300));
+
+        unawaited(r.engine.attachClick(_clickUri));
+        unawaited(r.engine.play());
+        async.elapse(const Duration(milliseconds: 250));
+        // Ready, but play() hasn't started anything yet.
+        expect(r.engine.clickAttached, isTrue);
+        expect(r.click.playCalls, 0);
+        expect(r.players[VoicePart.soprano]!.playing, isFalse);
+
+        async.elapse(const Duration(milliseconds: 100));
+        expect(r.players[VoicePart.soprano]!.playing, isTrue);
+        expect(r.click.playCalls, 1);
+        expect(r.click.position, r.engine.position);
+      });
+    });
+
+    test('the master starting during the catch-up seek: the click is '
+        're-seeked ahead before it starts, then started once', () {
+      fakeAsync((async) {
+        final r = rig();
+        r.click.seekDelay = const Duration(milliseconds: 100);
+        unawaited(r.engine.load(tracks()));
+        async.flushMicrotasks();
+        unawaited(r.engine.attachClick(_clickUri));
+        async.elapse(const Duration(milliseconds: 50));
+        unawaited(r.engine.play());
+        async.flushMicrotasks();
+        // play() ran before the click was ready, so only attach starts it.
+        expect(r.click.playCalls, 0);
+        async.elapse(const Duration(milliseconds: 200));
+        expect(r.engine.clickAttached, isTrue);
+        expect(r.click.seeks, hasLength(2));
+        expect(r.click.playCalls, 1);
+        expect(
+          (r.click.position - r.engine.position).abs(),
+          lessThanOrEqualTo(JustAudioPlaybackEngine.resyncTrigger),
+        );
+      });
+    });
+
     test('attached while paused: placed at the position, not started', () {
       fakeAsync((async) {
         final r = rig();

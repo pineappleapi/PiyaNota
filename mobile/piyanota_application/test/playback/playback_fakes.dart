@@ -31,9 +31,14 @@ class FakePlaybackEngine implements PlaybackEngine {
     this.loadError,
     this.failAtLoad = const {},
     this.clickAttachFails = false,
+    this.clickAttachGate,
   });
 
   final Duration trackDuration;
+
+  /// When set, [attachClick] waits for it, holding the click in
+  /// "preparing"; completing it with false fails the attach.
+  final Completer<bool>? clickAttachGate;
   final Object? loadError;
 
   /// Voices whose track "fails to load"; the rest load, like the real
@@ -169,6 +174,9 @@ class FakePlaybackEngine implements PlaybackEngine {
   @override
   Future<bool> attachClick(Uri track) async {
     if (clickAttachFails) return false;
+    if (clickAttachGate case final gate?) {
+      if (!await gate.future) return false;
+    }
     click = track;
     return true;
   }
@@ -297,6 +305,7 @@ ScoreResult testResult({
   bool reviewNeeded = true,
   String? arranger = kArranger,
   int tempoBpm = 90,
+  bool tempoKnown = true,
 }) => ScoreResult(
   scoreId: kScoreId,
   jobId: 'job-1',
@@ -312,6 +321,7 @@ ScoreResult testResult({
   pageSizes: const [Size(1000, 1400)],
   arranger: arranger,
   tempoBpm: tempoBpm,
+  tempoKnown: tempoKnown,
 );
 
 ProviderContainer appContainer(WidgetTester tester) =>
@@ -329,7 +339,12 @@ class PlaybackHarness {
     this.engineFailAtLoad = const {},
     this.clickAttachFails = false,
     this.clickWriteError,
+    this.clickAttachGate,
   });
+
+  /// Holds every engine's click in "preparing" until completed (see
+  /// [FakePlaybackEngine.clickAttachGate]).
+  final Completer<bool>? clickAttachGate;
 
   final ScriptedScoreResultApi api;
   final Duration engineDuration;
@@ -361,6 +376,7 @@ class PlaybackHarness {
         loadError: engineLoadError,
         failAtLoad: engineFailAtLoad,
         clickAttachFails: clickAttachFails,
+        clickAttachGate: clickAttachGate,
       );
       engines.add(engine);
       return engine;

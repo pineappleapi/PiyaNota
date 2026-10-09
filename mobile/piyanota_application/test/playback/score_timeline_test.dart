@@ -167,7 +167,7 @@ void main() {
         allowLocalFiles: false,
       );
       expect(release.audioTracks.keys, [VoicePart.soprano]);
-      expect(release.scoreImages, [Uri.parse('http://cdn/p2.png')]);
+      expect(release.scoreImages, [null, Uri.parse('http://cdn/p2.png')]);
       expect(release.timingMetadataUrl, isNull);
 
       final demo = ScoreResult.fromJson(body('file'), allowLocalFiles: true);
@@ -179,7 +179,7 @@ void main() {
       for (final scheme in ['content', 'asset', 'javascript', 'ftp']) {
         final other = ScoreResult.fromJson(body(scheme), allowLocalFiles: true);
         expect(other.audioTracks.keys, [VoicePart.soprano], reason: scheme);
-        expect(other.scoreImages, hasLength(1), reason: scheme);
+        expect(other.scoreImages.first, isNull, reason: scheme);
         expect(other.timingMetadataUrl, isNull, reason: scheme);
       }
 
@@ -191,6 +191,43 @@ void main() {
         }, allowLocalFiles: false),
         throwsFormatException,
       );
+    });
+
+    test('a rejected page URL keeps its slot, so later pages keep their '
+        'index', () {
+      final result = ScoreResult.fromJson({
+        'scoreId': 7,
+        'audioTracks': {'soprano': 'https://cdn/s.mp3'},
+        'scoreImages': [
+          'https://cdn/p0.png',
+          'ftp://x/p1.png',
+          42,
+          'https://cdn/p3.png',
+        ],
+      }, allowLocalFiles: false);
+      expect(result.scoreImages, [
+        Uri.parse('https://cdn/p0.png'),
+        null,
+        null,
+        Uri.parse('https://cdn/p3.png'),
+      ]);
+      expect(
+        [for (var i = -1; i <= 4; i++) result.hasPage(i)],
+        [false, true, false, false, true, false],
+      );
+    });
+
+    test('tempoKnown: only a valid tempoBpm counts', () {
+      ScoreResult parse(Object? tempo) => ScoreResult.fromJson({
+        'scoreId': 7,
+        'audioTracks': {'soprano': 'https://cdn/s.mp3'},
+        'tempoBpm': ?tempo,
+      });
+      expect(parse(120).tempoKnown, isTrue);
+      for (final bad in [null, 29, 241, 90.5, '120']) {
+        expect(parse(bad).tempoKnown, isFalse, reason: '$bad');
+        expect(parse(bad).tempoBpm, 90, reason: '$bad');
+      }
     });
 
     test('an explicit reviewNeeded false is respected', () {

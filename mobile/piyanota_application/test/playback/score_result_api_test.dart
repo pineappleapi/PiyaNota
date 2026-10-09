@@ -125,7 +125,7 @@ void main() {
         expect(result.audioTracks.keys.toSet(), {...VoicePart.values});
         for (final uri in [
           ...result.audioTracks.values,
-          ...result.scoreImages,
+          ...result.scoreImages.nonNulls,
           result.timingMetadataUrl!,
         ]) {
           expect(uri.scheme, 'file');
@@ -161,7 +161,7 @@ void main() {
         expect(events, hasLength(PlaybackDemo.notes().length));
 
         // Generated once: a second fetch reuses the same files.
-        final page = File.fromUri(result.scoreImages.single);
+        final page = File.fromUri(result.scoreImages.single!);
         final written = page.lastModifiedSync();
         final again = await f.api.fetchResult(101);
         expect(again.scoreImages.single, result.scoreImages.single);

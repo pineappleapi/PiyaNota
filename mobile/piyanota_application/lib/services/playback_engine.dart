@@ -164,6 +164,12 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
   /// its spinner. Generous: a slow 3G fetch of a few MB fits well inside.
   static const Duration loadTimeout = Duration(seconds: 30);
 
+  /// Catch-up seeks [attachClick] makes before giving the click to the
+  /// transport. Each round redoes the seek if a seek, speed change, play
+  /// or pause landed while it was in flight (the transport skips the click
+  /// until then); past this the drift check fixes what is left.
+  static const int clickSettleRounds = 3;
+
   final AudioPlayer Function() _playerFactory;
   final Map<VoicePart, AudioPlayer> _players = {};
   final Set<VoicePart> _dead = {};
@@ -198,6 +204,10 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
   /// Bumped by every play and pause. A play that is still aligning the
   /// followers when a pause (or a newer play) arrives must not start them.
   int _transport = 0;
+
+  /// Bumped by every [seek], so [attachClick] can tell one landed while
+  /// its own catch-up seek was in flight.
+  int _seekGeneration = 0;
 
   /// Followers re-seeked to the master so far; logged in debug builds and
   /// read by tests.
@@ -368,6 +378,7 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
 
   @override
   Future<void> seek(Duration position) async {
+    _seekGeneration++;
     _strikes.clear();
     await Future.wait([
       for (final entry in _transported)
@@ -395,10 +406,12 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
   Future<bool> attachClick(Uri track) async {
     if (_disposed || _master == null || _click != null) return false;
     final player = _click = _playerFactory();
+    var speed = _speed;
+    var volume = _clickVolume;
     try {
       await player.setAudioSource(AudioSource.uri(track)).timeout(loadTimeout);
-      await player.setVolume(_clickVolume);
-      await player.setSpeed(_speed);
+      await player.setVolume(volume);
+      await player.setSpeed(speed);
     } on Object catch (e) {
       _failClick(e);
       return false;
@@ -407,15 +420,61 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
     _subscriptions.add(
       player.errorStream.listen(_failClick, onError: _failClick),
     );
-    // Catch up with the voices: the master's position now (plus nothing
-    // for seek latency; the drift check corrects what is left).
+    // Catch up with the voices. Until _clickReady the transport leaves the
+    // click alone, so whatever it did during an await here is redone
+    // before the click joins it (see clickSettleRounds).
+    for (var round = 1; ; round++) {
+      if (_speed != speed) {
+        speed = _speed;
+        if (!await _guard(_clickKey, player.setSpeed(speed))) return false;
+      }
+      if (_clickVolume != volume) {
+        volume = _clickVolume;
+        if (!await _guard(_clickKey, player.setVolume(volume))) return false;
+      }
+      final master = _master;
+      if (_disposed || _clickDead || master == null) return false;
+      final seeks = _seekGeneration;
+      final transport = _transport;
+      final wasPlaying = master.playing;
+      // Playing, the master moves on while the seek lands: aim ahead.
+      final target = wasPlaying ? master.position + _seekLead : master.position;
+      final watch = clock.stopwatch()..start();
+      if (!await _guard(_clickKey, player.seek(target))) return false;
+      // A completed seek is a latency sample like a resync's, and the
+      // next round's lead (if the master started meanwhile) needs it.
+      _noteSeekLatency(watch.elapsed);
+      if (_disposed || _clickDead) return false;
+      final settled =
+          _speed == speed &&
+          _clickVolume == volume &&
+          _seekGeneration == seeks &&
+          _transport == transport &&
+          _master == master &&
+          master.playing == wasPlaying;
+      if (settled || round >= clickSettleRounds) break;
+    }
+    // From here on the transport drives it. Nothing awaits between the
+    // check and the flag, so a play() either sees the click ready (and
+    // starts it, after aligning it) or has already started the master
+    // (and the click starts here).
     final master = _master;
     if (master == null) return false;
-    if (!await _guard(_clickKey, player.seek(master.position))) return false;
-    if (_disposed || _clickDead) return false;
     _clickReady = true;
     if (master.playing) unawaited(_guard(_clickKey, player.play()));
     return true;
+  }
+
+  void _noteSeekLatency(Duration took) {
+    _seekLatency =
+        _seekLatency * (1 - seekLatencySmoothing) + took * seekLatencySmoothing;
+  }
+
+  /// How far the master moves while a seek lands: the recent seek latency
+  /// at the current speed, capped at [maxSeekLead].
+  Duration get _seekLead {
+    final lead = _seekLatency * _speed;
+    return lead > maxSeekLead ? maxSeekLead : lead;
   }
 
   @override
@@ -578,8 +637,8 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
     AudioPlayer master,
   ) async {
     _resyncing.add(voice);
-    final lead = _seekLatency * _speed;
-    final target = master.position + (lead > maxSeekLead ? maxSeekLead : lead);
+    final lead = _seekLead;
+    final target = master.position + lead;
     resyncCount++;
     if (kDebugMode) {
       debugPrint(
@@ -593,10 +652,7 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
       // A failed or interrupted seek says nothing about how long a seek
       // takes, so only a completed one updates the estimate.
       if (await _guard(voice, player.seek(target))) {
-        final took = watch.elapsed;
-        _seekLatency =
-            _seekLatency * (1 - seekLatencySmoothing) +
-            took * seekLatencySmoothing;
+        _noteSeekLatency(watch.elapsed);
       }
     } finally {
       _resyncing.remove(voice);

@@ -58,6 +58,29 @@ void main() {
       expect(plan.accents, {0, 2});
     });
 
+    test('a bar starting outside the clicks gets no accent, not the edge '
+        'click', () {
+      // Bar 1 at 1.0 s puts the grid at 0, 1, 2 s (60 BPM, 3 s long). Bar 2
+      // stamped before the grid (malformed) and bar 3 at the very end have
+      // no click of their own.
+      final early = planClicks(
+        events: [_at(1000, 1), _at(2000, 2), _at(3000, 3)],
+        tempoBpm: 60,
+        length: const Duration(seconds: 3),
+      );
+      expect(_ms(early), [0, 1000, 2000]);
+      expect(early.accents, {1, 2});
+
+      final past = planClicks(
+        events: [_at(500, 1), _at(2900, 2)],
+        tempoBpm: 60,
+        length: const Duration(milliseconds: 2800),
+      );
+      // Grid 0.5, 1.5, 2.5 s; bar 2 at 2.9 s is past the end.
+      expect(_ms(past), [500, 1500, 2500]);
+      expect(past.accents, {0});
+    });
+
     test('no events at all: a plain grid', () {
       final plan = planClicks(
         events: const [],
