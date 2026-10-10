@@ -18,7 +18,7 @@ import sys
 import time
 from pathlib import Path
 
-COMMIT = "SET_TO_REVIEWED_COMMIT"   # full sha of the reviewed commit; the kernel refuses to train on anything else
+COMMIT = "b5a213ddc52c99ee9c0b425d2ea6fb05ac58689c"  # full sha of the reviewed commit; the kernel refuses to train on anything else
 BRANCH = "piya106/stroke-calibration"
 # (output folder, seed, drop camera augmentation). The aug-off seed-1 arm is ml-cv-lead's P5 condition before any G2
 # gain is credited to augmentation. Runs go in order; edit this tuple (no new bundle needed) to rerun a skipped one.
