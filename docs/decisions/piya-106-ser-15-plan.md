@@ -1510,19 +1510,27 @@ secret was attached after the session started.
   - interline: 0.838 → 0.905.
   - top_extra: Q5 0.69 (BUG-048).
   - canvas_h: Q5 0.75.
-- **Frozen copy:** `D:/PiyaNota-training/data/phase1_recut_full/`, with `MANIFEST.sha256` covering 3,473 files. The
-  Kaggle output is not durable.
+- **Frozen copy (2026-10-11):** `D:/PiyaNota/datasets/phase1_recut_full/` (gitignored), with `MANIFEST.sha256`
+  covering 28,967 files (manifest sha256 b1d25535…). Every cut strip listed in the page JSONs is on disk (25,766 of
+  25,766). It was fetched with `training/phase1/kaggle/fetch_output.py`; the Kaggle CLI's `kernels output` ran the
+  PC out of memory. The Kaggle output is not durable. An earlier copy at `D:/PiyaNota-training/data/phase1_recut_full/`
+  has only 271 strips; do not train from it.
+- **Off-paper eyeball (2026-10-11):** 20 strips with off-paper fraction in 0.10-0.30, spread over 1,370 such strips
+  (5.3%) and all five fonts. Clef, key signature and time signature were intact on 20/20. The off-paper area is table
+  texture or a dark page-edge band beside the staff, never covering it. Condition 4 below is therefore relaxed: no
+  strip is dropped for off-paper.
 
 ml-cv-lead's conditions for Phase 2:
 1. **Piece-level split:** split train/val by `bach_` piece ID, with all five fonts of a piece on the same side.
 2. **Freeze the corpus:** keep the sha256 manifest above, plus a second copy before training starts. Done except the
-   second copy.
+   second copy (preferably on a different disk).
 3. **No reweighting by default.** Stratify the synthetic val split by line_mult and interline tertile, and report SER
    per stratum.
    - If thin-line SER lags, use capped inverse-propensity weights (≤ 1.2), never oversampling.
    - Track the top_extra survival loss as BUG-048.
 4. **Off-paper filter:** drop strips with `off_paper_left_frac` > 0.10 or `off_paper_right_frac` > 0.10, and keep
-   0.05-0.10. Eyeball 20 strips in 0.10-0.32 first, and relax the filter if their headers are intact.
+   0.05-0.10. Eyeball 20 strips in 0.10-0.32 first, and relax the filter if their headers are intact. **Done
+   2026-10-11: headers intact on 20/20, filter relaxed (keep all).**
 5. **Known gaps:**
    - Double sharps are not in the training data (OOV).
    - Whole notes and half rests are under-represented because of the final-system loss.
