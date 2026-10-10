@@ -1538,8 +1538,10 @@ ml-cv-lead's conditions for Phase 2:
 
 ### Phase 2: retraining (Kaggle GPU; Oct 4 - Oct 12)
 
-**ml-cv-lead reviews the training code before any run** (CLAUDE.md). The DataLoader seeding fix (notebook cell 12,
-still open from Step 2) goes in first.
+**ml-cv-lead reviews the training code before any run** (CLAUDE.md). The DataLoader seeding fix is already in the
+notebook (cell 12 passes `generator=` with `num_workers=0`, and `finetune()` reseeds it per seed since 2026-09-23;
+this line said "still open" until 2026-10-11). `training/phase2/train_phase2.py` keeps it (seeded `ReplaySampler`
+generator).
 
 1. **Scale-up run:**
    - Train on the Phase 1 synthetic SATB strips plus about 50% CPM replay (the full PrIMuS if the Kaggle copy loads).
@@ -1554,6 +1556,84 @@ still open from Step 2) goes in first.
      the dev number from being a training-set number.
    - The final model trains on all 5 pieces.
    - **Gate G3:** the leave-one-piece-out SER beats G2's model.
+
+#### Phase 2 prep record (2026-10-11; no GPU spent)
+
+- **P0:** the C:\phase1_recut_full copy was checked against MANIFEST.sha256 with `training/phase1/verify_manifest.py`
+  (`ok 28967 / mismatched 0 / missing 0`). There are now two verified copies, which closes Phase 1 condition 2.
+- **Label drift:** all 1,820 renders were rechecked against the committed converter, with 0 label changes.
+- **P1:** `training/phase2/build_manifest.py` writes 25,766 strip rows from 364 pieces (all Bach chorales).
+- **Tune-grouped split:** the split hashes the tune group from `training/phase2/tune_groups.py`, not the piece.
+  - Soprano interval fingerprint, union-find on the first 8 or last 12 intervals: 223 groups, the largest 11 pieces.
+  - Train: 23,997 strips / 339 pieces / 202 tunes. Val: 1,769 strips / 25 pieces / 21 tunes.
+  - 0 pieces and 0 tunes are in both splits. Manifest sha256 `78165b43251f67751afc91500e812a3ce7fa06d8980a275ddadd7014d8782824`.
+  - The first split, by BWV, had sha 98124d8d…, train 23,435 / val 2,331; it was replaced after ml-cv-lead P5 blocker 1.
+  - An 8-interval closing chained stock cadences into a 42-piece group, hence 12.
+  - A tune whose harmonisations differ in both the opening and the closing can still split.
+- **Watch classes:**
+
+  | Class | Train | Val |
+  |---|---|---|
+  | rest.half | 20 | 0 (report n, not recall) |
+  | fermata.above | 32,400 | 2,630 |
+  | note.whole | 955 | 60 |
+  | final_barline | 5,184 | 383 |
+
+- **P3:** `training/phase2/train_phase2.py --smoke` PASS on CPU (finite loss, identical logits after reload, all
+  metric keys present). It was re-run after the P5 changes.
+- **P4:** `training/phase2/eval_dev.py` reruns Stage 3 only on the stored eval_prelim strips, with the ClefKeyNet
+  header (version b) and no R1/R4. Deployed `finetuned_font_seed{1,2}`, both seeds as a range, dev data and
+  diagnostic only:
+
+  | strips / header | camera SER | camera pitch | digital SER | digital pitch |
+  |---|---|---|---|---|
+  | binary (pre-E7) / e1c | 26.83-28.43% | 85.16% | 16.30-16.54% | 89.78-90.18% |
+  | grey (live) / e1b | 15.61-16.17% | 88.71-89.81% | 14.86-15.70% | 90.67-90.97% |
+  | grey (live) / e1c | 16.26-16.55% | 88.71-89.93% | 15.90-16.64% | 90.67-90.97% |
+
+  - Rows 1 and 2 reproduce the recorded E1c row and the step-6 numbers exactly, so the scorer is trusted.
+  - Row 3 is the G2 baseline (see Amendment 4).
+
+#### Amendment 4 (2026-10-11): Phase 2 run as reviewed by ml-cv-lead (P5: GO with changes)
+
+What changes from the plan above and from Amendment 3's frozen mix, and why:
+
+1. **G2 baseline:** the grey (live) strips with the e1c rule. Camera 16.26-16.55%, digital 15.90-16.64%.
+   - The recorded E1c row was measured on pre-E7 binary strips, which the pipeline no longer serves.
+   - G2 = at least 3 pp below that baseline for both seeds, in both conditions, with no canary hard-cap breach.
+   - e1b is reported beside it, and so are with/without E1c (section 6b).
+   - G2 gates further GPU spend only. AC1 (<= 15%) is judged at Phase 4 held-out, never on dev.
+   - A piece-level bootstrap margin is computed from the per-piece JSONs before G2 is declared.
+2. **Data mix:** the frozen Bach re-cut plus CPM replay at `--replay-ratio 0.5`. This drops Amendment 3's targeted
+   20% oversampling, the 5% negatives, Palestrina and the relabelled replay.
+   - **Why:** the corpus that passed the Phase 1 gate is Bach only. The targeted and negative sets were never built.
+     The first G2 run tests whether scale-up alone moves dev SER before more data work is spent.
+   - The replay pool is CPM minus the canary (3,596 stems) plus the 4 font re-renders (`cpm-font-augmented2`), about
+     18k samples. That is fewer than the ~24k a true 50% needs, so the effective replay share is about 43%.
+   - Leland is no longer a leave-one-font-out probe: Phase 1 trains on it.
+3. **Init:** the CPM base (`crnn_cameraprimus_transcription.pt`) for both seeds.
+   - The existing caps (3x base canary, notebook cell 8) apply unchanged.
+   - Starting from the deployed font seeds would let the canary drift about 9x base before a cap trips.
+4. **Augmentation:** `--augment-synth` (the notebook `_augment`) is on.
+   - A seed-1 run with it off is part of the same kernel (`seed1_noaug`) and must finish before any G2 gain is
+     credited to augmentation.
+   - `_augment` is not the stroke/binarisation augmentation section 6b asked for, so it is not reported as
+     "camera augmentation" in general.
+5. **Settings:** unchanged. lr 3e-5, max 6 epochs, patience 3, selection on tune-held-out synthetic val SER.
+6. **Canary identity:** the canary is pinned to the notebook's slice (399 of 3,995 samples; sha256 of the stems in
+   order). Any other CPM mount or glob order stops the run.
+7. **Session budget:** the kernel runs seed1, seed2, then seed1_noaug within 11 h.
+   - It skips a run that would not fit, judged from the longest run so far, and caps each run's time at what is
+     left, so the session always ends cleanly and keeps its output.
+   - Skipped runs are re-pushed by editing `RUNS`.
+8. **Report-only items:**
+   - rest.half (val n = 0);
+   - inserted fermatas on dev (count, since LCS recall does not see insertions; Bach fermatas are dense).
+     `eval_dev.py` prints predicted/GT fermatas per pool. The dev GT has none, so every predicted fermata is an
+     insertion. Baseline (grey e1c, deployed seeds): camera 39-41, digital 30-38.
+   - val SER per tertile and font.
+
+Not addressed by this run: confident-wrong output (BUG-011) stays open.
 
 ### Phase 3: grammar-aware rescoring (CPU; Oct 10 - Oct 14)
 

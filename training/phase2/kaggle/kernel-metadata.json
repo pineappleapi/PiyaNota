@@ -1,0 +1,16 @@
+{
+  "id": "piamac/piyanota-phase2-train",
+  "title": "piyanota-phase2-train",
+  "code_file": "phase2_kernel.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": "true",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "false",
+  "dataset_sources": ["piamac/piyanota-phase2-code", "piamac/cameraprimus", "piamac/cpm-font-augmented2"],
+  "competition_sources": [],
+  "kernel_sources": ["piamac/piyanota-recut-full-1"],
+  "model_sources": [],
+  "docker_image_pinning_type": "original"
+}

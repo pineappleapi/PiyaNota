@@ -1,4 +1,4 @@
-"""Resumable, low-memory download of a Kaggle kernel's output files.
+r"""Resumable, low-memory download of a Kaggle kernel's output files.
 
 `kaggle kernels output` is unusable for the Phase 1 re-cut (about 29k files): it recurses once per 20-file page and
 keeps every page's response (each carrying the full run log) alive on the stack, and it reads each file whole into
@@ -9,11 +9,15 @@ only after the byte count matches Content-Length. A file under its final name is
 rerun skips it without any network call, and a stop loses at most the file in flight. The page token is saved after
 each page; if the server rejects a saved token the listing restarts from page 1 (finished files are still skipped).
 
-Usage: python fetch_output.py <owner/kernel-slug> <dest_dir>
+Usage: python fetch_output.py <owner/kernel-slug> <dest_dir> [--pattern REGEX]
+  --pattern keeps only files whose output path matches REGEX (re.search), e.g. the Phase 2 metrics and best
+  checkpoints: --pattern "(metrics|summary|run_info)\.json$|phase2_seed\d\.pt$". Other files are listed but not downloaded.
 """
 from __future__ import annotations
 
+import argparse
 import json
+import re
 import sys
 import threading
 import time
@@ -90,8 +94,13 @@ def list_page(api: KaggleApi, owner: str, slug: str, token: str | None):
 
 
 def main() -> None:
-    owner, slug = sys.argv[1].split("/")
-    dest = Path(sys.argv[2]).resolve()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("kernel")
+    ap.add_argument("dest")
+    ap.add_argument("--pattern", type=re.compile, default=None)
+    a = ap.parse_args()
+    owner, slug = a.kernel.split("/")
+    dest = Path(a.dest).resolve()
     dest.mkdir(parents=True, exist_ok=True)
     state_path = dest / STATE_NAME
     state = json.loads(state_path.read_text()) if state_path.exists() else {}
@@ -114,6 +123,8 @@ def main() -> None:
         page_no += 1
         todo = []
         for item in resp.files or []:
+            if a.pattern is not None and not a.pattern.search(item.file_name):
+                continue
             target = safe_target(dest, item.file_name)
             if target.exists():
                 skipped += 1
