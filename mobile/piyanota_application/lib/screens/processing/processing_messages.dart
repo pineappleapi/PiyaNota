@@ -141,14 +141,19 @@ class ProcessingMessages {
       FailureReason.unsupportedStaffLayout => unsupportedLayout,
       FailureReason.incompleteVoiceSequence =>
         'We couldn\'t find all four voice parts (Soprano, Alto, Tenor, Bass) '
-            'in this score. Check that every page is included and add the '
-            'score again.',
+            'in these photos. Re-photographing the whole score may fix it; '
+            'check that every page is included.',
       FailureReason.stageTimeout =>
         'This scan took too long to finish. Please add the score again; '
             'fewer pages per score can help.',
       FailureReason.serverRestart =>
         'PiyaNota was interrupted while working on this scan. Please add '
             'the score again.',
+      FailureReason.synthesisFailed =>
+        'We couldn\'t make the audio for this score. Please try again later.',
+      FailureReason.internalError =>
+        'Something went wrong on our side while working on this score. '
+            'Please try again later.',
       FailureReason.unknown =>
         'Something went wrong on our side while reading this score. Please '
             'add it again.',

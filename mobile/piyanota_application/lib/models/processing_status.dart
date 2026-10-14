@@ -1,5 +1,9 @@
 import 'package:flutter/foundation.dart';
 
+import 'score_details.dart';
+import 'voice_failure.dart';
+import 'voice_part.dart';
+
 /// The pipeline stage PIYA-102 reports in `data.status`.
 enum ProcessingStage {
   queued('queued'),
@@ -51,6 +55,8 @@ enum FailureReason {
   incompleteVoiceSequence('incomplete_voice_sequence'),
   stageTimeout('stage_timeout'),
   serverRestart('server_restart'),
+  synthesisFailed('synthesis_failed'),
+  internalError('internal_error'),
   unknown('');
 
   const FailureReason(this.apiValue);
@@ -59,6 +65,10 @@ enum FailureReason {
 
   /// Reasons a retake of one page can fix (PIYA-207 AC7, PIYA-116
   /// trigger). Only offered when the response also names the page.
+  /// PIYA-207 AC7: a failed voice has no single bad page, so only a
+  /// whole-score retake (AC12) can help.
+  bool get isWholeRetakeable => this == incompleteVoiceSequence;
+
   bool get isRetakeable =>
       this == noStaffDetected ||
       this == ambiguousStaffCount ||
@@ -86,6 +96,9 @@ class ProcessingStatus {
     this.failureReason,
     this.failedPageIndex,
     this.scoreId,
+    this.failedVoices = const {},
+    this.failedVoiceCauses = const {},
+    this.details,
   });
 
   final ProcessingStage stage;
@@ -114,6 +127,27 @@ class ProcessingStatus {
   /// backend-lead has to add it. Missing means "can't open Playback".
   final int? scoreId;
 
+  /// PIYA-102 AC7: voices the finished score has no audio for. Empty unless
+  /// [stage] is [ProcessingStage.complete].
+  final Set<VoicePart> failedVoices;
+
+  /// PIYA-102 AC7: why each of [failedVoices] failed. Every failed voice
+  /// has an entry; unknown or missing causes are `renderFailed`.
+  final Map<VoicePart, VoiceFailureCause> failedVoiceCauses;
+
+  /// PIYA-102 AC8: the details submitted for this job, for pre-filling a
+  /// whole-score retake (PIYA-207 AC12). Null without a usable title.
+  final ScoreDetails? details;
+
+  /// Voices a whole-score retake may fix (PIYA-207 AC11).
+  List<VoicePart> get unreadableVoices => [
+    for (final voice in VoicePart.values)
+      if (failedVoiceCauses[voice] == VoiceFailureCause.unreadable) voice,
+  ];
+
+  /// PIYA-207 AC11's N: 4 minus the length of `failedVoices`.
+  int get playableVoiceCount => VoicePart.values.length - failedVoices.length;
+
   static const int _maxPercent = 100;
 
   /// Throws [FormatException] only when `status` is missing or not a
@@ -135,6 +169,10 @@ class ProcessingStatus {
     final remaining = json['estimatedRemainingSeconds'];
     final reason = json['failureReason'];
     final pageIndex = json['pageIndex'];
+    final complete = stage == ProcessingStage.complete;
+    final failedVoices = complete
+        ? parseFailedVoices(json['failedVoices'])
+        : const <VoicePart>{};
     return ProcessingStatus(
       stage: stage,
       currentPage: currentPage,
@@ -156,6 +194,11 @@ class ProcessingStatus {
           ? pageIndex
           : null,
       scoreId: _positiveInt(json['scoreId']),
+      failedVoices: failedVoices,
+      failedVoiceCauses: complete
+          ? parseFailedVoiceCauses(json['failedVoiceCauses'], failedVoices)
+          : const {},
+      details: scoreDetailsFromJson(json),
     );
   }
 

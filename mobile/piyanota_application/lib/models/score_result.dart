@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../config/api_config.dart';
 
 import 'score_details.dart';
+import 'voice_failure.dart';
 import 'voice_part.dart';
 
 /// Reads a voice name from either contract: PIYA-103 keys its audio tracks
@@ -62,6 +63,58 @@ class ReviewSummary {
   }
 }
 
+/// One PIYA-103 AC9 `mutedMeasures` entry: a span of one voice that Stage 5
+/// rendered as silence because Stage 4's repair threw notes away. The
+/// audio already carries the silence; the app only tells the user.
+@immutable
+class MutedMeasure {
+  const MutedMeasure({
+    required this.voice,
+    this.bar,
+    this.pageIndex,
+    this.systemIndex,
+    this.startMs,
+    this.endMs,
+    this.reason,
+  });
+
+  final VoicePart voice;
+
+  /// Printed measure number (pickup = 0); null when Stage 4 could not
+  /// anchor the voice-strip to the bar grid. Then [pageIndex] and
+  /// [systemIndex] (both 0-based) say where it is.
+  final int? bar;
+  final int? pageIndex;
+  final int? systemIndex;
+  final int? startMs;
+  final int? endMs;
+  final String? reason;
+
+  /// Null for an entry that can't be named to the user (no voice, or
+  /// neither a bar nor a page); one bad entry never fails the result.
+  static MutedMeasure? tryParse(Object? json) {
+    if (json is! Map) return null;
+    final voice = parseVoicePart(json['voice']);
+    if (voice == null) return null;
+    final bar = _nonNegative(json['bar']);
+    final page = _nonNegative(json['pageIndex']);
+    if (bar == null && page == null) return null;
+    final reason = json['reason'];
+    return MutedMeasure(
+      voice: voice,
+      bar: bar,
+      pageIndex: page,
+      systemIndex: _nonNegative(json['systemIndex']),
+      startMs: _nonNegative(json['startMs']),
+      endMs: _nonNegative(json['endMs']),
+      reason: reason is String ? reason : null,
+    );
+  }
+
+  static int? _nonNegative(Object? value) =>
+      value is int && value >= 0 ? value : null;
+}
+
 /// The `data` of a PIYA-103 result: everything Playback needs to load.
 @immutable
 class ScoreResult {
@@ -76,6 +129,9 @@ class ScoreResult {
     this.arranger,
     this.tempoBpm = ScoreDetails.defaultTempo,
     this.tempoKnown = true,
+    this.declaredFailedVoices = const {},
+    this.failedVoiceCauses = const {},
+    this.mutedMeasures = const [],
   });
 
   final int scoreId;
@@ -117,6 +173,35 @@ class ScoreResult {
   /// is unavailable: a click off the music's real beat is worse than none.
   final bool tempoKnown;
 
+  /// PIYA-103 AC10 `failedVoices`: voices the server could not render.
+  final Set<VoicePart> declaredFailedVoices;
+
+  /// PIYA-103 AC10 `failedVoiceCauses`, one entry per voice in
+  /// [declaredFailedVoices] (unknown or missing causes are `renderFailed`).
+  final Map<VoicePart, VoiceFailureCause> failedVoiceCauses;
+
+  /// Server-failed voices a whole-score retake may fix (PIYA-208: their
+  /// chips offer Re-photograph, and the failed-voice alert leaves them out).
+  /// In SATB order.
+  List<VoicePart> get unreadableVoices => [
+    for (final voice in VoicePart.values)
+      if (failedVoiceCauses[voice] == VoiceFailureCause.unreadable) voice,
+  ];
+
+  /// PIYA-103 AC9, in the server's order; empty when nothing was muted.
+  /// Entries for a failed voice are dropped (it has no audio to mute).
+  final List<MutedMeasure> mutedMeasures;
+
+  /// Every voice that won't play from the server's side: listed in
+  /// `failedVoices`, or missing from `audioTracks` (PIYA-216 AC5 treats a
+  /// missing track as failed, not as an error for the whole score). The
+  /// device can fail more on load; see PlaybackState.failedVoices.
+  Set<VoicePart> get failedVoices => {
+    ...declaredFailedVoices,
+    for (final voice in VoicePart.values)
+      if (!audioTracks.containsKey(voice)) voice,
+  };
+
   /// Whether page [pageIndex] has an image to draw on.
   bool hasPage(int pageIndex) =>
       pageIndex >= 0 &&
@@ -149,9 +234,20 @@ class ScoreResult {
         if (voice != null && track != null) tracks[voice] = track;
       });
     }
+    final declaredFailed = parseFailedVoices(data['failedVoices']);
+    // A voice the server calls failed has no audio to trust, even if a
+    // track was sent anyway (AC10 says it has none).
+    tracks.removeWhere((voice, _) => declaredFailed.contains(voice));
     if (tracks.isEmpty) {
       throw const FormatException('PIYA-103 result without audio tracks');
     }
+    final rawMuted = data['mutedMeasures'];
+    final muted = <MutedMeasure>[
+      if (rawMuted is List)
+        for (final entry in rawMuted)
+          if (MutedMeasure.tryParse(entry) case final measure?)
+            if (tracks.containsKey(measure.voice)) measure,
+    ];
     final rawImages = data['scoreImages'];
     // Rejected entries stay as null: dropping them would shift every later
     // page onto the wrong timing events.
@@ -183,6 +279,12 @@ class ScoreResult {
           : null,
       tempoBpm: tempo is int && tempoKnown ? tempo : ScoreDetails.defaultTempo,
       tempoKnown: tempoKnown,
+      declaredFailedVoices: declaredFailed,
+      failedVoiceCauses: parseFailedVoiceCauses(
+        data['failedVoiceCauses'],
+        declaredFailed,
+      ),
+      mutedMeasures: List.unmodifiable(muted),
     );
   }
 

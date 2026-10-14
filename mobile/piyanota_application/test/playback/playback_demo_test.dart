@@ -1,9 +1,11 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 
+import 'package:piyanota_application/models/measure_table.dart';
 import 'package:piyanota_application/models/score_result.dart';
 import 'package:piyanota_application/models/voice_part.dart';
 import 'package:piyanota_application/services/demo/playback_demo.dart';
@@ -13,39 +15,100 @@ String get _app => Directory.current.path;
 
 void main() {
   group('PlaybackDemo', () {
-    test('every bar holds four beats and every voice has notes', () {
+    test('every voice fills every bar, pickup and meter changes '
+        'included', () {
       final notes = PlaybackDemo.notes();
       for (final voice in VoicePart.values) {
-        final ofVoice = notes.where((note) => note.voice == voice);
-        expect(
-          ofVoice.fold<int>(0, (sum, note) => sum + note.beats),
-          PlaybackDemo.barCount * PlaybackDemo.beatsPerBar,
-          reason: voice.name,
-        );
+        for (var bar = 0; bar < PlaybackDemo.barCount; bar++) {
+          final ticks = notes
+              .where((note) => note.voice == voice && note.bar == bar)
+              .fold<int>(0, (sum, note) => sum + note.ticks);
+          expect(ticks, PlaybackDemo.bars[bar].durTicks, reason: '$voice $bar');
+        }
       }
     });
 
-    test('the timing file parses and matches the notes, in time order', () {
-      final events = parseTimingEvents(PlaybackDemo.timingJson());
+    test('the timing file parses: events in time order, and a gapless '
+        'measure table with a pickup and consecutive meter changes', () {
+      final file = TimingFile.parse(
+        jsonDecode(jsonEncode(PlaybackDemo.timingJson())),
+      );
       final notes = PlaybackDemo.notes();
-      expect(events, hasLength(notes.length));
-      for (var i = 0; i < events.length; i++) {
-        expect(events[i].voice, notes[i].voice);
-        expect(events[i].bar, notes[i].bar);
-        expect(events[i].systemTopY, lessThan(events[i].y));
-        expect(events[i].systemBottomY, greaterThan(events[i].y));
+      expect(file.events, hasLength(notes.length));
+      for (var i = 0; i < file.events.length; i++) {
+        expect(file.events[i].voice, notes[i].voice);
+        expect(file.events[i].bar, notes[i].bar);
+        expect(file.events[i].systemTopY, lessThan(file.events[i].y));
+        expect(file.events[i].systemBottomY, greaterThan(file.events[i].y));
       }
-      // 90 bpm: beat 4 of bar 1 is at 2 s.
-      expect(events.where((e) => e.timestampMs == 2000).map((e) => e.voice), [
-        VoicePart.soprano,
-      ]);
+      // 90 bpm: bar 1 starts after the one-quarter pickup, at 667 ms.
+      expect(
+        file.events.where((e) => e.bar == 1).map((e) => e.timestampMs).toSet(),
+        contains(667),
+      );
+      final bars = file.bars;
+      expect(bars.map((b) => b.bar), [0, 1, 2, 3, 4, 5, 6, 7, 8]);
+      expect(bars.first.pickup, isTrue);
+      expect(bars.first.durTicks, 480);
+      for (var i = 1; i < bars.length; i++) {
+        expect(bars[i].startTick, bars[i - 1].startTick + bars[i - 1].durTicks);
+        expect(bars[i].startMs, bars[i - 1].startMs! + bars[i - 1].durMs!);
+        expect(bars[i].meterSource.trusted, isTrue);
+      }
+      expect(
+        [for (final b in bars) '${b.numerator}/${b.denominator}'],
+        [
+          '3/4', '3/4', '3/4', '5/8', '2/4', '6/8', '6/8', '4/4', '4/4', //
+        ],
+      );
+    });
+
+    test('a failed Tenor has no events; the measure table is unchanged', () {
+      final file = TimingFile.parse(
+        jsonDecode(
+          jsonEncode(PlaybackDemo.timingJson(failed: {VoicePart.tenor})),
+        ),
+      );
+      expect(file.events.where((e) => e.voice == VoicePart.tenor), isEmpty);
+      expect(file.events, isNotEmpty);
+      expect(file.bars, hasLength(PlaybackDemo.barCount));
+    });
+
+    test('the muted Bass measure is silent but still timed', () {
+      final muted = MutedMeasure.tryParse(PlaybackDemo.mutedMeasureJson())!;
+      expect(muted.voice, VoicePart.bass);
+      expect(muted.bar, PlaybackDemo.mutedBar);
+      final events = TimingFile.parse(
+        jsonDecode(jsonEncode(PlaybackDemo.timingJson())),
+      ).events;
+      expect(
+        events.where((e) => e.voice == VoicePart.bass && e.bar == muted.bar),
+        isNotEmpty,
+      );
+      final wav = PlaybackDemo.wav(VoicePart.bass);
+      final pcm = ByteData.sublistView(wav, 44);
+      int loudest(int fromMs, int toMs) {
+        var peak = 0;
+        final from = fromMs * PlaybackDemo.sampleRate ~/ 1000;
+        final to = toMs * PlaybackDemo.sampleRate ~/ 1000;
+        for (var i = from; i < to; i++) {
+          final v = pcm.getInt16(i * 2, Endian.little).abs();
+          if (v > peak) peak = v;
+        }
+        return peak;
+      }
+
+      // Inside the muted bar, clear of the rounding at its edges.
+      expect(loudest(muted.startMs! + 5, muted.endMs! - 5), 0);
+      expect(loudest(muted.endMs! + 60, muted.endMs! + 600), greaterThan(1000));
     });
 
     test('the indicator lands on ink: a notehead at every event', () {
       final page = PlaybackDemo.page();
       expect(page.width, PlaybackDemo.pageWidth);
       expect(page.height, PlaybackDemo.pageHeight);
-      for (final event in PlaybackDemo.timingJson()) {
+      final events = PlaybackDemo.timingJson()['events']! as List<Object>;
+      for (final event in events.cast<Map<String, Object>>()) {
         final x = event['x']! as int;
         final y = event['y']! as int;
         // Hollow heads (half/whole notes) have their ink on the rim.
@@ -84,7 +147,12 @@ void main() {
       addTearDown(() => root.delete(recursive: true));
       final dir = Directory('${root.path}/demo');
       final files = await PlaybackDemo.writeTo(dir);
-      for (final uri in [...files.tracks.values, files.page, files.timing]) {
+      for (final uri in [
+        ...files.tracks.values,
+        files.page,
+        files.timing,
+        files.timingWithoutTenor,
+      ]) {
         expect(File.fromUri(uri).existsSync(), isTrue, reason: '$uri');
       }
       final png = img.decodePng(File.fromUri(files.page).readAsBytesSync())!;

@@ -7,6 +7,7 @@ import '../../models/library_entry.dart';
 import '../../models/score_summary.dart';
 import '../../routes/app_routes.dart';
 import '../../services/score_library_api.dart';
+import '../../state/processing_providers.dart';
 import '../../state/score_library_providers.dart';
 import '../../state/session_actions.dart';
 import '../../theme/app_theme.dart';
@@ -82,6 +83,25 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
   Future<void> _openScore(LibraryEntry entry) async {
     if (_openingScore) return;
     _openingScore = true;
+    // PIYA-207 AC12: while a whole-score retake runs, the old version
+    // can't be opened; the card follows the retake instead.
+    final retake = ref
+        .read(processingJobsProvider.notifier)
+        .runningRetakeOf(entry.scoreId);
+    if (retake != null) {
+      try {
+        await Navigator.of(context).pushNamed(
+          AppRoutes.processing,
+          arguments: ProcessingArguments(
+            jobId: retake.jobId,
+            title: retake.title ?? entry.displayTitle,
+          ),
+        );
+      } finally {
+        _openingScore = false;
+      }
+      return;
+    }
     // Moves the score to the top of the library now; the real server
     // records the open itself when Playback fetches it (PIYA-308 AC8).
     ref.read(scoreLibraryProvider.notifier).markOpened(entry.scoreId);
@@ -230,8 +250,33 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
       );
   }
 
+  /// PIYA-207 AC12: a retake of a completed score that fails or is
+  /// cancelled leaves the old result in place; say so here, where the
+  /// card is.
+  void _onJobsChanged(
+    Map<String, TrackedJob>? previous,
+    Map<String, TrackedJob> next,
+  ) {
+    for (final job in next.values) {
+      if (job.retakeOfScoreId == null) continue;
+      final ended =
+          job.phase == TrackedPhase.failed ||
+          job.phase == TrackedPhase.cancelled;
+      final before = previous?[job.jobId]?.phase;
+      if (!ended || before == job.phase) continue;
+      ref.invalidate(scoreLibraryProvider);
+      if (job.phase == TrackedPhase.failed &&
+          (ModalRoute.of(context)?.isCurrent ?? false)) {
+        _showSnackBar(
+          LibraryMessages.retakeFailed(job.title ?? untitledScoreLabel),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    ref.listen(processingJobsProvider, _onJobsChanged);
     final library = ref.watch(scoreLibraryProvider);
     final width = MediaQuery.sizeOf(context).width;
     final cardMargin = (width * _cardMarginFraction)

@@ -56,6 +56,10 @@ dev_dependencies:
     sdk: flutter
   # Drives the Processing tracker's 2 s poll timers in unit tests (PIYA-207).
   fake_async: ^1.3.3
+  # A preferences store that throws, for the muted-alert fallbacks (PIYA-207
+  # AC10 / PIYA-208). Pinned to the version shared_preferences resolves:
+  # the tests import its types.dart, which is not a stable public API.
+  shared_preferences_platform_interface: 2.4.2
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is

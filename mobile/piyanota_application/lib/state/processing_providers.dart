@@ -75,9 +75,15 @@ class TrackedJob {
     this.failedPolls = 0,
     this.failingSince,
     this.unchangedPolls = 0,
+    this.retakeOfScoreId,
   });
 
   final String jobId;
+
+  /// Set when this job is a whole-score retake of a completed score
+  /// (PIYA-207 AC12): the score it fills, whose card shows as processing
+  /// and can't be opened until the retake ends.
+  final int? retakeOfScoreId;
 
   /// The score's title as the user typed it, so a list of jobs (the
   /// library card, the PIYA-218 bell) can be labelled from the tracker
@@ -120,6 +126,7 @@ class TrackedJob {
     String? title,
   }) => TrackedJob(
     jobId: jobId,
+    retakeOfScoreId: retakeOfScoreId,
     title: title ?? this.title,
     phase: phase ?? this.phase,
     status: status ?? this.status,
@@ -209,8 +216,9 @@ class ProcessingJobsController extends Notifier<Map<String, TrackedJob>> {
 
   /// Starts following [jobId] and polls it straight away. A job already
   /// followed is left alone (opening its screen again doesn't restart it),
-  /// apart from picking up a [title] it didn't have.
-  void track(String jobId, {String? title}) {
+  /// apart from picking up a [title] it didn't have. [retakeOfScoreId] as
+  /// in [TrackedJob.retakeOfScoreId].
+  void track(String jobId, {String? title, int? retakeOfScoreId}) {
     final existing = state[jobId];
     if (existing != null) {
       if (existing.title == null && title != null) {
@@ -220,8 +228,33 @@ class ProcessingJobsController extends Notifier<Map<String, TrackedJob>> {
       }
       return;
     }
-    _put(TrackedJob(jobId: jobId, title: title));
+    _put(
+      TrackedJob(jobId: jobId, title: title, retakeOfScoreId: retakeOfScoreId),
+    );
     unawaited(_poll(jobId));
+  }
+
+  /// The whole-score retake still running for [scoreId], if any: the
+  /// library opens its Processing instead of the old result (PIYA-207
+  /// AC12, PIYA-218 AC3).
+  TrackedJob? runningRetakeOf(int scoreId) {
+    for (final job in state.values) {
+      if (job.retakeOfScoreId == scoreId && !job.phase.isFinal) return job;
+    }
+    return null;
+  }
+
+  /// The tracked job that completed as [scoreId], for a result that came
+  /// without its `jobId` (PIYA-207 AC12 needs one to send
+  /// `replacesJobId`). Null when the tracker never saw it.
+  TrackedJob? completedJobOf(int scoreId) {
+    for (final job in state.values) {
+      if (job.phase == TrackedPhase.complete &&
+          job.status?.scoreId == scoreId) {
+        return job;
+      }
+    }
+    return null;
   }
 
   /// Retry from the paused state.

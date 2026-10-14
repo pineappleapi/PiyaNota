@@ -50,14 +50,22 @@ class PiyaNotaApp extends StatelessWidget {
             title: arguments.title,
           );
         },
-        AppRoutes.capture: (_) => const ScoreDetailsScreen(),
+        AppRoutes.capture: (context) {
+          final arguments = ModalRoute.of(context)?.settings.arguments;
+          return ScoreDetailsScreen(
+            wholeRetake: arguments is WholeRetakeArguments ? arguments : null,
+          );
+        },
         AppRoutes.capturePages: (context) {
           final arguments = ModalRoute.of(context)?.settings.arguments;
           if (arguments is! CapturePagesArguments) {
             // Only reachable through Details, which always passes these.
             return const ScoreDetailsScreen();
           }
-          return CaptureScreen(details: arguments.details);
+          return CaptureScreen(
+            details: arguments.details,
+            wholeRetake: arguments.wholeRetake,
+          );
         },
         AppRoutes.processing: (context) {
           final arguments = ModalRoute.of(context)?.settings.arguments;

@@ -6,8 +6,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
 
+import 'package:piyanota_application/models/measure_table.dart';
+import 'package:piyanota_application/models/processing_status.dart';
+import 'package:piyanota_application/models/score_details.dart';
 import 'package:piyanota_application/models/score_result.dart';
+import 'package:piyanota_application/models/voice_failure.dart';
 import 'package:piyanota_application/models/voice_part.dart';
 import 'package:piyanota_application/routes/app_routes.dart';
 import 'package:piyanota_application/screens/playback/playback_screen.dart';
@@ -17,8 +22,10 @@ import 'package:piyanota_application/services/score_result_api.dart';
 import 'package:piyanota_application/services/session_storage.dart';
 import 'package:piyanota_application/state/auth_providers.dart';
 import 'package:piyanota_application/state/playback_providers.dart';
+import 'package:piyanota_application/state/processing_providers.dart';
 
 import '../auth/auth_test_harness.dart';
+import '../processing/processing_fakes.dart' show ScriptedProcessingApi;
 
 /// [PlaybackEngine] whose position runs on the test clock (`clock.now`,
 /// which `testWidgets` advances with `pump`), at the set speed. Like the
@@ -171,14 +178,62 @@ class FakePlaybackEngine implements PlaybackEngine {
     this.speed = speed;
   }
 
+  /// Like [JustAudioPlaybackEngine.attachClick]: one click slot, taken
+  /// at the start of an attach and freed only by [detachClick] (a failed
+  /// attach keeps it, holding the dead player); a failure is also
+  /// reported on [clickFailures], unless a detach (or dispose) came first.
   @override
   Future<bool> attachClick(Uri track) async {
-    if (clickAttachFails) return false;
-    if (clickAttachGate case final gate?) {
-      if (!await gate.future) return false;
+    final call = attachCalls.length;
+    attachCalls.add(track);
+    if (disposed || clickSlotTaken) return false;
+    clickSlotTaken = true;
+    final key = _clickKey;
+    bool gone() => key != _clickKey || disposed;
+    bool fail() {
+      if (!gone()) _clickFailures.add('test click not attached');
+      return false;
     }
+
+    if (clickAttachFails) return fail();
+    if (attachGateAt[call] case final gate?) {
+      if (!await gate.future) return fail();
+    } else if (clickAttachGate case final gate?) {
+      if (!await gate.future) return fail();
+    }
+    if (attachOutcomeAt[call] == false) return fail();
+    if (gone()) return false;
     click = track;
+    attachedClicks.add(track);
     return true;
+  }
+
+  /// A click is attached, being attached, or failed and not yet detached.
+  bool clickSlotTaken = false;
+
+  /// Every attachClick call, attached or not.
+  final List<Uri> attachCalls = [];
+
+  /// The result of the attachClick call at this index (0 = the first);
+  /// a call not listed attaches normally. False fails it like a load
+  /// error: reported on [clickFailures], slot kept until a detach.
+  final Map<int, bool> attachOutcomeAt = {};
+
+  /// Holds the attachClick call at this index until completed (instead
+  /// of [clickAttachGate]).
+  final Map<int, Completer<bool>> attachGateAt = {};
+  int _clickKey = 0;
+
+  /// Every click track attached, in order (a re-plan attaches another).
+  final List<Uri> attachedClicks = [];
+  int detachCalls = 0;
+
+  @override
+  Future<void> detachClick() async {
+    detachCalls++;
+    _clickKey++;
+    clickSlotTaken = false;
+    click = null;
   }
 
   @override
@@ -206,11 +261,14 @@ class FakePlaybackEngine implements PlaybackEngine {
 /// Answers result fetches from a script: each entry is a [ScoreResult] or
 /// a [ScoreResultException] to throw; the last entry repeats.
 class ScriptedScoreResultApi implements ScoreResultApi {
-  ScriptedScoreResultApi(List<Object> script, {this.timing})
+  ScriptedScoreResultApi(List<Object> script, {this.timing, this.bars})
     : script = [...script];
 
   final List<Object> script;
   List<TimingEvent>? timing;
+
+  /// The timing file's measure table (PIYA-117 AC9); none when null.
+  List<BarInfo>? bars;
   Object? _last;
   int fetches = 0;
 
@@ -231,10 +289,10 @@ class ScriptedScoreResultApi implements ScoreResultApi {
   }
 
   @override
-  Future<List<TimingEvent>> fetchTiming(Uri url) async {
+  Future<TimingFile> fetchTiming(Uri url) async {
     final events = timing;
     if (events == null) throw const ScoreResultNotFoundException();
-    return events;
+    return TimingFile(events: events, bars: bars ?? const []);
   }
 }
 
@@ -243,6 +301,14 @@ const kTitle = 'Bituin Walang Ningning';
 const kArranger = 'Robert Delgado';
 const kLibrary = 'ROUTE:library';
 const kLogin = 'ROUTE:login';
+
+/// PIYA-207 AC12: Capture opened for a whole-score retake.
+String wholeRetakeMarker(WholeRetakeArguments args) =>
+    'ROUTE:whole-retake ${args.replacesJobId} ${args.details.title} '
+    '${args.details.tempoBpm} ${args.retakeOfScoreId}';
+
+/// The PIYA-102 details a whole-score retake pre-fills from.
+const kRetakeDetails = ScoreDetails(title: kTitle, tempoBpm: 90);
 
 /// Natural size of the test page; the timing x/y are in these pixels.
 const kPageWidth = 1000;
@@ -300,15 +366,23 @@ List<TimingEvent> testTiming() {
   return events;
 }
 
+/// The job [testResult] comes from by default.
+const String kJobId = 'job-1';
+
 ScoreResult testResult({
   Set<VoicePart> voices = const {...VoicePart.values},
   bool reviewNeeded = true,
   String? arranger = kArranger,
   int tempoBpm = 90,
   bool tempoKnown = true,
+  Set<VoicePart> failedVoices = const {},
+  List<MutedMeasure> mutedMeasures = const [],
+  String jobId = kJobId,
+  Map<VoicePart, VoiceFailureCause> failedVoiceCauses = const {},
 }) => ScoreResult(
   scoreId: kScoreId,
-  jobId: 'job-1',
+  jobId: jobId,
+  failedVoiceCauses: failedVoiceCauses,
   audioTracks: {
     for (final voice in voices)
       voice: Uri.parse('https://cdn.test/${voice.name}.mp3'),
@@ -322,6 +396,8 @@ ScoreResult testResult({
   arranger: arranger,
   tempoBpm: tempoBpm,
   tempoKnown: tempoKnown,
+  declaredFailedVoices: failedVoices,
+  mutedMeasures: mutedMeasures,
 );
 
 ProviderContainer appContainer(WidgetTester tester) =>
@@ -340,7 +416,11 @@ class PlaybackHarness {
     this.clickAttachFails = false,
     this.clickWriteError,
     this.clickAttachGate,
+    this.clickWriter,
   });
+
+  /// Replaces the default click writer (which writes nothing).
+  final Future<Uri> Function(ClickPlan plan)? clickWriter;
 
   /// Holds every engine's click in "preparing" until completed (see
   /// [FakePlaybackEngine.clickAttachGate]).
@@ -384,10 +464,22 @@ class PlaybackHarness {
     clickTrackWriterProvider.overrideWithValue((plan) async {
       clickPlans.add(plan);
       if (clickWriteError case final error?) throw error;
+      if (clickWriter case final write?) return write(plan);
       // Not a file, so nothing is written or deleted.
       return Uri.parse('test://click.wav');
     }),
     sessionStorageProvider.overrideWithValue(SessionStorage(secureStorage)),
+    // A whole-score retake (PIYA-207 AC12) reads the job's details.
+    processingApiProvider.overrideWithValue(
+      ScriptedProcessingApi([
+        const ProcessingStatus(
+          stage: ProcessingStage.complete,
+          percentComplete: 100,
+          scoreId: kScoreId,
+          details: kRetakeDetails,
+        ),
+      ]),
+    ),
   ];
 }
 
@@ -399,11 +491,23 @@ Future<void> pumpPlayback(
   VoicePart? defaultVoice,
   Size size = const Size(412, 917),
   double textScale = 1,
+  Map<String, Object> prefs = const {},
+  SharedPreferencesStorePlatform Function(Map<String, Object> values)?
+  prefsStore,
 }) async {
-  SharedPreferences.setMockInitialValues({
+  final values = <String, Object>{
     'onboarding_completed': true,
     'onboarding_default_voice': ?defaultVoice?.name,
-  });
+    ...prefs,
+  };
+  SharedPreferences.setMockInitialValues(values);
+  if (prefsStore != null) {
+    // After setMockInitialValues, which resets the cached instance.
+    SharedPreferencesStorePlatform.instance = prefsStore({
+      for (final MapEntry(:key, :value) in values.entries)
+        'flutter.$key': value,
+    });
+  }
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
@@ -425,6 +529,12 @@ Future<void> pumpPlayback(
                 ModalRoute.of(context)!.settings.arguments!
                     as PlaybackArguments;
             return PlaybackScreen(scoreId: args.scoreId, title: args.title);
+          },
+          AppRoutes.capture: (context) {
+            final args =
+                ModalRoute.of(context)!.settings.arguments!
+                    as WholeRetakeArguments;
+            return Scaffold(body: Text(wholeRetakeMarker(args)));
           },
         },
       ),

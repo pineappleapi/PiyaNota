@@ -65,7 +65,7 @@ void main() {
       expect(find.text(PlaybackMessages.speedSubtitle), findsOneWidget);
       expect(find.text(PlaybackMessages.playbackSpeed), findsOneWidget);
       expect(sliderValue(tester), 90);
-      expect(bpmText(tester), '90');
+      expect(bpmText(tester), '♩ = 90');
       final widget = tester.widget<Slider>(slider);
       expect(widget.min, 30);
       expect(widget.max, 240);
@@ -101,7 +101,7 @@ void main() {
       await tapBpm(tester, 180);
       final bpm = sliderValue(tester).round();
       expect(bpm, closeTo(180, 3));
-      expect(bpmText(tester), '$bpm');
+      expect(bpmText(tester), '♩ = $bpm');
       expect(harness.engine.speed, bpm / 90);
 
       await tester.drag(slider, const Offset(-60, 0));

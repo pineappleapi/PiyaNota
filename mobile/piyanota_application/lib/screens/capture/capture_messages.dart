@@ -173,6 +173,32 @@ class CaptureMessages {
   static bool isDeadRetake(ScoreUploadException e) =>
       e is UploadRejectedException &&
       (e.code == jobNotFoundCode || e.code == pageNotRetakeableCode);
+
+  /// PIYA-101 AC12 answers to a whole-score retake that no resend can fix.
+  static bool isDeadWholeRetake(ScoreUploadException e) =>
+      e is UploadRejectedException &&
+      (e.code == jobNotFoundCode ||
+          e.code == notRetakeableCode ||
+          e.code == retakeInProgressCode);
+
+  /// Whole-score retake wording (PIYA-207 AC12) for the PIYA-101 AC12
+  /// codes; null for any other error, which keeps its usual wording.
+  static String? wholeRetakeError(ScoreUploadException e) {
+    if (e is! UploadRejectedException) return null;
+    return switch (e.code) {
+      jobNotFoundCode =>
+        'The old scan no longer exists, so it can\'t be replaced. Go back to '
+            'your library and add the score again.',
+      notRetakeableCode =>
+        'This score can\'t be re-photographed any more. Go back to your '
+            'library to see where it stands.',
+      retakeInProgressCode =>
+        'This score is already being re-photographed. Go back to your '
+            'library to follow that scan.',
+      _ => null,
+    };
+  }
+
   static const String cancelUpload = 'Cancel sending';
   static const String uploadCancelled =
       'Sending cancelled. Your pages are still here.';

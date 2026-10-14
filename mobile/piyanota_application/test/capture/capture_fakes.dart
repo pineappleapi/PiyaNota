@@ -199,6 +199,9 @@ class ScriptedScoreUploadApi implements ScoreUploadApi {
     status: 'queued',
   );
 
+  /// `replacesJobId` per submit, in call order (PIYA-207 AC12).
+  final List<String?> replacesSent = [];
+
   /// The token passed with the latest submit.
   CancelToken? lastCancelToken;
 
@@ -220,8 +223,10 @@ class ScriptedScoreUploadApi implements ScoreUploadApi {
     required ScoreDetails details,
     required List<String> imagePaths,
     CancelToken? cancelToken,
+    String? replacesJobId,
   }) {
     detailsSent.add(details);
+    replacesSent.add(replacesJobId);
     imageCalls.add(imagePaths);
     return _answer(cancelToken);
   }
@@ -231,8 +236,10 @@ class ScriptedScoreUploadApi implements ScoreUploadApi {
     required ScoreDetails details,
     required String pdfPath,
     CancelToken? cancelToken,
+    String? replacesJobId,
   }) {
     detailsSent.add(details);
+    replacesSent.add(replacesJobId);
     pdfCalls.add(pdfPath);
     return _answer(cancelToken);
   }
@@ -316,6 +323,7 @@ Future<void> pumpCapture(
   double textScale = 1,
   bool startOnDetails = false,
   CaptureRetakeArguments? retake,
+  WholeRetakeArguments? wholeRetake,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -334,12 +342,20 @@ Future<void> pumpCapture(
           AppRoutes.scoreLibrary: (_) =>
               const Scaffold(body: Text(kLibraryMarker)),
           AppRoutes.login: (_) => const Scaffold(body: Text(kLoginMarker)),
-          AppRoutes.capture: (_) => const ScoreDetailsScreen(),
+          AppRoutes.capture: (context) {
+            final args = ModalRoute.of(context)!.settings.arguments;
+            return ScoreDetailsScreen(
+              wholeRetake: args is WholeRetakeArguments ? args : null,
+            );
+          },
           AppRoutes.capturePages: (context) {
             final args =
                 ModalRoute.of(context)!.settings.arguments!
                     as CapturePagesArguments;
-            return CaptureScreen(details: args.details);
+            return CaptureScreen(
+              details: args.details,
+              wholeRetake: args.wholeRetake,
+            );
           },
           AppRoutes.captureRetake: (context) {
             final args =
@@ -365,6 +381,8 @@ Future<void> pumpCapture(
   final navigator = tester.state<NavigatorState>(find.byType(Navigator));
   if (retake != null) {
     navigator.pushNamed(AppRoutes.captureRetake, arguments: retake);
+  } else if (wholeRetake != null) {
+    navigator.pushNamed(AppRoutes.capture, arguments: wholeRetake);
   } else if (startOnDetails) {
     navigator.pushNamed(AppRoutes.capture);
   } else {

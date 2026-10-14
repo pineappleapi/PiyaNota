@@ -9,6 +9,12 @@ class LibraryMessages {
   LibraryMessages._();
 
   static const String title = 'My Scores';
+
+  /// PIYA-207 AC12: a whole-score retake of a completed score ended
+  /// without a result, so the card is back to the earlier version.
+  static String retakeFailed(String title) =>
+      'The new photos of "$title" couldn\'t be used. Your earlier version '
+      'is still here.';
   static const String emptySubtitle = 'No Scores • Tap Capture Button';
   static const String loadingSubtitle = 'Loading your scores…';
   static const String errorSubtitle = 'Scores unavailable';

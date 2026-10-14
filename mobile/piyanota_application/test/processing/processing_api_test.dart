@@ -176,6 +176,8 @@ void main() {
         'incomplete_voice_sequence',
         'stage_timeout',
         'server_restart',
+        'synthesis_failed',
+        'internal_error',
       ]) {
         final reason = FailureReason.fromApi(code);
         expect(reason, isNot(FailureReason.unknown), reason: code);
@@ -224,6 +226,8 @@ void main() {
       final cases = <int, Matcher>{
         401: isA<ProcessingSessionExpiredException>(),
         404: isA<ProcessingJobNotFoundException>(),
+        // PIYA-101 AC12 job_superseded: gone, like a 404.
+        410: isA<ProcessingJobNotFoundException>(),
         409: isA<ProcessingConflictException>(),
         500: isA<ProcessingServerException>(),
         503: isA<ProcessingServerException>(),

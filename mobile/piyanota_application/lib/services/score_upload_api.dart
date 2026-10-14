@@ -86,18 +86,22 @@ class UploadRejectedException extends ScoreUploadException {
 abstract interface class ScoreUploadApi {
   /// PIYA-101: camera and gallery pages, in page order.
   /// [cancelToken] aborts the request; the future then fails with
-  /// [UploadCancelledException].
+  /// [UploadCancelledException]. [replacesJobId] makes it a whole-score
+  /// retake of that job (PIYA-101 AC12, PIYA-207 AC12).
   Future<SubmittedJob> submitImages({
     required ScoreDetails details,
     required List<String> imagePaths,
     CancelToken? cancelToken,
+    String? replacesJobId,
   });
 
-  /// PIYA-310: one PDF, rasterised by the server.
+  /// PIYA-310: one PDF, rasterised by the server. [replacesJobId] as for
+  /// [submitImages].
   Future<SubmittedJob> submitPdf({
     required ScoreDetails details,
     required String pdfPath,
     CancelToken? cancelToken,
+    String? replacesJobId,
   });
 
   /// PIYA-116: replaces page [pageIndex] (0-based) of the failed job
@@ -116,12 +120,24 @@ abstract interface class ScoreUploadApi {
 const String jobNotFoundCode = 'job_not_found';
 const String pageNotRetakeableCode = 'page_not_retakeable';
 
+/// PIYA-101 AC12's 409 codes for a whole-score retake: the old job can't be
+/// retaken (or already was), or a retake of it is already running.
+const String notRetakeableCode = 'not_retakeable';
+const String retakeInProgressCode = 'retake_in_progress';
+
+/// PIYA-101 AC12's 410 code: the old job was already replaced by a retake.
+const String jobSupersededCode = 'job_superseded';
+
 /// The PIYA-101 AC8 text parts. Optional fields are left out when unset —
 /// never sent empty or as "null" — and "Other" time also leaves its field
 /// out.
-List<MapEntry<String, String>> scoreFormFields(ScoreDetails details) {
+List<MapEntry<String, String>> scoreFormFields(
+  ScoreDetails details, {
+  String? replacesJobId,
+}) {
   final arranger = details.arranger.trim();
   return [
+    if (replacesJobId != null) MapEntry('replacesJobId', replacesJobId),
     MapEntry('title', details.title.trim()),
     if (arranger.isNotEmpty) MapEntry('arranger', arranger),
     if (details.tempoBpm case final tempo?)
@@ -143,6 +159,7 @@ class HttpScoreUploadApi implements ScoreUploadApi {
   static const int _payloadTooLarge = 413;
   static const int _notFound = 404;
   static const int _conflict = 409;
+  static const int _gone = 410;
   static final DioMediaType _jpeg = DioMediaType('image', 'jpeg');
   static final DioMediaType _pdf = DioMediaType('application', 'pdf');
 
@@ -151,9 +168,11 @@ class HttpScoreUploadApi implements ScoreUploadApi {
     required ScoreDetails details,
     required List<String> imagePaths,
     CancelToken? cancelToken,
+    String? replacesJobId,
   }) async {
     // Part order is page order (PIYA-101 context note).
-    final form = FormData()..fields.addAll(scoreFormFields(details));
+    final form = FormData()
+      ..fields.addAll(scoreFormFields(details, replacesJobId: replacesJobId));
     for (var i = 0; i < imagePaths.length; i++) {
       form.files.add(
         MapEntry(
@@ -167,7 +186,47 @@ class HttpScoreUploadApi implements ScoreUploadApi {
         ),
       );
     }
-    return _post(ApiConfig.submitImagesPath, form, cancelToken: cancelToken);
+    return _submit(
+      () => _post(ApiConfig.submitImagesPath, form, cancelToken: cancelToken),
+      replacesJobId: replacesJobId,
+    );
+  }
+
+  /// A whole-score retake's rejections get their PIYA-101 AC12 code even
+  /// when a proxy or an older server sends none.
+  Future<SubmittedJob> _submit(
+    Future<SubmittedJob> Function() post, {
+    required String? replacesJobId,
+  }) async {
+    try {
+      return await post();
+    } on UploadRejectedException catch (e) {
+      if (replacesJobId == null) rethrow;
+      throw wholeRetakeRejection(e);
+    }
+  }
+
+  /// Bare 404 → [jobNotFoundCode], bare 409 → [notRetakeableCode]. A 410
+  /// (`job_superseded`) means the old job is already replaced, which for
+  /// the singer is the same dead end as [notRetakeableCode].
+  @visibleForTesting
+  static UploadRejectedException wholeRetakeRejection(
+    UploadRejectedException e,
+  ) {
+    final code = switch ((e.statusCode, e.code)) {
+      (_gone, _) || (_, jobSupersededCode) => notRetakeableCode,
+      (_notFound, null) => jobNotFoundCode,
+      (_conflict, null) => notRetakeableCode,
+      (_, final code) => code,
+    };
+    if (code == e.code) return e;
+    return UploadRejectedException(
+      statusCode: e.statusCode,
+      code: code,
+      field: e.field,
+      pageIndex: e.pageIndex,
+      retryAfter: e.retryAfter,
+    );
   }
 
   @override
@@ -175,20 +234,24 @@ class HttpScoreUploadApi implements ScoreUploadApi {
     required ScoreDetails details,
     required String pdfPath,
     CancelToken? cancelToken,
+    String? replacesJobId,
   }) async {
     final form = FormData()
-      ..fields.addAll(scoreFormFields(details))
+      ..fields.addAll(scoreFormFields(details, replacesJobId: replacesJobId))
       ..files.add(
         MapEntry(
           'file',
           await _readFile(pdfPath, filename: 'score.pdf', contentType: _pdf),
         ),
       );
-    return _post(
-      ApiConfig.submitPdfPath,
-      form,
-      receiveTimeout: ApiConfig.pdfReceiveTimeout,
-      cancelToken: cancelToken,
+    return _submit(
+      () => _post(
+        ApiConfig.submitPdfPath,
+        form,
+        receiveTimeout: ApiConfig.pdfReceiveTimeout,
+        cancelToken: cancelToken,
+      ),
+      replacesJobId: replacesJobId,
     );
   }
 

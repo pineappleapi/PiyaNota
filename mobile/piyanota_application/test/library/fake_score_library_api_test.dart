@@ -59,8 +59,10 @@ void main() {
         'Bahay Kubo',
         null,
         'Pasko Na Naman',
+        // PIYA-207 AC11 demo: an `unreadable` Tenor.
+        'Ama Namin',
       ]);
-      final noArranger = scores.last;
+      final noArranger = scores.firstWhere((s) => s.title == 'Pasko Na Naman');
       expect(noArranger.arranger, isNull);
       expect(noArranger.pageCount, isNull);
     },
@@ -88,6 +90,7 @@ void main() {
       103,
       104,
       105,
+      106,
     ]);
   });
 

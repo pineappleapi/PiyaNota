@@ -479,10 +479,18 @@ void main() {
       );
       await pumpPlayback(tester, harness);
       expect(find.byKey(const ValueKey('play-pause')), findsOneWidget);
+      expect(find.byKey(const ValueKey('failed-voices-alert')), findsOneWidget);
       expect(
-        find.text(PlaybackMessages.audioUnavailable([VoicePart.tenor])),
-        findsWidgets,
+        find.text(PlaybackMessages.failedVoicesTitle([VoicePart.tenor])),
+        findsOneWidget,
       );
+      expect(
+        find.text(PlaybackMessages.failedVoicesBody([VoicePart.tenor], 3)),
+        findsOneWidget,
+      );
+      await tester.tap(find.text(PlaybackMessages.ok));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('failed-voices-alert')), findsNothing);
       expect(
         tester.widget<FilterChip>(chip(VoicePart.tenor)).onSelected,
         isNull,
@@ -547,9 +555,12 @@ void main() {
       expect(engine.playing, isTrue);
       expect(engine.disposed, isFalse);
       expect(
-        find.text(PlaybackMessages.audioUnavailable([VoicePart.alto])),
-        findsWidgets,
+        find.text(PlaybackMessages.failedVoicesTitle([VoicePart.alto])),
+        findsOneWidget,
       );
+      await tester.tap(find.text(PlaybackMessages.ok));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
       expect(
         tester.widget<FilterChip>(chip(VoicePart.alto)).onSelected,
         isNull,
@@ -577,6 +588,14 @@ void main() {
       await tester.pump();
       await tester.pump();
       expect(harness.engine.playing, isTrue);
+      // Item 7: the same failed-voice alert as at load.
+      expect(
+        find.text(PlaybackMessages.failedVoicesTitle([VoicePart.bass])),
+        findsOneWidget,
+      );
+      await tester.tap(find.text(PlaybackMessages.ok));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
       expect(chipSelected(tester, VoicePart.bass), isFalse);
       for (final voice in [
         VoicePart.soprano,

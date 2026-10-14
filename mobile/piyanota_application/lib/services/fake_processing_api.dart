@@ -1,11 +1,14 @@
 import '../models/processing_status.dart';
+import '../models/score_details.dart';
+import '../models/voice_failure.dart';
+import '../models/voice_part.dart';
 import 'fake_score_library_api.dart';
 import 'processing_api.dart';
 import 'score_upload_api.dart';
 import 'session_storage.dart';
 
 /// How a fake job ends. Accounts on [FakeScoreLibraryApi.flakyDomain] cycle
-/// through these so every Processing state can be demoed.
+/// through the first four so every Processing state can be demoed.
 enum FakeJobOutcome {
   success,
 
@@ -18,10 +21,26 @@ enum FakeJobOutcome {
   /// Polls fail for a stretch shorter than the paused threshold, then the
   /// job succeeds: the "Reconnecting…" state.
   networkBlip,
+
+  /// Completes with the Tenor `unreadable` (PIYA-207 AC11 offer).
+  unreadableTenor,
+
+  /// Completes with the Tenor `render_failed` (no offer; PIYA-208 alert).
+  renderFailedTenor,
+
+  /// Fails with `incomplete_voice_sequence` (PIYA-207 AC7 whole-score
+  /// Re-photograph).
+  incompleteVoices,
 }
 
-/// In-memory stand-in for PIYA-102/114 (and the job side of PIYA-116)
-/// until Module 3 is deployed.
+/// The newest completed job for a score, as the fake PIYA-103 serves it.
+typedef FakeCompletedJob = ({
+  String jobId,
+  Map<VoicePart, VoiceFailureCause> causes,
+});
+
+/// In-memory stand-in for PIYA-102/114 (and the job side of PIYA-116 and
+/// PIYA-101 AC12) until Module 3 is deployed.
 ///
 /// A job walks queued → (preprocessing → detecting_staff → transcribing)
 /// per page → reconstructing → synthesizing → complete, one step per
@@ -31,6 +50,13 @@ enum FakeJobOutcome {
 ///
 /// Jobs are scoped to the account that submitted them; another account or
 /// an unknown job id is a 404, a missing token a 401.
+///
+/// Titles containing [unreadableTitleKeyword] or [missingVoiceTitleKeyword]
+/// end as [FakeJobOutcome.unreadableTenor] or
+/// [FakeJobOutcome.incompleteVoices], so the whole-score retake (PIYA-207
+/// AC11/AC12) can be demoed on a phone. A retake itself always succeeds.
+/// The demo library's scores answer as completed jobs [demoJobId], so a
+/// retake can start from them too.
 class FakeProcessingApi implements ProcessingApi {
   FakeProcessingApi({
     required this._sessionStorage,
@@ -61,6 +87,47 @@ class FakeProcessingApi implements ProcessingApi {
   static const int _percentScale = 100;
   static const int _flakyCycle = 4;
 
+  static const String unreadableTitleKeyword = 'unreadable';
+  static const String missingVoiceTitleKeyword = 'missing voice';
+
+  static const String _demoJobPrefix = 'fake-job-';
+
+  /// The job id the demo library's score [scoreId] was "processed" by.
+  static String demoJobId(int scoreId) => '$_demoJobPrefix$scoreId';
+
+  /// "Paraiso": its Tenor could be read but not rendered.
+  /// The tempo the demo jobs report (PlaybackDemo's 90 bpm; repeated, not
+  /// imported, so the demo audio stays reachable only through the fake
+  /// result API).
+  static const int demoTempoBpm = 90;
+
+  static const int renderFailedDemoScoreId = 102;
+
+  /// "Ama Namin": its Tenor couldn't be read from the photos.
+  static const int unreadableDemoScoreId = 106;
+
+  static FakeJobOutcome _demoOutcome(int scoreId) => switch (scoreId) {
+    renderFailedDemoScoreId => FakeJobOutcome.renderFailedTenor,
+    unreadableDemoScoreId => FakeJobOutcome.unreadableTenor,
+    _ => FakeJobOutcome.success,
+  };
+
+  /// `failedVoiceCauses` a job with [outcome] completes with.
+  static Map<VoicePart, VoiceFailureCause> causesFor(FakeJobOutcome outcome) =>
+      switch (outcome) {
+        FakeJobOutcome.unreadableTenor => const {
+          VoicePart.tenor: VoiceFailureCause.unreadable,
+        },
+        FakeJobOutcome.renderFailedTenor => const {
+          VoicePart.tenor: VoiceFailureCause.renderFailed,
+        },
+        _ => const {},
+      };
+
+  /// What a demo score's result says when no job of it was ever polled.
+  static Map<VoicePart, VoiceFailureCause> demoCausesFor(int scoreId) =>
+      causesFor(_demoOutcome(scoreId));
+
   final Duration stepDuration;
   final Duration latency;
   final SessionStorage _sessionStorage;
@@ -72,30 +139,127 @@ class FakeProcessingApi implements ProcessingApi {
   int _nextReplacement = 1;
 
   /// Called by the fake upload when a submit succeeds, as the real submit
-  /// creates the job row.
+  /// creates the job row. [keepsScore] marks a whole-score retake of a
+  /// completed score, which fills the same score.
   void registerJob({
     required String jobId,
     required String account,
     required int scoreId,
     required int? pageCount,
+    ScoreDetails? details,
+    String? replacesJobId,
+    bool keepsScore = false,
   }) {
-    final count = (_jobsByAccount[account] ?? 0) + 1;
-    _jobsByAccount[account] = count;
-    final outcome = account.endsWith(FakeScoreLibraryApi.flakyDomain)
-        ? switch (count % _flakyCycle) {
-            1 => FakeJobOutcome.noStaffOnPage2,
-            2 => FakeJobOutcome.unsupportedLayoutOnPage1,
-            3 => FakeJobOutcome.networkBlip,
-            _ => FakeJobOutcome.success,
-          }
-        : FakeJobOutcome.success;
+    final FakeJobOutcome outcome;
+    if (replacesJobId != null) {
+      outcome = FakeJobOutcome.success;
+    } else {
+      final count = (_jobsByAccount[account] ?? 0) + 1;
+      _jobsByAccount[account] = count;
+      final title = details?.title.toLowerCase() ?? '';
+      if (title.contains(unreadableTitleKeyword)) {
+        outcome = FakeJobOutcome.unreadableTenor;
+      } else if (title.contains(missingVoiceTitleKeyword)) {
+        outcome = FakeJobOutcome.incompleteVoices;
+      } else if (account.endsWith(FakeScoreLibraryApi.flakyDomain)) {
+        outcome = switch (count % _flakyCycle) {
+          1 => FakeJobOutcome.noStaffOnPage2,
+          2 => FakeJobOutcome.unsupportedLayoutOnPage1,
+          3 => FakeJobOutcome.networkBlip,
+          _ => FakeJobOutcome.success,
+        };
+      } else {
+        outcome = FakeJobOutcome.success;
+      }
+    }
     _jobs[jobId] = _FakeJob(
       account: account,
       scoreId: scoreId,
       pages: pageCount ?? defaultPageCount,
       outcome: outcome,
       startedAt: _clock(),
+      details: details,
+      replacesJobId: replacesJobId,
+      keepsScore: keepsScore,
     );
+  }
+
+  /// The PIYA-101 AC12 checks on `replacesJobId`, made before the fake
+  /// upload creates anything. Returns the old job's score and whether the
+  /// retake keeps it (a completed job) or replaces its card (a failed job).
+  ({int scoreId, bool keepsScore}) checkWholeRetake({
+    required String account,
+    required String jobId,
+  }) {
+    final job = _jobFor(account, jobId);
+    if (job == null) {
+      throw const UploadRejectedException(
+        statusCode: 404,
+        code: jobNotFoundCode,
+      );
+    }
+    final status = _statusAt(job, _stepOf(job));
+    final completedUnreadable =
+        status.stage == ProcessingStage.complete &&
+        status.unreadableVoices.isNotEmpty;
+    final missingVoice =
+        status.stage == ProcessingStage.failed &&
+        status.failureReason == FailureReason.incompleteVoiceSequence;
+    if (!completedUnreadable && !missingVoice) {
+      throw const UploadRejectedException(
+        statusCode: 409,
+        code: notRetakeableCode,
+      );
+    }
+    // PIYA-101 AC12 order: a running retake is reported before
+    // "superseded", which a failed job already is once its retake exists.
+    final running = _jobs.values.any(
+      (other) =>
+          other.replacesJobId == jobId &&
+          !_statusAt(other, _stepOf(other)).stage.isTerminal,
+    );
+    if (running) {
+      throw const UploadRejectedException(
+        statusCode: 409,
+        code: retakeInProgressCode,
+      );
+    }
+    if (_isSuperseded(jobId)) {
+      throw const UploadRejectedException(
+        statusCode: 409,
+        code: notRetakeableCode,
+      );
+    }
+    return (scoreId: job.scoreId, keepsScore: completedUnreadable);
+  }
+
+  /// A completed job is superseded once its retake completes, a failed one
+  /// as soon as its retake is created (PIYA-101 AC12).
+  bool _isSuperseded(String jobId) => _jobs.values.any((other) {
+    if (other.replacesJobId != jobId) return false;
+    if (!other.keepsScore) return true;
+    return _statusAt(other, _stepOf(other)).stage == ProcessingStage.complete;
+  });
+
+  /// The newest completed job of [scoreId], or null when the fake knows of
+  /// none (a demo score whose job was never asked about).
+  FakeCompletedJob? latestCompletedJob({
+    required String account,
+    required int scoreId,
+  }) {
+    FakeCompletedJob? latest;
+    DateTime? latestStart;
+    for (final MapEntry(key: id, value: job) in _jobs.entries) {
+      if (job.account != account || job.scoreId != scoreId) continue;
+      if (_statusAt(job, _stepOf(job)).stage != ProcessingStage.complete) {
+        continue;
+      }
+      if (latestStart == null || !job.startedAt.isBefore(latestStart)) {
+        latestStart = job.startedAt;
+        latest = (jobId: id, causes: causesFor(job.outcome));
+      }
+    }
+    return latest;
   }
 
   @override
@@ -119,7 +283,11 @@ class FakeProcessingApi implements ProcessingApi {
       throw const ProcessingConflictException();
     }
     job.cancelled = true;
-    _library.removeSubmittedScore(account: job.account, scoreId: job.scoreId);
+    // A cancelled retake of a completed score leaves the score on its old
+    // result (PIYA-207 AC12); any other cancelled scan takes its card.
+    if (!job.keepsScore) {
+      _library.removeSubmittedScore(account: job.account, scoreId: job.scoreId);
+    }
   }
 
   /// The job side of PIYA-116, called by the fake upload once it has the
@@ -130,8 +298,8 @@ class FakeProcessingApi implements ProcessingApi {
     required String jobId,
     required int pageIndex,
   }) {
-    final job = _jobs[jobId];
-    if (job == null || job.account != account) {
+    final job = _jobFor(account, jobId);
+    if (job == null) {
       throw const UploadRejectedException(
         statusCode: 404,
         code: jobNotFoundCode,
@@ -152,6 +320,7 @@ class FakeProcessingApi implements ProcessingApi {
       pages: job.pages,
       outcome: FakeJobOutcome.success,
       startedAt: _clock(),
+      details: job.details,
     );
     return ResubmittedJob(
       originalJobId: jobId,
@@ -160,30 +329,61 @@ class FakeProcessingApi implements ProcessingApi {
     );
   }
 
-  /// Whether [account] has a job for [scoreId] and none of its jobs
-  /// (original or retake replacement) has completed: the fake PIYA-103's
-  /// 409. Scores with no fake job (the demo library) count as finished.
+  /// The fake PIYA-103's 409: [account] has a job for [scoreId] still
+  /// running (a whole-score retake of a completed score included, whose
+  /// old version can't be opened meanwhile, PIYA-207 AC12), or has jobs
+  /// for it and none of them completed. Scores with no fake job (the demo
+  /// library) count as finished.
   bool hasUnfinishedJob({required String account, required int scoreId}) {
     var any = false;
+    var completed = false;
     for (final job in _jobs.values) {
       if (job.account != account || job.scoreId != scoreId) continue;
       any = true;
-      if (_statusAt(job, _stepOf(job)).stage == ProcessingStage.complete) {
-        return false;
-      }
+      final stage = _statusAt(job, _stepOf(job)).stage;
+      if (!stage.isTerminal) return true;
+      if (stage == ProcessingStage.complete) completed = true;
     }
-    return any;
+    return any && !completed;
   }
 
   Future<_FakeJob> _ownedJob(String jobId) async {
     final token = await _sessionStorage.readToken();
     final account = token == null ? null : _accountForToken(token);
     if (account == null) throw const ProcessingSessionExpiredException();
-    final job = _jobs[jobId];
-    if (job == null || job.account != account) {
-      throw const ProcessingJobNotFoundException();
-    }
+    final job = _jobFor(account, jobId);
+    if (job == null) throw const ProcessingJobNotFoundException();
     return job;
+  }
+
+  /// [jobId] if [account] owns it. A demo library score's job is created
+  /// on first use, already completed.
+  _FakeJob? _jobFor(String account, String jobId) {
+    final job = _jobs[jobId];
+    if (job != null) return job.account == account ? job : null;
+    if (!jobId.startsWith(_demoJobPrefix)) return null;
+    final scoreId = int.tryParse(jobId.substring(_demoJobPrefix.length));
+    if (scoreId == null ||
+        !FakeScoreLibraryApi.demoScores.any((s) => s.scoreId == scoreId)) {
+      return null;
+    }
+    final score = _library.scoreFor(account: account, scoreId: scoreId);
+    if (score == null) return null;
+    final title = score.title;
+    return _jobs[jobId] = _FakeJob(
+      account: account,
+      scoreId: scoreId,
+      pages: score.pageCount ?? defaultPageCount,
+      outcome: _demoOutcome(scoreId),
+      startedAt: DateTime.fromMillisecondsSinceEpoch(0),
+      details: title == null
+          ? null
+          : ScoreDetails(
+              title: title,
+              arranger: score.arranger ?? '',
+              tempoBpm: demoTempoBpm,
+            ),
+    );
   }
 
   int _stepOf(_FakeJob job) {
@@ -192,22 +392,29 @@ class FakeProcessingApi implements ProcessingApi {
   }
 
   ProcessingStatus _statusAt(_FakeJob job, int step) {
+    final details = job.details;
     if (job.cancelled) {
-      return const ProcessingStatus(stage: ProcessingStage.cancelled);
+      return ProcessingStatus(
+        stage: ProcessingStage.cancelled,
+        details: details,
+      );
     }
     final total = _stepsBefore + job.pages * _stagesPerPage + _stepsAfter;
     final failure = _failureFor(job);
     if (failure != null && step >= failure.step) {
+      final pageIndex = failure.pageIndex;
       return ProcessingStatus(
         stage: ProcessingStage.failed,
-        currentPage: failure.pageIndex + 1,
-        totalPages: job.pages,
+        currentPage: pageIndex == null ? null : pageIndex + 1,
+        totalPages: pageIndex == null ? null : job.pages,
         percentComplete: failure.step * _percentScale ~/ total,
         failureReason: failure.reason,
-        failedPageIndex: failure.pageIndex,
+        failedPageIndex: pageIndex,
+        details: details,
       );
     }
     if (step >= total) {
+      final causes = causesFor(job.outcome);
       return ProcessingStatus(
         stage: ProcessingStage.complete,
         currentPage: job.pages,
@@ -215,6 +422,9 @@ class FakeProcessingApi implements ProcessingApi {
         percentComplete: _percentScale,
         estimatedRemainingSeconds: 0,
         scoreId: job.scoreId,
+        failedVoices: causes.keys.toSet(),
+        failedVoiceCauses: causes,
+        details: details,
       );
     }
     final ProcessingStage stage;
@@ -244,30 +454,40 @@ class FakeProcessingApi implements ProcessingApi {
       estimatedRemainingSeconds: step < _unestimatedSteps
           ? null
           : (total - step) * stepDuration.inSeconds,
+      details: details,
     );
   }
 
-  /// The step at which a failing job stops: detecting_staff on its page.
-  ({int step, int pageIndex, FailureReason reason})? _failureFor(_FakeJob job) {
-    final (int pageIndex, FailureReason reason) = switch (job.outcome) {
+  /// The step at which a failing job stops: detecting_staff on its page,
+  /// or reconstructing for a voice missing from the whole score.
+  ({int step, int? pageIndex, FailureReason reason})? _failureFor(
+    _FakeJob job,
+  ) {
+    const detectingOffset = 1;
+    return switch (job.outcome) {
       FakeJobOutcome.noStaffOnPage2 => (
-        job.pages >= 2 ? 1 : 0,
-        FailureReason.noStaffDetected,
+        step:
+            _stepsBefore +
+            (job.pages >= 2 ? 1 : 0) * _stagesPerPage +
+            detectingOffset,
+        pageIndex: job.pages >= 2 ? 1 : 0,
+        reason: FailureReason.noStaffDetected,
       ),
       FakeJobOutcome.unsupportedLayoutOnPage1 => (
-        0,
-        FailureReason.unsupportedStaffLayout,
+        step: _stepsBefore + detectingOffset,
+        pageIndex: 0,
+        reason: FailureReason.unsupportedStaffLayout,
+      ),
+      FakeJobOutcome.incompleteVoices => (
+        step: _stepsBefore + job.pages * _stagesPerPage,
+        pageIndex: null,
+        reason: FailureReason.incompleteVoiceSequence,
       ),
       FakeJobOutcome.success ||
-      FakeJobOutcome.networkBlip => (-1, FailureReason.unknown),
+      FakeJobOutcome.networkBlip ||
+      FakeJobOutcome.unreadableTenor ||
+      FakeJobOutcome.renderFailedTenor => null,
     };
-    if (pageIndex < 0) return null;
-    const detectingOffset = 1;
-    return (
-      step: _stepsBefore + pageIndex * _stagesPerPage + detectingOffset,
-      pageIndex: pageIndex,
-      reason: reason,
-    );
   }
 }
 
@@ -278,6 +498,9 @@ class _FakeJob {
     required this.pages,
     required this.outcome,
     required this.startedAt,
+    this.details,
+    this.replacesJobId,
+    this.keepsScore = false,
   });
 
   final String account;
@@ -285,5 +508,15 @@ class _FakeJob {
   final int pages;
   final FakeJobOutcome outcome;
   final DateTime startedAt;
+
+  /// What was submitted (PIYA-102 AC8 echoes it on every status).
+  final ScoreDetails? details;
+
+  /// Set on a whole-score retake (PIYA-101 AC12).
+  final String? replacesJobId;
+
+  /// A retake of a completed score: it fills the same score, which stays
+  /// on its old result when the retake is cancelled.
+  final bool keepsScore;
   bool cancelled = false;
 }

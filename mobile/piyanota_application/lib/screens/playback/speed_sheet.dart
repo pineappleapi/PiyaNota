@@ -133,6 +133,8 @@ class PlaybackSpeedSheet extends ConsumerWidget {
                     PlaybackMessages.bpmSpoken(v.round()),
                 // On every change, so a drag is heard as it moves (210 AC4).
                 onChanged: (v) => controller.setBpm(v.round()),
+                // Re-plans the click only if the subdivision changed.
+                onChangeEnd: (_) => controller.commitBpm(),
               ),
             ),
           ),

@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:piyanota_application/models/processing_status.dart';
 import 'package:piyanota_application/models/score_summary.dart';
 import 'package:piyanota_application/routes/app_routes.dart';
 import 'package:piyanota_application/screens/library/library_messages.dart';
@@ -20,7 +21,12 @@ import 'package:piyanota_application/state/score_library_providers.dart';
 import 'package:piyanota_application/theme/app_theme.dart';
 
 import '../processing/processing_fakes.dart'
-    show ScriptedProcessingApi, expectTrackerCleared, running, seedOldJob;
+    show
+        ScriptedProcessingApi,
+        expectTrackerCleared,
+        failed,
+        running,
+        seedOldJob;
 
 /// [ScoreLibraryApi] whose every call is answered by the test, either
 /// immediately or via a [Completer] so in-flight states are observable.
@@ -143,6 +149,12 @@ Future<void> _pumpLibrary(
           AppRoutes.settings: (_) =>
               const Scaffold(body: Text(_settingsMarker)),
           AppRoutes.login: (_) => const Scaffold(body: Text(_loginMarker)),
+          AppRoutes.processing: (context) {
+            final args =
+                ModalRoute.of(context)!.settings.arguments!
+                    as ProcessingArguments;
+            return Scaffold(body: Text('ROUTE:processing ${args.jobId}'));
+          },
         },
       ),
     ),
@@ -1415,6 +1427,67 @@ void main() {
       await tester.pumpAndSettle();
       await expectGuidelines(tester);
       handle.dispose();
+    });
+  });
+
+  group('PIYA-207 AC12 whole-score retake', () {
+    testWidgets('while it runs, the card opens Processing, not Playback', (
+      tester,
+    ) async {
+      final processing = ScriptedProcessingApi([running(40)]);
+      final api = _apiReturning(_scores);
+      await _pumpLibrary(
+        tester,
+        api,
+        extraOverrides: [processingApiProvider.overrideWithValue(processing)],
+      );
+      await tester.pumpAndSettle();
+      ProviderScope.containerOf(tester.element(find.byType(ScoreLibraryScreen)))
+          .read(processingJobsProvider.notifier)
+          .track('job-new', title: 'Paraiso', retakeOfScoreId: 102);
+      await tester.pump();
+
+      await tester.tap(find.text('Paraiso'));
+      await tester.pumpAndSettle();
+      expect(find.text('ROUTE:processing job-new'), findsOneWidget);
+      expect(find.text(_playbackMarker), findsNothing);
+    });
+
+    testWidgets('a failed retake says the earlier version is still there', (
+      tester,
+    ) async {
+      final processing = ScriptedProcessingApi([
+        running(40),
+        failed(FailureReason.stageTimeout),
+      ]);
+      final api = _apiReturning(_scores);
+      await _pumpLibrary(
+        tester,
+        api,
+        extraOverrides: [processingApiProvider.overrideWithValue(processing)],
+      );
+      await tester.pumpAndSettle();
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(ScoreLibraryScreen)),
+      );
+      container
+          .read(processingJobsProvider.notifier)
+          .track('job-new', title: 'Paraiso', retakeOfScoreId: 102);
+      await tester.pump();
+      await tester.pump(ProcessingTiming.pollInterval);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+
+      expect(
+        find.text(LibraryMessages.retakeFailed('Paraiso')),
+        findsOneWidget,
+      );
+      expect(api.fetchCalls, greaterThan(1));
+      await tester.tap(find.text('Paraiso'));
+      await tester.pumpAndSettle();
+      expect(find.text(_playbackMarker), findsOneWidget);
+      // Unmount so the tracker's timers go with it.
+      await tester.pumpWidget(const SizedBox());
     });
   });
 }

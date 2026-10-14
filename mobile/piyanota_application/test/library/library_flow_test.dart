@@ -30,6 +30,7 @@ final _unwrittenDemo = PlaybackDemoFiles(
   },
   page: Uri.file('/unwritten/score_page_1.png'),
   timing: Uri.parse('https://unwritten.test/timing.json'),
+  timingWithoutTenor: Uri.parse('https://unwritten.test/timing_t.json'),
 );
 
 void main() {
@@ -97,7 +98,7 @@ void main() {
     await tester.pump(FakeScoreLibraryApi.defaultLatency + settle);
 
     expect(find.text('My Scores'), findsOneWidget);
-    expect(find.text('5 Scores • Tap to Listen'), findsOneWidget);
+    expect(find.text('6 Scores • Tap to Listen'), findsOneWidget);
     expect(find.text('Bahay Kubo'), findsOneWidget);
 
     // Library is the root route: back has nowhere to go but out.
