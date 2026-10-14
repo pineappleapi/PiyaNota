@@ -74,12 +74,14 @@ PIYA-208-210 design decisions.
       same measure) is not applied, and the strip is flagged
       (`meter_mid_measure`). *(Added 2026-10-09, review round.)*
     - A vote that would change the meter from the previous bar's is applied
-      only if a majority of the voices that have that bar back it, with at
-      least 2 (capped at the number of voices present). Otherwise the
-      previous meter is kept and a review flag is raised
-      (`meter_change_single_voice`): in open-score SATB every staff engraves
-      the meter, so one voice reading a change is far likelier a misread.
-      *(Added 2026-10-09, review round.)*
+      only if a majority of the voices that READ a meter at that bar back it,
+      with at least 2. A voice that read nothing there (or sits in a
+      multirest) is no vote either way. Only a system with a single live
+      voice in total accepts a one-voice change. Otherwise the previous
+      meter is kept and a review flag is raised (`meter_change_minority`):
+      in open-score SATB every staff engraves the meter, so one voice
+      reading a change is far likelier a misread. *(Added 2026-10-09, review
+      round; threshold amended 2026-10-14, review round 3.)*
     - Meter flags of a strip that produced no events reach `review.items`
       through Stage 3's `strip_flags_out`.
     - Limitation: the CRNN vocabulary has no `digit.5-L4` or `digit.7-L4`, so

@@ -83,7 +83,10 @@ FLAG_METER_DISAGREEMENT = "meter_disagreement"
 # A meter change backed by too few voices (see MIN_METER_CHANGE_VOTES) is not
 # applied: in open-score SATB every staff engraves the meter, so one voice
 # reading a change the others do not is far likelier a misread.
-FLAG_METER_CHANGE_SINGLE = "meter_change_single_voice"
+FLAG_METER_CHANGE_MINORITY = "meter_change_minority"
+# Informational (review_needed=False): a voice's lone whole rest in the opening
+# bar was read as its rest through the agreed pickup, not as a full bar 1.
+FLAG_WHOLE_REST_PICKUP = "whole_rest_as_pickup"
 MIN_METER_CHANGE_VOTES = 2
 # Repairs that threw notes away (PIYA-103 AC9 "muted reasons"). Such a flag
 # carries muted=True plus start_tick/end_tick (PIYA-108 AC8) only when its
@@ -111,6 +114,13 @@ class PipelineFailure(ValueError):
     def __init__(self, failure_reason: str, message: str) -> None:
         super().__init__(f"{failure_reason}: {message}")
         self.failure_reason = failure_reason
+        self.message = message
+
+    def __reduce__(self) -> tuple[type, tuple[str, str]]:
+        # BaseException pickles as cls(*self.args), and args holds only the
+        # joined string, so without this a job queue / worker process that
+        # pickles the exception gets a TypeError instead of the failure.
+        return (type(self), (self.failure_reason, self.message))
 
 # -- Calibration status of every threshold below ---------------------------
 # ALL thresholds and weights in this module are hand-set priors, NOT fit to
@@ -471,11 +481,8 @@ def _plan_layout(strips: dict, flags: list) -> tuple[dict, int, dict]:
         notes: list[tuple[str, int, dict[str, str], str]] = []   # (kind, rank, votes, meter used)
         for rank in range(n_bars):
             votes: dict[str, str] = {}
-            have = 0
             for voice in voters:
                 m_events = _measure_at(ranked[voice], rank)
-                if m_events:
-                    have += 1
                 meter = _measure_meter(m_events) if m_events else None
                 if meter is not None:
                     votes[voice] = meter
@@ -492,10 +499,14 @@ def _plan_layout(strips: dict, flags: list) -> tuple[dict, int, dict]:
                 meter, source = tally.most_common(1)[0][0], METER_DETECTED
                 if len(tally) > 1:
                     notes.append((FLAG_METER_DISAGREEMENT, rank, votes, meter))
-                # The cap keeps a score with only one voice left able to change meter.
-                needed = min(max(MIN_METER_CHANGE_VOTES, have // 2 + 1), have)
+                # Only voices that read a meter at this bar count: a voice that read
+                # nothing (or sits in a multirest) is no evidence against a change,
+                # and must not let one stray read pass either. A system with a
+                # single live voice in total is the one case one read is enough.
+                needed = 1 if len(ranked) == 1 else max(
+                    MIN_METER_CHANGE_VOTES, len(votes) // 2 + 1)
                 if previous is not None and meter != previous[0] and tally[meter] < needed:
-                    notes.append((FLAG_METER_CHANGE_SINGLE, rank, votes, kept[0]))
+                    notes.append((FLAG_METER_CHANGE_MINORITY, rank, votes, kept[0]))
                     meter, source = kept
             else:
                 meter, source = kept
@@ -920,6 +931,10 @@ def _decide_pickups(strips: dict, meters: dict, first_key: tuple,
             # whole rest in the pickup bar; it is that voice's pickup, not a
             # full bar 1 (placement normalises the rest to the pickup length).
             voice_pickup[voice] = agreed
+            flag(FLAG_WHOLE_REST_PICKUP, voice,
+                 f"lone whole rest in the first bar taken as this voice's "
+                 f"{agreed}-tick pickup rest", "whole_rest_as_pickup", False,
+                 o["ticks"])
             continue
         if o["kind"] == "full":
             deviants.append(voice)
@@ -1143,12 +1158,15 @@ def _place_voice_strip(
                     # Right-aligning a longer bar would sound before tick 0:
                     # keep the LAST pickup_ticks (the notes leading into the
                     # downbeat), trimming from the head.
-                    m_events, dropped = _keep_last_ticks(
+                    m_events, dropped, head_cut = _keep_last_ticks(
                         m_events, first_local, pickup_ticks)
                     first_local = min(e["local_tick_onset"] for e in m_events)
                     total = _measure_ticks(m_events)
                     action = ACTION_TRIMMED_PICKUP
-                    span = (0, pickup_ticks)
+                    # Mute only when a note was actually lost: trimming away
+                    # leading rests loses nothing a singer would hear.
+                    if dropped or head_cut:
+                        span = (0, pickup_ticks)
                     how = (f"longer than the agreed pickup; kept the last "
                            f"{pickup_ticks} ticks, dropped {len(dropped)} "
                            f"note(s) from the head: {dropped}")
@@ -1351,12 +1369,19 @@ def _repair_by_run(m_events: list[Event], slots: list[dict],
 
 
 def _keep_last_ticks(m_events: list, first_local: int,
-                     keep: int) -> tuple[list, list]:
+                     keep: int) -> tuple[list, list, bool]:
     """Keeps the final `keep` ticks of a measure. Events wholly before the cut
     are dropped (pitched ones listed), an event straddling it loses its head:
-    its onset moves to the cut and its duration shrinks accordingly."""
+    its onset moves to the cut and its duration shrinks accordingly.
+
+    Returns:
+        (kept events, dropped note descriptions, whether a NOTE lost its head).
+        The caller mutes the pickup only if a note was dropped or cut, so a
+        trim that removed only rests is not reported as lost music.
+    """
     cut = _measure_ticks(m_events) - keep
     kept, dropped = [], []
+    head_cut = False
     for e in m_events:
         offset = e["local_tick_onset"] - first_local
         end = offset + e["duration_ticks"]
@@ -1367,8 +1392,9 @@ def _keep_last_ticks(m_events: list, first_local: int,
         if offset < cut:
             e["local_tick_onset"] += cut - offset
             e["duration_ticks"] -= cut - offset
+            head_cut = head_cut or e["type"] == "note"
         kept.append(e)
-    return kept, dropped
+    return kept, dropped, head_cut
 
 
 def _clip_to_bar(m_events: list, first_local: int,
