@@ -699,7 +699,18 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
         _pendingUndo = null;
         _files.deleteAll();
         // The failed job is finished with; only the replacement is polled.
-        ref.read(processingJobsProvider.notifier).forget(retake.jobId);
+        // It fills the same library card (PIYA-218 AC4), so it is tracked
+        // here with that card's id before the old job is forgotten.
+        final jobs = ref.read(processingJobsProvider.notifier);
+        final old = ref.read(processingJobsProvider)[retake.jobId];
+        jobs
+          ..track(
+            replaced.replacementJobId,
+            title: retake.title,
+            retakeOfScoreId: old?.retakeOfScoreId,
+            scoreId: old?.libraryScoreId,
+          )
+          ..forget(retake.jobId);
         Navigator.of(context).pushNamedAndRemoveUntil(
           AppRoutes.processing,
           (route) =>
@@ -732,18 +743,18 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
       // The server has its own copies now.
       _pendingUndo = null;
       _files.deleteAll();
-      if (wholeRetake != null) {
-        final jobs = ref.read(processingJobsProvider.notifier)
-          // The old job is finished with; only the retake is followed.
-          ..forget(wholeRetake.replacesJobId);
-        // Tracked here, before Processing opens, so the library knows at
-        // once that the old score is being replaced (PIYA-207 AC12).
-        jobs.track(
-          job.jobId,
-          title: details.title,
-          retakeOfScoreId: wholeRetake.retakeOfScoreId,
-        );
-      }
+      final jobs = ref.read(processingJobsProvider.notifier);
+      // The old job is finished with; only the retake is followed.
+      if (wholeRetake != null) jobs.forget(wholeRetake.replacesJobId);
+      // Tracked here, before Processing opens, so the library shows the
+      // card as processing from the moment of submit (PIYA-218 AC2) and
+      // knows at once that an old score is being replaced (PIYA-207 AC12).
+      jobs.track(
+        job.jobId,
+        title: details.title,
+        retakeOfScoreId: wholeRetake?.retakeOfScoreId,
+        scoreId: job.scoreId,
+      );
       ref.invalidate(scoreLibraryProvider);
       // Details and Capture leave the stack: Back from Processing returns
       // to the library, not to a form that was already sent.

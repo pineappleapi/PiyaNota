@@ -25,7 +25,11 @@ void _withTracker(
 ) {
   fakeAsync((async) {
     final container = ProviderContainer(
-      overrides: [processingApiProvider.overrideWithValue(api)],
+      overrides: [
+        processingApiProvider.overrideWithValue(api),
+        scanJobStoreProvider.overrideWithValue(MemoryScanJobStore()),
+        networkAvailabilityProvider.overrideWithValue(const Stream.empty()),
+      ],
     );
     final tracker = container.read(processingJobsProvider.notifier);
     body(async, tracker, () => container.read(processingJobsProvider)[kJob]);

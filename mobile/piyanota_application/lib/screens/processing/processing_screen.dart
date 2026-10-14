@@ -9,7 +9,13 @@ import '../../state/processing_providers.dart';
 import '../../state/session_actions.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/primary_pill_button.dart';
+import '../../services/score_library_api.dart';
+import '../../state/score_library_providers.dart';
+import '../library/library_messages.dart';
+import '../library/widgets/delete_score_dialog.dart';
 import '../retake/rephotograph.dart';
+import '../scan_status/scan_status_messages.dart';
+import 'cancel_scan_dialog.dart';
 import 'processing_messages.dart';
 
 /// Processing View (PIYA-207, SOW Module 2): follows one job through the
@@ -61,6 +67,9 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
   bool _finishing = false;
   Timer? _completionTimer;
 
+  /// The failure view's Delete request is in flight.
+  bool _deleting = false;
+
   static const double _maxHeadingScale = 1.5;
   static const double _maxCardScale = 1.3;
   static const double _gutterFraction = 0.107; // 44 dp on the 412 dp mockup
@@ -91,6 +100,11 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
 
   void _react(TrackedJob job) {
     if (_leaving) return;
+    // PIYA-218 AC6: watched to the end here, so the bell has nothing new
+    // to tell about it.
+    if (job.isFinished && !job.read) {
+      ref.read(processingJobsProvider.notifier).markRead(job.jobId);
+    }
     switch (job.phase) {
       case TrackedPhase.complete:
         if (!_cancelling) _complete(hold: _sawProgress);
@@ -175,7 +189,7 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
   void _openPlayback() {
     if (!mounted || _leaving) return;
     _leaving = true;
-    final scoreId = _job?.status?.scoreId;
+    final scoreId = _job?.libraryScoreId;
     final navigator = Navigator.of(context);
     if (scoreId == null) {
       // PIYA-102 doesn't return a scoreId yet (contract gap): the score is
@@ -226,26 +240,9 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
   Future<void> _confirmCancel() async {
     if (_cancelling || _leaving) return;
     setState(() => _cancelling = true);
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text(ProcessingMessages.cancelTitle),
-        content: const Text(ProcessingMessages.cancelBody),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text(ProcessingMessages.keepScanning),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            style: TextButton.styleFrom(foregroundColor: AppTheme.errorRed),
-            child: const Text(ProcessingMessages.confirmCancel),
-          ),
-        ],
-      ),
-    );
+    final confirmed = await confirmCancelScan(context);
     if (!mounted) return;
-    if (confirmed != true) {
+    if (!confirmed) {
       setState(() => _cancelling = false);
       // It may have finished while the dialog was open.
       if (_job case final job?) _react(job);
@@ -311,6 +308,51 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
     );
   }
 
+  /// PIYA-218 AC3: Delete on the failure view, confirmed first, then
+  /// PIYA-309. Only offered for the failed scan's own card: a failed
+  /// retake of a completed score leaves that score as it was (PIYA-207
+  /// AC12), so deleting from here would remove the good version.
+  int? get _deletableScoreId {
+    final job = _job;
+    if (job == null || job.retakeOfScoreId != null) return null;
+    return job.libraryScoreId;
+  }
+
+  Future<void> _deleteScan() async {
+    final scoreId = _deletableScoreId;
+    if (scoreId == null || _leaving || _deleting) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => DeleteScoreDialog(title: widget.title),
+    );
+    if (confirmed != true || !mounted || _leaving) return;
+    setState(() => _deleting = true);
+    String? failure;
+    try {
+      await ref.read(scoreLibraryProvider.notifier).deleteOnServer(scoreId);
+    } on ScoreNotFoundException {
+      // Already gone: the outcome the user asked for.
+    } on SessionExpiredException {
+      if (mounted) setState(() => _deleting = false);
+      await _returnToLogin();
+      return;
+    } on ScoreLibraryNetworkException {
+      failure = LibraryMessages.deleteNetworkError;
+    } on Object catch (e) {
+      debugPrint('Failed scan delete failed: $e');
+      failure = LibraryMessages.deleteServerError;
+    }
+    if (!mounted) return;
+    setState(() => _deleting = false);
+    if (failure != null) {
+      _snack(failure);
+      return;
+    }
+    ref.read(processingJobsProvider.notifier).forget(widget.jobId);
+    _snack(LibraryMessages.deleted(widget.title));
+    _backToLibrary();
+  }
+
   void _retake(int pageIndex) {
     Navigator.of(context).pushNamed(
       AppRoutes.captureRetake,
@@ -353,6 +395,8 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
         onRetake: _retake,
         onRetakeWhole: _retakeWhole,
         onBack: _backToLibrary,
+        onDelete: _deletableScoreId == null ? null : _deleteScan,
+        deleting: _deleting,
       ),
       TrackedPhase.notFound => _FailureView(
         heading: ProcessingMessages.notFoundHeading,
@@ -726,6 +770,8 @@ class _FailureView extends StatelessWidget {
     this.body,
     this.onRetake,
     this.onRetakeWhole,
+    this.onDelete,
+    this.deleting = false,
   });
 
   final String heading;
@@ -739,6 +785,10 @@ class _FailureView extends StatelessWidget {
   /// AC7/AC12: re-photograph the whole score.
   final VoidCallback? onRetakeWhole;
   final VoidCallback onBack;
+
+  /// PIYA-218 AC3: removes the failed scan's score; null hides it.
+  final VoidCallback? onDelete;
+  final bool deleting;
 
   static const double _iconSize = 48;
 
@@ -871,6 +921,28 @@ class _FailureView extends StatelessWidget {
             onPressed: onBack,
             backgroundColor: AppTheme.processingSecondary,
           ),
+        if (onDelete != null) ...[
+          const SizedBox(height: 8),
+          TextButton.icon(
+            key: const ValueKey('failure-delete'),
+            onPressed: deleting ? null : onDelete,
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.errorRed,
+              minimumSize: const Size.fromHeight(48),
+            ),
+            icon: deleting
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppTheme.errorRed,
+                      semanticsLabel: LibraryMessages.deleting,
+                    ),
+                  )
+                : const Icon(Icons.delete_outline_rounded),
+            label: const Text(ScanStatusMessages.deleteScan),
+          ),
+        ],
       ],
     );
   }

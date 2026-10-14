@@ -13,7 +13,11 @@ import '../../state/session_actions.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/primary_pill_button.dart';
 import '../auth/widgets/auth_error_banner.dart';
+import '../processing/cancel_scan_dialog.dart';
+import '../processing/processing_messages.dart';
+import '../scan_status/scan_navigation.dart';
 import 'library_messages.dart';
+import 'widgets/delete_score_dialog.dart';
 import 'widgets/library_bottom_nav.dart';
 import 'widgets/library_header.dart';
 import 'widgets/score_cards.dart';
@@ -51,6 +55,9 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
   /// opens it once.
   bool _openingScore = false;
 
+  /// Jobs whose long-press cancel dialog or request is in progress.
+  final Set<String> _cancellingJobs = {};
+
   // Mockup: 32 dp side margins at 412 dp wide, header content at 26 dp,
   // first card 32 dp under the header, 18 dp between cards. Margins scale
   // down on narrow phones so cards keep usable text width.
@@ -80,28 +87,67 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
   /// PIYA-308 call here; the screen only ever renders the filtered result.
   void _onSearchChanged(String value) => setState(() => _query = value);
 
-  Future<void> _openScore(LibraryEntry entry) async {
+  /// The tracked job a card follows instead of opening Playback (PIYA-218
+  /// AC3): a scan still running (including a whole-score retake of a
+  /// completed score, PIYA-207 AC12), or a scan that failed. A failed
+  /// retake of a completed score doesn't count: that score is unchanged
+  /// and plays as before.
+  static TrackedJob? _cardJob(Map<String, TrackedJob> jobs, int scoreId) {
+    final job = latestScanJobFor(jobs, scoreId);
+    if (job == null) return null;
+    if (job.isRunning) return job;
+    if (job.phase == TrackedPhase.failed && job.retakeOfScoreId == null) {
+      return job;
+    }
+    return null;
+  }
+
+  /// AC3 for a card whose scan is running or failed.
+  Future<void> _openJob(TrackedJob job, String title) async {
     if (_openingScore) return;
     _openingScore = true;
-    // PIYA-207 AC12: while a whole-score retake runs, the old version
-    // can't be opened; the card follows the retake instead.
-    final retake = ref
-        .read(processingJobsProvider.notifier)
-        .runningRetakeOf(entry.scoreId);
-    if (retake != null) {
-      try {
-        await Navigator.of(context).pushNamed(
-          AppRoutes.processing,
-          arguments: ProcessingArguments(
-            jobId: retake.jobId,
-            title: retake.title ?? entry.displayTitle,
-          ),
-        );
-      } finally {
-        _openingScore = false;
-      }
-      return;
+    try {
+      await openScanJob(Navigator.of(context), ref, job, title: title);
+    } finally {
+      _openingScore = false;
     }
+  }
+
+  /// PIYA-218 AC4: long-press "Cancel scan" on a processing card, with the
+  /// same dialog and PIYA-114 call as Processing (PIYA-207 AC4).
+  Future<void> _cancelScan(TrackedJob job) async {
+    if (_cancellingJobs.contains(job.jobId)) return;
+    _cancellingJobs.add(job.jobId);
+    try {
+      if (!await confirmCancelScan(context) || !mounted) return;
+      final outcome = await ref
+          .read(processingJobsProvider.notifier)
+          .cancel(job.jobId);
+      if (!mounted) return;
+      switch (outcome) {
+        case CancelOutcome.cancelled:
+          _showSnackBar(ProcessingMessages.scanCancelled);
+        case CancelOutcome.notFound:
+          break;
+        case CancelOutcome.sessionExpired:
+          await _returnToLogin();
+        case CancelOutcome.failed:
+          _showSnackBar(ProcessingMessages.cancelFailed);
+        case CancelOutcome.alreadyFinished:
+          _showSnackBar(ProcessingMessages.alreadyFinished);
+      }
+    } finally {
+      _cancellingJobs.remove(job.jobId);
+    }
+  }
+
+  Future<void> _openScore(LibraryEntry entry) async {
+    if (_openingScore) return;
+    // PIYA-218 AC3 (and PIYA-207 AC12): a running or failed scan opens
+    // Processing, never a Playback with nothing to play.
+    final job = _cardJob(ref.read(processingJobsProvider), entry.scoreId);
+    if (job != null) return _openJob(job, entry.displayTitle);
+    _openingScore = true;
     // Moves the score to the top of the library now; the real server
     // records the open itself when Playback fetches it (PIYA-308 AC8).
     ref.read(scoreLibraryProvider.notifier).markOpened(entry.scoreId);
@@ -148,7 +194,7 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
       // ours.
       confirmed = await showDialog<bool>(
         context: context,
-        builder: (context) => _DeleteScoreDialog(title: entry.displayTitle),
+        builder: (context) => DeleteScoreDialog(title: entry.displayTitle),
       );
     } finally {
       _confirmingIds.remove(scoreId);
@@ -250,26 +296,35 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
       );
   }
 
-  /// PIYA-207 AC12: a retake of a completed score that fails or is
-  /// cancelled leaves the old result in place; say so here, where the
-  /// card is.
+  /// Reloads the list only when a finished scan changes which scores
+  /// exist: a retake of a completed score that failed or was cancelled
+  /// (PIYA-207 AC12, the old result is back), or a scan that completed as
+  /// a score the list doesn't have yet. A scan that completes as a card
+  /// already listed just turns into a normal card in place (PIYA-218
+  /// AC4). The user hears about the outcome from the app-wide toast
+  /// (AC7), which replaces this screen's old retake-failed snackbar.
   void _onJobsChanged(
     Map<String, TrackedJob>? previous,
     Map<String, TrackedJob> next,
   ) {
+    final listed = {
+      for (final score in ref.read(scoreLibraryProvider).value ?? const [])
+        score.scoreId,
+    };
     for (final job in next.values) {
-      if (job.retakeOfScoreId == null) continue;
-      final ended =
-          job.phase == TrackedPhase.failed ||
-          job.phase == TrackedPhase.cancelled;
       final before = previous?[job.jobId]?.phase;
-      if (!ended || before == job.phase) continue;
-      ref.invalidate(scoreLibraryProvider);
-      if (job.phase == TrackedPhase.failed &&
-          (ModalRoute.of(context)?.isCurrent ?? false)) {
-        _showSnackBar(
-          LibraryMessages.retakeFailed(job.title ?? untitledScoreLabel),
-        );
+      if (before == null || before == job.phase) continue;
+      final retakeEnded =
+          job.retakeOfScoreId != null &&
+          (job.phase == TrackedPhase.failed ||
+              job.phase == TrackedPhase.cancelled);
+      final scoreId = job.libraryScoreId;
+      final newScore =
+          job.phase == TrackedPhase.complete &&
+          (scoreId == null || !listed.contains(scoreId));
+      if (retakeEnded || newScore) {
+        ref.invalidate(scoreLibraryProvider);
+        return;
       }
     }
   }
@@ -278,6 +333,7 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
   Widget build(BuildContext context) {
     ref.listen(processingJobsProvider, _onJobsChanged);
     final library = ref.watch(scoreLibraryProvider);
+    final jobs = ref.watch(processingJobsProvider);
     final width = MediaQuery.sizeOf(context).width;
     final cardMargin = (width * _cardMarginFraction)
         .clamp(_minCardMargin, _maxCardMargin)
@@ -335,7 +391,7 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
                     ),
                     children: [
                       if (showAddCard) AddScoreCard(onTap: _openCapture),
-                      ..._buildStateContent(library),
+                      ..._buildStateContent(library, jobs),
                     ],
                   ),
                 ),
@@ -358,17 +414,64 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
     );
   }
 
-  List<Widget> _buildStateContent(AsyncValue<List<ScoreSummary>> library) {
+  /// PIYA-218 AC2: a scan whose score the list doesn't show yet (the
+  /// server didn't send its scoreId, or the list was loaded before the
+  /// submit) still gets its processing card, above the saved scores.
+  List<Widget> _unlistedScanCards(
+    Map<String, TrackedJob> jobs,
+    Set<int> listed,
+  ) {
+    final needle = _query.trim().toLowerCase();
+    final running = [
+      for (final job in jobs.values)
+        if (job.isRunning &&
+            (job.libraryScoreId == null ||
+                !listed.contains(job.libraryScoreId)) &&
+            (needle.isEmpty ||
+                (job.title ?? untitledScoreLabel).toLowerCase().contains(
+                  needle,
+                )))
+          job,
+    ]..sort(compareScanJobsNewestFirst);
+    return [
+      for (final job in running)
+        Padding(
+          key: ValueKey('scan-job-${job.jobId}'),
+          padding: const EdgeInsets.only(top: _cardGap),
+          child: _scanningCard(job, job.title ?? untitledScoreLabel),
+        ),
+    ];
+  }
+
+  Widget _scanningCard(TrackedJob job, String title, {String? thumbnailUrl}) =>
+      ScanningScoreCard(
+        key: ValueKey('scanning-${job.jobId}'),
+        title: title,
+        job: job,
+        thumbnailUrl: thumbnailUrl,
+        onTap: () => _openJob(job, title),
+        onLongPress: () => _cancelScan(job),
+        onRetry: () =>
+            ref.read(processingJobsProvider.notifier).retry(job.jobId),
+      );
+
+  List<Widget> _buildStateContent(
+    AsyncValue<List<ScoreSummary>> library,
+    Map<String, TrackedJob> jobs,
+  ) {
     switch (library) {
       case AsyncData(:final value):
+        final unlisted = _unlistedScanCards(jobs, {
+          for (final score in value) score.scoreId,
+        });
         // AC4: zero scores shows only the Add Score card, as in the mockup;
         // the header subtitle carries the empty-state message.
-        if (value.isEmpty) return const [];
+        if (value.isEmpty) return unlisted;
         final visible = filterLibraryEntries(
           buildLibraryEntries(value),
           _query,
         );
-        if (visible.isEmpty) {
+        if (visible.isEmpty && unlisted.isEmpty) {
           return [
             const SizedBox(height: _cardGap + _stateMessageTopGap),
             _NoResultsMessage(query: _query),
@@ -376,6 +479,7 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
         }
         final reduceMotion = MediaQuery.disableAnimationsOf(context);
         return [
+          ...unlisted,
           for (final entry in visible)
             // The Builder's context identifies this mount of the row, so a
             // delete that outlives it can tell (see _deleteViaTrash).
@@ -384,8 +488,9 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
               builder: (rowContext) => _RemovableRow(
                 leaving: _leavingIds.contains(entry.scoreId),
                 onRemoved: () => _finishRemoval(entry.scoreId),
-                child: _buildDismissibleCard(
+                child: _buildRowCard(
                   entry,
+                  _cardJob(jobs, entry.scoreId),
                   rowContext: rowContext,
                   reduceMotion: reduceMotion,
                 ),
@@ -411,8 +516,36 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
     }
   }
 
+  /// The same row shows the processing card while its scan runs and the
+  /// normal card afterwards, so completion changes it in place (AC4). A
+  /// running scan can't be swiped or trashed: Cancel scan is its way out.
+  Widget _buildRowCard(
+    LibraryEntry entry,
+    TrackedJob? job, {
+    required BuildContext rowContext,
+    required bool reduceMotion,
+  }) {
+    if (job != null && job.isRunning) {
+      return Padding(
+        padding: const EdgeInsets.only(top: _cardGap),
+        child: _scanningCard(
+          job,
+          entry.displayTitle,
+          thumbnailUrl: entry.score.thumbnailUrl,
+        ),
+      );
+    }
+    return _buildDismissibleCard(
+      entry,
+      scanFailed: job != null,
+      rowContext: rowContext,
+      reduceMotion: reduceMotion,
+    );
+  }
+
   Widget _buildDismissibleCard(
     LibraryEntry entry, {
+    required bool scanFailed,
     required BuildContext rowContext,
     required bool reduceMotion,
   }) {
@@ -466,6 +599,7 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
           key: ValueKey(scoreId),
           entry: entry,
           isDeleting: isDeleting,
+          scanFailed: scanFailed,
           onTap: () => _openScore(entry),
           onDelete: () => _deleteViaTrash(entry, rowContext),
         ),
@@ -663,35 +797,6 @@ class _RemovableRowState extends State<_RemovableRow>
       sizeFactor: _curve,
       alignment: Alignment.topCenter,
       child: FadeTransition(opacity: _curve, child: widget.child),
-    );
-  }
-}
-
-class _DeleteScoreDialog extends StatelessWidget {
-  const _DeleteScoreDialog({required this.title});
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: Colors.white,
-      title: const Text(LibraryMessages.deleteDialogTitle),
-      content: Text(LibraryMessages.deleteDialogBody(title)),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          style: TextButton.styleFrom(
-            foregroundColor: AppTheme.libraryScoreSubtitle,
-          ),
-          child: const Text(LibraryMessages.deleteCancel),
-        ),
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(true),
-          style: TextButton.styleFrom(foregroundColor: AppTheme.errorRed),
-          child: const Text(LibraryMessages.deleteConfirm),
-        ),
-      ],
     );
   }
 }

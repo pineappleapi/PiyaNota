@@ -471,6 +471,18 @@ void main() {
       });
       expect(job.pageCount, isNull);
       expect(job.status, 'queued');
+      expect(job.scoreId, isNull);
+    });
+
+    test('scoreId is read when the server sends one (PIYA-218)', () {
+      final job = HttpScoreUploadApi.parseSubmittedJob({
+        'data': {'jobId': 'j', 'scoreId': 41},
+      });
+      expect(job.scoreId, 41);
+      final bad = HttpScoreUploadApi.parseSubmittedJob({
+        'data': {'jobId': 'j', 'scoreId': '41'},
+      });
+      expect(bad.scoreId, isNull);
     });
 
     test('retryAfterSeconds in the body wins over the header', () {

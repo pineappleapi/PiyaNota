@@ -14,11 +14,16 @@ class SubmittedJob {
     required this.jobId,
     required this.pageCount,
     required this.status,
+    this.scoreId,
   });
 
   final String jobId;
   final int? pageCount;
   final String status;
+
+  /// The library score the job fills, when PIYA-101 says (PIYA-218: the
+  /// card shows as processing from the moment of submit).
+  final int? scoreId;
 }
 
 /// The replacement job PIYA-116 created for a retaken page. Processing
@@ -401,10 +406,12 @@ class HttpScoreUploadApi implements ScoreUploadApi {
     }
     final pageCount = data['pageCount'];
     final status = data['status'];
+    final scoreId = data['scoreId'];
     return SubmittedJob(
       jobId: jobId,
       pageCount: pageCount is int ? pageCount : null,
       status: status is String ? status : 'queued',
+      scoreId: scoreId is int && scoreId > 0 ? scoreId : null,
     );
   }
 
