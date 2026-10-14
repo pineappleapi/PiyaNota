@@ -151,6 +151,7 @@ _Covers: UI tickets (Onboarding, Account, Score Library, Playback, Settings, Sys
    - The scan keeps running and its status keeps being polled after the user leaves this screen. Polling belongs to one app-level progress source, not to this screen's lifecycle. Polling stops when the job reaches a terminal state (`complete`/`failed`/`cancelled`), when the job is gone (404) or the session has expired (401), or when it pauses after 30 s of continuous poll failures. Resuming a paused background job without opening Processing is PIYA-218 AC10.
    - Reopening Processing for a job that is still running shows its current progress immediately, without restarting from 0%. Reopening it for a job that has already completed routes straight to Playback.
    - The library card and notification bell that show this background progress are specified in PIYA-218 and read the same progress source, so the three never disagree.
+10. **Muted-measures alert on completion** *(added 2026-10-09, user decision)*. When processing first completes and the PIYA-103 result has a non-empty `mutedMeasures`, the app shows a system alert (`AlertDialog`) saying those measures were too damaged to play and will be silent, and listing them: voice and measure ("Bass: m. 4"), or page and system when `bar` is `null` ("Bass: page 1, system 2", counting from 1 for display). The dialog has a "Don't show again for this score" option, saved on the device per `scoreId`, which also stops the Playback alert (PIYA-208). When completion routes straight into Playback (AC8), the alert is shown once, not again when Playback opens. The review banner (PIYA-208) is unaffected.
 
 ---
 
@@ -182,6 +183,9 @@ _Covers: UI tickets (Onboarding, Account, Score Library, Playback, Settings, Sys
 - Audio plays only while the Playback screen is open. Leaving the screen or sending the app to the background pauses/stops playback. Offline or background listening is what Export (PIYA-211) downloads are for.
 - If one voice's track fails to load or drops out, the other voices keep playing; that voice's chip is disabled with a short notice. The score fails as a whole only if no track can play.
 - Bundled demo data (the fake API) exists in debug/fake builds only, never in release builds.
+- **Whole-voice failure alert** *(added 2026-10-09, user decision)*. On opening Playback, if any voice failed as a whole, either listed in PIYA-103 `failedVoices` or because its audio fails to load or play on the device, the app shows a system alert (`AlertDialog`) at the start. It names the voice as wholly corrupted and says the other voices will play. If that voice was the user's selected voice, all the remaining voices are turned on and play. The failed voice's chip is disabled. This alert replaces the "short notice" above for a voice that fails when Playback opens.
+- **Muted-measures alert** *(added 2026-10-09, user decision)*. If PIYA-103 `mutedMeasures` is non-empty, the same alert as PIYA-207 AC10 (listing voice + measure, or page/system when `bar` is `null`) is shown each time Playback opens, unless "Don't show again for this score" was ticked for this `scoreId`. When Playback is opened straight from Processing, it is not shown a second time. The review banner is shown as before, independently of this alert.
+- **Metronome click** *(added 2026-10-09, user decision)*: laid out per measure from the timing file's `bars` table (PIYA-117 AC9) by the rules in PIYA-210.
 
 ---
 
@@ -206,6 +210,7 @@ _Covers: UI tickets (Onboarding, Account, Score Library, Playback, Settings, Sys
 - Each row has a Solo checkbox. When any row is soloed, only soloed rows are heard; Mute still wins over Solo.
 - The Metronome Click row sets the click's volume and Mute only. Whether the click plays at all is the Speed modal's toggle (PIYA-210 AC3). The click is heard only when that toggle is on and the row is not muted.
 - Mixer volumes stack with the Playback voice chips (PIYA-208): an unselected chip is silent whatever its slider says.
+- **Soloing a voice whose chip is off** *(added 2026-10-09, user decision)*. Ticking Solo on a voice whose chip is off on the Playback screen shows a system alert (`AlertDialog`) explaining that nothing will be heard from that voice while its chip is off, with a "Turn <Voice> on" action that turns the chip on.
 
 ---
 
@@ -225,8 +230,18 @@ _Covers: UI tickets (Onboarding, Account, Score Library, Playback, Settings, Sys
 5. Modal dismissible via close (X) button, returns to Playback without interrupting playback.
 
 **Design decisions (2026-10-09, user):**
-- The slider is in BPM, range 30–240 (same as the tempo field at capture, PIYA-101 AC8). It opens at the score's `tempoBpm` (PIYA-103 AC8), which is 90 unless another tempo was entered. Playback rate = chosen BPM ÷ `tempoBpm`, with pitch kept.
-- The Metronome Click checkbox turns the click on or off (off by default). Its volume and Mute live in the Voice Mixer (PIYA-209). The click is generated in the app at the chosen BPM, one click per quarter note, and stays aligned to the start of bar 1.
+- The slider is in BPM, range 30–240 (same as the tempo field at capture, PIYA-101 AC8). It opens at the score's `tempoBpm` (PIYA-103 AC8), which is 90 unless another tempo was entered. Playback rate = chosen BPM ÷ `tempoBpm`, with pitch kept. *(added 2026-10-09, user decision: the value is quarter-note BPM whatever the meter and is labelled that way, e.g. "♩ = 90". 30–240 is a hard cap; the user confirmed 240 is high enough.)*
+- The Metronome Click checkbox turns the click on or off (off by default). Its volume and Mute live in the Voice Mixer (PIYA-209). The click is generated in the app at the chosen BPM, one click per quarter note, and stays aligned to the start of bar 1. *(added 2026-10-09, user decision: "one click per quarter note" is replaced by the per-measure layout below. It remains only as the fallback for a timing file with no `bars`.)*
+- **Metronome click layout** *(added 2026-10-09, user decision; matches MuseScore's metronome, rules from choral-conductor research)*. Clicks are laid out measure by measure from the timing file's `bars` table (PIYA-117 AC9). Each measure uses its own meter and its clicks restart at its barline (`startTick`), so consecutive measures may change meter. A click at tick `t` sounds at `t × 60000 ÷ (480 × chosen BPM)` ms.
+  - **Unit:** one 1/`denominator` note (`1920 ÷ denominator` ticks).
+  - **Compound meter:** `numerator > 3` and `numerator % 3 == 0` (6/8, 9/8, 12/8, 6/4…). Its beat is 3 units. The beat tempo at the current playback speed is chosen BPM × `denominator` ÷ 12 beats per minute (6/8 at ♩ = 90 is 60). If the beat tempo is 60 per minute or more, click each beat; below 60, click every unit.
+  - **Simple meter** (every other meter): click every unit, so 2/2 clicks half notes and 3/8 clicks eighths.
+  - **Odd non-compound numerator of 5 or more** (5, 7…): units grouped `ceil(n/2) + floor(n/2)`, i.e. 5 = 3+2 and 7 = 4+3.
+  - **Accent levels**, loudest first: downbeat (offset 0 of the measure), secondary (the first click of each later group: beat 3 of 4/4 and of 12/8, following MuseScore's `stressEvery` rule, and the start of the second group in 5 and 7), beat (every other beat click), subdivision (a unit click that is not on a beat, which only happens in a slow compound meter).
+  - **Pickup** (`pickup: true`): its clicks are placed as the **end** of a full bar of its meter and take the accent of that full-bar position. A pickup click is never a downbeat.
+  - **Short final bar:** clicks from its barline and stops at its end (`durTicks`).
+  - **Unknown meter:** a measure whose `meterSource` is `unknown` or `default` uses the last measure with a `detected` or `inherited` meter. If there is none, it gets a plain quarter-note grid from its barline with only the first click accented (downbeat), and no secondary accents.
+  - **Speed changes:** when a speed change makes a compound measure's beat tempo cross 60 per minute (either way), the clicks not yet played are re-planned. Other speed changes only rescale the click times.
 - Speed and metronome settings last while the Playback screen is open and reset when the score is reopened, like the mixer (PIYA-209 AC6).
 
 ---
@@ -359,6 +374,7 @@ Wires Processing Status (PIYA-207) and Score Playback (PIYA-208) to PIYA-102 and
 2. On `status: complete`, Playback calls PIYA-103 and binds `audioTracks`, `scoreImages`, `timingMetadataUrl` to the player, seek bar, and playback-indicator overlay as defined in PIYA-208.
 3. A 409 response from PIYA-103 (job not yet complete) is handled defensively even though the UI shouldn't normally trigger it before `complete` status.
 4. Playback shows its dismissible review banner (PIYA-208 design decisions) exactly when PIYA-103 returns `review.reviewNeeded: true`. While BUG-021 is open, that is every score. *(Added 2026-10-09.)*
+5. Playback binds PIYA-103 `failedVoices` and `mutedMeasures` to the alerts in PIYA-208 (and PIYA-207 AC10), and reads the timing file's `bars` table (PIYA-117 AC9) for the metronome click (PIYA-210). A voice missing from `audioTracks` is treated as failed, not as an error for the whole score. *(added 2026-10-09, user decision)*
 
 *(2026-10-09: opening a saved score from the library is blocked on the open gap that PIYA-103 is keyed by `job_id`, while the library has only `scoreId`. See PIYA-308 AC8 in `module3-backend.md`. Until that is resolved, Playback runs against a fake keyed by score.)*
 

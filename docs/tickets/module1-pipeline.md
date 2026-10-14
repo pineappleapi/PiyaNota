@@ -39,7 +39,7 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
    - **Absent values.** "Not sure" (key) and "Other" (time signature) are both expressed by omitting the field, and the server stores NULL. Multipart cannot carry `null`; an optional field sent with an empty or whitespace-only value is treated as absent. The literal string `"null"` gets no special handling: it is an invalid enumerated value (400), and as `arranger` it would be stored as text, so the client must omit the field as agreed.
    - **Character counting.** Values are trimmed and NFC-normalized, then counted in Unicode code points (Python `len()`, PostgreSQL `char_length()`). Text containing control characters (Unicode category Cc, including newlines and tabs) is rejected with `title_invalid` / `arranger_invalid`.
    - A field sent more than once returns 400 `duplicate_field`. Unrecognized field names are ignored and not stored, so a newer client still works against an older server.
-   - **Meaning.** `keySignature` and `timeSignature` are display labels only. They are never passed to the pipeline; Stages 3–4 use their own clef/key/time-signature detection. `tempoBpm` is the default playback speed, and the four tracks are rendered at it (Stage 5 `bpm`). It counts **quarter notes per minute whatever the time signature** (Stage 5 writes a quarter-note MIDI tempo at 480 PPQ), so `6/8` at dotted-quarter = 60 is `tempoBpm` 90, and `2/2` at half = 60 is `tempoBpm` 120. The submitted (or default) tempo takes precedence over any detected tempo marking. *(PIYA-109 AC2 still reads "unless a detected tempo marking overrides it" and needs the matching edit; flagged to the user.)*
+   - **Meaning.** `keySignature` and `timeSignature` are display labels only. They are never passed to the pipeline; Stages 3–4 use their own clef/key/time-signature detection. `tempoBpm` is the default playback speed, and the four tracks are rendered at it (Stage 5 `bpm`). It counts **quarter notes per minute whatever the time signature** (Stage 5 writes a quarter-note MIDI tempo at 480 PPQ), so `6/8` at dotted-quarter = 60 is `tempoBpm` 90, and `2/2` at half = 60 is `tempoBpm` 120. The submitted (or default) tempo takes precedence over any detected tempo marking. *(added 2026-10-09, user decision: PIYA-109 AC2 now says the same. The tempo stays one quarter-note BPM for the whole piece, whatever the meter or meter changes; the metronome click works out each measure's beat from that BPM, see PIYA-210.)*
 9. **Errors** (added 2026-10-08, PIYA-206 / PIYA-215 AC3). Every error uses the standard envelope with an `error` object, so the app can map `error.code` to its own message. `message` is English text for logs, not for display:
    ```json
    { "data": null, "success": false, "status": 400, "message": "Title is required",
@@ -123,14 +123,31 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
 
 **Acceptance Criteria:**
 1. Returns 409 (not 200) if job status is not yet `complete`.
-2. Once complete, returns all four SATB audio track URLs (soprano, alto, tenor, bass), preprocessed page image URL(s) for playback overlay, and tick-based timing metadata for the playback indicator.
+2. Once complete, returns all four SATB audio track URLs (soprano, alto, tenor, bass), preprocessed page image URL(s) for playback overlay, and tick-based timing metadata for the playback indicator. *(added 2026-10-09, user decision: "all four" now means every voice not listed in `failedVoices` (AC10). A failed voice has no `audioTracks` key.)*
 3. Returns 404 if `job_id` doesn't exist or doesn't belong to caller's account.
 4. Every returned audio track URL is independently playable/downloadable without additional auth beyond the session token.
 5. Repeated calls return cached results and do not re-trigger pipeline computation.
 6. Once complete, the response includes a `review` object. `reviewNeeded` is true whenever any Stage 3 strip flag or Stage 4 reconstruction flag carries `review_needed`, or the clef/key classifier was disabled. `reasons` lists the distinct flag codes. `items` holds at most 200 entries, each with `code`, `voice`, `pageIndex`, `systemIndex`, `bar`, and `truncated` is set when entries were left out. `reviewNeeded: false` means no flag was raised, not that the transcription is verified correct. Model provenance (checkpoint hash, gate status) is never included in the response. *(Added 2026-09-29, backend-lead review. While the clef/key classifier has not passed its real-photo gate (BUG-021), every job carries the reason `clef_key_unvalidated`, so `reviewNeeded` is always true. The pipeline side is `stage5_synthesis.run_full_pipeline_with_report()` / `build_review()`; flag codes stay snake_case, voice is lowercase.)*
 
 7. Once complete, the response includes `title` (always present) and `arranger` (omitted when absent, never `null`), read from the job's `scores` row (PIYA-321), so Playback (PIYA-208) can show its header ("arr. by <arranger>") when opened straight from Processing without a library fetch. *(Added 2026-10-09, user decision — closes the "PIYA-103 result has no title/composer" contract gap reported by frontend-lead; the field is `arranger`, not `composer`.)*
-8. Once complete, the response includes `tempoBpm`, the tempo the four tracks were rendered at (the stored `tempo_bpm`, 90 when none was submitted; same quarter-note-per-minute meaning as PIYA-101 AC8). The Speed modal (PIYA-210) shows speed in BPM, so the client plays at rate = chosen BPM ÷ `tempoBpm`, and the metronome click (PIYA-209/210) is generated client-side at the chosen BPM. *(Added 2026-10-09, user decision for PIYA-210.)*
+8. Once complete, the response includes `tempoBpm`, the tempo the four tracks were rendered at (the stored `tempo_bpm`, 90 when none was submitted; same quarter-note-per-minute meaning as PIYA-101 AC8). The Speed modal (PIYA-210) shows speed in BPM, so the client plays at rate = chosen BPM ÷ `tempoBpm`, and the metronome click (PIYA-209/210) is generated client-side at the chosen BPM. *(Added 2026-10-09, user decision for PIYA-210.)* *(added 2026-10-09, user decision: `tempoBpm` is one quarter-note BPM for the whole piece. The click is laid out measure by measure from the timing file's `bars` table (PIYA-117 AC9) by the rules in PIYA-210, not as one click per quarter note.)*
+9. **Muted measures** *(added 2026-10-09, user decision)*. Once complete, the response includes `mutedMeasures`: the measures of a voice that Stage 5 rendered as silence because Stage 4's repair of that measure threw notes away (PIYA-109 AC8). It is always present and is `[]` when nothing was muted. Each entry:
+
+   | Field | Type | Meaning |
+   |---|---|---|
+   | `voice` | string | lowercase, as in `audioTracks` |
+   | `bar` | int or null | printed measure number (PIYA-117 AC7, pickup = 0); `null` when Stage 4 could not anchor the voice-strip to the bar grid |
+   | `pageIndex` | int | 0-based, as in PIYA-117 "Index bases" |
+   | `systemIndex` | int | 0-based within its page |
+   | `startMs` / `endMs` | int | the silent span at the rendered tempo (`tempoBpm`), on the same clock as the timing file's `timestampMs`; `endMs` is exclusive |
+   | `reason` | string | the Stage 4 flag code that caused it, snake_case |
+
+   - Muted reasons (repair was lossy): `bar_overflow_clipped`, `suspected_missing_barline` (clipped), `bar_length_invariant_failed`, `local_placement_overrun` (notes dropped), and `pickup_length_mismatch` only when its action is `trimmed_head_to_pickup`.
+   - Never muted (the measure was only scaled or compressed, nothing thrown away): `bar_overflow_run_scaled`, `suspected_tuplet` (compressed). A `pickup_length_mismatch` that was only right-aligned is not muted either.
+   - Muting is by tick span, so it works where `bar` is `null`. Only that voice is silent in the span; the other voices and the rest of that voice play.
+   - Entries are ordered by `startMs`, then voice (soprano, alto, tenor, bass). The list is not capped.
+   - Every muted measure also appears in `review.items` with the same `reason` as its `code`, so `review.reviewNeeded` is true whenever `mutedMeasures` is non-empty.
+10. **Failed voices** *(added 2026-10-09, user decision)*. One voice that comes back empty from Stage 4, or whose audio Stage 5 cannot produce, no longer fails the job (PIYA-108 AC4/AC5, PIYA-109 AC9). The job fails only if all four voices fail. The response includes `failedVoices`, a list of lowercase voice names in SATB order (e.g. `["tenor"]`). It is always present and is `[]` when every voice rendered. A voice in `failedVoices` has no `audioTracks` entry and no `mutedMeasures` entries. *(Open: whether a voice that Stage 4 placed but Stage 5 could not render keeps its events in the timing file is not decided yet.)* `review.reasons` includes `voice_failed` whenever `failedVoices` is non-empty, with one `review.items` entry per failed voice: `{"code": "voice_failed", "voice": "tenor", "pageIndex": null, "systemIndex": null, "bar": null}`.
 
 *(2026-10-09: open gap. This endpoint is keyed by `job_id`, but the library opens scores by `scoreId`. See PIYA-308 AC8 in `module3-backend.md`. Playback (PIYA-208) is currently built against a fake keyed by score. `review.items[].pageIndex` / `systemIndex` are also affected by the index-base question under PIYA-117.)*
 
@@ -156,10 +173,14 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
       "reasons": ["bar_overflow_clipped", "clef_key_unvalidated", "key_no_majority"],
       "items": [
         {"code": "key_no_majority", "voice": "tenor", "pageIndex": 1, "systemIndex": 2, "bar": null},
-        {"code": "bar_overflow_clipped", "voice": "bass", "pageIndex": 1, "systemIndex": 1, "bar": 4}
+        {"code": "bar_overflow_clipped", "voice": "bass", "pageIndex": 0, "systemIndex": 0, "bar": 4}
       ],
       "truncated": false
-    }
+    },
+    "mutedMeasures": [
+      {"voice": "bass", "bar": 4, "pageIndex": 0, "systemIndex": 0, "startMs": 8000, "endMs": 10667, "reason": "bar_overflow_clipped"}
+    ],
+    "failedVoices": []
   },
   "success": true,
   "status": 200,
@@ -370,6 +391,9 @@ which token-level SER alone can't answer.
 4. Defaults key signature to `K = 0` and time signature to 4/4 if either not detected on a staff.
 5. Groups chord-tagged noteheads (shared `chord_group_id`) into a single chord event; all others treated as individual note events.
 6. Every output pitch event includes pitch, duration, time signature, voice label, page index, position.
+7. **Time signature per measure, including mid-strip changes** *(added 2026-10-09, user decision)*. A time signature is read wherever it is engraved in the strip: in the header, or after a barline mid-strip (a mid-line meter change). It applies from that measure on, and each event's `time_signature` is the meter of the measure it sits in, not the strip header's. Today the meter is read only in the header states (`clef` / `keysig` / `fixed_header` in `infer_pitch()`); in `body` a metersign is ignored and every `digit.*` token is taken as a multirest count, so a mid-strip `3/4` is lost (BUG-051).
+8. **Meter digits vs multirest counts by staff position** *(added 2026-10-09, user decision)*. In the Camera-PrIMuS vocabulary a time-signature digit sits on the staff (numerator `digit.N-L4`, denominator `digit.N-L2`) and a multirest count sits above it (`digit.N-S5`). Stage 3 tells them apart by that position, not by where the digit falls in the token order: an `S5` digit is never read as a meter, and an `L4` + `L2` pair is never read as a multirest count, in the header or the body. This fixes BUG-035 (a strip-start multirest count read as a meter) and the mid-strip case in BUG-051.
+9. **Detected vs defaulted meter** *(added 2026-10-09, user decision)*. Each event also carries `time_signature_source`: `"detected"` when its measure's meter was read in this strip (header or mid-strip, AC7), `"default"` when the strip had no meter at or before that measure and AC4's 4/4 was stamped. Stage 4 uses this to inherit the previous meter instead of reading a defaulted 4/4 as a change (PIYA-108 AC7).
 
 **AC5 decision (2026-09-10):** Two ways to satisfy "groups chord-tagged noteheads into a single
 chord event" were on the table: (a) merge same-onset noteheads into one multi-pitch event object,
@@ -449,22 +473,27 @@ the base training run finishing so AC4's fine-tune can proceed with explicit mul
 1. Sorts all strips by `page_index`, then vertical position, to establish global reading order before assembly.
 2. Appends each strip's event sequence to its corresponding voice sequence (S/A/T/B) without altering event order.
 3. Preserves chord events, clefs, key signatures, time signatures, and barlines unmodified during assembly.
-4. Verifies all four voice sequences are non-empty before marking the stage complete.
-5. If any voice sequence is empty, sets job status to `failed` with `failure_reason = "incomplete_voice_sequence"`, identifying the missing voice, triggers recapture prompt (FR-24).
+4. Verifies all four voice sequences are non-empty before marking the stage complete. *(added 2026-10-09, user decision: an empty voice no longer stops the stage. It is reported as a failed voice (PIYA-103 AC10) and the other voices continue to Stage 5. Today `reconstruct_satb()` raises `ValueError` if any voice is empty; that raise moves to the all-four-empty case.)*
+5. If any voice sequence is empty, sets job status to `failed` with `failure_reason = "incomplete_voice_sequence"`, identifying the missing voice, triggers recapture prompt (FR-24). *(added 2026-10-09, user decision: the job fails this way only when **all four** voices are empty or fail in Stage 5 (PIYA-109 AC9). One to three failed voices give a completed job with `failedVoices`.)*
+6. **Per-measure meter** *(added 2026-10-09, user decision)*. Stage 4 lays out bars measure by measure, each measure's length taken from its own meter (PIYA-107 AC7), so bar ticks can vary inside one system. A meter change at any barline, mid-system included, takes effect from that measure. The voices' meter for a measure is decided by consensus across voices, as `_consensus_time_signatures()` does per system today. `report["systems"]` gives, per system, `first_bar`, `n_bars`, `start_tick` and the ticks and time signature **of each bar** (a single `bar_ticks` / `time_signature` per system is no longer enough), and `pickup_ticks` stays at the top level. A multirest covers the bar count Stage 3 read for it, each bar at its own meter's length, not its tick total divided by one bar's length (`_measure_span()` today assumes 4/4 whole-note bars).
+7. **Inherit, don't reset, on a defaulted meter** *(added 2026-10-09, user decision)*. A measure whose meter is only Stage 3's default (`time_signature_source: "default"`, PIYA-107 AC9) inherits the last detected meter. A detected meter always counts, including a detected 4/4 after another meter. This removes the known limit in `_consensus_time_signatures()` ("a real change back to 4/4 mid-piece is invisible"). Each bar also records how its meter was obtained: `detected` (a meter was read for it in its own system: the strip header, or a change at or before it in that strip), `inherited` (carried over from an earlier system), `default` (no meter detected at or before it anywhere, 4/4 used) or `unknown` (Stage 4 could not establish one); PIYA-117 AC9 publishes this as `meterSource`.
+8. **Tick span on lossy repairs** *(added 2026-10-09, user decision)*. Every flag whose repair threw notes away (the muted reasons in PIYA-103 AC9) carries `start_tick` and `end_tick`, the global tick span (end exclusive) of the measure whose content was lost, so Stage 5 can silence it even where `bar` is `null`. For a bar-anchored measure this is that bar's span; for `pickup_length_mismatch` with `trimmed_head_to_pickup` it is the pickup, `[0, pickup_ticks)`. *(Open: the span for `local_placement_overrun` is not decided. That voice-strip has no bar anchoring, so Stage 4 cannot say which measure lost the notes.)*
 
 ---
 
 ### PIYA-109 — MIDI-Based Piano Audio Synthesis
-**Trigger:** Internal — invoked after SATB Part Reconstruction confirms all four voices are complete.
+**Trigger:** Internal — invoked after SATB Part Reconstruction confirms all four voices are complete. *(added 2026-10-09, user decision: invoked when Stage 4 has at least one non-empty voice; see PIYA-108 AC4/AC5.)*
 
 **Acceptance Criteria:**
 1. Encodes each voice as an independent MIDI track at 480 PPQ (pulses per quarter note).
-2. Applies default tempo of 90 BPM unless a detected tempo marking overrides it.
+2. Renders every track at the job's `tempoBpm` (PIYA-101 AC8; 90 when none was submitted), one quarter-note tempo for the whole piece. A detected tempo marking never overrides it. *(added 2026-10-09, user decision; replaces "Applies default tempo of 90 BPM unless a detected tempo marking overrides it", which contradicted PIYA-101 AC8.)*
 3. Encodes dotted notes at 1.5× base duration, double-dotted at 1.75×.
 4. Encodes rests by advancing the tick counter without generating note events.
 5. Encodes chord notes with identical onset/offset ticks to guarantee simultaneous playback.
-6. Outputs exactly four independently playable audio files (S/A/T/B) per job upon successful synthesis.
+6. Outputs exactly four independently playable audio files (S/A/T/B) per job upon successful synthesis. *(added 2026-10-09, user decision: one file per voice that did not fail (AC9); a failed voice has no file.)*
 7. Synthesis for a 3-page score completes in under 30 seconds on deployed hardware, as part of the overall ≤2-min/page budget.
+8. **Damaged measures play as silence** *(added 2026-10-09, user decision)*. For each Stage 4 flag whose repair was lossy (the muted reasons in PIYA-103 AC9, with the tick span from PIYA-108 AC8), that voice is silent from `start_tick` to `end_tick`: notes starting inside the span are not emitted, and a note that starts earlier and sounds into the span is cut at `start_tick`. Measures that were only scaled or compressed (`bar_overflow_run_scaled`, `suspected_tuplet`) play as repaired. The other voices, and the rest of the muted voice, are unaffected. Each silenced span becomes one `mutedMeasures` entry, with `startMs` / `endMs` converted at `tempoBpm` the same way as the timing file.
+9. **One voice failing does not fail the job** *(added 2026-10-09, user decision)*. A voice that is empty after Stage 4, or whose audio cannot be produced, is left out of the output and listed in `failedVoices` (PIYA-103 AC10). The other voices are still rendered and the job completes. The job fails only if all four voices fail.
 
 ## Infrastructure & Reliability Tickets
 
@@ -523,8 +552,27 @@ the base training run finishing so AC4's fine-tune can proceed with explicit mul
 6. Output is accessible through PIYA-103.
 7. Every event carries `bar`, the 1-based measure number taken from Stage 4's `global_bar`. A pickup (anacrusis) measure is `bar: 0`, so the first full measure is always `bar: 1` and the numbers match the printed score. `bar` is `null` for events in a voice-strip that Stage 4 could not anchor to the bar grid (its `placed_by_local_ticks` flag), and the client must accept `null`. Rest events are included, so a measure that starts on a rest still has an event on its downbeat. A note tied across a barline is one event (Stage 4 merges ties) and keeps the bar it starts in. *(Added 2026-10-09, for PIYA-208's ⏮ first-measure / ⏭ last-measure-start buttons. Depends on Stage 4 bar tracking in `stage4_reconstruction.py`; when bars are not anchored, those buttons can only approximate.)*
 8. Every event also carries `systemIndex` (Stage 2's `sys_idx`, already on every Stage 3/4 event) and `systemTopY` / `systemBottomY` (the top of the system's first staff and the bottom of its last staff, in the same pixel space as `y`). The Playback band spans the whole system. Without these fields the client has to guess the band's height from the four voices' note `y` values near one timestamp, which shrinks when the voices sit close together and breaks when a voice is resting. Stage 2 already has these staff boxes, so the cost is three integers per event. *(Added 2026-10-09, backend-lead; adopted by the user the same day. The client still falls back to note `y` values when the fields are absent.)*
+9. **Measure table** *(added 2026-10-09, user decision)*. The file also holds `bars`, one entry per measure of the whole piece, in order, so the client can lay out the metronome click per measure (PIYA-210). It is built from Stage 4's layout (`report["systems"]`: `first_bar`, `n_bars`, `start_tick`, each bar's ticks and time signature, PIYA-108 AC6; and `pickup_ticks`), not from any voice's events, so a measure where a voice rests, failed or was muted still has its entry.
 
-**Record shape (2026-10-09):** PIYA-117 and PIYA-118 describe the **same file**: one JSON array per score (AC4), each element one event holding both the timing fields above and PIYA-118's `x`/`y` (PIYA-118 AC6). PIYA-118's example below is the subset it adds, not a second record type. `timingMetadataUrl` in PIYA-103 serves this array.
+   | Field | Type | Meaning |
+   |---|---|---|
+   | `bar` | int | printed measure number as in AC7; `0` = pickup |
+   | `startMs` | int | start at the rendered tempo (`tempoBpm`), same clock as `timestampMs` |
+   | `durMs` | int | the measure's actual length at the rendered tempo |
+   | `startTick` | int | global tick at 480 PPQ |
+   | `durTicks` | int | the measure's actual length in ticks (a pickup or a short final bar is shorter than its meter) |
+   | `numerator` | int or null | `null` only when `meterSource` is `unknown` |
+   | `denominator` | int or null | `null` only when `meterSource` is `unknown` |
+   | `meterSource` | string | `detected`, `inherited`, `default` or `unknown` (PIYA-108 AC7) |
+   | `pickup` | bool | `true` only for the bar-0 entry |
+   | `groups` | null | reserved for beat grouping; always `null` for now and ignored by the client |
+
+   - Entries tile the piece with no gaps: the first starts at tick 0, and each `startTick` is the previous `startTick + durTicks`. A multirest of N bars gives N entries.
+   - A pickup entry carries bar 1's meter, so the client can place its clicks as the end of a full bar.
+   - With `meterSource: "default"` the meter is the 4/4 Stage 4 assumed, written as `4/4`.
+   - `durMs` is the next entry's `startMs` minus this one's (the last one runs to the end of the piece), so rounding never opens a gap.
+
+**Record shape (2026-10-09):** PIYA-117 and PIYA-118 describe the **same file**: one JSON array per score (AC4), each element one event holding both the timing fields above and PIYA-118's `x`/`y` (PIYA-118 AC6). PIYA-118's example below is the subset it adds, not a second record type. `timingMetadataUrl` in PIYA-103 serves this array. *(added 2026-10-09, user decision: the top level is now an object, `{"events": [...], "bars": [...]}`. `events` is the event array described here; `bars` is AC9. The client already accepts both a bare event array and `{"events": [...]}`; a file with no `bars` gets the plain quarter-note click fallback in PIYA-210.)*
 
 **Index bases (0-based API indices decided by the user 2026-10-09; `voice` casing still open):** no ticket fixes whether `pageIndex` counts from 0 or 1. The pipeline counts from 1 (Stage 1 `page_index`, Stage 2 `sys_idx`), and PIYA-103's `review.items` pass those values through unchanged (`stage5_synthesis.build_review()`). The app counts pages from 0 (PIYA-116 retake, PIYA-207 failure page). Decision: in every API response, `pageIndex` counts from 0 and indexes `scoreImages` directly, and `systemIndex` counts from 0 within its page. The serializer converts from the pipeline's 1-based values at that boundary. `bar` stays 1-based because it is a printed measure number, not an index. This applies to PIYA-101/102/103/116 as well, not only this file. `voice` here is `"Soprano"`, while PIYA-103 uses lowercase (`audioTracks` keys and `review.items`). The two should match.
 
@@ -533,6 +581,21 @@ the base training run finishing so AC4's fine-tune can proceed with explicit mul
 { "timestampMs": 12500, "pageIndex": 0, "voice": "Soprano", "tick": 960, "eventId": 45, "x": 1432, "y": 528, "bar": 3 }
 ```
 With the optional AC8 fields: `"systemIndex": 0, "systemTopY": 410, "systemBottomY": 1190`.
+
+**Example file** *(added 2026-10-09, user decision)*: a one-quarter pickup in 3/4, then a change to 6/8 at bar 3, at `tempoBpm` 90 (one quarter = 480 ticks = 666.67 ms):
+```json
+{
+  "events": [
+    { "timestampMs": 0, "pageIndex": 0, "voice": "Soprano", "tick": 0, "eventId": 0, "x": 312, "y": 528, "bar": 0 }
+  ],
+  "bars": [
+    { "bar": 0, "startMs": 0,    "durMs": 667,  "startTick": 0,    "durTicks": 480,  "numerator": 3, "denominator": 4, "meterSource": "detected", "pickup": true,  "groups": null },
+    { "bar": 1, "startMs": 667,  "durMs": 2000, "startTick": 480,  "durTicks": 1440, "numerator": 3, "denominator": 4, "meterSource": "detected", "pickup": false, "groups": null },
+    { "bar": 2, "startMs": 2667, "durMs": 2000, "startTick": 1920, "durTicks": 1440, "numerator": 3, "denominator": 4, "meterSource": "detected", "pickup": false, "groups": null },
+    { "bar": 3, "startMs": 4667, "durMs": 2000, "startTick": 3360, "durTicks": 1440, "numerator": 6, "denominator": 8, "meterSource": "detected", "pickup": false, "groups": null }
+  ]
+}
+```
 
 ---
 
