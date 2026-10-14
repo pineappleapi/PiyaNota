@@ -6,7 +6,7 @@ to confirm the ones marked **(product)**. Tickets: PIYA-103 AC9/AC10, PIYA-107
 AC7-AC9, PIYA-108 AC4-AC8, PIYA-109 AC8/AC9, PIYA-117 AC9, PIYA-207 AC10,
 PIYA-208-210 design decisions.
 
-1. **(product) Recapture for a failed voice.** *(Superseded 2026-10-14 by user decisions 2026-10-14 (3-6). The 2026-10-09 default was: no FR-24 recapture prompt for a failed voice, and `incomplete_voice_sequence` only when all four fail.)* A job with one to three failed voices still completes. Each failed voice has a cause (PIYA-103 AC10 `failedVoiceCauses`): `unreadable` (Stage 4 placed nothing for it) or `render_failed` (read, but Stage 5 could not render it). Only `unreadable` is the photos' fault, so only it offers a retake, as soon as processing is done and before Playback opens (PIYA-102 AC7, PIYA-207 AC11). The retake is of the whole score: back to Capture with pages cleared and details kept, as a new job that keeps the score's `scoreId` (PIYA-101 AC12, PIYA-207 AC12). `render_failed` keeps the Playback failed-voice alert with "try again later". When all four fail, the reason is `incomplete_voice_sequence` (whole-score retake) if at least one was `unreadable`, and `synthesis_failed` only when all four were read and none rendered (PIYA-109 AC9).
+1. **(product) Recapture for a failed voice.** *(Superseded 2026-10-14 by user decisions 2026-10-14 (3-6). The 2026-10-09 default was: no FR-24 recapture prompt for a failed voice, and `incomplete_voice_sequence` only when all four fail.)* A job with one to three failed voices still completes. Each failed voice has a cause (PIYA-103 AC10 `failedVoiceCauses`): `unreadable` (Stage 4 placed nothing for it) or `render_failed` (read, but Stage 5 could not render it). Only `unreadable` is the photos' fault, so only it offers a retake, as soon as processing is done and before Playback opens (PIYA-102 AC7, PIYA-207 AC11). The retake is of the whole score: back to Capture with pages cleared and details kept, as a new job that keeps the score's `scoreId` (PIYA-101 AC12, PIYA-207 AC12). `render_failed` keeps the Playback failed-voice alert with "try again later". When all four fail, the reason is `incomplete_voice_sequence` (whole-score retake) if at least one was `unreadable`, and `synthesis_failed` only when all four were read and none rendered (PIYA-109 AC9). *(Added 2026-10-14, user decision 2026-10-14.)* A later retake is also offered from Playback: tapping an `unreadable` voice's disabled chip or Mixer row explains "<Voice> couldn't be read from the photos" and offers Re-photograph, the same whole-score flow (PIYA-208, PIYA-209). The once-per-job offer after processing is unchanged. During a retake the library card shows processing and the old version cannot be opened (confirmed, user decision 2026-10-14).
 2. **`local_placement_overrun` span.** Mute that voice from the earliest
    trimmed onset to the end of the system. Notes dropped past the system end
    never sounded, so they need no span.
@@ -19,7 +19,7 @@ PIYA-208-210 design decisions.
 5. **PIYA-207 alert.** PIYA-207 routes to Playback on completion, so the
    muted-measures alert is shown by Playback (once). A background completion
    shows it when Playback is next opened. PIYA-102 gains no muted count.
-   *(Confirmed 2026-10-14, user decision 2026-10-14: "Muted-measure alert shows on first Playback open per score, not on Processing". PIYA-207 AC10 now defers to Playback, and Processing never shows it.)*
+   *(Confirmed 2026-10-14, user decision 2026-10-14: "Muted-measure alert shows on first Playback open per score, not on Processing". PIYA-207 AC10 now defers to Playback, and Processing never shows it. It shows on every Playback open until "Don't show again for this score" is ticked, the PIYA-208 rule, also user decision 2026-10-14.)*
 6. **Alert order.** The failed-voice alert comes first, then the muted-measures
    alert. "Don't show again" is on the muted-measures alert only.
    *(Amended 2026-10-14.)* Full order: the retake offer for `unreadable` voices, before Playback (PIYA-207 AC11); then, on Playback, the failed-voice alert for `render_failed` voices and voices that fail on the device; then the muted-measures alert. The retake offer has no "Don't show again"; it is offered once per completed job.
@@ -27,7 +27,7 @@ PIYA-208-210 design decisions.
    failed-voice alert when it happens; the other voices keep playing. A failed
    voice's Mixer row is disabled (no Solo, no slider), so the "Turn <Voice> on"
    alert never applies to it.
-   *(2026-10-14: unaffected by the cause split. A mid-playback dropout is a device-side failure and shows the failed-voice alert. The disabled Mixer row applies to both `unreadable` and `render_failed` voices.)*
+   *(2026-10-14: unaffected by the cause split. A mid-playback dropout is a device-side failure and shows the failed-voice alert. The disabled Mixer row applies to both `unreadable` and `render_failed` voices. For an `unreadable` voice, tapping the disabled chip or row gives the retake explanation from resolution 1, so the "Turn <Voice> on" alert still never applies.)*
 8. **Click accents for other meters.** Secondary stresses follow MuseScore's
    rule on beats per bar: every 3rd beat if divisible by 3, else every 2nd if
    divisible by 2, else at beat (n+1)/2 + 1 (5 → 3+2, 7 → 4+3, compound 15/8 →

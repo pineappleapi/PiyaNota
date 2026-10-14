@@ -273,6 +273,7 @@ Permanently removes a saved score and its associated audio/image assets from a u
 3. Deletes the database record and queues associated audio files/score images for deletion from storage within 60 seconds.
 4. Returns 200 immediately after the database record is removed; score no longer appears in subsequent PIYA-308 calls.
 5. Deletion is irreversible and does not require a secondary confirmation at the API layer (confirmation handled client-side).
+6. **Cancels a running retake** *(added 2026-10-14, user decision 2026-10-14; PIYA-101 AC12)*. In the same transaction that removes the score, every unfinished job whose `replaces_job_id` points at a job of this score is set to `cancelled` (as PIYA-114 would), and its page images are queued for deletion with the score's assets. The worker checks the job's status before PIYA-321 commits, so a cancelled retake never completes into a deleted score. If the retake's completion commits first, the delete then removes the updated score as usual. The score row is locked (`SELECT ... FOR UPDATE`) by both transactions, so they serialize.
 
 **Response Schema:**
 ```json
@@ -330,6 +331,12 @@ Permanently removes a saved score and its associated audio/image assets from a u
    - `scores` gains `tempo_bpm`, `key_signature` and `time_signature` with the same types and CHECKs, alongside the `arranger` and `page_count` columns added under PIYA-308. `scores.title` gets the same NOT NULL and CHECK as `jobs.title`. *(2026-10-09: `jobs.composer` / `scores.composer` renamed to `jobs.arranger` / `scores.arranger`, user decision — the field holds the arranger. No migration has been written yet, so this is a spec change, not a rename migration.)*
    - Use CHECK constraints rather than PostgreSQL `ENUM` types: changing a value set is then a one-line migration with a simple rollback (PIYA-312).
    - `tempo_bpm` stores the concrete tempo the audio was rendered at (90 when the client sent none), never NULL, so a later change to the server default does not change what an existing score claims.
+8. **Retake links** *(added 2026-10-14, user decision 2026-10-14; PIYA-101 AC12)*. `jobs` gains:
+   - `replaces_job_id` (FK `jobs(id)`, nullable, ON DELETE SET NULL): the job this submission retakes.
+   - `superseded_by_job_id` (FK `jobs(id)`, nullable, ON DELETE SET NULL): set on the old job when its retake is created (failed old job) or completes (completed old job).
+   - A partial unique index on `jobs (replaces_job_id) WHERE status NOT IN ('complete', 'failed', 'cancelled')`, so at most one unfinished retake per job. A violation maps to 409 `retake_in_progress`.
+   - Both FKs cannot check that the two jobs have the same owner; the endpoint does (PIYA-315), and returns 404 otherwise.
+   - ON DELETE SET NULL because job rows may be removed by PIYA-111 retention; losing the link must not block that.
 
 ---
 
@@ -341,6 +348,12 @@ Permanently removes a saved score and its associated audio/image assets from a u
 2. The generated default title is what Get User Score Library (PIYA-308) returns and what its search parameter filters against. *(2026-10-08: read "the submitted title and arranger" for "the generated default title", per PIYA-308 AC4.)*
 3. Title generation never blocks or delays the `complete` status response to the client.
 4. **Atomic with completion** (added 2026-10-08, backend-lead). Inserting the `scores` row, copying the metadata, setting `jobs.score_id` and moving the job to `complete` happen in one database transaction. PIYA-102 cannot report `complete` for a job without a score, and a failed copy rolls back to the previous status, which PIYA-111's failure handling then picks up, instead of leaving a completed job with no score.
+5. **Retake completion updates, not inserts** *(added 2026-10-14, user decision 2026-10-14; PIYA-101 AC12)*. When the completing job has `replaces_job_id` and that old job has a `score_id`, the AC4 transaction:
+   - locks that `scores` row (`SELECT ... FOR UPDATE`) and, if it no longer exists (deleted by PIYA-309), sets the job to `cancelled` instead of completing it, and queues its files for deletion;
+   - otherwise updates the row's `title`, `arranger`, `tempo_bpm`, `key_signature`, `time_signature` and `page_count` from the new job, keeping `id`, `created_at` and `last_accessed_at`;
+   - replaces that score's `audio_tracks` and `timing_metadata` rows with the new job's (both are keyed by `score_id`, so leaving the old rows would serve the old audio);
+   - sets the new job's `score_id` and `complete`, sets the old job's `superseded_by_job_id`, and sets the old job's `score_id` to NULL.
+   After commit, the old job's audio, timing file and page images are queued for deletion (FR-12). A crash between commit and deletion leaves only unreferenced blobs, which PIYA-111 cleanup removes. A retake of a failed job (no `score_id`) takes the normal AC1 insert path.
 
 ---
 
