@@ -1693,6 +1693,168 @@ reviewed them on 2026-10-14 and agrees with PASS.
   Gaano, Honneur and Handog GT are agent-made and Don't Stop Me Now's status is not on record (section 1 item 5).
   G3 folds cannot train until the user verifies the other pieces' GT or explicitly overrides the rule.
 
+#### Amendment 7 (2026-10-14): G3 pre-registration (ml-cv-lead), written before any G3 code exists
+
+**Status update (user, 2026-10-14):** all 5 dev pieces' GT is user-verified (BUG-051 fixed; `gt/README.md`
+corrected), so the 7.2 labels blocker and the per-strip verification task are no longer needed. The user also
+confirmed that clefs and key signatures stay scored (7.8 (iv); this replaces the Amendment 6 assumption).
+
+Dev data, diagnostic only. AC1 is judged only at Phase 4. Nothing below may change after the first G3 training run
+starts; a change needs Amendment 8, and any earlier G3 result must still be reported.
+
+**Corrections to step 2 as written:** about half the dev GT cannot be CTC labels. 701 GT tokens are `<OOV>`, and 121
+of the 247 scored strips contain at least one (`<OOV>` and `<TIEX>` are not in VOCAB). OOV-free strips with GT,
+camera: Non Nobis 11/36, Honneur 19/28, Gaano 39/72, Handog 19/52, Don't Stop Me Now 38/59. That is 126 camera
+strips plus about 88 digital, not "about 330 strips per condition". The GT status records conflict (BUG-051). The
+dev GT has 0 fermata tokens, so the Amendment 6 scoring change has no effect on dev.
+
+**7.1 Scoring**
+- Headline: grey strips, e1c header rule, ClefKeyNet header version (b), token SER with fermata tokens removed from
+  BOTH prediction and GT before alignment ("fermata-excluded SER"). Full SOW token SER (fermata included) is always
+  reported beside it as the secondary metric.
+- Not used as headline: an "in-scope classes only" allowlist SER. It would also drop clef.C and gracenote.*
+  predictions. On real strips those are pure errors (clef.C is the BUG-011 collapse class; gracenotes are
+  hallucinations), so an allowlist would hide exactly the failure class we must track. Fermata is the only class
+  removed, as a direct consequence of the user's 2026-10-14 scope ruling.
+- eval_dev_nofermata.py gets a both-sides mode. Parity checks before any G3 scoring: (i) without the flag it
+  reproduces phase2_run1; (ii) on dev, both-sides == prediction-only exactly (dev GT has 0 fermatas). Either
+  mismatch stops scoring.
+- Vocabulary and labels: fermata.above stays in VOCAB, and synthetic/CPM labels are unchanged. Removing it would
+  change the output layer (the G2 init and canary are no longer comparable), and deleting labels for visible glyphs
+  teaches CTC contradictory alignments. Real-strip labels have no fermata tokens (dev GT has none); that is
+  accepted, since fermatas are out of scope.
+- Real-strip training labels: `<TIEX>` tokens are dropped. Strips containing any `<OOV>` are excluded from training
+  (CTC has no wildcard target), but stay in scoring with the existing `<OOV>` wildcard rule. Slur tokens are kept as
+  the GT has them. The GT omits phrase slurs, which is a known label-convention confound; slur pred/GT counts are
+  reported (Stage 4 consumes slurs).
+
+**7.2 Labels: what must be user-verified (blocker)**
+- Rule (6b): only user-verified GT is used as training labels. Scoring GT need not be verified: G2 and G3 models
+  are scored on identical GT, and the comparison is paired.
+- Verification is per strip, not per condition. Camera and digital share one gt.json per piece.
+- Required scope: every training-candidate strip (GT has no `<OOV>`, and the strip was detected in at least one
+  condition) of Gaano, Honneur, Handog and, unless the user confirms it was already verified (with a date), Don't
+  Stop Me Now. Non Nobis is already verified. That is about 115 strips.
+- User task, one piece at a time:
+  - The agent prepares `gt/<piece>/verify_g3.md`. Each row has the strip id, the rectified staff crop
+    (`gt/tools/rect.py`), and the strip's `gt_source.txt` line (human notation: clef/key/time, pitch+octave,
+    printed accidentals `^ _ =`, durations `w h q e s` with dots, `[ ]` beams, rests, `|` barlines).
+  - The user checks, left to right: clef; key signature; time signature (only where printed); each note's pitch
+    and octave; each printed accidental; each duration including dots; beam grouping; each rest and its duration;
+    barline count and position. Not checked: slurs, ties, fermatas, lyrics, dynamics, text.
+  - Return format, one line per strip:
+    `page00P_sysSS_Voice: OK` / `page00P_sysSS_Voice: FIXED <corrected gt_source line>` /
+    `page00P_sysSS_Voice: EXCLUDE <reason>` (anything unreadable or an unresolvable `?`), plus a header line
+    `verified_by: <name>  date: <YYYY-MM-DD>  scope: G3 training strips, in-scope classes`.
+  - Recommended order (most training data first): Don't Stop Me Now status, then Gaano, Honneur, Handog.
+- Afterwards the agent: rebuilds gt.json with each piece's build_gt.py; re-freezes gt_source.sha256; spot-checks
+  2 strips per piece of the agnostic conversion against the crop with the overlay viewer; corrects GT_STATUS in
+  score_prelim.py and gt/README.md (including amending the "TEST-only, never train" line, with the user's
+  confirmation); records the sha256 of every piece's GT here. G3 GPU runs may not start before this record exists.
+- G2 numbers are NOT re-litigated. G2's PASS stands as recorded on the agent GT. G3 compares against the G2
+  checkpoints re-scored on the frozen post-verification GT (7.5).
+- Fallback, decided now:
+  - At least 3 pieces verified, including Non Nobis: G3 runs. Training labels come from verified pieces only. There
+    is one fold per verified piece (trained on the other verified pieces). One model trained on all verified pieces
+    scores every unverified piece; that same model is the final model. All 5 pieces are still scored as held-out;
+    unverified pieces are labelled "agent GT" in every table.
+  - Fewer than 3 verified: G3 does not run, unless the user explicitly overrides 6b. Under an override, G3 trains on
+    agent GT, is labelled "G3-agent-GT, diagnostic, not AC4 evidence", and the gate rule is unchanged. Phase 4 stays
+    valid either way, since its GT is independent.
+
+**7.3 Folds and data**
+- Fold = one piece. Its camera AND digital strips are both held out. Don't Stop Me Now digital strips are used for
+  training in the other folds, but are not part of the scored digital pool. The pools stay as at G2: camera 5
+  pieces, digital Non Nobis + Gaano. Don't Stop Me Now digital is reported as a supplementary row.
+- Real training strips: grey_live strips, OOV-free verified GT, only from pages where Stage 2's staff count equals
+  the GT staff count (6b label-join rule). Header and continuation strips are used as-is: labels are the printed
+  GT (clef and key on every system, time signature only where printed). No e1c-style rule is applied to labels.
+- A real-strip manifest is written per fold, with its sha256 recorded in run_info.json. A hard assert fails if any
+  strip of the held-out piece (either condition) is in the training list.
+
+**7.4 Fixed recipe (identical for every fold; no tuning, no selection on dev)**
+- Init: phase2_seed1.pt for seed 1, phase2_seed2.pt for seed 2 (the G2 checkpoints), so every comparison is
+  same-seed paired.
+- Epoch composition (seeded sampler, num_workers=0): 6,000 samples, as 20% real strips (with replacement), 40%
+  Phase 1 synthetic train (the same manifest, sha 78165b43...) and 40% CPM replay (canary excluded,
+  distorted_prob 0.5). So 1,500 steps of batch 16 in total.
+- Optimiser: AdamW, lr 1e-5, weight decay 1e-4, cosine over 4 epochs, gradient clip 5.0. Fixed 4 epochs, no
+  patience, no early stopping.
+- Augmentation: _augment on real and synthetic strips (as Phase 2 --augment-synth); CPM as in Phase 2.
+- Selection: the last epoch (4) is the fold model. Synthetic val SER is reported per epoch but never used for
+  selection.
+- Canary: the 399 pinned stems; the hard cap is 3x the init canary (measured on the G2 checkpoint). A breach stops
+  the run, the fold is invalid, and that seed FAILS G3. No fallback to an earlier epoch.
+- Runs: 5 folds x 2 seeds = 10; control x 2 seeds = 2 (same recipe, real share 0: 50% synthetic / 50% CPM, same
+  steps, same init; scored on all 5 pieces); final all-pieces model x 2 seeds = 2 (never scored on dev for any
+  claim; only its canary and synthetic val are reported). Total 14 runs.
+- Training code gets ml-cv-lead review plus a --smoke CPU pass before the kernel is pushed (CLAUDE.md).
+
+**7.5 Gate G3 (applies to EACH seed; G3 = PASS only if both seeds pass)**
+Definitions: G2_s = phase2_seed{s}.pt re-scored on the frozen verified GT. LOPO_s = each fold model scored only on
+its held-out piece, then pooled (summed errors / summed reference tokens). Headline metric per 7.1.
+
+a. Pooled LOPO_s <= G2_s - 1.0 pp, in camera and in digital.
+b. Per-piece paired delta (fold model minus G2_s, same piece) < 0 in >= 4/5 camera pieces and 2/2 digital pieces.
+c. The Non Nobis fold is reported separately; its camera delta must be <= 0.
+d. grey/e1b and grey/none fermata-excluded SER: pooled LOPO_s not worse than G2_s, in either pool.
+e. Pitch accuracy (SOW), pooled, >= G2_s - 0.5 pp in each pool, and >= 85%.
+f. No canary hard-cap breach in any fold. The final-epoch canary (canary_check.py metric) is no more than 1.0 pp
+   worse than G2_s, clean and distorted.
+g. All-in note precision (eval_dev_oov.py) is no more than 2.0 pp below G2_s, in each pool.
+h. Final-epoch synthetic val SER <= 2x the init's val SER.
+
+Verdicts:
+- PASS: a-h hold.
+- MARGINAL: a and e hold, but any of b, c, d, f, g or h fails. ml-cv-lead review before Phase 4 freezes a model.
+- FAIL: a or e fails, or any hard-cap breach. Phase 4 then freezes the G2 checkpoints. No GPU retry with changed
+  settings without Amendment 8, and the first result is reported regardless.
+
+Attribution (reported, not a gate): real-data effect = LOPO_s - Control_s on the same pieces. It is "attributed to
+real data" only if <= -0.5 pp pooled camera for both seeds; otherwise the record states that the gain comes from
+continued training.
+
+Phase 4 candidate: if G3 = PASS, the final all-pieces model, both seeds as a range. Otherwise as above.
+
+**7.6 Report (nothing omitted)**
+- Both seeds as a range, never the better seed. Camera and digital never pooled.
+- Headline and full SOW SER side by side for e1c, e1b and none, for LOPO_s, G2_s and Control_s.
+- Per-piece table with a GT-status column.
+- Pitch accuracy.
+- Note precision as a range: aligned (upper bound) and all-in (lower bound), plus GT `<OOV>` counts.
+- Canary clean/distorted per fold and per epoch.
+- Per-class recall with n, pooled per pool: note.whole, every rest class, accidental.sharp/flat/natural, dot,
+  barline, time-signature tokens (digit + metersign). Report n and do not interpret when n < 20.
+- Slur pred/GT counts.
+- Fermata pred counts (BUG-049, diagnostic only).
+- Training strips per fold and per condition, and the strips dropped by the label-join rule.
+- Confident-wrong diagnostic (step 7, report-only): token confidence AUROC for correct vs wrong aligned tokens, G2_s
+  vs LOPO_s. Not addressed by G3; BUG-011's confidence problem stays open.
+
+**7.7 Compute**
+- Phase 2 measured about 1,300-1,700 s per epoch for about 42k samples (about 30 ms per sample including eval). A
+  G3 run is 4 x 6,000 samples plus eval and startup: about 20 min, range 15-30 min.
+- 14 runs: about 4.5 h, range 3.5-7 h. That fits one 11 h T4 session with the Amendment 4 session-budget logic.
+- RUNS order: seed 1 folds, seed 2 folds, controls, finals.
+- The dev strips plus the frozen label manifest go up as a new small Kaggle dataset version.
+- Scoring runs locally on CPU (eval_dev.py, only on each fold's held-out piece).
+
+**7.8 Effects on Phase 3 and Phase 4**
+- Phase 3 (if revived): tune on the G3 fold models' logits, never on the final model (6b).
+- Phase 4 pre-registration changes:
+  - (i) Headline = fermata-excluded token SER (both sides), with full SOW SER beside it. The deviation from the SOW
+    definition is disclosed in the thesis as a scope ruling (amend the line "Nothing here redefines it").
+  - (ii) Phase 4 GT annotates printed fermatas, so the full-SER secondary is computable. It must never encode
+    fermatas, or anything that can be encoded in VOCAB, as `<OOV>`. `<OOV>` is used minimally, and the GT `<OOV>`
+    count is reported with all-in note precision.
+  - (iii) Fermata insertion counts drop out of the gate list and stay diagnostic.
+  - (iv) The user explicitly confirms that clefs and key signatures stay scored (currently an assumption in
+    Amendment 6) before Phase 4 is frozen.
+  - (v) Held-out pieces must differ from dev in piece AND capture session (phone, printing, lighting), and ideally
+    engraver/arranger, because leave-one-piece-out only controls for piece.
+  - (vi) The frozen system records the checkpoint sha256 of the final all-pieces model (or the G2 checkpoints on
+    G3 FAIL), both seeds as a range, a piece-level bootstrap CI, and the confident-wrong rate and calibration.
+
 ### Phase 3: grammar-aware rescoring (CPU; Oct 10 - Oct 14; dates slipped, see Amendment 5)
 
 - Oracle headroom: 47% of note/accidental misreads have the GT token in the top 3 with p > 1e-2. (Measured on the
