@@ -285,6 +285,7 @@ def test_one_empty_voice_completes_with_failed_voices(monkeypatch: pytest.Monkey
     with pytest.warns(RuntimeWarning, match="Tenor"):
         result = _run(monkeypatch, tmp_path, ve)
     assert result["failedVoices"] == ["tenor"]
+    assert result["failedVoiceCauses"] == {"tenor": s5.CAUSE_UNREADABLE} == {"tenor": "unreadable"}
     assert set(result["audio"]) == {"Soprano", "Alto", "Bass"}
     assert "voice_failed" in result["review"]["reasons"]
     assert {"code": "voice_failed", "voice": "tenor", "pageIndex": None, "systemIndex": None,
@@ -298,6 +299,7 @@ def test_render_failure_is_a_failed_voice(monkeypatch: pytest.MonkeyPatch, tmp_p
     _stub_render(monkeypatch, fail={"Alto"})
     result = _run(monkeypatch, tmp_path, _all_voices(PLAIN, Alto=OVERFULL))
     assert result["failedVoices"] == ["alto"] and "Alto" not in result["audio"]
+    assert result["failedVoiceCauses"] == {"alto": "render_failed"}
     assert result["mutedMeasures"] == [], "a failed voice has no mutedMeasures entries"
 
 
@@ -305,6 +307,7 @@ def test_nothing_failed_or_muted_gives_empty_lists(monkeypatch: pytest.MonkeyPat
     _stub_render(monkeypatch)
     result = _run(monkeypatch, tmp_path, _all_voices(PLAIN))
     assert result["failedVoices"] == [] and result["mutedMeasures"] == []
+    assert result["failedVoiceCauses"] == {}
     assert len(result["audio"]) == 4
 
 
@@ -331,14 +334,16 @@ def test_all_four_render_failures_are_synthesis_failed(monkeypatch: pytest.Monke
     assert err.value.failure_reason == s5.FAILURE_SYNTHESIS == "synthesis_failed"
 
 
-def test_empty_plus_render_failures_are_synthesis_failed(monkeypatch: pytest.MonkeyPatch,
-                                                        tmp_path: Path) -> None:
+def test_empty_plus_render_failures_are_incomplete_voice_sequence(monkeypatch: pytest.MonkeyPatch,
+                                                                 tmp_path: Path) -> None:
+    # PIYA-109 AC9 (amended 2026-10-14): one empty voice means a retake can help, so not synthesis_failed.
     _stub_render(monkeypatch, fail={"Soprano", "Alto", "Tenor"})
     ve = _all_voices(PLAIN)
     ve["Bass"] = []
     with pytest.warns(RuntimeWarning), pytest.raises(s4.PipelineFailure) as err:
         _run(monkeypatch, tmp_path, ve)
-    assert err.value.failure_reason == "synthesis_failed"
+    assert err.value.failure_reason == s4.FAILURE_INCOMPLETE_VOICE_SEQUENCE
+    assert str(err.value).startswith("incomplete_voice_sequence: ")
 
 
 def test_muted_span_is_silent_in_the_midi(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

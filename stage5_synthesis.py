@@ -35,9 +35,13 @@ MS_PER_MINUTE = 60_000
 ROUND_HALF_UP = 0.5         # ms values round half up: int(x + 0.5), same rule as the timing file
 # PIYA-103 AC10: the review code for a voice in failedVoices.
 VOICE_FAILED_CODE = "voice_failed"
-# PIYA-109 AC9: every voice failed and at least one had events, so rendering (server side) broke, not the
-# capture; no recapture prompt. Stage 4's FAILURE_INCOMPLETE_VOICE_SEQUENCE covers "every voice empty".
+# PIYA-109 AC9 (amended 2026-10-14): every voice failed and ALL four had events after Stage 4, so rendering
+# (server side) broke, not the capture; no retake. If any failed voice was empty, a retake can help, so the
+# job fails with Stage 4's FAILURE_INCOMPLETE_VOICE_SEQUENCE instead.
 FAILURE_SYNTHESIS = "synthesis_failed"
+# PIYA-109 AC10 / PIYA-103 AC10 failedVoiceCauses values: the app offers a retake only for UNREADABLE.
+CAUSE_UNREADABLE = "unreadable"          # empty after Stage 4 (in its report["failed_voices"])
+CAUSE_RENDER_FAILED = "render_failed"    # had events, Stage 5 could not produce its audio
 # A pipeline invariant broke (a bug, not the user's photo): retry-later copy,
 # never a recapture prompt.
 FAILURE_INTERNAL_ERROR = "internal_error"
@@ -643,15 +647,18 @@ def run_full_pipeline_with_report(
     A voice that is empty after Stage 4 or cannot be rendered is listed in
     ``failedVoices`` and the job still completes. It fails only when all four
     voices fail (PIYA-108 AC4/AC5, PIYA-109 AC9), with a PipelineFailure whose
-    ``failure_reason`` is ``incomplete_voice_sequence`` when every voice was
-    empty after Stage 4 (raised by Stage 4; recapture), else
-    ``synthesis_failed`` (a server-side rendering fault; no recapture).
+    ``failure_reason`` is ``incomplete_voice_sequence`` when at least one of
+    them was empty after Stage 4 (whole-score retake), else
+    ``synthesis_failed`` (all four were read; a server-side rendering fault,
+    no retake).
 
     Returns:
         {"audio": {voice: mp3 path}, failed voices left out,
          "bars": PIYA-117 AC9 measure table (see build_bars_table),
          "mutedMeasures": PIYA-103 AC9 (see build_muted_measures),
          "failedVoices": PIYA-103 AC10, lowercase, SATB order,
+         "failedVoiceCauses": PIYA-109 AC10, {lowercase voice: CAUSE_UNREADABLE | CAUSE_RENDER_FAILED},
+                              keys exactly failedVoices ({} when none),
          "review": client object for PIYA-103 (see build_review),
          "review_detail": uncapped review items for the job record,
          "provenance": INTERNAL ONLY (job record and logs, never the client response; backend-lead
@@ -682,9 +689,13 @@ def run_full_pipeline_with_report(
     # Stage 5
     mp3_files, failed = synthesize_satb_with_failures(
         satb, output_dir, bpm, soundfont_path, muted_spans_by_voice(recon_report["flags"]))
+    unreadable = {v.lower() for v in recon_report.get("failed_voices", [])}
+    failed_voice_causes = {v.lower(): CAUSE_UNREADABLE if v.lower() in unreadable else CAUSE_RENDER_FAILED
+                           for v in failed}
     if len(failed) == len(VOICES):
-        rendered_but_failed = [v for v in failed if satb.get(v)]
-        reason = FAILURE_SYNTHESIS if rendered_but_failed else FAILURE_INCOMPLETE_VOICE_SEQUENCE
+        rendered_but_failed = [v for v in failed if failed_voice_causes[v.lower()] == CAUSE_RENDER_FAILED]
+        reason = (FAILURE_INCOMPLETE_VOICE_SEQUENCE if CAUSE_UNREADABLE in failed_voice_causes.values()
+                  else FAILURE_SYNTHESIS)
         raise PipelineFailure(reason, f"no voice could be rendered (render failures: "
                                       f"{', '.join(rendered_but_failed) or 'none'})")
     failed_voices = [v.lower() for v in failed]
@@ -701,6 +712,7 @@ def run_full_pipeline_with_report(
             "bars": build_bars_table(recon_report, bpm),
             "mutedMeasures": build_muted_measures(recon_report["flags"], bpm, failed_voices),
             "failedVoices": failed_voices,
+            "failedVoiceCauses": failed_voice_causes,
             "review": review, "review_detail": review_detail, "provenance": provenance}
 
 
