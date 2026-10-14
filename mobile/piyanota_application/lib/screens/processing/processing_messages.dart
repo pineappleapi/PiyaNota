@@ -149,6 +149,11 @@ class ProcessingMessages {
       FailureReason.serverRestart =>
         'PiyaNota was interrupted while working on this scan. Please add '
             'the score again.',
+      FailureReason.synthesisFailed =>
+        'We couldn\'t make the audio for this score. Please try again later.',
+      FailureReason.internalError =>
+        'Something went wrong on our side while working on this score. '
+            'Please try again later.',
       FailureReason.unknown =>
         'Something went wrong on our side while reading this score. Please '
             'add it again.',

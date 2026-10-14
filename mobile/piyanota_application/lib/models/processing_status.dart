@@ -51,6 +51,8 @@ enum FailureReason {
   incompleteVoiceSequence('incomplete_voice_sequence'),
   stageTimeout('stage_timeout'),
   serverRestart('server_restart'),
+  synthesisFailed('synthesis_failed'),
+  internalError('internal_error'),
   unknown('');
 
   const FailureReason(this.apiValue);

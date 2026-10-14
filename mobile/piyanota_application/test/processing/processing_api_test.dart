@@ -176,6 +176,8 @@ void main() {
         'incomplete_voice_sequence',
         'stage_timeout',
         'server_restart',
+        'synthesis_failed',
+        'internal_error',
       ]) {
         final reason = FailureReason.fromApi(code);
         expect(reason, isNot(FailureReason.unknown), reason: code);
