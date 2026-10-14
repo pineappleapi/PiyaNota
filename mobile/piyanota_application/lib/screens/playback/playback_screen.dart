@@ -16,6 +16,7 @@ import '../../state/playback_providers.dart';
 import '../../state/session_actions.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/primary_pill_button.dart';
+import '../retake/rephotograph.dart';
 import 'mixer_sheet.dart';
 import 'playback_alerts.dart';
 import 'playback_messages.dart';
@@ -192,9 +193,22 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
   /// chip stays disabled for as long as the screen is open.
   void _onAlertState(PlaybackState state) {
     if (state.phase != PlaybackPhase.ready) return;
+    if (!_offerChecked) {
+      _offerChecked = true;
+      final result = state.result;
+      if (result != null && result.unreadableVoices.isNotEmpty) {
+        // First in the queue: nothing else is shown until it's answered.
+        _queueAlert(() => _offerRephotograph(result));
+      }
+    }
+    // PIYA-208: `unreadable` voices were offered a retake by PIYA-207
+    // AC11 and keep their chip alert, so this one names only voices that
+    // can't be helped by one (`render_failed`, unknown, or the device).
+    final unreadable = state.result?.unreadableVoices ?? const <VoicePart>[];
     final fresh = [
       for (final voice in VoicePart.values)
         if (state.failedVoices.contains(voice) &&
+            !unreadable.contains(voice) &&
             !_announcedFailures.contains(voice))
           voice,
     ];
@@ -208,8 +222,45 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
     }
     if (!_mutedChecked) {
       _mutedChecked = true;
-      final measures = state.result?.mutedMeasures ?? const [];
-      if (measures.isNotEmpty) _queueAlert(() => _showMuted(measures));
+      final result = state.result;
+      final measures = result?.mutedMeasures ?? const [];
+      if (result != null && measures.isNotEmpty) {
+        _queueAlert(() => _showMuted(result, measures));
+      }
+    }
+  }
+
+  /// The PIYA-207 AC11 offer was considered for this screen.
+  bool _offerChecked = false;
+
+  /// PIYA-207 AC11 when the score is opened from the library (or anything
+  /// else that isn't Processing, which asks before routing here): until it
+  /// is answered for this `jobId`, the offer comes before the score is
+  /// used. Continue stays here; Re-photograph goes to Capture; system
+  /// Back returns to the library without an answer, so it is offered
+  /// again next time.
+  Future<void> _offerRephotograph(ScoreResult result) async {
+    final jobId = result.jobId;
+    if (jobId == null || await RephotographOfferPrefs.isAnswered(jobId)) {
+      return;
+    }
+    if (!mounted || _leaving) return;
+    final playable =
+        VoicePart.values.length - result.declaredFailedVoices.length;
+    final choice = await showRephotographOffer(
+      context,
+      voices: result.unreadableVoices,
+      playable: playable,
+    );
+    if (!mounted) return;
+    switch (choice) {
+      case null:
+        await _back();
+      case RephotographChoice.continuePlayback:
+        await RephotographOfferPrefs.markAnswered(jobId);
+      case RephotographChoice.rephotograph:
+        await RephotographOfferPrefs.markAnswered(jobId);
+        if (mounted) await _rephotograph();
     }
   }
 
@@ -217,8 +268,12 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
   /// score" was ticked. Processing routes here on completion without
   /// showing it itself (gap doc item 5), so a score opened straight from
   /// Processing sees it exactly once.
-  Future<void> _showMuted(List<MutedMeasure> measures) async {
-    if (await MutedAlertPrefs.isHidden(widget.scoreId)) return;
+  Future<void> _showMuted(
+    ScoreResult result,
+    List<MutedMeasure> measures,
+  ) async {
+    final scope = MutedAlertPrefs.scopeFor(result);
+    if (await MutedAlertPrefs.isHidden(scope)) return;
     if (!mounted || _leaving) return;
     // A voice that has since failed as a whole is in the other alert.
     final failed = ref
@@ -230,7 +285,38 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
     ];
     if (shown.isEmpty) return;
     final hide = await showMutedMeasuresAlert(context, measures: shown);
-    if (hide) await MutedAlertPrefs.hide(widget.scoreId);
+    if (hide) await MutedAlertPrefs.hide(scope);
+  }
+
+  /// PIYA-208: an `unreadable` voice's disabled chip. Usable any number
+  /// of times; "Re-photograph" leaves Playback for Capture.
+  Future<void> _onUnreadableChip(VoicePart voice) async {
+    if (_leaving) return;
+    final retake = await showUnreadableVoiceAlert(context, voice: voice);
+    if (retake && mounted) await _rephotograph();
+  }
+
+  /// PIYA-207 AC12 from Playback: the whole score, pre-filled from one
+  /// PIYA-102 call on the result's job.
+  Future<void> _rephotograph() async {
+    final result = ref.read(playbackControllerProvider(widget.scoreId)).result;
+    final jobId = result?.jobId;
+    if (_leaving || jobId == null) return;
+    _leaving = true;
+    try {
+      await _controller.pause();
+    } on Object catch (e, stack) {
+      // Leaving disposes the engine anyway, which stops the audio.
+      debugPrint('Playback: pause on leaving failed: $e\n$stack');
+    }
+    if (!mounted) return;
+    await startWholeRetake(
+      context,
+      ref,
+      jobId: jobId,
+      title: widget.title,
+      retakeOfScoreId: widget.scoreId,
+    );
   }
 
   void _toggleVoice(VoicePart voice) {
@@ -254,7 +340,13 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
   }
 
   void _openMixer() => unawaited(
-    showPlaybackSheet(context, (_) => VoiceMixerSheet(scoreId: widget.scoreId)),
+    showPlaybackSheet(
+      context,
+      (_) => VoiceMixerSheet(
+        scoreId: widget.scoreId,
+        onRephotograph: () => unawaited(_rephotograph()),
+      ),
+    ),
   );
 
   void _openSpeed() => unawaited(
@@ -337,7 +429,9 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
                 _VoiceChips(
                   available: state.available,
                   selected: state.selected,
+                  unreadable: {...?state.result?.unreadableVoices},
                   onToggle: _toggleVoice,
+                  onUnreadable: (voice) => unawaited(_onUnreadableChip(voice)),
                 ),
               if (ready && state.timingUnavailable)
                 const _IndicatorUnavailableNote(),
@@ -493,12 +587,16 @@ class _VoiceChips extends StatelessWidget {
   const _VoiceChips({
     required this.available,
     required this.selected,
+    required this.unreadable,
     required this.onToggle,
+    required this.onUnreadable,
   });
 
   final Set<VoicePart> available;
   final Set<VoicePart> selected;
+  final Set<VoicePart> unreadable;
   final ValueChanged<VoicePart> onToggle;
+  final ValueChanged<VoicePart> onUnreadable;
 
   @override
   Widget build(BuildContext context) {
@@ -525,6 +623,10 @@ class _VoiceChips extends StatelessWidget {
                     available: available.contains(voice),
                     selected: selected.contains(voice),
                     onToggle: onToggle,
+                    onUnavailableTap:
+                        !available.contains(voice) && unreadable.contains(voice)
+                        ? () => onUnreadable(voice)
+                        : null,
                   ),
               ],
             ),
@@ -541,12 +643,17 @@ class _VoiceChip extends StatelessWidget {
     required this.available,
     required this.selected,
     required this.onToggle,
+    this.onUnavailableTap,
   });
 
   final VoicePart voice;
   final bool available;
   final bool selected;
   final ValueChanged<VoicePart> onToggle;
+
+  /// A disabled chip that still answers a tap (PIYA-208: an `unreadable`
+  /// voice offers the retake); null for one that doesn't.
+  final VoidCallback? onUnavailableTap;
 
   static const double _unavailableAlpha = 0.45;
 
@@ -578,9 +685,24 @@ class _VoiceChip extends StatelessWidget {
       side: BorderSide.none,
       materialTapTargetSize: MaterialTapTargetSize.padded,
     );
-    return available
-        ? chip
-        : Semantics(hint: PlaybackMessages.voiceUnavailable, child: chip);
+    if (available) return chip;
+    final tap = onUnavailableTap;
+    if (tap == null) {
+      return Semantics(hint: PlaybackMessages.voiceUnavailable, child: chip);
+    }
+    // The chip itself stays disabled (it can't be selected); the tap
+    // around it opens the alert.
+    return Semantics(
+      hint: PlaybackMessages.voiceUnavailable,
+      button: true,
+      onTap: tap,
+      child: GestureDetector(
+        key: ValueKey('voice-chip-tap-${voice.name}'),
+        behavior: HitTestBehavior.opaque,
+        onTap: tap,
+        child: chip,
+      ),
+    );
   }
 }
 

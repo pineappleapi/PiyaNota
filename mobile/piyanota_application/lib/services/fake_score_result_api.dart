@@ -25,7 +25,10 @@ import 'session_storage.dart';
 ///   builds, which never construct this class, carry none of it). Its
 ///   Bass bar 4 is a muted measure (PIYA-103 AC9).
 /// - Score [failedOnServerScoreId] comes back with the Tenor in
-///   `failedVoices` (PIYA-103 AC10): no Tenor track or timing events.
+///   `failedVoices` as `render_failed` (PIYA-103 AC10): no Tenor track or
+///   timing events. Score [unreadableScoreId] the same, but `unreadable`.
+/// - A score with a completed fake job reports that job's id and causes,
+///   so a whole-score retake (PIYA-207 AC12) replaces the old result.
 /// - Score [failsOnDeviceScoreId]'s Alto URL names a file that isn't
 ///   there, so the Alto fails to load on the device.
 class FakeScoreResultApi implements ScoreResultApi {
@@ -41,7 +44,11 @@ class FakeScoreResultApi implements ScoreResultApi {
   static const Duration defaultLatency = Duration(milliseconds: 600);
 
   /// "Paraiso" in [FakeScoreLibraryApi]'s demo library.
-  static const int failedOnServerScoreId = 102;
+  static const int failedOnServerScoreId =
+      FakeProcessingApi.renderFailedDemoScoreId;
+
+  /// "Ama Namin" in [FakeScoreLibraryApi]'s demo library.
+  static const int unreadableScoreId = FakeProcessingApi.unreadableDemoScoreId;
 
   /// "Bahay Kubo" in [FakeScoreLibraryApi]'s demo library.
   static const int failsOnDeviceScoreId = 103;
@@ -86,12 +93,17 @@ class FakeScoreResultApi implements ScoreResultApi {
       throw const ScoreResultNotReadyException();
     }
     final demo = await _demoFiles();
-    final tenorFailed = scoreId == failedOnServerScoreId;
+    final latest = _processing?.latestCompletedJob(
+      account: account,
+      scoreId: scoreId,
+    );
+    final causes = latest?.causes ?? FakeProcessingApi.demoCausesFor(scoreId);
+    final tenorFailed = causes.containsKey(VoicePart.tenor);
     final muted = PlaybackDemo.mutedMeasureJson();
     // The PIYA-103 envelope's `data`, through the real parser, so the fake
     // can't hand Playback something the server never could.
     return ScoreResult.fromJson({
-      'jobId': 'fake-job-$scoreId',
+      'jobId': latest?.jobId ?? FakeProcessingApi.demoJobId(scoreId),
       'scoreId': scoreId,
       'audioTracks': {
         for (final MapEntry(key: voice, value: uri) in demo.tracks.entries)
@@ -131,7 +143,11 @@ class FakeScoreResultApi implements ScoreResultApi {
         'truncated': false,
       },
       'mutedMeasures': [muted],
-      'failedVoices': [if (tenorFailed) 'tenor'],
+      'failedVoices': [for (final voice in causes.keys) voice.name],
+      'failedVoiceCauses': {
+        for (final MapEntry(key: voice, value: cause) in causes.entries)
+          voice.name: cause.apiValue,
+      },
       // Not in PIYA-103 (proposed): see ScoreResult.pageSizes.
       'scoreImageSizes': [
         {'width': PlaybackDemo.pageWidth, 'height': PlaybackDemo.pageHeight},

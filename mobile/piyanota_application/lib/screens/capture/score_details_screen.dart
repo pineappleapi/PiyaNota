@@ -16,10 +16,15 @@ import 'widgets/music_pictures.dart';
 /// With [initial] set it edits answers already given: Capture opens it so
 /// a field the server rejected can be fixed without losing the pages, and
 /// "Save details" pops with the new [ScoreDetails] (Cancel pops null).
+///
+/// With [wholeRetake] set it is step 1 of a whole-score retake (PIYA-207
+/// AC12): pre-filled with the old job's details, still editable, and the
+/// pages that follow are submitted with `replacesJobId`.
 class ScoreDetailsScreen extends StatefulWidget {
-  const ScoreDetailsScreen({super.key, this.initial});
+  const ScoreDetailsScreen({super.key, this.initial, this.wholeRetake});
 
   final ScoreDetails? initial;
+  final WholeRetakeArguments? wholeRetake;
 
   @override
   State<ScoreDetailsScreen> createState() => _ScoreDetailsScreenState();
@@ -42,7 +47,9 @@ class _ScoreDetailsScreenState extends State<ScoreDetailsScreen> {
   @override
   void initState() {
     super.initState();
-    if (widget.initial case final initial?) _apply(initial);
+    if ((widget.initial ?? widget.wholeRetake?.details) case final initial?) {
+      _apply(initial);
+    }
     _hadTitle = _title.text.trim().isNotEmpty;
     _title.addListener(_onTitleChanged);
   }
@@ -90,7 +97,10 @@ class _ScoreDetailsScreenState extends State<ScoreDetailsScreen> {
     // form shows what will actually be sent.
     final edited = await Navigator.of(context).pushNamed<Object?>(
       AppRoutes.capturePages,
-      arguments: CapturePagesArguments(details: _details),
+      arguments: CapturePagesArguments(
+        details: _details,
+        wholeRetake: widget.wholeRetake,
+      ),
     );
     if (edited is ScoreDetails && mounted) setState(() => _apply(edited));
   }

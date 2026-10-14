@@ -41,17 +41,19 @@ class FakeScoreUploadApi implements ScoreUploadApi {
     required ScoreDetails details,
     required List<String> imagePaths,
     CancelToken? cancelToken,
-  }) => _submit(details, imagePaths.length, cancelToken);
+    String? replacesJobId,
+  }) => _submit(details, imagePaths.length, cancelToken, replacesJobId);
 
   @override
   Future<SubmittedJob> submitPdf({
     required ScoreDetails details,
     required String pdfPath,
     CancelToken? cancelToken,
+    String? replacesJobId,
   }) =>
       // The real PIYA-310 counts the pages itself; the fake has no PDF
       // parser, so the library card shows no page count.
-      _submit(details, null, cancelToken);
+      _submit(details, null, cancelToken, replacesJobId);
 
   /// Retakes never fail on the flaky accounts: the job they replace has
   /// already demoed a failure.
@@ -91,8 +93,12 @@ class FakeScoreUploadApi implements ScoreUploadApi {
     ScoreDetails details,
     int? pageCount,
     CancelToken? cancelToken,
+    String? replacesJobId,
   ) async {
     final account = await _accountAfterLatency(cancelToken);
+    if (replacesJobId != null) {
+      return _submitRetake(account, details, pageCount, replacesJobId);
+    }
     if (account.endsWith(FakeScoreLibraryApi.flakyDomain)) {
       final call = (_callsByAccount[account] ?? 0) + 1;
       _callsByAccount[account] = call;
@@ -126,6 +132,50 @@ class FakeScoreUploadApi implements ScoreUploadApi {
       account: account,
       scoreId: scoreId,
       pageCount: pageCount,
+      details: details,
+    );
+    return SubmittedJob(jobId: jobId, pageCount: pageCount, status: 'queued');
+  }
+
+  /// PIYA-101 AC12. Never fails on the flaky accounts, like a page retake.
+  /// A completed score keeps its id and card; a failed scan's card is
+  /// replaced by the new one.
+  SubmittedJob _submitRetake(
+    String account,
+    ScoreDetails details,
+    int? pageCount,
+    String replacesJobId,
+  ) {
+    final jobs = _jobs;
+    if (jobs == null) {
+      throw const UploadRejectedException(
+        statusCode: 404,
+        code: jobNotFoundCode,
+      );
+    }
+    final old = jobs.checkWholeRetake(account: account, jobId: replacesJobId);
+    final int scoreId;
+    if (old.keepsScore) {
+      scoreId = old.scoreId;
+    } else {
+      _library.removeSubmittedScore(account: account, scoreId: old.scoreId);
+      final arranger = details.arranger.trim();
+      scoreId = _library.addSubmittedScore(
+        account: account,
+        title: details.title.trim(),
+        arranger: arranger.isEmpty ? null : arranger,
+        pageCount: pageCount,
+      );
+    }
+    final jobId = 'fake-job-retake-${_nextJob++}';
+    jobs.registerJob(
+      jobId: jobId,
+      account: account,
+      scoreId: scoreId,
+      pageCount: pageCount,
+      details: details,
+      replacesJobId: replacesJobId,
+      keepsScore: old.keepsScore,
     );
     return SubmittedJob(jobId: jobId, pageCount: pageCount, status: 'queued');
   }

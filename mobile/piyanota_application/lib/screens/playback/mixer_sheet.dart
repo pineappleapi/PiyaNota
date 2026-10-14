@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/voice_part.dart';
 import '../../state/playback_providers.dart';
 import '../../theme/app_theme.dart';
+import '../retake/rephotograph.dart';
 import 'playback_alerts.dart';
 import 'playback_messages.dart';
 import 'sheet_parts.dart';
@@ -13,9 +14,17 @@ import 'sheet_parts.dart';
 /// Playback controller, so its settings last for the Playback session and
 /// reset when the score is reopened (AC6).
 class VoiceMixerSheet extends ConsumerWidget {
-  const VoiceMixerSheet({super.key, required this.scoreId});
+  const VoiceMixerSheet({
+    super.key,
+    required this.scoreId,
+    this.onRephotograph,
+  });
 
   final int scoreId;
+
+  /// Starts the whole-score retake (PIYA-209: an `unreadable` row's tap
+  /// offers it). Called after the sheet has closed.
+  final VoidCallback? onRephotograph;
 
   static const Map<VoicePart, Color> pillColors = {
     VoicePart.soprano: AppTheme.mixerSoprano,
@@ -42,6 +51,12 @@ class VoiceMixerSheet extends ConsumerWidget {
       // Every voice keeps its row; one that can't play (failed on the
       // server or on the device) is disabled (user decision 2026-10-09).
       final usable = state.available.contains(voice);
+      // PIYA-209: an `unreadable` row offers the whole-score retake; a
+      // `render_failed` (or device-failed) row offers nothing.
+      final unreadable =
+          !usable &&
+          onRephotograph != null &&
+          (state.result?.unreadableVoices.contains(voice) ?? false);
       rows
         ..add(
           _MixerRow(
@@ -56,6 +71,9 @@ class VoiceMixerSheet extends ConsumerWidget {
             onSolo: (on) => _solo(context, ref, scoreId, voice, soloed: on),
             onMute: (on) => controller.setVoiceMuted(voice, muted: on),
             onVolume: (level) => controller.setVoiceVolume(voice, level),
+            onDisabledTap: unreadable
+                ? () => _offerRetake(context, voice)
+                : null,
           ),
         )
         ..add(const Divider(height: 1, color: AppTheme.sheetDivider));
@@ -146,6 +164,17 @@ class _VoicePill extends StatelessWidget {
   );
 }
 
+extension on VoiceMixerSheet {
+  /// "Re-photograph" closes the Mixer and leaves Playback for Capture
+  /// (PIYA-209); Cancel leaves everything as it was.
+  Future<void> _offerRetake(BuildContext context, VoicePart voice) async {
+    final retake = await showUnreadableVoiceAlert(context, voice: voice);
+    if (!retake || !context.mounted) return;
+    Navigator.of(context).pop();
+    onRephotograph?.call();
+  }
+}
+
 class _MixerRow extends StatelessWidget {
   const _MixerRow({
     super.key,
@@ -160,7 +189,11 @@ class _MixerRow extends StatelessWidget {
     required this.onMute,
     required this.onVolume,
     this.inactive = false,
+    this.onDisabledTap,
   });
+
+  /// What a tap on the row does while it is disabled; null for nothing.
+  final VoidCallback? onDisabledTap;
 
   /// The row's name for screen readers ("Soprano", "Metronome Click").
   final String name;
@@ -255,10 +288,19 @@ class _MixerRow extends StatelessWidget {
       },
     );
     if (enabled) return row;
-    return Semantics(
+    final faded = Semantics(
       container: true,
       label: disabledNote,
+      button: onDisabledTap != null,
+      onTap: onDisabledTap,
       child: Opacity(opacity: 0.38, child: row),
+    );
+    if (onDisabledTap == null) return faded;
+    // The row's own controls are disabled, so the whole row takes the tap.
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onDisabledTap,
+      child: faded,
     );
   }
 }

@@ -60,6 +60,10 @@ class HttpScoreResultApi implements ScoreResultApi {
   static const int _notFound = 404;
   static const int _conflict = 409;
 
+  /// PIYA-101 AC12 `job_superseded`: a whole-score retake replaced this
+  /// result, so for Playback it is as gone as a 404.
+  static const int _gone = 410;
+
   @override
   Future<ScoreResult> fetchResult(int scoreId) async {
     final token = await _sessionStorage.readToken();
@@ -128,7 +132,7 @@ class HttpScoreResultApi implements ScoreResultApi {
       case DioExceptionType.badResponse:
         return switch (e.response?.statusCode) {
           _unauthorized => const ScoreResultSessionExpiredException(),
-          _notFound => const ScoreResultNotFoundException(),
+          _notFound || _gone => const ScoreResultNotFoundException(),
           _conflict => const ScoreResultNotReadyException(),
           _ => const ScoreResultServerException(),
         };

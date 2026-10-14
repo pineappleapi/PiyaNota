@@ -230,15 +230,30 @@ void main() {
       await tester.pump();
       await ok(tester);
       final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getBool(MutedAlertPrefs.keyFor(kScoreId)), isTrue);
-      expect(prefs.getBool(MutedAlertPrefs.keyFor(kScoreId + 1)), isNull);
+      expect(prefs.getBool(MutedAlertPrefs.keyFor(kJobId)), isTrue);
+      expect(prefs.getBool(MutedAlertPrefs.keyFor('job-2')), isNull);
     });
 
     testWidgets('left unticked, nothing is saved', (tester) async {
       await pumpPlayback(tester, harness(mutedMeasures: [muted]));
       await ok(tester);
       final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getBool(MutedAlertPrefs.keyFor(kScoreId)), isNull);
+      expect(prefs.getBool(MutedAlertPrefs.keyFor(kJobId)), isNull);
+    });
+
+    testWidgets('hidden for an earlier job of the score: shown again for '
+        'the retake (PIYA-207 AC12)', (tester) async {
+      await pumpPlayback(
+        tester,
+        PlaybackHarness(
+          ScriptedScoreResultApi([
+            testResult(mutedMeasures: [muted], jobId: 'job-retake'),
+          ], timing: testTiming()),
+        ),
+        prefs: {MutedAlertPrefs.keyFor(kJobId): true},
+      );
+      await settle(tester);
+      expect(mutedAlert, findsOneWidget);
     });
 
     testWidgets('once hidden, the alert stays away for that score', (
@@ -247,7 +262,7 @@ void main() {
       await pumpPlayback(
         tester,
         harness(mutedMeasures: [muted]),
-        prefs: {MutedAlertPrefs.keyFor(kScoreId): true},
+        prefs: {MutedAlertPrefs.keyFor(kJobId): true},
       );
       await settle(tester);
       expect(mutedAlert, findsNothing);
@@ -259,7 +274,7 @@ void main() {
       await pumpPlayback(
         tester,
         harness(mutedMeasures: [muted]),
-        prefs: {MutedAlertPrefs.keyFor(kScoreId): true},
+        prefs: {MutedAlertPrefs.keyFor(kJobId): true},
         prefsStore: (values) => _FaultyPrefsStore(values, readFails: true),
       );
       await settle(tester);

@@ -9,6 +9,7 @@ import '../../state/processing_providers.dart';
 import '../../state/session_actions.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/primary_pill_button.dart';
+import '../retake/rephotograph.dart';
 import 'processing_messages.dart';
 
 /// Processing View (PIYA-207, SOW Module 2): follows one job through the
@@ -109,10 +110,58 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
   void _complete({required bool hold}) {
     if (_leaving || _completionTimer != null) return;
     if (!hold) {
+      unawaited(_finish());
+      return;
+    }
+    _completionTimer = Timer(
+      ProcessingScreen.completionHold,
+      () => unawaited(_finish()),
+    );
+  }
+
+  /// PIYA-207 AC8/AC11: with an `unreadable` voice the Re-photograph offer
+  /// comes first (once per job), and routing waits for the answer. Only
+  /// `render_failed` voices go straight to Playback.
+  Future<void> _finish() async {
+    if (!mounted || _leaving) return;
+    final status = _job?.status;
+    final unreadable = status?.unreadableVoices ?? const [];
+    if (status == null ||
+        unreadable.isEmpty ||
+        await RephotographOfferPrefs.isAnswered(widget.jobId)) {
       _openPlayback();
       return;
     }
-    _completionTimer = Timer(ProcessingScreen.completionHold, _openPlayback);
+    if (!mounted || _leaving) return;
+    _leaving = true;
+    final navigator = Navigator.of(context);
+    final choice = await showRephotographOffer(
+      context,
+      voices: unreadable,
+      playable: status.playableVoiceCount,
+    );
+    if (!mounted) return;
+    switch (choice) {
+      case null:
+        // System Back: to the library, not answered, offered again on
+        // the next tap of the card (AC11).
+        _goToLibrary(navigator);
+      case RephotographChoice.continuePlayback:
+        await RephotographOfferPrefs.markAnswered(widget.jobId);
+        _leaving = false;
+        _openPlayback();
+      case RephotographChoice.rephotograph:
+        await RephotographOfferPrefs.markAnswered(widget.jobId);
+        if (!mounted) return;
+        await startWholeRetake(
+          context,
+          ref,
+          jobId: widget.jobId,
+          title: widget.title,
+          details: status.details,
+          retakeOfScoreId: status.scoreId,
+        );
+    }
   }
 
   void _openPlayback() {
@@ -238,6 +287,22 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
     }
   }
 
+  /// PIYA-207 AC7 `incompleteVoiceSequence`: the whole score (AC12). The
+  /// failed scan's card is replaced by the new one, so no score id.
+  void _retakeWhole() {
+    if (_leaving) return;
+    _leaving = true;
+    unawaited(
+      startWholeRetake(
+        context,
+        ref,
+        jobId: widget.jobId,
+        title: widget.title,
+        details: _job?.status?.details,
+      ),
+    );
+  }
+
   void _retake(int pageIndex) {
     Navigator.of(context).pushNamed(
       AppRoutes.captureRetake,
@@ -278,6 +343,7 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
             : ProcessingMessages.failedHeading,
         status: job!.status,
         onRetake: _retake,
+        onRetakeWhole: _retakeWhole,
         onBack: _backToLibrary,
       ),
       TrackedPhase.notFound => _FailureView(
@@ -651,6 +717,7 @@ class _FailureView extends StatelessWidget {
     this.status,
     this.body,
     this.onRetake,
+    this.onRetakeWhole,
   });
 
   final String heading;
@@ -660,6 +727,9 @@ class _FailureView extends StatelessWidget {
   /// worded from [status].
   final String? body;
   final ValueChanged<int>? onRetake;
+
+  /// AC7/AC12: re-photograph the whole score.
+  final VoidCallback? onRetakeWhole;
   final VoidCallback onBack;
 
   static const double _iconSize = 48;
@@ -677,6 +747,8 @@ class _FailureView extends StatelessWidget {
         reason.isRetakeable &&
         pageIndex != null &&
         onRetake != null;
+    final canRetakeWhole =
+        body == null && reason.isWholeRetakeable && onRetakeWhole != null;
     final unsupported = reason == FailureReason.unsupportedStaffLayout;
 
     return Column(
@@ -727,7 +799,7 @@ class _FailureView extends StatelessWidget {
             ),
           ),
         ],
-        if (canRetake) ...[
+        if (canRetake || canRetakeWhole) ...[
           const SizedBox(height: 16),
           Text(
             ProcessingMessages.retakeTipsTitle,
@@ -765,10 +837,12 @@ class _FailureView extends StatelessWidget {
         ],
         const Spacer(flex: 4),
         const SizedBox(height: 16),
-        if (canRetake) ...[
+        if (canRetake || canRetakeWhole) ...[
           PrimaryPillButton(
-            label: ProcessingMessages.retakePage(page!),
-            onPressed: () => onRetake!(pageIndex),
+            label: canRetake
+                ? ProcessingMessages.retakePage(page!)
+                : RephotographMessages.rephotograph,
+            onPressed: canRetake ? () => onRetake!(pageIndex) : onRetakeWhole,
             // White on the brand blue is 4.3:1; this blue passes 4.5:1.
             backgroundColor: AppTheme.processingSecondary,
           ),

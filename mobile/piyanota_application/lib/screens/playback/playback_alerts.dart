@@ -111,29 +111,36 @@ Future<bool> showSoloChipOffAlert(
   return turnOn ?? false;
 }
 
-/// "Don't show again for this score", per `scoreId` on the device. A
-/// storage failure reads as "not hidden" and a failed save is only
-/// logged: at worst the alert shows again, never a crash.
+/// "Don't show again for this score", per `jobId` on the device
+/// (PIYA-207 AC12: a whole-score retake is a new job, so its muted
+/// measures are listed again). A storage failure reads as "not hidden" and
+/// a failed save is only logged: at worst the alert shows again, never a
+/// crash.
 class MutedAlertPrefs {
   const MutedAlertPrefs._();
 
-  @visibleForTesting
-  static String keyFor(int scoreId) => 'muted_alert_hidden_$scoreId';
+  /// What the flag is keyed by: the result's `jobId`, or its `scoreId`
+  /// when an older server didn't send one.
+  static String scopeFor(ScoreResult result) =>
+      result.jobId ?? 'score-${result.scoreId}';
 
-  static Future<bool> isHidden(int scoreId) async {
+  @visibleForTesting
+  static String keyFor(String scope) => 'muted_alert_hidden_$scope';
+
+  static Future<bool> isHidden(String scope) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      return prefs.getBool(keyFor(scoreId)) ?? false;
+      return prefs.getBool(keyFor(scope)) ?? false;
     } on Object catch (e) {
       debugPrint('Playback: muted-alert preference unread: $e');
       return false;
     }
   }
 
-  static Future<void> hide(int scoreId) async {
+  static Future<void> hide(String scope) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(keyFor(scoreId), true);
+      await prefs.setBool(keyFor(scope), true);
     } on Object catch (e) {
       debugPrint('Playback: muted-alert preference not saved: $e');
     }

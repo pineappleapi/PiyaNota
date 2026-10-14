@@ -23,7 +23,8 @@ class PlaybackMessages {
       1 => 'The other voice will play.',
       _ => 'The other ${_count(remaining)} voices will play.',
     };
-    return '$which corrupted and can’t be played at all. $rest';
+    return '$which corrupted and can’t be played at all. $rest Please try '
+        'again later.';
   }
 
   static const String ok = 'OK';

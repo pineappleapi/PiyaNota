@@ -9,7 +9,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
 
 import 'package:piyanota_application/models/measure_table.dart';
+import 'package:piyanota_application/models/processing_status.dart';
+import 'package:piyanota_application/models/score_details.dart';
 import 'package:piyanota_application/models/score_result.dart';
+import 'package:piyanota_application/models/voice_failure.dart';
 import 'package:piyanota_application/models/voice_part.dart';
 import 'package:piyanota_application/routes/app_routes.dart';
 import 'package:piyanota_application/screens/playback/playback_screen.dart';
@@ -19,8 +22,10 @@ import 'package:piyanota_application/services/score_result_api.dart';
 import 'package:piyanota_application/services/session_storage.dart';
 import 'package:piyanota_application/state/auth_providers.dart';
 import 'package:piyanota_application/state/playback_providers.dart';
+import 'package:piyanota_application/state/processing_providers.dart';
 
 import '../auth/auth_test_harness.dart';
+import '../processing/processing_fakes.dart' show ScriptedProcessingApi;
 
 /// [PlaybackEngine] whose position runs on the test clock (`clock.now`,
 /// which `testWidgets` advances with `pump`), at the set speed. Like the
@@ -297,6 +302,14 @@ const kArranger = 'Robert Delgado';
 const kLibrary = 'ROUTE:library';
 const kLogin = 'ROUTE:login';
 
+/// PIYA-207 AC12: Capture opened for a whole-score retake.
+String wholeRetakeMarker(WholeRetakeArguments args) =>
+    'ROUTE:whole-retake ${args.replacesJobId} ${args.details.title} '
+    '${args.details.tempoBpm} ${args.retakeOfScoreId}';
+
+/// The PIYA-102 details a whole-score retake pre-fills from.
+const kRetakeDetails = ScoreDetails(title: kTitle, tempoBpm: 90);
+
 /// Natural size of the test page; the timing x/y are in these pixels.
 const kPageWidth = 1000;
 const kPageHeight = 1400;
@@ -353,6 +366,9 @@ List<TimingEvent> testTiming() {
   return events;
 }
 
+/// The job [testResult] comes from by default.
+const String kJobId = 'job-1';
+
 ScoreResult testResult({
   Set<VoicePart> voices = const {...VoicePart.values},
   bool reviewNeeded = true,
@@ -361,9 +377,12 @@ ScoreResult testResult({
   bool tempoKnown = true,
   Set<VoicePart> failedVoices = const {},
   List<MutedMeasure> mutedMeasures = const [],
+  String jobId = kJobId,
+  Map<VoicePart, VoiceFailureCause> failedVoiceCauses = const {},
 }) => ScoreResult(
   scoreId: kScoreId,
-  jobId: 'job-1',
+  jobId: jobId,
+  failedVoiceCauses: failedVoiceCauses,
   audioTracks: {
     for (final voice in voices)
       voice: Uri.parse('https://cdn.test/${voice.name}.mp3'),
@@ -450,6 +469,17 @@ class PlaybackHarness {
       return Uri.parse('test://click.wav');
     }),
     sessionStorageProvider.overrideWithValue(SessionStorage(secureStorage)),
+    // A whole-score retake (PIYA-207 AC12) reads the job's details.
+    processingApiProvider.overrideWithValue(
+      ScriptedProcessingApi([
+        const ProcessingStatus(
+          stage: ProcessingStage.complete,
+          percentComplete: 100,
+          scoreId: kScoreId,
+          details: kRetakeDetails,
+        ),
+      ]),
+    ),
   ];
 }
 
@@ -499,6 +529,12 @@ Future<void> pumpPlayback(
                 ModalRoute.of(context)!.settings.arguments!
                     as PlaybackArguments;
             return PlaybackScreen(scoreId: args.scoreId, title: args.title);
+          },
+          AppRoutes.capture: (context) {
+            final args =
+                ModalRoute.of(context)!.settings.arguments!
+                    as WholeRetakeArguments;
+            return Scaffold(body: Text(wholeRetakeMarker(args)));
           },
         },
       ),

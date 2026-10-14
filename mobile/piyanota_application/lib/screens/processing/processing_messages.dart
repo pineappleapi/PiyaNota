@@ -141,8 +141,8 @@ class ProcessingMessages {
       FailureReason.unsupportedStaffLayout => unsupportedLayout,
       FailureReason.incompleteVoiceSequence =>
         'We couldn\'t find all four voice parts (Soprano, Alto, Tenor, Bass) '
-            'in this score. Check that every page is included and add the '
-            'score again.',
+            'in these photos. Re-photographing the whole score may fix it; '
+            'check that every page is included.',
       FailureReason.stageTimeout =>
         'This scan took too long to finish. Please add the score again; '
             'fewer pages per score can help.',

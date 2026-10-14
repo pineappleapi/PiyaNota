@@ -131,6 +131,12 @@ Future<void> expectTrackerCleared(
 }
 
 String playbackMarker(int scoreId) => 'ROUTE:playback $scoreId $kTitle';
+
+/// PIYA-207 AC12: Capture opened for a whole-score retake.
+String wholeRetakeMarker(WholeRetakeArguments args) =>
+    'ROUTE:whole-retake ${args.replacesJobId} ${args.details.title} '
+    '${args.details.tempoBpm} ${args.retakeOfScoreId}';
+
 String retakeMarker(String jobId, int pageIndex) =>
     'ROUTE:retake $jobId $pageIndex';
 
@@ -193,6 +199,12 @@ Future<void> pumpProcessing(
             return Scaffold(
               body: Text(retakeMarker(args.jobId, args.pageIndex)),
             );
+          },
+          AppRoutes.capture: (context) {
+            final args =
+                ModalRoute.of(context)!.settings.arguments!
+                    as WholeRetakeArguments;
+            return Scaffold(body: Text(wholeRetakeMarker(args)));
           },
           AppRoutes.processing: (context) {
             final args =

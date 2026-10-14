@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../config/api_config.dart';
 
 import 'score_details.dart';
+import 'voice_failure.dart';
 import 'voice_part.dart';
 
 /// Reads a voice name from either contract: PIYA-103 keys its audio tracks
@@ -129,6 +130,7 @@ class ScoreResult {
     this.tempoBpm = ScoreDetails.defaultTempo,
     this.tempoKnown = true,
     this.declaredFailedVoices = const {},
+    this.failedVoiceCauses = const {},
     this.mutedMeasures = const [],
   });
 
@@ -173,6 +175,18 @@ class ScoreResult {
 
   /// PIYA-103 AC10 `failedVoices`: voices the server could not render.
   final Set<VoicePart> declaredFailedVoices;
+
+  /// PIYA-103 AC10 `failedVoiceCauses`, one entry per voice in
+  /// [declaredFailedVoices] (unknown or missing causes are `renderFailed`).
+  final Map<VoicePart, VoiceFailureCause> failedVoiceCauses;
+
+  /// Server-failed voices a whole-score retake may fix (PIYA-208: their
+  /// chips offer Re-photograph, and the failed-voice alert leaves them out).
+  /// In SATB order.
+  List<VoicePart> get unreadableVoices => [
+    for (final voice in VoicePart.values)
+      if (failedVoiceCauses[voice] == VoiceFailureCause.unreadable) voice,
+  ];
 
   /// PIYA-103 AC9, in the server's order; empty when nothing was muted.
   /// Entries for a failed voice are dropped (it has no audio to mute).
@@ -220,11 +234,7 @@ class ScoreResult {
         if (voice != null && track != null) tracks[voice] = track;
       });
     }
-    final rawFailed = data['failedVoices'];
-    final declaredFailed = <VoicePart>{
-      if (rawFailed is List)
-        for (final name in rawFailed) ?parseVoicePart(name),
-    };
+    final declaredFailed = parseFailedVoices(data['failedVoices']);
     // A voice the server calls failed has no audio to trust, even if a
     // track was sent anyway (AC10 says it has none).
     tracks.removeWhere((voice, _) => declaredFailed.contains(voice));
@@ -269,7 +279,11 @@ class ScoreResult {
           : null,
       tempoBpm: tempo is int && tempoKnown ? tempo : ScoreDetails.defaultTempo,
       tempoKnown: tempoKnown,
-      declaredFailedVoices: Set.unmodifiable(declaredFailed),
+      declaredFailedVoices: declaredFailed,
+      failedVoiceCauses: parseFailedVoiceCauses(
+        data['failedVoiceCauses'],
+        declaredFailed,
+      ),
       mutedMeasures: List.unmodifiable(muted),
     );
   }

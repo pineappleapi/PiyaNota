@@ -41,12 +41,29 @@ class CaptureRetakeArguments {
   final String title;
 }
 
+/// Arguments for [AppRoutes.capture] when it starts a whole-score retake
+/// (PIYA-207 AC12): step 1 opens pre-filled with [details], and the submit
+/// carries [replacesJobId]. [retakeOfScoreId] is the completed score the
+/// retake will fill (null for a failed scan, whose card is replaced).
+class WholeRetakeArguments {
+  const WholeRetakeArguments({
+    required this.replacesJobId,
+    required this.details,
+    this.retakeOfScoreId,
+  });
+
+  final String replacesJobId;
+  final ScoreDetails details;
+  final int? retakeOfScoreId;
+}
+
 /// Arguments for [AppRoutes.capturePages]: the step-1 answers that travel
-/// with the pages at submit.
+/// with the pages at submit, and the whole-score retake they belong to.
 class CapturePagesArguments {
-  const CapturePagesArguments({required this.details});
+  const CapturePagesArguments({required this.details, this.wholeRetake});
 
   final ScoreDetails details;
+  final WholeRetakeArguments? wholeRetake;
 }
 
 /// Arguments for [AppRoutes.processing]. [jobId] is what Processing

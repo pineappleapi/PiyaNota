@@ -34,7 +34,8 @@ class FakeScoreLibraryApi implements ScoreLibraryApi {
 
   /// The mockup's three scores, plus two incomplete entries so the
   /// broken-data handling (PIYA-308 client handling, 2026-10-08) is visible
-  /// in the demo: one untitled, one with no arranger or page count.
+  /// in the demo: one untitled, one with no arranger or page count. The
+  /// last one has a Tenor that couldn't be read (PIYA-207 AC11/AC12 demo).
   static final List<ScoreSummary> demoScores = List.unmodifiable([
     ScoreSummary(
       scoreId: 101,
@@ -66,6 +67,13 @@ class FakeScoreLibraryApi implements ScoreLibraryApi {
       scoreId: 105,
       title: 'Pasko Na Naman',
       lastActivityAt: DateTime.utc(2026, 9, 14, 16, 30),
+    ),
+    ScoreSummary(
+      scoreId: 106,
+      title: 'Ama Namin',
+      lastActivityAt: DateTime.utc(2026, 9, 10, 8, 45),
+      arranger: 'Bobby Enriquez',
+      pageCount: 3,
     ),
   ]);
 

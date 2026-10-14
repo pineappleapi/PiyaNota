@@ -34,10 +34,21 @@ import 'widgets/page_strip.dart';
 /// With [retake] set (PIYA-207 AC7) it replaces one page of a failed job
 /// instead: one photo at most, no PDF, and the page goes to PIYA-116.
 class CaptureScreen extends ConsumerStatefulWidget {
-  const CaptureScreen({super.key, required this.details, this.retake});
+  const CaptureScreen({
+    super.key,
+    required this.details,
+    this.retake,
+    this.wholeRetake,
+  });
 
   final ScoreDetails details;
+
+  /// PIYA-207 AC7 page retake: one page of a failed job.
   final CaptureRetakeArguments? retake;
+
+  /// PIYA-207 AC12 whole-score retake: every page, sent as a new score
+  /// with `replacesJobId`.
+  final WholeRetakeArguments? wholeRetake;
 
   @override
   ConsumerState<CaptureScreen> createState() => _CaptureScreenState();
@@ -640,13 +651,14 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   /// offers this same retake again, so go past it to the library. The
   /// library reloads to show where the scan really stands.
   void _abandonRetake() {
-    final retake = widget.retake;
-    if (retake == null || _submitting) return;
+    final retakeJobId =
+        widget.retake?.jobId ?? widget.wholeRetake?.replacesJobId;
+    if (retakeJobId == null || _submitting) return;
     _pendingUndo = null;
     _files.deleteAll();
     final error = _uploadError;
     if (error is UploadRejectedException && error.code == jobNotFoundCode) {
-      ref.read(processingJobsProvider.notifier).forget(retake.jobId);
+      ref.read(processingJobsProvider.notifier).forget(retakeJobId);
     }
     ref.invalidate(scoreLibraryProvider);
     final navigator = Navigator.of(context);
@@ -701,22 +713,37 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
       }
       // AC8: a PDF goes to PIYA-310, camera/gallery photos to PIYA-101.
       final pdf = _session.pdf;
+      final wholeRetake = widget.wholeRetake;
       final job = pdf != null
           ? await api.submitPdf(
               details: details,
               pdfPath: pdf.path,
               cancelToken: cancelToken,
+              replacesJobId: wholeRetake?.replacesJobId,
             )
           : await api.submitImages(
               details: details,
               imagePaths: [for (final page in _session.photos) page.path],
               cancelToken: cancelToken,
+              replacesJobId: wholeRetake?.replacesJobId,
             );
       if (!mounted) return;
       sent = true;
       // The server has its own copies now.
       _pendingUndo = null;
       _files.deleteAll();
+      if (wholeRetake != null) {
+        final jobs = ref.read(processingJobsProvider.notifier)
+          // The old job is finished with; only the retake is followed.
+          ..forget(wholeRetake.replacesJobId);
+        // Tracked here, before Processing opens, so the library knows at
+        // once that the old score is being replaced (PIYA-207 AC12).
+        jobs.track(
+          job.jobId,
+          title: details.title,
+          retakeOfScoreId: wholeRetake.retakeOfScoreId,
+        );
+      }
       ref.invalidate(scoreLibraryProvider);
       // Details and Capture leave the stack: Back from Processing returns
       // to the library, not to a form that was already sent.
@@ -891,7 +918,11 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                         if (_uploadError case final error?) ...[
                           const SizedBox(height: 8),
                           _UploadErrorBanner(
-                            message: CaptureMessages.uploadError(error),
+                            message:
+                                (widget.wholeRetake != null
+                                    ? CaptureMessages.wholeRetakeError(error)
+                                    : null) ??
+                                CaptureMessages.uploadError(error),
                             action: switch (error) {
                               UploadSessionExpiredException() => (
                                 CaptureMessages.logIn,
@@ -900,6 +931,12 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                               _
                                   when widget.retake != null &&
                                       CaptureMessages.isDeadRetake(error) =>
+                                (CaptureMessages.backToLibrary, _abandonRetake),
+                              _
+                                  when widget.wholeRetake != null &&
+                                      CaptureMessages.isDeadWholeRetake(
+                                        error,
+                                      ) =>
                                 (CaptureMessages.backToLibrary, _abandonRetake),
                               _ when CaptureMessages.isDetailsError(error) => (
                                 CaptureMessages.editDetails,
