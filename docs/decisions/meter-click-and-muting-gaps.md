@@ -6,10 +6,7 @@ to confirm the ones marked **(product)**. Tickets: PIYA-103 AC9/AC10, PIYA-107
 AC7-AC9, PIYA-108 AC4-AC8, PIYA-109 AC8/AC9, PIYA-117 AC9, PIYA-207 AC10,
 PIYA-208-210 design decisions.
 
-1. **(product) Recapture for a failed voice.** A job with one to three failed
-   voices completes; the failed-voice alert names the voice. No FR-24
-   recapture prompt is offered for it yet. `incomplete_voice_sequence` stays
-   the reason only when all four fail.
+1. **(product) Recapture for a failed voice.** *(Superseded 2026-10-14 by user decisions 2026-10-14 (3-6). The 2026-10-09 default was: no FR-24 recapture prompt for a failed voice, and `incomplete_voice_sequence` only when all four fail.)* A job with one to three failed voices still completes. Each failed voice has a cause (PIYA-103 AC10 `failedVoiceCauses`): `unreadable` (Stage 4 placed nothing for it) or `render_failed` (read, but Stage 5 could not render it). Only `unreadable` is the photos' fault, so only it offers a retake, as soon as processing is done and before Playback opens (PIYA-102 AC7, PIYA-207 AC11). The retake is of the whole score: back to Capture with pages cleared and details kept, as a new job that keeps the score's `scoreId` (PIYA-101 AC12, PIYA-207 AC12). `render_failed` keeps the Playback failed-voice alert with "try again later". When all four fail, the reason is `incomplete_voice_sequence` (whole-score retake) if at least one was `unreadable`, and `synthesis_failed` only when all four were read and none rendered (PIYA-109 AC9).
 2. **`local_placement_overrun` span.** Mute that voice from the earliest
    trimmed onset to the end of the system. Notes dropped past the system end
    never sounded, so they need no span.
@@ -22,12 +19,15 @@ PIYA-208-210 design decisions.
 5. **PIYA-207 alert.** PIYA-207 routes to Playback on completion, so the
    muted-measures alert is shown by Playback (once). A background completion
    shows it when Playback is next opened. PIYA-102 gains no muted count.
+   *(Confirmed 2026-10-14, user decision 2026-10-14: "Muted-measure alert shows on first Playback open per score, not on Processing". PIYA-207 AC10 now defers to Playback, and Processing never shows it.)*
 6. **Alert order.** The failed-voice alert comes first, then the muted-measures
    alert. "Don't show again" is on the muted-measures alert only.
+   *(Amended 2026-10-14.)* Full order: the retake offer for `unreadable` voices, before Playback (PIYA-207 AC11); then, on Playback, the failed-voice alert for `render_failed` voices and voices that fail on the device; then the muted-measures alert. The retake offer has no "Don't show again"; it is offered once per completed job.
 7. **Mid-playback dropout.** A voice that fails while playing shows the same
    failed-voice alert when it happens; the other voices keep playing. A failed
    voice's Mixer row is disabled (no Solo, no slider), so the "Turn <Voice> on"
    alert never applies to it.
+   *(2026-10-14: unaffected by the cause split. A mid-playback dropout is a device-side failure and shows the failed-voice alert. The disabled Mixer row applies to both `unreadable` and `render_failed` voices.)*
 8. **Click accents for other meters.** Secondary stresses follow MuseScore's
    rule on beats per bar: every 3rd beat if divisible by 3, else every 2nd if
    divisible by 2, else at beat (n+1)/2 + 1 (5 → 3+2, 7 → 4+3, compound 15/8 →
@@ -82,6 +82,7 @@ PIYA-208-210 design decisions.
       in open-score SATB every staff engraves the meter, so one voice
       reading a change is far likelier a misread. *(Added 2026-10-09, review
       round; threshold amended 2026-10-14, review round 3.)*
+      *(Confirmed as is, user decision 2026-10-14: at least 2 of the voices that actually read a time signature.)*
     - Meter flags of a strip that produced no events reach `review.items`
       through Stage 3's `strip_flags_out`.
     - Limitation: the CRNN vocabulary has no `digit.5-L4` or `digit.7-L4`, so
@@ -95,4 +96,5 @@ PIYA-208-210 design decisions.
     multirest in 3/4 counts as 5) is logged as BUG-052 and fixed with PIYA-108
     AC6.
 12. Timing-file `voice` stays capitalised (`"Soprano"`); the client matches
-    case-insensitively. `mutedMeasures`/`failedVoices` are lowercase.
+    case-insensitively. `mutedMeasures`/`failedVoices` are lowercase. `failedVoiceCauses` keys are lowercase too.
+13. **No count-in** *(user decision 2026-10-14)*. The metronome plays no count-in bar. The first click sounds with the music at t=0, on the pickup or on bar 1 (PIYA-210).
