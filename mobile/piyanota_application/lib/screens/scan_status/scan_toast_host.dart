@@ -28,10 +28,15 @@ class ScanToastHost extends ConsumerStatefulWidget {
   const ScanToastHost({
     super.key,
     required this.navigatorKey,
+    required this.routes,
     required this.child,
   });
 
   final GlobalKey<NavigatorState> navigatorKey;
+
+  /// The navigator's stack, so a dialog or sheet over a scan's Processing
+  /// screen still counts as watching it.
+  final ScanRouteStack routes;
   final Widget child;
 
   /// Long enough to read and reach the button; the bell keeps the item.
@@ -76,16 +81,11 @@ class _ScanToastHostState extends ConsumerState<ScanToastHost> {
     return state == null || state == AppLifecycleState.resumed;
   }
 
-  /// True when the top route is Processing for [jobId].
+  /// True when the top screen is Processing for [jobId], even with a
+  /// popup (dialog, sheet, menu) open over it.
   bool _isWatching(String jobId) {
-    final navigator = widget.navigatorKey.currentState;
-    if (navigator == null) return false;
-    Route<dynamic>? top;
-    navigator.popUntil((route) {
-      top = route;
-      return true;
-    });
-    final settings = top?.settings;
+    final screen = widget.routes.topScreen;
+    final settings = screen?.settings;
     final arguments = settings?.arguments;
     return settings?.name == AppRoutes.processing &&
         arguments is ProcessingArguments &&
@@ -208,5 +208,43 @@ class _ScanToastHostState extends ConsumerState<ScanToastHost> {
         ),
       ),
     );
+  }
+}
+
+/// Keeps the app navigator's route stack, for [ScanToastHost] to see which
+/// screen is under any popup. Register it in `navigatorObservers`.
+class ScanRouteStack extends NavigatorObserver {
+  final List<Route<dynamic>> _stack = [];
+
+  /// The topmost route that isn't a popup (dialog, bottom sheet, menu).
+  Route<dynamic>? get topScreen {
+    for (final route in _stack.reversed) {
+      if (route is! PopupRoute) return route;
+    }
+    return null;
+  }
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) =>
+      _stack.add(route);
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) =>
+      _stack.remove(route);
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) =>
+      _stack.remove(route);
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    final index = oldRoute == null ? -1 : _stack.indexOf(oldRoute);
+    if (newRoute == null) {
+      if (index >= 0) _stack.removeAt(index);
+    } else if (index >= 0) {
+      _stack[index] = newRoute;
+    } else {
+      _stack.add(newRoute);
+    }
   }
 }

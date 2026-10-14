@@ -29,6 +29,7 @@ class _PiyaNotaAppState extends State<PiyaNotaApp> {
   /// Lets the app-wide scan toast (PIYA-218 AC7), which sits above the
   /// Navigator, open Processing or Playback.
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+  final ScanRouteStack _routes = ScanRouteStack();
 
   @override
   Widget build(BuildContext context) {
@@ -36,8 +37,10 @@ class _PiyaNotaAppState extends State<PiyaNotaApp> {
       title: 'PiyaNota',
       theme: AppTheme.light,
       navigatorKey: _navigatorKey,
+      navigatorObservers: [_routes],
       builder: (context, child) => ScanToastHost(
         navigatorKey: _navigatorKey,
+        routes: _routes,
         child: child ?? const SizedBox.shrink(),
       ),
       home: const _AppEntryPoint(),

@@ -228,6 +228,9 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
       if (kDebugMode) debugPrint('Score delete failed: $e\n$stack');
       message = LibraryMessages.deleteServerError;
     }
+    // PIYA-218: a deleted score's scans leave the bell and the stored
+    // history with it.
+    if (gone) ref.read(processingJobsProvider.notifier).forgetScore(scoreId);
     if (!mounted) return gone;
     // A gone row keeps its disabled state until it has left the list.
     if (!gone) setState(() => _deletingIds.remove(scoreId));

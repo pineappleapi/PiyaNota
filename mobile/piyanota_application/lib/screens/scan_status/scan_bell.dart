@@ -130,11 +130,33 @@ Future<void> showScanPanel(BuildContext context) =>
 
 /// The rows themselves: newest first, one per score, updated in place as
 /// the tracker changes (AC6).
-class ScanPanel extends ConsumerWidget {
+class ScanPanel extends ConsumerStatefulWidget {
   const ScanPanel({super.key});
 
+  /// How often "Just now" / "5 min ago" are recomputed while open.
+  static const Duration timeRefresh = Duration(minutes: 1);
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ScanPanel> createState() => _ScanPanelState();
+}
+
+class _ScanPanelState extends ConsumerState<ScanPanel> {
+  Timer? _ticker;
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = Timer.periodic(ScanPanel.timeRefresh, (_) => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final jobs = ref.watch(processingJobsProvider);
     final rows = scanNotifications(jobs);
     final unread = unreadScanCount(jobs);
@@ -346,7 +368,7 @@ class _ScanRow extends ConsumerWidget {
           alignment: Alignment.centerRight,
           child: Padding(
             padding: EdgeInsets.only(right: 16),
-            child: Icon(Icons.close_rounded, color: AppTheme.sheetClose),
+            child: Icon(Icons.close_rounded, color: AppTheme.sheetSubtle),
           ),
         ),
       ),

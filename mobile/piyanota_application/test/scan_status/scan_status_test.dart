@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
@@ -117,14 +119,20 @@ class _App {
     tester.view.devicePixelRatio = 2.75;
     addTearDown(tester.view.reset);
     final navigatorKey = GlobalKey<NavigatorState>();
+    final routes = ScanRouteStack();
     await tester.pumpWidget(
       ProviderScope(
         overrides: overrides,
         child: MaterialApp(
           navigatorKey: navigatorKey,
+          navigatorObservers: [routes],
           builder: (context, child) => MediaQuery(
             data: MediaQuery.of(context).copyWith(disableAnimations: true),
-            child: ScanToastHost(navigatorKey: navigatorKey, child: child!),
+            child: ScanToastHost(
+              navigatorKey: navigatorKey,
+              routes: routes,
+              child: child!,
+            ),
           ),
           home: home,
           routes: {
@@ -896,6 +904,101 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text(ProcessingMessages.failedHeading), findsOneWidget);
       expect(find.byKey(const ValueKey('failure-delete')), findsNothing);
+      await app.end();
+    });
+  });
+
+  group('review fixes', () {
+    testWidgets('deleting a score forgets its scans, also on the device', (
+      tester,
+    ) async {
+      final app = _App();
+      await app.pump(tester, const ScoreLibraryScreen());
+      await tester.pumpAndSettle();
+      app.api.script('a', [failed(FailureReason.stageTimeout)]);
+      app.tracker.track('a', title: 'Paraiso', scoreId: 102);
+      await tester.pump();
+      await tester.pump(ScanToastHost.showFor);
+      expect(_badge, findsOneWidget);
+
+      await tester.tap(
+        find.bySemanticsLabel(LibraryMessages.deleteSemantics('Paraiso')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text(LibraryMessages.deleteConfirm),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(app.libraryApi.deleted, [102]);
+      expect(app.jobs, isEmpty);
+      expect(_badge, findsNothing);
+      expect(app.store.storedJobs, isEmpty, reason: 'not back after restart');
+      await app.end();
+    });
+
+    test('one unreadable stored entry drops only itself', () {
+      final good = ScanJobStore.encodeJobs([
+        const TrackedJob(jobId: 'good', title: 'Paraiso', scoreId: 102),
+      ]);
+      final raw =
+          '[${good.substring(1, good.length - 1)},'
+          '"not a job",{"jobId":5,"phase":"active"},'
+          '{"jobId":"bad-phase","phase":"exploded"},'
+          '{"jobId":"bad-status","phase":"failed","status":{"status":7}}]';
+      final jobs = ScanJobStore.decodeJobs(raw);
+      // A broken status is dropped but its job is kept (same policy as the
+      // API parser); entries with no usable id or phase drop alone.
+      expect(jobs.map((job) => job.jobId), ['good', 'bad-status']);
+      expect(jobs.last.status, isNull);
+    });
+
+    testWidgets("the panel's relative times move on while it is open", (
+      tester,
+    ) async {
+      final app = _App();
+      await app.pump(tester, _bellHome);
+      app.api.script('a', [done(scoreId: 1)]);
+      app.tracker.track('a', title: 'A');
+      await tester.pump();
+      await _openPanel(tester);
+      expect(find.text('Just now'), findsOneWidget);
+      await tester.pump(const Duration(minutes: 2));
+      expect(find.text('2 min ago'), findsOneWidget);
+      await app.end();
+    });
+
+    testWidgets("a dialog over that scan's Processing still counts as "
+        'watching: no toast, and not marked read behind it', (tester) async {
+      final app = _App();
+      await app.pump(tester, _bellHome);
+      app.api.script('a', [running(40), failed(FailureReason.stageTimeout)]);
+      app.tracker.track('a', title: 'Paraiso');
+      await tester.pump();
+      final navigator = tester.state<NavigatorState>(
+        find.byType(Navigator).first,
+      );
+      unawaited(
+        navigator.pushNamed(
+          AppRoutes.processing,
+          arguments: const ProcessingArguments(jobId: 'a', title: 'Paraiso'),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      unawaited(
+        showDialog<void>(
+          context: navigator.context,
+          builder: (_) => const AlertDialog(content: Text('popup')),
+        ),
+      );
+      await tester.pump();
+      await app.poll();
+      expect(app.jobs['a']!.phase, TrackedPhase.failed);
+      expect(find.byKey(const ValueKey('scan-toast-open')), findsNothing);
+      expect(app.jobs['a']!.read, isFalse);
       await app.end();
     });
   });

@@ -454,6 +454,14 @@ class ProcessingJobsController extends Notifier<Map<String, TrackedJob>> {
     _persist();
   }
 
+  /// Stops following every job of [scoreId]: the score was deleted, so
+  /// its bell rows and card state must go too, here and on the device.
+  void forgetScore(int scoreId) {
+    for (final job in [...state.values]) {
+      if (job.libraryScoreId == scoreId) forget(job.jobId);
+    }
+  }
+
   /// Stops following everything and wipes the stored copy: the session is
   /// gone, and the next account must not see these jobs.
   void forgetAll() {

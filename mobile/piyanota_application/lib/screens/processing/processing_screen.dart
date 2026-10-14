@@ -102,7 +102,9 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
     if (_leaving) return;
     // PIYA-218 AC6: watched to the end here, so the bell has nothing new
     // to tell about it.
-    if (job.isFinished && !job.read) {
+    if (job.isFinished &&
+        !job.read &&
+        (ModalRoute.of(context)?.isCurrent ?? false)) {
       ref.read(processingJobsProvider.notifier).markRead(job.jobId);
     }
     switch (job.phase) {
@@ -348,7 +350,9 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
       _snack(failure);
       return;
     }
-    ref.read(processingJobsProvider.notifier).forget(widget.jobId);
+    ref.read(processingJobsProvider.notifier)
+      ..forgetScore(scoreId)
+      ..forget(widget.jobId);
     _snack(LibraryMessages.deleted(widget.title));
     _backToLibrary();
   }

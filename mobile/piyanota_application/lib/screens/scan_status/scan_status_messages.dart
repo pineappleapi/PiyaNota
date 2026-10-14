@@ -6,7 +6,10 @@ class ScanStatusMessages {
   // Library card (AC4, spec §4/§9 "Converting… 60%").
   static String converting(int percent) => 'Converting… $percent%';
   static const String stalled = 'Still working, this one\'s a long piece.';
-  static const String paused = 'Scan paused — no connection';
+  // Neutral: a pause follows 30 s of failed polls, whether the phone is
+  // offline or the server is answering 5xx (same tone as Processing's
+  // "We can't reach PiyaNota right now").
+  static const String paused = 'Scan paused — can\'t reach PiyaNota';
   static const String retry = 'Try again';
   static const String failedCard = 'This scan didn\'t work. Tap to see why.';
   static String cardSemantics(String title, int percent) =>
@@ -39,7 +42,8 @@ class ScanStatusMessages {
   static const String readyRow = ' is ready to play';
   static const String failedRow = ' couldn\'t be converted';
   static const String failedRowHint = 'Tap to see what happened';
-  static const String pausedRowHint = 'Paused — no connection';
+  static const String pausedRowHint =
+      'Paused — we can\'t reach PiyaNota right now';
   static const String dismissHint = 'Swipe to dismiss';
   static const String unread = 'unread';
 
@@ -53,7 +57,7 @@ class ScanStatusMessages {
 
   // Toast (AC7, spec §6/§9 "[Score] is ready. [Open]").
   static String readyToast(String title) => '$title is ready.';
-  static String failedToast(String title) => '$title couldn\'t be converted.';
+  static String failedToast(String title) => '$title\'s scan didn\'t work.';
   static const String open = 'Open';
   static const String view = 'View';
   static const String dismissToast = 'Dismiss';

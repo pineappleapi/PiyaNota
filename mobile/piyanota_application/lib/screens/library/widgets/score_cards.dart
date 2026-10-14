@@ -345,7 +345,8 @@ class ScoreCard extends StatelessWidget {
 /// Paused (no connection) shows a Try again button instead of a frozen
 /// bar, and 90 s without progress swaps the label for the stalled copy
 /// (AC10). When the scan completes the library swaps this for a
-/// [ScoreCard] under the same key, in place.
+/// [ScoreCard] in the same list row (the row's key, not this widget's),
+/// so it changes in place without reloading the list.
 class ScanningScoreCard extends StatelessWidget {
   const ScanningScoreCard({
     super.key,

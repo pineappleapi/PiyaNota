@@ -72,10 +72,18 @@ class ScanJobStore {
       return const [];
     }
     if (list is! List) return const [];
-    return [
-      for (final entry in list)
-        if (entry is Map<String, dynamic>) ?_decodeJob(entry),
-    ];
+    final jobs = <TrackedJob>[];
+    for (final entry in list) {
+      if (entry is! Map<String, dynamic>) continue;
+      // One mistyped entry (e.g. from an older app version) drops only
+      // itself, not every other scan.
+      try {
+        if (_decodeJob(entry) case final job?) jobs.add(job);
+      } on Object catch (e) {
+        debugPrint('Stored scan job dropped: $e');
+      }
+    }
+    return jobs;
   }
 
   static Map<String, Object?> _encodeJob(TrackedJob job) => {
