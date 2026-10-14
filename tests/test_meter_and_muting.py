@@ -587,6 +587,27 @@ def test_meter_change_in_a_one_voice_system_is_applied() -> None:
     assert not [f for f in report["flags"] if f["kind"] == s4.FLAG_METER_CHANGE_MINORITY]
 
 
+def test_meter_change_split_two_versus_two_is_not_applied() -> None:
+    # Soprano/Alto read 3/4, Tenor/Bass read 4/4: 2 of 4 readers is short of the 3 needed.
+    sys1 = _all_voices([CLEF, *M44, Q, Q, Q, Q, BAR], sys_idx=1)
+    sys2 = _all_voices([CLEF, *M44, Q, Q, Q, Q, BAR], sys_idx=2,
+                       Soprano=[CLEF, *M34, Q, Q, Q, Q, BAR], Alto=[CLEF, *M34, Q, Q, Q, Q, BAR])
+    _, report = s4.reconstruct_satb_with_report(_merge(sys1, sys2))
+    assert [ts for _, ts, _ in _bar_layout(report)] == ["4/4", "4/4"]
+    minority = [f for f in report["flags"] if f["kind"] == s4.FLAG_METER_CHANGE_MINORITY]
+    assert len(minority) == 1
+
+
+def test_pickup_trim_that_only_cuts_a_note_head_is_muted() -> None:
+    # Alto's first bar is one half note straddling the cut: nothing dropped, but a note lost its head.
+    _, report = s4.reconstruct_satb_with_report(_all_voices(
+        [CLEF, *M44, Q, BAR, Q, Q, Q, Q, BAR],
+        Alto=[CLEF, *M44, H, BAR, Q, Q, Q, Q, BAR]))
+    trimmed = [f for f in report["flags"] if f.get("action") == s4.ACTION_TRIMMED_PICKUP]
+    assert len(trimmed) == 1 and trimmed[0]["voice"] == "Alto"
+    assert trimmed[0]["muted"] is True and (trimmed[0]["start_tick"], trimmed[0]["end_tick"]) == (0, QUARTER)
+
+
 def test_pickup_trim_that_drops_only_a_rest_is_not_muted() -> None:
     # Alto's first bar is a quarter rest + the pickup quarter: trimming to the pickup loses only the rest.
     _, report = s4.reconstruct_satb_with_report(_all_voices(
