@@ -108,6 +108,7 @@ class _App {
     scoreLibraryApiProvider.overrideWithValue(libraryApi),
     scanJobStoreProvider.overrideWithValue(store),
     networkAvailabilityProvider.overrideWithValue(network.controller.stream),
+    networkCheckProvider.overrideWithValue(network.check),
   ];
 
   /// [home] under the app-wide toast host, with animations off so the
@@ -623,6 +624,34 @@ void main() {
       await tester.pump();
       expect(app.jobs['a']!.phase, TrackedPhase.active);
       expect(find.text(ScanStatusMessages.converting(60)), findsOneWidget);
+      await app.end();
+    });
+
+    testWidgets('already offline when paused: the first online report '
+        'resumes it', (tester) async {
+      final app = _App();
+      app.network.initial = false;
+      await app.pump(tester, const ScoreLibraryScreen());
+      await tester.pumpAndSettle();
+      app.api.script('a', [
+        running(40),
+        for (var i = 0; i < 30; i++) const ProcessingNetworkException(),
+      ]);
+      app.tracker.track('a', title: 'Paraiso', scoreId: 102);
+      await tester.pump();
+      for (var i = 0; i < 20; i++) {
+        await app.poll();
+      }
+      expect(app.jobs['a']!.phase, TrackedPhase.paused);
+
+      // No "offline" report ever comes; the seeded check stands in for it.
+      app.api.scripts['a']!
+        ..clear()
+        ..add(running(60));
+      app.network.set(true);
+      await tester.pump();
+      await tester.pump();
+      expect(app.jobs['a']!.phase, TrackedPhase.active);
       await app.end();
     });
 

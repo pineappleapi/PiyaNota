@@ -253,9 +253,19 @@ final scanJobStoreProvider = Provider<ScanJobStore>(
 /// to once a job has paused, so screens and tests that never pause never
 /// touch the platform channel.
 final networkAvailabilityProvider = Provider<Stream<bool>>(
-  (ref) => Connectivity().onConnectivityChanged.map(
-    (results) => results.any((result) => result != ConnectivityResult.none),
-  ),
+  (ref) => Connectivity().onConnectivityChanged.map(_hasNetwork),
+);
+
+bool _hasNetwork(List<ConnectivityResult> results) =>
+    results.any((result) => result != ConnectivityResult.none);
+
+/// Reads whether the phone has a network right now, to seed the state
+/// before the first change arrives: the change stream isn't guaranteed to
+/// report the starting state, so a phone already offline when a job
+/// paused would otherwise miss its first "back online". Null when unknown.
+final networkCheckProvider = Provider<Future<bool?> Function()>(
+  (ref) =>
+      () async => _hasNetwork(await Connectivity().checkConnectivity()),
 );
 
 /// Every job the app is following, by job id: the one progress source the
@@ -466,9 +476,12 @@ class ProcessingJobsController extends Notifier<Map<String, TrackedJob>> {
   /// gone, and the next account must not see these jobs.
   void forgetAll() {
     _clearEpoch++;
-    for (final jobId in [...state.keys]) {
-      forget(jobId);
+    for (final jobId in state.keys) {
+      _stop(jobId);
+      _generations[jobId] = (_generations[jobId] ?? 0) + 1;
     }
+    // One state change and no per-job saves: the store is cleared below.
+    state = const {};
     // Nothing is left to restore; save normally from now on.
     _restored = true;
     _lastSaved = ScanJobStore.encodeJobs(const []);
@@ -603,6 +616,10 @@ class ProcessingJobsController extends Notifier<Map<String, TrackedJob>> {
 
   /// AC6: finished jobs older than [ScanHistoryLimits.maxAge] go, then the
   /// oldest beyond [ScanHistoryLimits.maxItems] rows. Running jobs stay.
+  ///
+  /// Dismissed jobs count toward the cap on purpose: they are hidden from
+  /// the bell but kept so their library card can still open Processing
+  /// or Playback, and the cap bounds what is kept, not what is shown.
   void _prune() {
     final cutoff = _now().subtract(ScanHistoryLimits.maxAge);
     final running = state.values.where((job) => job.isRunning).length;
@@ -645,10 +662,21 @@ class ProcessingJobsController extends Notifier<Map<String, TrackedJob>> {
         onError: (Object e) =>
             debugPrint('Connectivity updates unavailable: $e'),
       );
+      unawaited(_seedOnline());
     } on Object catch (e) {
       // No connectivity plugin (e.g. an unsupported platform): Retry on
       // the card, the bell row and Processing still works.
       debugPrint('Connectivity updates unavailable: $e');
+    }
+  }
+
+  Future<void> _seedOnline() async {
+    try {
+      final online = await ref.read(networkCheckProvider)();
+      // A report from the stream in the meantime is newer; keep it.
+      if (ref.mounted && _online == null) _online = online;
+    } on Object catch (e) {
+      debugPrint('Connectivity check unavailable: $e');
     }
   }
 

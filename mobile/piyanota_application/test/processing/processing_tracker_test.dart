@@ -29,6 +29,7 @@ void _withTracker(
         processingApiProvider.overrideWithValue(api),
         scanJobStoreProvider.overrideWithValue(MemoryScanJobStore()),
         networkAvailabilityProvider.overrideWithValue(const Stream.empty()),
+        networkCheckProvider.overrideWithValue(() async => null),
       ],
     );
     final tracker = container.read(processingJobsProvider.notifier);

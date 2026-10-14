@@ -131,6 +131,10 @@ class FakeNetwork {
   final controller = StreamController<bool>.broadcast();
   int get listeners => controller.hasListener ? 1 : 0;
   void set(bool online) => controller.add(online);
+
+  /// What a one-off connectivity check reports; null means unknown.
+  bool? initial;
+  Future<bool?> check() async => initial;
 }
 
 const kJob = 'job-9';
@@ -197,6 +201,7 @@ class ProcessingHarness {
     sessionStorageProvider.overrideWithValue(SessionStorage(secureStorage)),
     scanJobStoreProvider.overrideWithValue(store),
     networkAvailabilityProvider.overrideWithValue(network.controller.stream),
+    networkCheckProvider.overrideWithValue(network.check),
   ];
 
   TrackedJob? get job => container.read(processingJobsProvider)[kJob];
