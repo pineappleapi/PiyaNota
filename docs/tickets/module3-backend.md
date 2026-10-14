@@ -354,6 +354,7 @@ Permanently removes a saved score and its associated audio/image assets from a u
    - replaces that score's `audio_tracks` and `timing_metadata` rows with the new job's (both are keyed by `score_id`, so leaving the old rows would serve the old audio);
    - sets the new job's `score_id` and `complete`, sets the old job's `superseded_by_job_id`, and sets the old job's `score_id` to NULL.
    After commit, the old job's audio, timing file and page images are queued for deletion (FR-12). A crash between commit and deletion leaves only unreferenced blobs, which PIYA-111 cleanup removes. A retake of a failed job (no `score_id`) takes the normal AC1 insert path.
+6. **Superseded jobs return 410** *(added 2026-10-14, review; PIYA-103 / PIYA-101 AC12)*. Once AC5 has set `superseded_by_job_id` on the old job, PIYA-103's result endpoint for that job returns 410 `job_superseded` with `replacementJobId` (the new job's id). Ownership is checked first, so another user's request still gets 404 `job_not_found`. The app normally never hits this, since it opens scores by `scoreId`.
 
 ---
 

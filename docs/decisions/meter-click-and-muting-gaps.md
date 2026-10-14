@@ -19,7 +19,7 @@ PIYA-208-210 design decisions.
 5. **PIYA-207 alert.** PIYA-207 routes to Playback on completion, so the
    muted-measures alert is shown by Playback (once). A background completion
    shows it when Playback is next opened. PIYA-102 gains no muted count.
-   *(Confirmed 2026-10-14, user decision 2026-10-14: "Muted-measure alert shows on first Playback open per score, not on Processing". PIYA-207 AC10 now defers to Playback, and Processing never shows it. It shows on every Playback open until "Don't show again for this score" is ticked, the PIYA-208 rule, also user decision 2026-10-14.)*
+   *(Confirmed 2026-10-14, user decision 2026-10-14: "Muted-measure alert shows on first Playback open per score, not on Processing". PIYA-207 AC10 now defers to Playback, and Processing never shows it. It shows on every Playback open until "Don't show again for this score" is ticked, the PIYA-208 rule, also user decision 2026-10-14.)* "Don't show again" is stored per job: a retake is a new job, so its alert shows again until ticked for that job. *(Added 2026-10-14, review.)*
 6. **Alert order.** The failed-voice alert comes first, then the muted-measures
    alert. "Don't show again" is on the muted-measures alert only.
    *(Amended 2026-10-14.)* Full order: the retake offer for `unreadable` voices, before Playback (PIYA-207 AC11); then, on Playback, the failed-voice alert for `render_failed` voices and voices that fail on the device; then the muted-measures alert. The retake offer has no "Don't show again"; it is offered once per completed job.

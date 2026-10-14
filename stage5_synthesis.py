@@ -689,15 +689,20 @@ def run_full_pipeline_with_report(
     # Stage 5
     mp3_files, failed = synthesize_satb_with_failures(
         satb, output_dir, bpm, soundfont_path, muted_spans_by_voice(recon_report["flags"]))
-    unreadable = {v.lower() for v in recon_report.get("failed_voices", [])}
+    # PIYA-103 AC10 "Stage 4 placed no events": a voice can be non-empty going into Stage 4 and still come
+    # out with nothing placed (dropped during placement/tie merging); that is unreadable too, not a render fault.
+    unreadable = ({v.lower() for v in recon_report.get("failed_voices", [])}
+                  | {v.lower() for v in VOICES if not satb.get(v)})
     failed_voice_causes = {v.lower(): CAUSE_UNREADABLE if v.lower() in unreadable else CAUSE_RENDER_FAILED
                            for v in failed}
     if len(failed) == len(VOICES):
-        rendered_but_failed = [v for v in failed if failed_voice_causes[v.lower()] == CAUSE_RENDER_FAILED]
-        reason = (FAILURE_INCOMPLETE_VOICE_SEQUENCE if CAUSE_UNREADABLE in failed_voice_causes.values()
-                  else FAILURE_SYNTHESIS)
-        raise PipelineFailure(reason, f"no voice could be rendered (render failures: "
-                                      f"{', '.join(rendered_but_failed) or 'none'})")
+        by_cause = {cause: [v for v in failed if failed_voice_causes[v.lower()] == cause]
+                    for cause in (CAUSE_UNREADABLE, CAUSE_RENDER_FAILED)}
+        reason = FAILURE_INCOMPLETE_VOICE_SEQUENCE if by_cause[CAUSE_UNREADABLE] else FAILURE_SYNTHESIS
+        # PIYA-108 AC5: the message names the missing (unreadable) voices as well as the render failures.
+        raise PipelineFailure(reason, f"no voice could be rendered (unreadable: "
+                                      f"{', '.join(by_cause[CAUSE_UNREADABLE]) or 'none'}; render failures: "
+                                      f"{', '.join(by_cause[CAUSE_RENDER_FAILED]) or 'none'})")
     failed_voices = [v.lower() for v in failed]
     review, review_detail = build_review(voice_events, recon_report["flags"], failed_voices,
                                          eventless_strip_flags)

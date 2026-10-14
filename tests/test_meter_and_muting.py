@@ -690,3 +690,32 @@ def test_process_strip_reports_flags_of_an_eventless_strip(monkeypatch: pytest.M
     ev = s3.process_strip(strip, "Tenor", 2, None, torch.device("cpu"), sys_idx=3, strip_id="full",
                           strip_flags_out=out)
     assert ev and len(out) == 1, "flags of a strip with events ride on its events"
+
+
+def _empty_after_placement(monkeypatch: pytest.MonkeyPatch, voice: str) -> None:
+    # The input voice is non-empty; Stage 4 placement leaves it with nothing (not in its failed_voices).
+    real = s4.reconstruct_satb_with_report
+
+    def recon(ve: dict) -> tuple[dict, dict]:
+        satb, report = real(ve)
+        assert voice not in report["failed_voices"]
+        return {**satb, voice: []}, report
+    monkeypatch.setattr(s4, "reconstruct_satb_with_report", recon)
+
+
+def test_voice_emptied_by_placement_is_unreadable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _stub_render(monkeypatch)
+    _empty_after_placement(monkeypatch, "Tenor")
+    with pytest.warns(RuntimeWarning, match="Tenor"):
+        result = _run(monkeypatch, tmp_path, _all_voices(PLAIN))
+    assert result["failedVoiceCauses"] == {"tenor": "unreadable"}
+
+
+def test_all_four_failed_with_placement_emptied_voice_is_incomplete(monkeypatch: pytest.MonkeyPatch,
+                                                                   tmp_path: Path) -> None:
+    _stub_render(monkeypatch, fail={"Soprano", "Alto", "Bass"})
+    _empty_after_placement(monkeypatch, "Tenor")
+    with pytest.warns(RuntimeWarning), pytest.raises(s4.PipelineFailure) as err:
+        _run(monkeypatch, tmp_path, _all_voices(PLAIN))
+    assert err.value.failure_reason == s4.FAILURE_INCOMPLETE_VOICE_SEQUENCE
+    assert "unreadable: Tenor;" in str(err.value) and "render failures: Soprano, Alto, Bass" in str(err.value)
