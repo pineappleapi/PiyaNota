@@ -63,11 +63,12 @@ def test_review_shape_and_job_level_reason() -> None:
     assert set(review) == {"reviewNeeded", "reasons", "items", "truncated"}
     assert review["reviewNeeded"] is True and review["truncated"] is False
     assert review["reasons"] == ["bar_overflow_clipped", s3ck.CLEF_KEY_UNVALIDATED_FLAG, "key_no_majority"]
-    # Stage 4 items first; one item per strip and code; job-level reasons and unflagged Stage 4 entries
+    # Stage 4 items first; one item per strip and code; camelCase indices are 0-based (page 1 / system 2
+    # in, pageIndex 0 / systemIndex 1 out); job-level reasons and unflagged Stage 4 entries
     # are not items.
     assert review["items"] == [
-        {"code": "bar_overflow_clipped", "voice": "bass", "pageIndex": 1, "systemIndex": 1, "bar": 4},
-        {"code": "key_no_majority", "voice": "tenor", "pageIndex": 1, "systemIndex": 2, "bar": None},
+        {"code": "bar_overflow_clipped", "voice": "bass", "pageIndex": 0, "systemIndex": 0, "bar": 4},
+        {"code": "key_no_majority", "voice": "tenor", "pageIndex": 0, "systemIndex": 1, "bar": None},
     ]
     assert full == review["items"]
     # Internal fields never leak into the client object.

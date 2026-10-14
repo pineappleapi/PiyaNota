@@ -162,8 +162,10 @@ later stages import functions from earlier ones rather than duplicating logic.
      `pickup_ticks`, `total_ticks`, `systems`) — e.g. `pickup_detected`, `bar_underfull`,
      `bar_overflow_clipped`, `bar_count_mismatch`, `tie_unresolved`. Flags that need a human carry
      `review_needed`.
-   Raises `ValueError` if any of the four SATB voices came back empty — a hard requirement that all
-   four parts were detected. Known gaps: mid-bar system breaks are not handled, and Stage 3 cannot
+   An empty voice is reported in `failed_voices` and the others continue; `ValueError` only when all
+   four are empty (PIYA-108 AC4/AC5, 2026-10-09). Bars are laid out per measure at their own meter
+   (PIYA-108 AC6/AC7), and lossy repairs carry a `start_tick`/`end_tick` span that Stage 5 renders
+   silent (PIYA-108 AC8, PIYA-109 AC8). Known gaps: mid-bar system breaks are not handled, and Stage 3 cannot
    currently represent chords (its `chord_id` block never fires, and Camera-PrIMuS has no chord token),
    so simultaneous notes in one voice (e.g. Bass divisi) arrive as sequential notes until the
    vocabulary/retraining work lands.
