@@ -82,3 +82,77 @@ Written after the baseline rerun and before eval_dev.py was run on phase2_seed1.
 4. **Output folders.** Baseline JSONs: D:\PiyaNota\datasets\phase2_eval_dev\baseline. Phase 2 will be written to
    .../phase2_run1 (p2s1, p2s2) and .../phase2_noaug (diagnostic only), so no JSON is overwritten.
 5. **Section 6 wording.** seed1_noaug removes `--augment-synth` only; CPM replay is augmented in every run.
+
+### Amendment 2 (2026-10-14): G2 result and full section 5 report
+
+Phase 2 JSONs (scored 2026-10-12, after Amendment 1): `D:\PiyaNota\datasets\phase2_eval_dev\phase2_run1` (grey e1c/e1b/
+none), `phase2_noaug`, `nofermata_*`, `canary_check`. The section 5 items that eval_dev.py does not keep come from
+`training/phase2/eval_dev_detail.py` (new: imports eval_dev unchanged and re-aggregates the same score_eval rows).
+`training/phase2/eval_dev_oov.py` (new) counts predicted tokens absorbed by GT `<OOV>` wildcard spans (BUG-049/050).
+Outputs: `detail_baseline/`, `detail_phase2/`, `oov/{baseline,phase2}/`. **Parity:** token SER and pitch match the eval_dev JSONs exactly for
+all 8 seed x pool rows.
+
+**Verdict: G2 = PASS for both seeds (not MARGINAL).** ml-cv-lead reviewed it on 2026-10-14 and agrees.
+
+| Rule | p2s1-p2s2 camera | p2s1-p2s2 digital | Baseline (deployed seeds) | Result |
+|---|---|---|---|---|
+| 4a grey/e1c SER | 8.15-8.44% (393-407/4823) | 8.00-8.20% (162-166/2025) | 16.26-16.55 / 15.90-16.64% | pass (thresholds 13.26 / 12.90; >1 pp clear) |
+| 4b per-piece deltas | 5/5 < 0 (-6.05 to -9.87 pp) | 2/2 < 0 (-4.54 to -9.22 pp) | mean of the 2 seeds per piece | pass |
+| 4c grey/e1b SER | 8.07-8.38% | 8.00-8.20% | 15.61-16.17 / 14.86-15.70% | pass |
+| 4c grey/none SER | 8.52-8.92% | 9.04-9.28% | 20.38-21.29 / 24.64-25.09% | pass |
+| 4d pitch (SOW) | 95.30-95.62% | 96.33-96.43% | 88.71-89.93 / 90.67-90.97% | pass (floors 87.71 / 89.67) |
+| 4e canary | no hard-cap breach in any epoch | | | pass |
+
+Per-piece grey/e1c deltas (Phase 2 minus the mean of the 2 baseline seeds, pp, seed1 / seed2): camera
+dont_stop_me_now -9.87/-9.30, gaano -8.18/-7.85, handog -7.67/-6.74, honneur -7.16/-8.24, non_nobis -7.26/-6.05;
+digital gaano -9.03/-9.22, non_nobis -5.95/-4.54.
+
+**Canary (section 3, report-only). Deviation from section 3:** section 3 said to rerun `e6_grey.py`. What ran
+instead was `canary_check.py` (commit 0d732ce, written after Amendment 1). It scores the deployed and Phase 2 models
+with one metric, the trainer's own, so the comparison is like for like; e6_grey's "E6 raw" numbers come from a
+different metric. canary_check.py uses the trainer's mean per-sample SER on the 399 pinned
+stems, the same metric for both models. Phase 2: clean 2.70-2.74%, distorted 4.32-4.50%. Deployed seeds: clean
+4.92-7.85%, distorted 8.65-13.11%. Phase 2 is better, so the 1 pp MARGINAL rule does not trigger. These numbers are
+not comparable to the "E6 raw" 2.59-2.69 / 5.73-5.83% in section 3. The outcome does not depend on the deviation,
+because Phase 2 is better on both clean and distorted under this one consistent metric.
+
+**Section 5 report (grey/e1c, both seeds as a range; baseline in brackets):**
+- **Note precision is reported as a range, because GT `<OOV>` spans hide part of the output (BUG-050).** In each
+  camera pool the scorer never sees 569-609 predicted note tokens: 591 GT `<OOV>` tokens each absorb up to 2
+  predicted tokens at zero cost. Digital: 212 `<OOV>`, 242-254 notes. Some of these are real notes the GT could not
+  encode, and some are hallucinations, so neither bound alone is right:
+  - aligned only (absorbed notes left out; upper bound): camera 91.4-91.7% [82.3-83.5], digital 89.0-89.4%
+    [84.8-85.8];
+  - all-in (absorbed notes counted as wrong; lower bound): camera 74.3% [67.2-68.5], digital 72.1-72.3% [69.2-70.1].
+  Phase 2 is better under both bounds. Event-level `headline.note_precision` (camera 75.4-75.5% [70.3-72.0],
+  digital 73.2-73.3% [69.0-69.4]; F1 camera 84.2-84.3% [78.4-79.9], digital 83.2-83.3% [78.4-78.7]) sits near the
+  lower bound for the same reason.
+  Hallucinated notes inside `<OOV>` spans, the BUG-011 failure, are not measurable on this GT.
+- Per-class recall (exact, pooled):
+  - whole note: camera 84.9% both seeds, n=86 [72.1-74.4]; digital 95.7-97.9%, n=47 [93.6].
+  - half rest: camera 91.7-100%, n=12 [83.3-91.7]; digital 100%, n=9 [77.8-100]. Half-rest precision camera
+    100% [47.6-50.0]: the baseline's spurious half rests are gone.
+  - fermata: the dev GT has none, so recall is undefined (see insertions).
+  - barline: camera 94.1-94.3%, n=882 [91.8-92.4]; digital 98.3-98.9%, n=460 [98.7]. The dev GT has no separate
+    final-barline class, so it is scored as part of `barline`. Synthetic val final-barline recall is 1.0 for both
+    seeds (n=383, `metrics.json` watch_recall).
+- Fermata insertions (raw predicted/GT): camera 80-83/0 [39-41], digital 26-28/0 [30-38]. **BUG-049** (`oov/` JSONs): fermatas in scored
+  positions / inside GT `<OOV>` wildcard spans, which SER never scores: camera 34-36 / 46-47 [33-36 / 5-6], digital
+  13-16 / 12-13 [27-35 / 3]. So scored fermata insertions are flat, but Phase 2 writes fermatas where
+  the GT marks out-of-vocabulary symbols. All of them reach Stage 4/5. Fermata-excluded SER (eval_dev_nofermata.py;
+  parity without the flag reproduces phase2_run1): camera 7.28-7.44% [15.55-15.90], digital 7.01-7.31% [14.67-15.16].
+- Val SER (synthetic, tune-held-out, epoch 6): 0.259-0.263%. By font: Bravura 0.21%, Gootville 0.23-0.25%, Leipzig
+  0.31-0.33%, Leland 0.26-0.29%, Petaluma 0.24-0.30%. Interline tertile 0/1/2: 0.32-0.34 / 0.22 / 0.23-0.26%.
+  line_mult tertile 0/1/2: 0.29-0.30 / 0.25 / 0.22-0.24%. The about 30x gap to dev SER is the remaining
+  synthetic-to-real gap.
+- Diagnostic only (section 6, not a control): seed1_noaug epoch 1, camera 9.56%, digital 8.94%, pitch 94.32 /
+  94.94%.
+
+**Caveats (ml-cv-lead, 2026-10-14):**
+1. The absolute ~8% is optimistic. Grey vs binary, the e1c rule and the contrast work were all chosen on these 5
+   pieces. The delta against baseline (same pipeline, same GT) is the safer evidence.
+2. GT for gaano, honneur and handog is agent-made and not user-verified. The digital pool is 2 of the same 5 pieces,
+   so the two pools are not independent evidence.
+3. No leakage found: no dev piece is a Bach chorale. eval_dev.py is unchanged since b5a213d.
+4. Confident-wrong output (BUG-011, plan step 7) is not addressed by this result.
+5. G2 gates GPU spend only. AC1 is judged at Phase 4 held-out.

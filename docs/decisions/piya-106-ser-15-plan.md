@@ -1,7 +1,13 @@
 # PIYA-106 - Plan to reach token SER below 15% (2026-09-29)
 
-**Status:** plan plus Phase 0 implemented on branch `piya106/ser15-header-rule` (not merged). ml-cv-lead review of
-this plan is pending. All numbers below are on **eval_prelim, which is dev data**: the user decided on 2026-09-28
+**Status (updated 2026-10-14):** Phases 0, 0b, 1 and Phase 2 step 1 are done.
+**Gate G2 passed for both seeds:** dev grey/e1c SER camera 8.15-8.44%, digital 8.00-8.20%, against
+16.26-16.55 / 15.90-16.64% for the deployed model (Amendment 5).
+Next (user, Amendment 6): Phase 2 step 2 (AC4 leave-one-piece-out, gate G3), then Phase 4. G3 training is
+blocked until the dev pieces' GT is user-verified. Fermatas are out of scope (Amendment 6). Branch
+`piya106/stroke-calibration`, not merged.
+Original 2026-09-29 status: plan plus Phase 0 implemented on branch `piya106/ser15-header-rule` (not merged);
+ml-cv-lead review pending. All numbers below are on **eval_prelim, which is dev data**: the user decided on 2026-09-28
 that tuning on it is allowed, but no held-out claim can come from it. The thesis SER claim can only come from the
 Phase 4 pre-registered held-out set.
 
@@ -38,7 +44,10 @@ This camera pool is wider than the 2-piece table in `NEXT-SESSION.md`, which is 
 - **Pitch doesn't move.** Stage 4 already inherited the running meter when a strip has none, so dropping a
   hallucinated meter mostly removes wrong bar lengths.
 
-**What is left to cut:**
+> **Superseded 2026-10-14:** the table above is the 2026-09-29 starting point on pre-E7 binary strips. The current
+> dev numbers are in Amendment 5 (Phase 2 result).
+
+**What is left to cut (2026-09-29):**
 - **Camera needs about -12 pp more.**
 - **Digital needs about -1.5 pp.**
 
@@ -1635,9 +1644,59 @@ What changes from the plan above and from Amendment 3's frozen mix, and why:
 
 Not addressed by this run: confident-wrong output (BUG-011) stays open.
 
-### Phase 3: grammar-aware rescoring (CPU; Oct 10 - Oct 14)
+#### Amendment 5 (2026-10-14): Phase 2 result - G2 PASS
 
-- Oracle headroom: 47% of note/accidental misreads have the GT token in the top 3 with p > 1e-2.
+Full numbers, per-piece deltas and the section 5 report are in `piya-106-g2-rules.md` Amendment 2. ml-cv-lead
+reviewed them on 2026-10-14 and agrees with PASS.
+- **Kernel:** `piamac/piyanota-phase2-train` v1, bundle b5a213d, Tesla T4. seed1 / seed2 ran 6 of 6 epochs (best
+  epoch 6, val SER 0.259 / 0.263%). seed1_noaug diverged and stopped at epoch 4 (best epoch 1). Checkpoints:
+  `D:\PiyaNota\music_symbol_detection\phase2_kaggle_models\{seed1,seed2,seed1_noaug}`.
+- **Dev (grey/e1c, both seeds):** camera SER 8.15-8.44%, digital 8.00-8.20%; pitch 95.30-95.62 / 96.33-96.43%.
+  Every piece improved, by 4.5-9.9 pp. Canary is better than the deployed seeds, with no cap breach.
+- **What this changes in the plan:**
+  1. The section 1 budget ("camera needs about -12 pp") is met on dev. AC1 is still judged only at Phase 4. Dev has
+     been tuned on, so the held-out number will likely sit above 8%.
+  2. The side track (homr bake-off) is not needed: it only ran if G2 failed.
+  3. The Amendment 4 bootstrap margin is replaced by the per-piece paired deltas (G2 rules, Amendment 1 item 3).
+  4. Phase 3's 47% oracle-headroom figure was measured on the deployed model. Re-measure it on the Phase 2
+     checkpoints before Phase 3 is started.
+- **Carried forward as pre-registered G3 report items:**
+  - ~~raw fermata pred/GT per pool~~ dropped by Amendment 6 (fermatas out of scope); BUG-049 counts stay
+    diagnostic only (`training/phase2/eval_dev_oov.py`);
+  - note precision as a range, aligned to all-in (BUG-050: about 600 camera note tokens fall inside GT `<OOV>`
+    spans, so no single number is right). Phase 2: camera 74.3-91.7%, against 67.2-83.5% for the baseline;
+  - the CPM canary;
+  - per-class recall (whole note, half rest with n, barline).
+- **Open questions for G3 prep:**
+  - ~~choral-conductor: does a false fermata lengthen notes in Stage 5?~~ No: Stages 4/5 never read fermatas
+    (Amendment 6).
+  - optional: the DataLoader seeding fix (notebook cell 12) for seed-to-seed reproducibility.
+- **Not addressed:** confident-wrong output (BUG-011, plan step 7).
+- **Schedule:** Phase 3 (Oct 10-14) and Phase 4 (Oct 14-18) dates have slipped. They need re-dating once G3 is
+  scoped.
+
+#### Amendment 6 (2026-10-14): fermatas out of scope; G3 then Phase 4
+
+- **User ruling (2026-10-14): fermatas are out of thesis scope** and are ignored in transcription. In-scope symbols
+  are notes, accidentals, rests, barlines and time signatures. Clefs and key signatures stay, since pitch inference
+  depends on them (assumption, not part of the ruling).
+  - Stage 3/4/5 already ignore fermatas for pitch, duration and audio (`stage3_transcription.py:927` skips them;
+    Stages 4 and 5 never read them). A false fermata is therefore inaudible, which answers the open
+    choral-conductor question in Amendment 5. No pipeline change is needed.
+  - **Scoring from G3 on:** fermata tokens are dropped from both prediction and GT before SER (proposal, to be
+    confirmed by ml-cv-lead in G3 pre-registration). Full SER is still reported as secondary, so G2 numbers stay
+    comparable. `eval_dev_nofermata.py` drops prediction fermatas only; GT fermatas would still count as
+    deletions, so it needs a both-sides mode.
+  - BUG-049 is downgraded to a report-only diagnostic; fermata pred/GT is no longer a G3 report item.
+- **Order (user, 2026-10-14):** Phase 2 step 2 (AC4 leave-one-piece-out, G3) first, then Phase 4.
+- **G3 blocker (labels):** section 6 says "Only user-verified GT counts as labels". Only Non Nobis is user-verified;
+  Gaano, Honneur and Handog GT are agent-made and Don't Stop Me Now's status is not on record (section 1 item 5).
+  G3 folds cannot train until the user verifies the other pieces' GT or explicitly overrides the rule.
+
+### Phase 3: grammar-aware rescoring (CPU; Oct 10 - Oct 14; dates slipped, see Amendment 5)
+
+- Oracle headroom: 47% of note/accidental misreads have the GT token in the top 3 with p > 1e-2. (Measured on the
+  deployed model; re-measure on the Phase 2 checkpoints first, see Amendment 5.)
 - Rescore the top 3 per CTC segment with:
   - bar-duration consistency against the running meter;
   - the key signature and the accidental grammar (no accidental repeating the key alteration);
@@ -1715,6 +1774,8 @@ is the lever.
     gives. OLiMPiC's Zeus went from 59.9% to 17.7% SER on scanned input from augmentation alone.
   - Still, no one can promise it for our data. The gates exist to find out early.
 - **The held-out number will likely sit above the dev number**, because dev data has been tuned on.
+- **Update 2026-10-14 (Amendment 5):** after Phase 2, dev SER is camera 8.15-8.44% and digital 8.00-8.20%. The
+  camera "note errors roughly halved" condition above has been met on dev. The held-out test is still to come.
 
 ## 6b. ml-cv-lead review (2026-09-29): CONDITIONAL GO for Phase 1
 

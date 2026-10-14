@@ -428,3 +428,24 @@ Commit messages: `PIYA-XXX: <summary>`. Never commit without explicit user revie
 - Use frontend-lead for any Module 2 (Flutter/Android app) change.
 - Use prompt-enhancer when a task is described informally and needs
   structuring before execution begins.
+- Use choral-conductor for musical-semantics questions (clef/key/pitch logic, rhythm, slurs/ties, MIDI).
+
+## Token efficiency (installed plugins: caveman, ponytail, superpowers)
+
+These save tokens and context; they never override the policies above (plan first, risk line, quote ACs, no
+commit without approval, ml-cv-lead / senior-reviewer gates).
+
+- **Search (caveman):** broad "where is X / what calls Y" sweeps go to `caveman:cavecrew-investigator` or the
+  `caveman-explore` skill, which return compact `path:line` tables. Skip them when the exact file/symbol is known
+  — use Grep/Read directly.
+- **Small edits (ponytail):** default to `ponytail` (full) for code changes — smallest change that solves the
+  ticket, no speculative abstraction (matches the flat stage-script style). `caveman:cavecrew-builder` only for
+  bounded 1–2 file mechanical edits.
+- **Diff hygiene (caveman/ponytail):** `caveman:cavecrew-reviewer` or `/ponytail-review` for a quick one-line-per-
+  finding pass on a diff. These are a pre-check only; senior-reviewer is still required before any merge.
+- **Process (superpowers):** `superpowers:systematic-debugging` for bugs with unknown cause (before editing),
+  `superpowers:writing-plans` / `executing-plans` for multi-step tickets, and
+  `superpowers:verification-before-completion` before reporting a ticket done (workflow step 6).
+- **Long outputs:** keep raw eval/log dumps out of the main thread — run long jobs in the background, read only
+  the summary lines, and put full numbers in the JSON/doc they belong in.
+- **Replies:** short and direct; numbers stated once with their source file.
