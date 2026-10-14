@@ -299,6 +299,7 @@ void main() {
     for (final (status, matcher) in [
       (401, isA<ScoreResultSessionExpiredException>()),
       (404, isA<ScoreResultNotFoundException>()),
+      (410, isA<ScoreResultNotFoundException>()),
       (409, isA<ScoreResultNotReadyException>()),
       (500, isA<ScoreResultServerException>()),
     ]) {

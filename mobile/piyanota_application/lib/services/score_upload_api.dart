@@ -125,6 +125,9 @@ const String pageNotRetakeableCode = 'page_not_retakeable';
 const String notRetakeableCode = 'not_retakeable';
 const String retakeInProgressCode = 'retake_in_progress';
 
+/// PIYA-101 AC12's 410 code: the old job was already replaced by a retake.
+const String jobSupersededCode = 'job_superseded';
+
 /// The PIYA-101 AC8 text parts. Optional fields are left out when unset —
 /// never sent empty or as "null" — and "Other" time also leaves its field
 /// out.
@@ -156,6 +159,7 @@ class HttpScoreUploadApi implements ScoreUploadApi {
   static const int _payloadTooLarge = 413;
   static const int _notFound = 404;
   static const int _conflict = 409;
+  static const int _gone = 410;
   static final DioMediaType _jpeg = DioMediaType('image', 'jpeg');
   static final DioMediaType _pdf = DioMediaType('application', 'pdf');
 
@@ -182,7 +186,47 @@ class HttpScoreUploadApi implements ScoreUploadApi {
         ),
       );
     }
-    return _post(ApiConfig.submitImagesPath, form, cancelToken: cancelToken);
+    return _submit(
+      () => _post(ApiConfig.submitImagesPath, form, cancelToken: cancelToken),
+      replacesJobId: replacesJobId,
+    );
+  }
+
+  /// A whole-score retake's rejections get their PIYA-101 AC12 code even
+  /// when a proxy or an older server sends none.
+  Future<SubmittedJob> _submit(
+    Future<SubmittedJob> Function() post, {
+    required String? replacesJobId,
+  }) async {
+    try {
+      return await post();
+    } on UploadRejectedException catch (e) {
+      if (replacesJobId == null) rethrow;
+      throw wholeRetakeRejection(e);
+    }
+  }
+
+  /// Bare 404 → [jobNotFoundCode], bare 409 → [notRetakeableCode]. A 410
+  /// (`job_superseded`) means the old job is already replaced, which for
+  /// the singer is the same dead end as [notRetakeableCode].
+  @visibleForTesting
+  static UploadRejectedException wholeRetakeRejection(
+    UploadRejectedException e,
+  ) {
+    final code = switch ((e.statusCode, e.code)) {
+      (_gone, _) || (_, jobSupersededCode) => notRetakeableCode,
+      (_notFound, null) => jobNotFoundCode,
+      (_conflict, null) => notRetakeableCode,
+      (_, final code) => code,
+    };
+    if (code == e.code) return e;
+    return UploadRejectedException(
+      statusCode: e.statusCode,
+      code: code,
+      field: e.field,
+      pageIndex: e.pageIndex,
+      retryAfter: e.retryAfter,
+    );
   }
 
   @override
@@ -200,11 +244,14 @@ class HttpScoreUploadApi implements ScoreUploadApi {
           await _readFile(pdfPath, filename: 'score.pdf', contentType: _pdf),
         ),
       );
-    return _post(
-      ApiConfig.submitPdfPath,
-      form,
-      receiveTimeout: ApiConfig.pdfReceiveTimeout,
-      cancelToken: cancelToken,
+    return _submit(
+      () => _post(
+        ApiConfig.submitPdfPath,
+        form,
+        receiveTimeout: ApiConfig.pdfReceiveTimeout,
+        cancelToken: cancelToken,
+      ),
+      replacesJobId: replacesJobId,
     );
   }
 

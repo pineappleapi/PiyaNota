@@ -128,6 +128,18 @@ void main() {
     );
   });
 
+  test('a running retake of a failed job is retake_in_progress, not '
+      'superseded (PIYA-101 AC12 order)', () async {
+    final b = _Backend();
+    final jobId = await b.submit('Ave missing voice');
+    b.at(_end);
+    await b.submit('Ave', replacesJobId: jobId);
+    await expectLater(
+      b.submit('Ave', replacesJobId: jobId),
+      _rejected(409, retakeInProgressCode),
+    );
+  });
+
   test('a job that can\'t be retaken whole, or doesn\'t exist', () async {
     final b = _Backend();
     final ok = await b.submit('Ave');

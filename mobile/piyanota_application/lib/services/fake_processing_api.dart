@@ -205,12 +205,14 @@ class FakeProcessingApi implements ProcessingApi {
     final missingVoice =
         status.stage == ProcessingStage.failed &&
         status.failureReason == FailureReason.incompleteVoiceSequence;
-    if ((!completedUnreadable && !missingVoice) || _isSuperseded(jobId)) {
+    if (!completedUnreadable && !missingVoice) {
       throw const UploadRejectedException(
         statusCode: 409,
         code: notRetakeableCode,
       );
     }
+    // PIYA-101 AC12 order: a running retake is reported before
+    // "superseded", which a failed job already is once its retake exists.
     final running = _jobs.values.any(
       (other) =>
           other.replacesJobId == jobId &&
@@ -220,6 +222,12 @@ class FakeProcessingApi implements ProcessingApi {
       throw const UploadRejectedException(
         statusCode: 409,
         code: retakeInProgressCode,
+      );
+    }
+    if (_isSuperseded(jobId)) {
+      throw const UploadRejectedException(
+        statusCode: 409,
+        code: notRetakeableCode,
       );
     }
     return (scoreId: job.scoreId, keepsScore: completedUnreadable);

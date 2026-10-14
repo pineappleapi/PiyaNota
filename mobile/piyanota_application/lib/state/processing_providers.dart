@@ -244,6 +244,19 @@ class ProcessingJobsController extends Notifier<Map<String, TrackedJob>> {
     return null;
   }
 
+  /// The tracked job that completed as [scoreId], for a result that came
+  /// without its `jobId` (PIYA-207 AC12 needs one to send
+  /// `replacesJobId`). Null when the tracker never saw it.
+  TrackedJob? completedJobOf(int scoreId) {
+    for (final job in state.values) {
+      if (job.phase == TrackedPhase.complete &&
+          job.status?.scoreId == scoreId) {
+        return job;
+      }
+    }
+    return null;
+  }
+
   /// Retry from the paused state.
   Future<void> retry(String jobId) async {
     final job = state[jobId];

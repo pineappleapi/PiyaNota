@@ -122,6 +122,45 @@ void main() {
       expect(_retakeMarker, findsOneWidget);
     });
 
+    testWidgets('a double tap opens one alert', (tester) async {
+      await pumpPlayback(
+        tester,
+        _harness(VoiceFailureCause.unreadable),
+        prefs: _answered,
+      );
+      await tester.tap(_tenorChip);
+      await tester.tap(_tenorChip);
+      await settle(tester);
+      expect(_unreadableAlert, findsOneWidget);
+      await tester.tap(find.text(RephotographMessages.cancel));
+      await settle(tester);
+      expect(_unreadableAlert, findsNothing);
+      // The guard is released: the chip works again.
+      await tester.tap(_tenorChip);
+      await settle(tester);
+      expect(_unreadableAlert, findsOneWidget);
+    });
+
+    testWidgets('Library > Playback > chip > Capture; system Back lands on '
+        'the library', (tester) async {
+      await pumpPlayback(
+        tester,
+        _harness(VoiceFailureCause.unreadable),
+        prefs: _answered,
+      );
+      await tester.tap(_tenorChip);
+      await settle(tester);
+      await tester.tap(find.text(RephotographMessages.rephotograph));
+      await settle(tester);
+      await settle(tester);
+      expect(_retakeMarker, findsOneWidget);
+      await tester.binding.handlePopRoute();
+      await settle(tester);
+      await settle(tester);
+      expect(find.text(kLibrary), findsOneWidget);
+      expect(find.byKey(const ValueKey('play-pause')), findsNothing);
+    });
+
     testWidgets('a render_failed chip has no tap', (tester) async {
       await pumpPlayback(tester, _harness(VoiceFailureCause.renderFailed));
       await tester.tap(find.text(PlaybackMessages.ok));

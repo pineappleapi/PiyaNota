@@ -104,6 +104,10 @@ void main() {
         findsOneWidget,
       );
       expect(find.textContaining('ROUTE:processing'), findsNothing);
+      await tester.tap(find.text(CaptureMessages.backToLibrary));
+      await tester.pumpAndSettle();
+      expect(find.text(kLibraryMarker), findsOneWidget);
+      expect(h.upload.replacesSent, [_old]);
     });
   }
 }

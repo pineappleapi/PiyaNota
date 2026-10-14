@@ -226,6 +226,8 @@ void main() {
       final cases = <int, Matcher>{
         401: isA<ProcessingSessionExpiredException>(),
         404: isA<ProcessingJobNotFoundException>(),
+        // PIYA-101 AC12 job_superseded: gone, like a 404.
+        410: isA<ProcessingJobNotFoundException>(),
         409: isA<ProcessingConflictException>(),
         500: isA<ProcessingServerException>(),
         503: isA<ProcessingServerException>(),

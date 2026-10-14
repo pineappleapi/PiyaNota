@@ -1,6 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
+import 'package:shared_preferences_platform_interface/types.dart';
+import 'package:piyanota_application/state/processing_providers.dart';
 
 import 'package:piyanota_application/models/processing_status.dart';
 import 'package:piyanota_application/models/score_details.dart';
@@ -33,6 +38,22 @@ Future<void> _settle(WidgetTester tester) async {
 }
 
 Finder get _offer => find.byKey(const Key('rephotograph-offer'));
+
+/// A preferences store whose first read waits for [gate], to hold
+/// Processing inside its "answered yet?" check.
+class _GatedPrefsStore extends InMemorySharedPreferencesStore {
+  _GatedPrefsStore(this.gate) : super.empty();
+
+  final Completer<void> gate;
+
+  @override
+  Future<Map<String, Object>> getAllWithParameters(
+    GetAllParameters parameters,
+  ) async {
+    await gate.future;
+    return super.getAllWithParameters(parameters);
+  }
+}
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
@@ -69,6 +90,44 @@ void main() {
       await pumpProcessing(tester, h);
       await _settle(tester);
       expect(find.text('Continue with 2 voices'), findsOneWidget);
+    });
+
+    testWidgets('no voice left (N = 0): no Continue', (tester) async {
+      final h = ProcessingHarness(
+        ScriptedProcessingApi([
+          _doneWith({
+            for (final voice in VoicePart.values)
+              voice: VoiceFailureCause.unreadable,
+          }),
+        ]),
+      );
+      await pumpProcessing(tester, h);
+      await _settle(tester);
+      expect(_offer, findsOneWidget);
+      expect(find.textContaining('Continue with'), findsNothing);
+      expect(find.text(RephotographMessages.rephotograph), findsOneWidget);
+    });
+
+    testWidgets('a second complete while the first is being decided shows '
+        'one offer', (tester) async {
+      final gate = Completer<void>();
+      SharedPreferencesStorePlatform.instance = _GatedPrefsStore(gate);
+      final h = ProcessingHarness(
+        ScriptedProcessingApi([
+          _doneWith({VoicePart.tenor: VoiceFailureCause.unreadable}),
+        ]),
+      );
+      await pumpProcessing(tester, h);
+      // The first complete is waiting on the preference read. Follow the
+      // job afresh: its poll completes it a second time.
+      final jobs = h.container.read(processingJobsProvider.notifier);
+      jobs.forget(kJob);
+      jobs.track(kJob, title: kTitle);
+      await tester.pump();
+      await tester.pump();
+      gate.complete();
+      await _settle(tester);
+      expect(_offer, findsOneWidget);
     });
 
     testWidgets('render_failed only: straight to Playback', (tester) async {

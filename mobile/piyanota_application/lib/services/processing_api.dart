@@ -57,6 +57,10 @@ class HttpProcessingApi implements ProcessingApi {
   static const int _notFound = 404;
   static const int _conflict = 409;
 
+  /// PIYA-101 AC12 `job_superseded`: a whole-score retake replaced the
+  /// job, so for polling it is as gone as a 404 (as in PIYA-103).
+  static const int _gone = 410;
+
   @override
   Future<ProcessingStatus> fetchStatus(String jobId) async {
     final response = await _send(
@@ -118,7 +122,7 @@ class HttpProcessingApi implements ProcessingApi {
       case DioExceptionType.badResponse:
         return switch (e.response?.statusCode) {
           _unauthorized => const ProcessingSessionExpiredException(),
-          _notFound => const ProcessingJobNotFoundException(),
+          _notFound || _gone => const ProcessingJobNotFoundException(),
           _conflict => const ProcessingConflictException(),
           _ => const ProcessingServerException(),
         };

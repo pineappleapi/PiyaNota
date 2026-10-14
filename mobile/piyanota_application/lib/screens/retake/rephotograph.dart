@@ -37,6 +37,12 @@ class RephotographMessages {
   static String unreadableTitle(VoicePart voice) =>
       '${voice.label} couldn\'t be read from the photos';
 
+  /// No job to replace is known (a PIYA-103 result without `jobId` that
+  /// this device didn't scan).
+  static const String noJob =
+      'This score can\'t be re-photographed from here. Add it again from '
+      'Capture.';
+
   static const String unreadableBody =
       'Re-photographing the whole score may fix it.';
 
@@ -68,11 +74,13 @@ Future<RephotographChoice?> showRephotographOffer(
     title: Text(RephotographMessages.offerTitle(voices)),
     content: const Text(RephotographMessages.offerBody),
     actions: [
-      TextButton(
-        onPressed: () =>
-            Navigator.of(context).pop(RephotographChoice.continuePlayback),
-        child: Text(RephotographMessages.continueWith(playable)),
-      ),
+      // Nothing left to listen to: Re-photograph (or Back) only.
+      if (playable > 0)
+        TextButton(
+          onPressed: () =>
+              Navigator.of(context).pop(RephotographChoice.continuePlayback),
+          child: Text(RephotographMessages.continueWith(playable)),
+        ),
       TextButton(
         onPressed: () =>
             Navigator.of(context).pop(RephotographChoice.rephotograph),
@@ -84,30 +92,50 @@ Future<RephotographChoice?> showRephotographOffer(
 
 /// "`<Voice>` couldn't be read from the photos" (PIYA-208 chip, PIYA-209
 /// Mixer row). True for Re-photograph; false for Cancel or a dismiss.
+/// A second tap while one is open (a fast double tap on the chip or row)
+/// opens nothing and answers false.
 Future<bool> showUnreadableVoiceAlert(
   BuildContext context, {
   required VoicePart voice,
 }) async {
+  // Held as the route, not only a flag: a route torn down without popping
+  // (its navigator disposed) never completes, so a `finally` would never
+  // clear a flag, but the route does stop being active. [_alertPushing]
+  // covers the frame before the dialog's builder first runs.
+  if (_alertPushing || (_openUnreadableAlert?.isActive ?? false)) {
+    return false;
+  }
+  _alertPushing = true;
   final retake = await showDialog<bool>(
     context: context,
-    builder: (context) => AlertDialog(
-      key: const ValueKey('unreadable-voice-alert'),
-      title: Text(RephotographMessages.unreadableTitle(voice)),
-      content: const Text(RephotographMessages.unreadableBody),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          child: const Text(RephotographMessages.cancel),
-        ),
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(true),
-          child: const Text(RephotographMessages.rephotograph),
-        ),
-      ],
-    ),
+    builder: (context) {
+      _openUnreadableAlert = ModalRoute.of(context);
+      _alertPushing = false;
+      return AlertDialog(
+        key: const ValueKey('unreadable-voice-alert'),
+        title: Text(RephotographMessages.unreadableTitle(voice)),
+        content: const Text(RephotographMessages.unreadableBody),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text(RephotographMessages.cancel),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text(RephotographMessages.rephotograph),
+          ),
+        ],
+      );
+    },
   );
+  _alertPushing = false;
   return retake ?? false;
 }
+
+/// One unreadable-voice alert at a time, app-wide: Playback's chips and
+/// the Mixer's rows share it.
+Route<Object?>? _openUnreadableAlert;
+bool _alertPushing = false;
 
 /// AC11 "stays once per job": answered offers, per `jobId` on the device
 /// (AC12: a retake is a new job, so its own unreadable voices are offered

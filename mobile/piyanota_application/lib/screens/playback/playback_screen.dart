@@ -13,6 +13,7 @@ import '../../models/score_timeline.dart';
 import '../../models/voice_part.dart';
 import '../../routes/app_routes.dart';
 import '../../state/playback_providers.dart';
+import '../../state/processing_providers.dart';
 import '../../state/session_actions.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/primary_pill_button.dart';
@@ -240,10 +241,16 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
   /// Back returns to the library without an answer, so it is offered
   /// again next time.
   Future<void> _offerRephotograph(ScoreResult result) async {
-    final jobId = result.jobId;
-    if (jobId == null || await RephotographOfferPrefs.isAnswered(jobId)) {
-      return;
+    // Same scope as the muted flag: the jobId, or `score-<id>` when the
+    // result has none (a contract gap, logged).
+    final scope = MutedAlertPrefs.scopeFor(result);
+    if (result.jobId == null) {
+      debugPrint(
+        'Playback: result ${result.scoreId} has no jobId; '
+        'Re-photograph offer keyed by $scope',
+      );
     }
+    if (await RephotographOfferPrefs.isAnswered(scope)) return;
     if (!mounted || _leaving) return;
     final playable =
         VoicePart.values.length - result.declaredFailedVoices.length;
@@ -257,9 +264,9 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
       case null:
         await _back();
       case RephotographChoice.continuePlayback:
-        await RephotographOfferPrefs.markAnswered(jobId);
+        await RephotographOfferPrefs.markAnswered(scope);
       case RephotographChoice.rephotograph:
-        await RephotographOfferPrefs.markAnswered(jobId);
+        await RephotographOfferPrefs.markAnswered(scope);
         if (mounted) await _rephotograph();
     }
   }
@@ -299,9 +306,26 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
   /// PIYA-207 AC12 from Playback: the whole score, pre-filled from one
   /// PIYA-102 call on the result's job.
   Future<void> _rephotograph() async {
+    if (_leaving) return;
     final result = ref.read(playbackControllerProvider(widget.scoreId)).result;
-    final jobId = result?.jobId;
-    if (_leaving || jobId == null) return;
+    final jobId =
+        result?.jobId ??
+        ref
+            .read(processingJobsProvider.notifier)
+            .completedJobOf(widget.scoreId)
+            ?.jobId;
+    if (jobId == null) {
+      debugPrint(
+        'Playback: no jobId for score ${widget.scoreId}; '
+        'whole-score retake not possible',
+      );
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text(RephotographMessages.noJob)),
+        );
+      return;
+    }
     _leaving = true;
     try {
       await _controller.pause();

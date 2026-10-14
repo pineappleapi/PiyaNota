@@ -217,6 +217,39 @@ void main() {
       );
     });
 
+    test('a bare 404 on a whole-score retake is job_not_found; without '
+        'replacesJobId it stays bare', () async {
+      Future<void> check(String? replaces, Matcher code) => expectLater(
+        _apiWith(_StubAdapter(status: 404, body: {})).submitImages(
+          details: const ScoreDetails(title: 'Ave'),
+          imagePaths: [page1],
+          replacesJobId: replaces,
+        ),
+        throwsA(
+          isA<UploadRejectedException>().having((e) => e.code, 'code', code),
+        ),
+      );
+      await check('job-1', equals(jobNotFoundCode));
+      await check(null, isNull);
+    });
+
+    test('a 410 on a PDF retake is not_retakeable', () async {
+      await expectLater(
+        _apiWith(_StubAdapter(status: 410, body: {})).submitPdf(
+          details: const ScoreDetails(title: 'Ave'),
+          pdfPath: page1,
+          replacesJobId: 'job-1',
+        ),
+        throwsA(
+          isA<UploadRejectedException>().having(
+            (e) => e.code,
+            'code',
+            notRetakeableCode,
+          ),
+        ),
+      );
+    });
+
     test('an error envelope keeps code, field and page', () async {
       final adapter = _StubAdapter(
         status: 415,
@@ -394,6 +427,20 @@ void main() {
           ),
         );
       }
+    });
+
+    test('whole-score retake (PIYA-101 AC12): bare 404/409 get codes, '
+        '410 is a dead retake, a sent code is kept', () {
+      String? code(int status, [String? sent]) =>
+          HttpScoreUploadApi.wholeRetakeRejection(
+            UploadRejectedException(statusCode: status, code: sent),
+          ).code;
+      expect(code(404), jobNotFoundCode);
+      expect(code(409), notRetakeableCode);
+      expect(code(410), notRetakeableCode);
+      expect(code(410, jobSupersededCode), notRetakeableCode);
+      expect(code(409, retakeInProgressCode), retakeInProgressCode);
+      expect(code(400, 'title_too_long'), 'title_too_long');
     });
 
     test('a server code is kept as sent', () {

@@ -56,6 +56,9 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
 
   /// Set once this screen has started leaving, so it never navigates twice.
   bool _leaving = false;
+
+  /// [_finish] is running (AC11 offer pending or being decided).
+  bool _finishing = false;
   Timer? _completionTimer;
 
   static const double _maxHeadingScale = 1.5;
@@ -123,7 +126,10 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
   /// comes first (once per job), and routing waits for the answer. Only
   /// `render_failed` voices go straight to Playback.
   Future<void> _finish() async {
-    if (!mounted || _leaving) return;
+    // Set before the first await: a second `complete` (a poll landing
+    // while the prefs are read) must not show the offer twice.
+    if (!mounted || _leaving || _finishing) return;
+    _finishing = true;
     final status = _job?.status;
     final unreadable = status?.unreadableVoices ?? const [];
     if (status == null ||
@@ -149,6 +155,7 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
       case RephotographChoice.continuePlayback:
         await RephotographOfferPrefs.markAnswered(widget.jobId);
         _leaving = false;
+        _finishing = false;
         _openPlayback();
       case RephotographChoice.rephotograph:
         await RephotographOfferPrefs.markAnswered(widget.jobId);
@@ -159,7 +166,8 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
           jobId: widget.jobId,
           title: widget.title,
           details: status.details,
-          retakeOfScoreId: status.scoreId,
+          // A retake of a retake keeps pointing at the score's card.
+          retakeOfScoreId: status.scoreId ?? _job?.retakeOfScoreId,
         );
     }
   }
