@@ -1382,9 +1382,14 @@ def infer_pitch(
             else:
                 meter = _meter_pair_at(symbols, tok_idx)
                 if meter is not None:
-                    if not _at_measure_start(symbols, tok_idx):
+                    # Courtesy check first (same order as metersign): a courtesy
+                    # meter after the strip's last notes announces the next
+                    # system and is never "mid-measure".
+                    if not _has_body_content_after(symbols, tok_idx + 2):
+                        pass
+                    elif not _at_measure_start(symbols, tok_idx):
                         meter_flags.append(METER_FLAG_MID_MEASURE)
-                    elif _has_body_content_after(symbols, tok_idx + 2):
+                    else:
                         time_signature        = meter
                         time_signature_source = TIME_SIG_SOURCE_DETECTED
                 elif (_parse_digit(sym) or (0, ""))[1] in (
