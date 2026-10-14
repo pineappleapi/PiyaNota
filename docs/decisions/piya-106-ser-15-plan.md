@@ -3,8 +3,9 @@
 **Status (updated 2026-10-14):** Phases 0, 0b, 1 and Phase 2 step 1 are done.
 **Gate G2 passed for both seeds:** dev grey/e1c SER camera 8.15-8.44%, digital 8.00-8.20%, against
 16.26-16.55 / 15.90-16.64% for the deployed model (Amendment 5).
-Next (user, Amendment 6): Phase 2 step 2 (AC4 leave-one-piece-out, gate G3), then Phase 4. G3 training is
-blocked until the dev pieces' GT is user-verified. Fermatas are out of scope (Amendment 6). Branch
+Next (user, Amendment 8): G3 is skipped (AC4 unmet, disclosed). The divisi arm is built by 2026-10-18, then
+Phase 2, the control and the arm are scored in one look on the 10-piece Phase 4 set (camera only, GT v1/v2).
+Fermatas are out of scope (Amendment 6). Branch
 `piya106/stroke-calibration`, not merged.
 Original 2026-09-29 status: plan plus Phase 0 implemented on branch `piya106/ser15-header-rule` (not merged);
 ml-cv-lead review pending. All numbers below are on **eval_prelim, which is dev data**: the user decided on 2026-09-28
@@ -1855,6 +1856,85 @@ Phase 4 candidate: if G3 = PASS, the final all-pieces model, both seeds as a ran
   - (vi) The frozen system records the checkpoint sha256 of the final all-pieces model (or the G2 checkpoints on
     G3 FAIL), both seeds as a range, a piece-level bootstrap CI, and the confident-wrong rate and calibration.
 
+#### Amendment 8 (2026-10-14): G3 skipped; Phase 4 set redefined; divisi arm scored in the same look
+
+User decisions (2026-10-14), with ml-cv-lead's rulings on them (same day). Written before any GT for the Phase 4
+pieces exists and before any model has decoded them.
+
+**8.1 G3 is skipped.** G3 was dev-only and diagnostic; only Phase 4 gives the AC1 number. Phase 4 therefore uses the
+G2 checkpoints `phase2_kaggle_models/seed{1,2}/phase2_seed{1,2}.pt` unchanged, both seeds as a range (7.8 (vi),
+"G2 checkpoints on G3 FAIL"). Consequence, disclosed in the thesis: PIYA-106 AC4 is **not met**.
+`docs/tickets/module1-pipeline.md`: "4. Model trained on Camera-PrIMuS, supplemented with CPMS for photographic
+distortion, fine-tuned on the Filipino SATB dataset before production use." Phase 2 trained on synthetic
+Bach/Palestrina renders plus CPM, never on Filipino data.
+
+**8.2 Phase 4 set.** No new pieces exist, so the Phase 4 set is the 10 open-score SATB pieces in
+`data/piyanota_dataset` (`dataset_manifest.csv`, split `test`) that are not dev pieces and not excluded by
+`training/step3_mask_split.json`:
+- **Clean** (frozen 2026-09-25, never looked at while tuning): `ama_namin`, `salmo_150`.
+- **Stage 1 mask-tuned** (lyric/tie mask thresholds, 2026-09-25): `ale_nasa_langit_na_ba_ako`,
+  `bituing_walang_ningning`, `folk_medley`, `hesus_ng_aking_buhay`, `panalangin_sa_pagiging_bukas_palad`,
+  `sanay_wala_nang_wakas`, `dormi_jesu`, `livin_on_a_prayer`. Dormi and Livin' were also the ClefKeyNet one-shot
+  real-photo check (BUG-021, spent).
+- Excluded (not open-score SATB): `flashlight`, `awit_ng_paghahangad`, `ang_puso_koy_nagpupuri`,
+  `magdiwang_magpuri`. Pages marked `heldout_scope` and systems with 5+ staves (BUG-042) are excluded by layout rule,
+  fixed in the PREREG before anything is scored.
+- No CRNN checkpoint was trained or selected on any of them. "Held-out" holds for the CRNN only, not for the whole
+  pipeline: 8 pieces shaped Stage 1 thresholds, and 2 shaped the ClefKeyNet go decision. The thesis says so.
+
+**8.3 Rules relaxed, disclosed.** 7.8 (v) cannot be met: every photo, dev and test, comes from one continuous
+capture session (IMG_1496-1655), and only camera photos exist. Phase 4 is camera-only and makes no digital claim.
+The section 5 line "New pieces, never seen, ... digital and camera" is replaced by 8.2 and this item.
+
+**8.4 Divisi arm in the same look (reverses the 2026-10-01 ruling 3 of the chord plan).** The divisi ("chord")
+vocabulary arm, `piya-106-chord-vocabulary-plan.md` section 10, is in thesis scope and is built now. It is scored on
+the Phase 4 set, not a fresh set. ml-cv-lead conditions:
+- **One look.** Phase 2, the control run and the divisi arm (2 seeds each) are all frozen, with sha256s recorded,
+  then scored once on identical strips. No model is decoded on these pieces before that, and Phase 2 is not peeked
+  at first.
+- **Deadline: Sunday 2026-10-18.** If the arm fails a synthetic gate or is not frozen by then, Phase 2 is scored
+  alone and the arm loses its claim to this set.
+- **Arm freeze before GT drafting.** Every arm hyperparameter, gate and Stage 3/4 validator threshold is fixed in a
+  committed, ml-cv-lead-reviewed doc before anyone reads the test photos at notation level. A later arm change needs
+  an amendment recording the exposure, and its result is reported as test-informed.
+- **Firewall.** GT is drafted in a separate session that never edits arm code or config, only from photos and strip
+  crops, never from a model decode. No aggregate statistic of the test GT (divisi counts, intervals, voices) is
+  produced before the look, and none ever informs the arm.
+- Phase 2 also runs through the new Stage 3 (chord plan 10.6), with its events checked byte-identical to the old
+  Stage 3, so a model difference is not mixed with a Stage 3 change.
+
+**8.5 GT: one source, two projections.** Each piece gets one `gt_source` that labels every region by kind
+(`chord`, `splitstem_same_rhythm`, `seconds_displaced`, `triplet`, `two_voice_diffrhythm`), with member positions,
+durations, accidentals, one dot per head and ties per member; triplet notes and fermatas are written out. A frozen,
+committed `project_gt.py` derives:
+- **v1 (without divisi):** chord, split-stem, seconds and triplet regions become `<OOV>` spans, as in dev GT. The
+  only version comparable with dev SER.
+- **v2 (with divisi):** the same spans expanded to `chordnote-*` tokens (chord plan 10.3/10.4); triplets expanded
+  only if the arm's vocabulary has `tuplet.3`. `two_voice_diffrhythm` stays a kind-tagged `<OOV>` in both.
+- v1 and v2 must be token-identical outside the expanded spans (asserted in code). Nobody hand-edits v1 or v2.
+- The GT is user-verified and sha256-frozen before the look; unverified agent-made GT is diagnostic only and cannot
+  carry AC1. choral-conductor checks the kind-tag format before drafting.
+
+**8.6 Reporting (pre-registered here; details in the Phase 4 PREREG).**
+- Headline: fermata-excluded v1 SER per model, both seeds as a range, full SOW SER beside it, camera only.
+- Model comparison: paired per-piece delta on v2 all-in SER and on pitch accuracy, sign count over 10 pieces and a
+  piece-level bootstrap CI (wide with 10 pieces; said so). SER is never compared across v1 and v2.
+- Subgroups: clean (2) vs mask-tuned (8), per-piece values only, descriptive; divisi vs non-divisi strips (the
+  monophonic regression check across arm, Phase 2 and control); chordnote precision/recall, exact chord match,
+  seconds separately, per voice; hallucinated chordnotes per 100 notes on non-divisi strips; triplets; Phase 2's
+  divisi regions as their own row (chord plan 10.7); confident-wrong rate at a pre-registered threshold plus
+  AUROC, chordnotes separately; Stage 2 coverage with all-in and found-strip SER; per-piece table with GT status.
+  Header-dependent pitch accuracy is also reported without Dormi and Livin'.
+- **Invalidates the result:** GT edited after the look; an arm change after drafting without an amendment; v1/v2
+  differing outside expanded spans; models scored on different strips or scorer versions; reporting the better
+  seed; pooling with dev; drafting from model decodes.
+
+**8.7 Order.** (1) This amendment; (2) the arm freeze doc; (3) Phase 4 PREREG part 1 (piece list, layout
+exclusions, GT spec, `project_gt.py`); (4) Stage 1/2 strips cut once, manifest sha256 recorded; (5) GT drafted
+(separate session), user-verified, frozen; arm built and trained on Kaggle in parallel; (6) scorer, projection,
+Stage 3 version and all checkpoint sha256s frozen; (7) the one look. Phase 3 is not part of the Phase 4 system
+unless the user revives it before step 6.
+
 ### Phase 3: grammar-aware rescoring (CPU; Oct 10 - Oct 14; dates slipped, see Amendment 5)
 
 - Oracle headroom: 47% of note/accidental misreads have the GT token in the top 3 with p > 1e-2. (Measured on the
@@ -1866,9 +1946,10 @@ Phase 4 candidate: if G3 = PASS, the final all-pieces model, both seeds as a ran
 - Tune the weights with leave-one-piece-out on dev only.
 - **Gate G4:** at least 1 pp dev SER gain in leave-one-piece-out, and pitch not worse.
 
-### Phase 4: frozen, pre-registered held-out evaluation (Oct 14 - Oct 18) - step 4, ON HOLD for the user's questions
+### Phase 4: frozen, pre-registered held-out evaluation (Oct 14 - Oct 18) - step 4; set and order redefined by Amendment 8
 
-- New pieces, never seen, never tuned on, digital and camera. The proposal promises 10 scores.
+- ~~New pieces, never seen, never tuned on, digital and camera.~~ Replaced by Amendment 8.2-8.3 (10 existing
+  test pieces, camera only). The proposal promises 10 scores.
 - Pre-register the metrics, the system version and the analysis, like `data/eval_fresh/PREREG.md`.
 - Run once and report both seeds as a range, with 95% CI and note precision.
 - **This is the only number that can go in the thesis as the AC1 result.**

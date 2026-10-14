@@ -602,6 +602,8 @@ low priority: divisi bars are louder (two notes at velocity 100). Scale per memb
    because divisi is common in every SATB voice. This replaces the Bass/Tenor-leaning voice prior; the exact share is
    still set at the pre-training review.
 2. Control run: YES (continue Phase 2 without new tokens, same 2 seeds).
-3. The chord model is tested on a FRESH held-out set, not a second look at the Phase 4 set.
+3. ~~The chord model is tested on a FRESH held-out set, not a second look at the Phase 4 set.~~ **Reversed
+   2026-10-14 (user):** the divisi arm is scored on the Phase 4 set in the same single look as Phase 2 and the
+   control, under ml-cv-lead's conditions (SER-15 plan, Amendment 8.4). Arm deadline 2026-10-18.
 4. DS2 chord labels: OUT of arm v1.
 5. Extra-staves divisi is logged as BUG-042; the fix timing is under discussion with the user.
