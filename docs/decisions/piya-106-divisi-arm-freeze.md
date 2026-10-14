@@ -96,9 +96,10 @@ Stage 3 code may land after Sunday, but it must be sha-frozen before the look. I
 - Un-injected val SER at most 2x the init (Phase 2 val SER 0.259-0.263%, Amendment 5; G3 rule h precedent).
 - CPM canary, with new tokens counted as insertions: no breach of the 3x-init hard cap, and the final epoch at most
   1.0 pp above Phase 2's own canary, clean and distorted (G3 rule f). The frozen rule is "relative to Phase 2's
-  own logged canary, per seed". **The reference numbers are copied from the Phase 2 run logs before the training
-  diff review (step 6).** ml-cv-lead quoted 2.70-2.74% clean and 4.32-4.50% distorted, but those figures were not
-  found in the repo on 2026-10-14.
+  own logged canary, per seed". Reference values, Phase 2 epoch 6 (the deployed checkpoint), from
+  `music_symbol_detection/phase2_kaggle_models/seed{1,2}/metrics.json` (also `piya-106-g2-rules.md` section 3):
+  seed 1 clean 0.02695 / distorted 0.04317; seed 2 clean 0.02738 / distorted 0.04496. So the arm's final epoch must
+  be at most 0.03695 / 0.05317 (seed 1) and 0.03738 / 0.05496 (seed 2). Mean per-sample SER, 399 pinned stems.
 
 These floors only test whether chord reading works on synthetic data. Phase 2 reads synthetic strips almost
 perfectly, so they say nothing about real photos (synthetic divisi lacks "div." text and real stem forms).
