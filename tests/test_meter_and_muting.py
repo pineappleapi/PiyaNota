@@ -390,17 +390,17 @@ def test_note_fully_inside_a_span_is_still_dropped() -> None:
     assert _notes(out) == []
 
 
-def test_single_voice_meter_change_is_not_applied() -> None:
+def test_meter_change_read_by_one_of_four_is_not_applied() -> None:
     # Continuation system: only Soprano reads 3/4 (a misread); the bars really hold four quarters.
     sys1 = _all_voices([CLEF, *M44, Q, Q, Q, Q, BAR, Q, Q, Q, Q, BAR], sys_idx=1)
     sys2 = _all_voices([CLEF, Q, Q, Q, Q, BAR, Q, Q, Q, Q, BAR], sys_idx=2,
                        Soprano=[CLEF, *M34, Q, Q, Q, Q, BAR, Q, Q, Q, Q, BAR])
     satb, report = s4.reconstruct_satb_with_report(_merge(sys1, sys2))
     assert [ts for _, ts, _ in _bar_layout(report)] == ["4/4"] * 4
-    single = [f for f in report["flags"] if f["kind"] == s4.FLAG_METER_CHANGE_SINGLE]
+    single = [f for f in report["flags"] if f["kind"] == s4.FLAG_METER_CHANGE_MINORITY]
     assert len(single) == 1 and single[0]["review_needed"] is True
     assert (single[0]["bar"], single[0]["bar_end"], single[0]["sys_idx"]) == (3, 4, 2)
-    assert [f["kind"] for f in report["flags"]] == [s4.FLAG_METER_CHANGE_SINGLE], "no voice repaired"
+    assert [f["kind"] for f in report["flags"]] == [s4.FLAG_METER_CHANGE_MINORITY], "no voice repaired"
     assert not any(f.get("muted") for f in report["flags"])
     assert all(len([e for e in satb[v] if e["type"] == "note"]) == 16 for v in VOICES)
 
@@ -410,7 +410,7 @@ def test_meter_change_by_all_voices_is_applied() -> None:
     sys2 = _all_voices([CLEF, *M34, Q, Q, Q, BAR], sys_idx=2)
     _, report = s4.reconstruct_satb_with_report(_merge(sys1, sys2))
     assert [ts for _, ts, _ in _bar_layout(report)] == ["4/4", "3/4"]
-    assert not [f for f in report["flags"] if f["kind"] == s4.FLAG_METER_CHANGE_SINGLE]
+    assert not [f for f in report["flags"] if f["kind"] == s4.FLAG_METER_CHANGE_MINORITY]
 
 
 def test_meter_disagreement_is_one_item_per_run() -> None:
@@ -492,6 +492,8 @@ def test_whole_rest_pickup_is_the_pickup_length() -> None:
     bass_kinds = {f["kind"] for f in report["flags"] if f.get("voice") == "Bass"}
     assert not bass_kinds & {"pickup_length_mismatch", "bar_count_mismatch", "local_placement_overrun"}
     assert not any(f.get("muted") for f in report["flags"])
+    info = [f for f in report["flags"] if f["kind"] == s4.FLAG_WHOLE_REST_PICKUP]
+    assert len(info) == 1 and info[0]["voice"] == "Bass" and info[0]["review_needed"] is False
 
 
 def test_review_items_put_failed_then_muted_first() -> None:
@@ -521,8 +523,9 @@ def test_bars_table_refuses_drift() -> None:
     sys2 = _all_voices([CLEF, Q, Q, Q, Q, BAR], sys_idx=2)
     _, report = s4.reconstruct_satb_with_report(_merge(sys1, sys2))
     report["systems"][1]["start_tick"] += QUARTER
-    with pytest.raises(RuntimeError, match="drift"):
+    with pytest.raises(s4.PipelineFailure, match="^internal_error: bars table drift") as err:
         s5.build_bars_table(report, BPM)
+    assert err.value.failure_reason == s5.FAILURE_INTERNAL_ERROR == "internal_error"
 
 
 def test_meter_flags_reach_review_items(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -548,3 +551,116 @@ def test_eventless_strip_meter_flags_reach_review(monkeypatch: pytest.MonkeyPatc
     result = s5.run_full_pipeline_with_report(output_dir=str(tmp_path), clef_key_weights=None, bpm=BPM)
     assert {"code": "meter_digit_unpaired", "voice": "alto", "pageIndex": 1, "systemIndex": 2,
             "bar": None} in result["review"]["items"]
+
+
+# ── Review round 3 (senior-reviewer / backend-lead 2026-10-14) ─────────────────
+
+def test_meter_change_read_by_two_with_two_silent_is_applied() -> None:
+    # Tenor/Bass read no meter in system 2 (no vote, not a vote against): 2 of 2 readers is a majority.
+    sys1 = _all_voices([CLEF, *M44, Q, Q, Q, Q, BAR], sys_idx=1)
+    sys2 = _all_voices([CLEF, *M34, Q, Q, Q, BAR, Q, Q, Q, BAR], sys_idx=2,
+                       Tenor=[CLEF, Q, Q, Q, BAR, Q, Q, Q, BAR], Bass=[CLEF, Q, Q, Q, BAR, Q, Q, Q, BAR])
+    satb, report = s4.reconstruct_satb_with_report(_merge(sys1, sys2))
+    assert [ts for _, ts, _ in _bar_layout(report)] == ["4/4", "3/4", "3/4"]
+    assert not [f for f in report["flags"] if f["kind"] == s4.FLAG_METER_CHANGE_MINORITY]
+    assert not any(f.get("muted") for f in report["flags"])
+    assert all(len([e for e in satb[v] if e["type"] == "note"]) == 10 for v in VOICES)
+
+
+def test_meter_change_read_by_one_voice_inside_others_multirest_is_rejected() -> None:
+    # Bar 3: Soprano reads 3/4 while the other three sit in a 2-bar multirest. One read is not enough.
+    rest2 = [CLEF, "digit.2-S5", "multirest-L3", BAR]
+    sys1 = _all_voices([CLEF, *M44, Q, Q, Q, Q, BAR], sys_idx=1)
+    sys2 = _all_voices(rest2, sys_idx=2, Soprano=[CLEF, Q, Q, Q, Q, BAR, *M34, Q, Q, Q, BAR])
+    _, report = s4.reconstruct_satb_with_report(_merge(sys1, sys2))
+    assert [ts for _, ts, _ in _bar_layout(report)] == ["4/4"] * 3
+    minority = [f for f in report["flags"] if f["kind"] == s4.FLAG_METER_CHANGE_MINORITY]
+    assert len(minority) == 1 and minority[0]["bar"] == 3
+
+
+def test_meter_change_in_a_one_voice_system_is_applied() -> None:
+    sys1 = _all_voices([CLEF, *M44, Q, Q, Q, Q, BAR], sys_idx=1)
+    sys2 = {v: [] for v in VOICES}
+    sys2["Soprano"] = _events([CLEF, *M34, Q, Q, Q, BAR], "Soprano", 1, 2)
+    _, report = s4.reconstruct_satb_with_report(_merge(sys1, sys2))
+    assert [ts for _, ts, _ in _bar_layout(report)] == ["4/4", "3/4"]
+    assert not [f for f in report["flags"] if f["kind"] == s4.FLAG_METER_CHANGE_MINORITY]
+
+
+def test_pickup_trim_that_drops_only_a_rest_is_not_muted() -> None:
+    # Alto's first bar is a quarter rest + the pickup quarter: trimming to the pickup loses only the rest.
+    _, report = s4.reconstruct_satb_with_report(_all_voices(
+        [CLEF, *M44, Q, BAR, Q, Q, Q, Q, BAR],
+        Alto=[CLEF, *M44, "rest.quarter-L3", Q, BAR, Q, Q, Q, Q, BAR]))
+    trimmed = [f for f in report["flags"] if f.get("action") == s4.ACTION_TRIMMED_PICKUP]
+    assert len(trimmed) == 1 and trimmed[0]["voice"] == "Alto"
+    assert not trimmed[0].get("muted") and "start_tick" not in trimmed[0]
+    assert s5.build_muted_measures(report["flags"], BPM, []) == []
+
+
+def test_pipeline_failure_pickles() -> None:
+    import pickle
+    err = pickle.loads(pickle.dumps(s4.PipelineFailure("synthesis_failed", "all four voices failed")))
+    assert isinstance(err, s4.PipelineFailure) and isinstance(err, ValueError)
+    assert err.failure_reason == "synthesis_failed"
+    assert str(err) == "synthesis_failed: all four voices failed"
+
+
+def test_muted_measures_and_review_items_share_tick_then_satb_order() -> None:
+    def muted(voice: str, tick: int) -> dict:
+        return {"kind": "bar_overflow_clipped", "voice": voice, "page_index": 1, "sys_idx": 1, "bar": 2,
+                "review_needed": True, "muted": True, "start_tick": tick, "end_tick": tick + WHOLE}
+    # Out of order on purpose. Bass and Soprano share a tick. At 240 bpm ticks 1 and 2 both round to
+    # 1 ms, so Tenor (tick 1) must still precede Alto (tick 2): ordering by ms would flip them.
+    fast_bpm = 240
+    assert s5.tick_to_ms(1, fast_bpm) == s5.tick_to_ms(2, fast_bpm)
+    flags = [muted("Alto", 2), muted("Bass", WHOLE), muted("Soprano", WHOLE), muted("Tenor", 1)]
+    mm = s5.build_muted_measures(flags, fast_bpm, [])
+    review, _ = s5.build_review({}, flags)
+    order = [("tenor", 1), ("alto", 2), ("soprano", WHOLE), ("bass", WHOLE)]
+    assert [m["voice"] for m in mm] == [v for v, _ in order]
+    assert [i["voice"] for i in review["items"]] == [v for v, _ in order]
+
+
+def test_two_note_chord_is_split_identically() -> None:
+    chord = [{**_note(WHOLE + 2 * QUARTER, WHOLE, 60), "chord_id": 7},
+             {**_note(WHOLE + 2 * QUARTER, WHOLE, 64), "chord_id": 7}]
+    out = s5.apply_muted_spans(chord, [(WHOLE, 2 * WHOLE)])
+    assert len(out) == 2, "each member keeps only its restruck tail"
+    assert [(e["pitch"], e["tick_onset"], e["duration_ticks"], e["restruck_after_mute"]) for e in out] == [
+        (60, 2 * WHOLE, 2 * QUARTER, True), (64, 2 * WHOLE, 2 * QUARTER, True)]
+    split = s5.apply_muted_spans(chord, [(WHOLE + 3 * QUARTER, 2 * WHOLE)])
+    assert len(split) == 4, "a split adds events: build timing from the pre-mute satb"
+    assert sorted((e["pitch"], e["tick_onset"], e["duration_ticks"]) for e in split) == [
+        (60, WHOLE + 2 * QUARTER, QUARTER), (60, 2 * WHOLE, 2 * QUARTER),
+        (64, WHOLE + 2 * QUARTER, QUARTER), (64, 2 * WHOLE, 2 * QUARTER)]
+
+
+def test_courtesy_meter_pair_at_strip_end_is_not_mid_measure() -> None:
+    # A courtesy 3/4 after the strip's last notes (no closing barline) announces the next system.
+    flags: list[str] = []
+    s3.infer_pitch([CLEF, *M44, Q, Q, Q, Q, BAR, Q, Q, *M34], voice="Soprano", page_index=1, sys_idx=1,
+                   meter_flags_out=flags)
+    assert s3.METER_FLAG_MID_MEASURE not in flags
+    flags.clear()
+    s3.infer_pitch([CLEF, *M44, Q, Q, *M34, Q, Q, BAR], voice="Soprano", page_index=1, sys_idx=1,
+                   meter_flags_out=flags)
+    assert s3.METER_FLAG_MID_MEASURE in flags
+
+
+def test_process_strip_reports_flags_of_an_eventless_strip(monkeypatch: pytest.MonkeyPatch) -> None:
+    import numpy as np
+    import torch
+    tokens = {"empty": [CLEF, "digit.3-L4"], "full": [CLEF, *M44, "digit.3-S5", Q, Q, Q, Q, BAR]}
+    monkeypatch.setattr(s3, "transcribe_strip",
+                        lambda strip, *a, strip_id="", **k: [(t, 0.99) for t in tokens[strip_id]])
+    out: list[dict] = []
+    strip = np.zeros((64, 64), dtype=np.uint8)
+    ev = s3.process_strip(strip, "Tenor", 2, None, torch.device("cpu"), sys_idx=3, strip_id="empty",
+                          strip_flags_out=out)
+    assert ev == []
+    assert out == [{"voice": "Tenor", "page_index": 2, "sys_idx": 3,
+                    "meter_flags": [s3.METER_FLAG_UNPAIRED_DIGIT]}]
+    ev = s3.process_strip(strip, "Tenor", 2, None, torch.device("cpu"), sys_idx=3, strip_id="full",
+                          strip_flags_out=out)
+    assert ev and len(out) == 1, "flags of a strip with events ride on its events"

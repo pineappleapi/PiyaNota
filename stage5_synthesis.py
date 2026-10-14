@@ -38,6 +38,9 @@ VOICE_FAILED_CODE = "voice_failed"
 # PIYA-109 AC9: every voice failed and at least one had events, so rendering (server side) broke, not the
 # capture; no recapture prompt. Stage 4's FAILURE_INCOMPLETE_VOICE_SEQUENCE covers "every voice empty".
 FAILURE_SYNTHESIS = "synthesis_failed"
+# A pipeline invariant broke (a bug, not the user's photo): retry-later copy,
+# never a recapture prompt.
+FAILURE_INTERNAL_ERROR = "internal_error"
 # Client-facing review items are capped; the full list goes to the job record (backend-lead review
 # 2026-09-29: Stage 4 bar flags are unbounded, strips are at most 20 pages x 16 staves).
 REVIEW_ITEMS_CAP = 200
@@ -382,8 +385,15 @@ def apply_muted_spans(events: list[dict[str, Any]],
     from a damaged bar into a clean one (or across a whole damaged bar); only
     the damaged bar may go silent (senior-reviewer / choral-conductor
     2026-10-09). A note wholly inside a span is dropped. Rests and other
-    events are kept so the timeline (and the timing file built from it) is
-    unchanged. Output is ordered by onset.
+    events are kept so the timeline is unchanged. Output is ordered by onset.
+
+    A split note becomes several events, so the output can hold MORE events
+    than the input (every member of a chord is split the same way). The
+    timing file (PIYA-117) must therefore be built from the pre-mute ``satb``,
+    never from this output: the client shows the written notes and silences
+    the muted spans itself from ``mutedMeasures``. ``restruck_after_mute`` on a
+    piece is internal to rendering (it marks a re-attack the score does not
+    have) and is not part of any API payload.
     """
     merged = _merge_spans(spans)
     out: list[dict[str, Any]] = []
@@ -429,23 +439,28 @@ def _zero_based(index: Optional[int]) -> Optional[int]:
 
 def build_muted_measures(stage4_flags: list[dict[str, Any]], bpm: int,
                          failed_voices: list[str]) -> list[dict[str, Any]]:
-    """PIYA-103 AC9 ``mutedMeasures``: one entry per silenced span, by startMs then SATB order.
+    """PIYA-103 AC9 ``mutedMeasures``: one entry per silenced span, by start tick then SATB order.
 
     A failed voice has no entries (AC10): nothing of it plays, so nothing was muted.
     """
     failed = {v.lower() for v in failed_voices}
     entries = []
-    for f in stage4_flags:
-        if not _is_muted_entry(f, failed):
-            continue
+    for f in sorted((f for f in stage4_flags if _is_muted_entry(f, failed)), key=_muted_order):
         entries.append({
             "voice": f["voice"].lower(), "bar": f.get("bar"),
             "pageIndex": _zero_based(f.get("page_index")),
             "systemIndex": _zero_based(f.get("sys_idx")),
             "startMs": tick_to_ms(f["start_tick"], bpm), "endMs": tick_to_ms(f["end_tick"], bpm),
             "reason": f["kind"]})
-    entries.sort(key=lambda m: (m["startMs"], VOICES.index(m["voice"].capitalize())))
     return entries
+
+
+def _muted_order(flag: dict[str, Any]) -> tuple[int, int]:
+    """Shared sort key so ``mutedMeasures`` and the muted ``review.items`` list in the same order.
+
+    Ticks, not ms: two spans can round to the same ms and then tie-break differently.
+    """
+    return flag["start_tick"], VOICES.index(flag["voice"])
 
 
 def _meter_parts(time_signature: str) -> tuple[Optional[int], Optional[int]]:
@@ -466,8 +481,9 @@ def build_bars_table(report: dict[str, Any], bpm: int) -> list[dict[str, Any]]:
     held over the final barline).
 
     Raises:
-        RuntimeError: the tiled startTicks disagree with a system's
-            ``start_tick`` (the table and the audio would drift apart).
+        PipelineFailure: ``internal_error`` when the tiled startTicks disagree
+            with a system's ``start_tick`` (the table and the audio would drift
+            apart). That is a Stage 4 invariant breaking, not a capture problem.
     """
     rows: list[tuple[int, int, int, dict[str, Any]]] = []      # (bar, startTick, durTicks, meter bar)
     systems = sorted(report.get("systems", []), key=lambda s: s["start_tick"])
@@ -485,8 +501,9 @@ def build_bars_table(report: dict[str, Any], bpm: int) -> list[dict[str, Any]]:
     starts = {sys["first_bar"]: sys["start_tick"] for sys in systems}
     for bar_no, bar in all_bars:
         if bar_no in starts and starts[bar_no] != tick:
-            raise RuntimeError(f"bars table drift: bar {bar_no} tiles to tick {tick}, "
-                               f"Stage 4 starts its system at {starts[bar_no]}")
+            raise PipelineFailure(FAILURE_INTERNAL_ERROR,
+                                  f"bars table drift: bar {bar_no} tiles to tick {tick}, "
+                                  f"Stage 4 starts its system at {starts[bar_no]}")
         dur = int(bar.get("actual_ticks", bar["ticks"]))
         rows.append((bar_no, tick, dur, bar))
         tick += dur
@@ -552,7 +569,7 @@ def build_review(stage3_events: dict, stage4_flags: list, failed_voices: Optiona
         for v in VOICES if v.lower() in failed]
     flagged = [f for f in stage4_flags if f.get("review_needed")]
     muted = [f for f in flagged if _is_muted_entry(f, failed)]
-    muted.sort(key=lambda f: (f["start_tick"], VOICES.index(f["voice"])))
+    muted.sort(key=_muted_order)
     items += [stage4_item(f) for f in muted]
     items += [stage4_item(f) for f in flagged if not _is_muted_entry(f, failed)]
 
