@@ -201,3 +201,29 @@ perfectly, so they say nothing about real photos (synthetic divisi lacks "div." 
   Training data stays as frozen. After the Kaggle launch, camera-grandstaff is added as a diagnostic-only chord
   recall check (staves without split voices); it is never used for model selection or thresholds. Phase 4 remains
   the real test.
+- **A3 (2026-10-15, seconds and split stems; user concern, choral-conductor and ml-cv-lead reviews, ml-cv-lead GO,
+  frozen before any training and with no Phase 4 data seen):**
+  - Claim scope: the thesis claims "reads same-stem (homorhythmic) divisi". Split stems with the same rhythm are
+    cut (section 1) and two voices with different rhythms were never in scope; both are flagged, not modelled.
+  - Label order (choral-conductor, after Gould): in a second the lower head is always on the left, for stem up,
+    stem down and stemless heads, so bottom-to-top label order equals left-to-right drawn order for every dyad.
+    Only clusters of 3+ heads (and 3+ stacked accidentals) differ. Chord vocabulary plan 10.4 ("for stem-down
+    seconds this is the reverse of x order") is wrong for dyads. No relabelling.
+  - Seconds stay at the section 3 mix. The realised share (.03 on the G1b sample) is limited by candidates (a
+    second must double a pitch another voice sounds); raising the weight would only leave more onsets single.
+  - Corpus gate addition: `training/phase1/chord_xorder_audit.py` counts injected chords whose drawn head x order
+    disagrees with the label order, by chord size. Reported; mismatching chords go on the known-lost list.
+  - Metrics addition, reported on synthetic val, the camera-grandstaff diagnostic and Phase 4, never gated:
+    chordnote precision/recall per interval (2nd, 3rd, 4th/5th, 6th, 8ve, other) with n and Wilson 95% CI, and
+    `second_as_sequence` (a GT second read as two successive notes at the same two positions).
+  - Phase 4 expected outcome per GT kind, written before the look: same-stem chords are the primary metric;
+    split stems with the same rhythm are zero-shot (labels equal the chord form); two voices with different
+    rhythms are an expected failure, reported as member recall, insertions and confident-wrong count at 0.90.
+  - Stage 4 flag extension (to chord vocabulary plan 10.6): a bar in one voice whose total is 1.75-2.25 bar
+    lengths while the other three voices fit that bar gets `divisi_rhythm_split_suspected` + `review_needed`
+    whether or not it holds a `chord_id`, and is not run-scaled or tuplet-scaled; notes play up to the bar
+    length. The bounds are hand-set and never tuned on Phase 4 or `piyanota_dataset`. Report its recall on
+    two-voice bars and its false-flag rate elsewhere.
+  - Stage 3/4 code otherwise follows chord vocabulary plan 10.6 (chordnote events, per-position accidentals,
+    per-member ties, fix C dots, orphan and unison chordnotes dropped with `review_needed`); it is written after
+    the Kaggle launch and before the version-2 eval.

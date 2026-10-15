@@ -29,6 +29,7 @@ import hashlib
 import json
 import os
 import random
+import re
 import sys
 import time
 from collections import Counter, defaultdict
@@ -359,7 +360,52 @@ def chordnote_metrics(pairs: list[tuple[list[str], list[str]]]) -> dict[str, obj
         notes += sum(t.startswith(("note.", CHORDNOTE_PREFIX)) for t in gt)
     return {"chordnote_precision": hit / pred_n if pred_n else None, "chordnote_recall": hit / gt_n if gt_n else None,
             "chordnote_gt": gt_n, "chordnote_pred": pred_n, "chordnote_split_duplicates": split_dups,
-            "chordnote_pred_per_100_notes": 100.0 * pred_n / notes if notes else None}
+            "chordnote_pred_per_100_notes": 100.0 * pred_n / notes if notes else None, **interval_metrics(pairs)}
+
+
+# Staff steps from the head below to the chordnote -> interval row (divisi freeze A3; 6 = 7th and >7 fall in "other").
+INTERVAL_ROWS = {1: "2nd", 2: "3rd", 3: "4th5th", 4: "4th5th", 5: "6th", 7: "8ve"}
+WILSON_Z = 1.96
+POSITION_SUFFIX = re.compile(r"-([LS])(-?\d+)$")
+
+
+def staff_step(token: str) -> int:
+    """`...-L3` -> 6, `...-S3` -> 7: lines and spaces on one step scale (Sn is the space above Ln)."""
+    m = POSITION_SUFFIX.search(token)
+    if m is None:
+        raise ValueError(f"no staff position in {token!r}")
+    return 2 * int(m.group(2)) + (m.group(1) == "S")
+
+
+def wilson95(hit: int, n: int) -> list[float] | None:
+    if n == 0:
+        return None
+    p, z2 = hit / n, WILSON_Z ** 2
+    centre, half = p + z2 / (2 * n), WILSON_Z * (p * (1 - p) / n + z2 / (4 * n * n)) ** 0.5
+    return [(centre - half) / (1 + z2 / n), (centre + half) / (1 + z2 / n)]
+
+
+def interval_metrics(pairs: list[tuple[list[str], list[str]]]) -> dict[str, object]:
+    """Chordnote recall per interval to the head below it, plus `second_as_sequence`: a GT second not recalled
+    while the decode holds two successive notes at its two positions (the side-by-side heads read in time)."""
+    gt_n, hit, as_seq = Counter(), Counter(), 0
+    for pred, gt in pairs:
+        matched = lcs_matched_gt(pred, gt)
+        seq_pairs = {(staff_step(a), staff_step(b)) for a, b in zip(pred, pred[1:])
+                     if a.startswith(("note.", CHORDNOTE_PREFIX)) and b.startswith("note.")}
+        for i, tok in enumerate(gt):
+            if not tok.startswith(CHORDNOTE_PREFIX) or i == 0:
+                continue
+            lo, hi = staff_step(gt[i - 1]), staff_step(tok)
+            row = INTERVAL_ROWS.get(hi - lo, "other")
+            gt_n[row] += 1
+            hit[row] += i in matched
+            # shortcut: the note pair may sit anywhere in the strip, not at this onset; fine for a diagnostic count.
+            as_seq += row == "2nd" and i not in matched and (lo, hi) in seq_pairs
+    rows = ("2nd", "3rd", "4th5th", "6th", "8ve", "other")
+    return {"by_interval": {r: {"gt": gt_n[r], "hit": hit[r], "recall": hit[r] / gt_n[r] if gt_n[r] else None,
+                                "wilson95": wilson95(hit[r], gt_n[r])} for r in rows},
+            "second_as_sequence": as_seq}
 
 
 # ---- run -------------------------------------------------------------------------------------------------------

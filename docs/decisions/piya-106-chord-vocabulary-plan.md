@@ -492,7 +492,8 @@ Phase 2 data must be byte-identical with the flag off (check the corpus hash).
 - **Revised: split stems, same rhythm, use the same tokens as a same-stem chord.** The agnostic label is
   stem-free and CM says the music is the same. Split stems with different rhythms are not representable
   (members inherit the base duration). Stage 4 flags it (10.6), never repairs it.
-- Displaced seconds: still bottom to top. For stem-down seconds this is the reverse of x order, so report a
+- Displaced seconds: still bottom to top. (Corrected 2026-10-15, divisi freeze A3: for dyads this equals x order
+  in every stem direction; only 3+ head clusters differ.) Report a
   separate seconds metric. If it fails, the fallback is the known-lost list with its count (CM).
 - New vocabulary for the arm: `chordnote-*` (positions as the converted data produce them, capped at the
   existing note range) and `tuplet.3` (optionally `tuplet.2`).
