@@ -187,3 +187,17 @@ perfectly, so they say nothing about real photos (synthetic divisi lacks "div." 
     whatever the outcome.
   - Kaggle order: arm s1, arm s2, control s1, control s2, head-only s1, head-only s2. Head-only is dropped first if
     the Sat 2026-10-17 12:00 hard kill or the GPU quota is at risk.
+- **G1 rerun (2026-10-15, at 26e95ab):** 3995 CPM samples, agreement 0.99557, PASS, unchanged from before the
+  chord work.
+- **G1b sample (2026-10-15):** 12 manifest pieces (10 train, 2 val, seeded `random.Random("g1b-divisi")`) built
+  with `build_corpus.py --divisi --pieces ...` and rendered in 5 fonts with `resvg_py` 0.5.0 (same pin as the
+  Kaggle recut); 60/60 renders passed the SVG check, 0 OOV strips. Page: `g1b_page.py --divisi --seed 1`, 30
+  strips, 6 per case (dyad, triad, dotted chord, member accidental, member on a ledger line). Realised interval
+  mix on this subset (538 chords): 3rds .41, 6ths .28, 8ves .10, 4ths/5ths .18, 2nds .03 (target .35/.25/.20/
+  .10/.10); 8ves and 2nds are short of candidates. Re-measured on the full build at the corpus gate.
+- **Chord data sources (2026-10-15, user decision):** CameraPrIMuS has no chords (0 of 3996 local samples, MEI and
+  semantic), so it cannot supply chord strips. camera-grandstaff has many (3639 of 4623 val samples hold a chord)
+  but needs an ekern converter, staff cropping and a split-voice filter, and is Verovio-rendered like Phase 1.
+  Training data stays as frozen. After the Kaggle launch, camera-grandstaff is added as a diagnostic-only chord
+  recall check (staves without split voices); it is never used for model selection or thresholds. Phase 4 remains
+  the real test.

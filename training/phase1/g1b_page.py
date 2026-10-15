@@ -49,6 +49,15 @@ CASES: dict[str, str] = {
     "breve": "Breve (double whole) note or rest",
     "clef_normalised": "Source clef normalised (alto to treble, tenor to treble-8vb; no C clefs)",
 }
+# Divisi arm G1b (freeze doc section 5): only these cases, only strips with a chordnote (--divisi).
+CHORD_CASES: dict[str, str] = {
+    "chord_dyad": "Two-note chord: lowest head as note.*, the other as chordnote-<pos>",
+    "chord_triad": "Three-note chord: two chordnote tokens, bottom to top",
+    "chord_dotted": "Dotted chord: one dot per head, after the chordnote tokens",
+    "chord_accidental": "Accidental on a chord member (accidentals bottom to top, before the note)",
+    "chord_ledger": "Chord member on a ledger line, above or below the staff",
+}
+CASES.update(CHORD_CASES)
 # Cases that only arise from Palestrina's source handling; the Bach page never lists them as missing.
 PALESTRINA_ONLY: frozenset[str] = frozenset({"breve", "clef_normalised"})
 
@@ -159,7 +168,39 @@ def strip_cases(tokens: list[str], prev_tokens: list[str] | None, system: int, v
     return cases
 
 
-def collect(out: Path, composer: str) -> list[Strip]:
+def _ledger(pos: str) -> bool:
+    """Positions needing a ledger line: L0 and below, L6 and above, S-1 and below, S6 and above."""
+    n = int(pos[1:])
+    return n <= (0 if pos[0] == "L" else -1) or n >= 6
+
+
+def chord_cases(tokens: list[str]) -> set[str]:
+    found: set[str] = set()
+    for i, t in enumerate(tokens):
+        if not t.startswith("chordnote-"):
+            continue
+        pos = _split(t)[1]
+        nxt = tokens[i + 1] if i + 1 < len(tokens) else ""
+        prev = tokens[i - 1]
+        if not (prev.startswith("chordnote-") or nxt.startswith("chordnote-")):
+            found.add("chord_dyad")
+        if nxt.startswith("chordnote-"):
+            found.add("chord_triad")
+        if nxt.startswith("dot"):
+            found.add("chord_dotted")
+        if _ledger(pos):
+            found.add("chord_ledger")
+        j = i - 1
+        while j >= 0 and tokens[j].startswith(("chordnote-", "note.")):
+            j -= 1
+        while j >= 0 and tokens[j].startswith("accidental."):
+            if _split(tokens[j])[1] == pos:
+                found.add("chord_accidental")
+            j -= 1
+    return found
+
+
+def collect(out: Path, composer: str, divisi: bool = False) -> list[Strip]:
     strips: list[Strip] = []
     for font in FONTS:
         for render_dir in sorted((out / "renders" / font).glob(f"{composer}_*")):
@@ -173,8 +214,10 @@ def collect(out: Path, composer: str) -> list[Strip]:
                 if r.get("quarantine"):
                     continue   # OOV strip (vocab_guard): never used for training, so not worth a hand check
                 prev = by_key.get((r["voice"], r["system"] - 1))
-                for case in strip_cases(r["tokens"], prev["tokens"] if prev else None, r["system"], r["voice"],
-                                        plan, plan["systems"]):
+                found = (chord_cases(r["tokens"]) if divisi else
+                         strip_cases(r["tokens"], prev["tokens"] if prev else None, r["system"], r["voice"], plan,
+                                     plan["systems"]))
+                for case in found:
                     strips.append(Strip(font, render_dir.name, r["page"], r["system"], r["voice"], r["tokens"],
                                         case, render_dir))
     return strips
@@ -322,13 +365,19 @@ def main() -> None:
     parser.add_argument("--composer", default="bach", help="piece-id prefix to sample from (bach or palestrina)")
     parser.add_argument("--n", type=int, default=N_STRIPS)
     parser.add_argument("--name", default="g1b", help="output folder under --out")
+    parser.add_argument("--divisi", action="store_true", help="divisi arm: sample only chord strips, chord cases")
     args = parser.parse_args()
     rng = random.Random(args.seed)
-    cases = [c for c in CASES if args.composer == "palestrina" or c not in PALESTRINA_ONLY]
-    chosen, missing = select(collect(args.out, args.composer), rng, args.n, cases)
+    if args.divisi:
+        cases = list(CHORD_CASES)
+    else:
+        cases = [c for c in CASES if c not in CHORD_CASES
+                 and (args.composer == "palestrina" or c not in PALESTRINA_ONLY)]
+    chosen, missing = select(collect(args.out, args.composer, args.divisi), rng, args.n, cases)
     page_dir = args.out / args.name
     page_dir.mkdir(parents=True, exist_ok=True)
-    title = f"G1b label spot-check ({args.composer.capitalize()} Phase 1 renders)"
+    title = (f"G1b label spot-check ({args.composer.capitalize()} "
+             f"{'divisi-arm injected chords' if args.divisi else 'Phase 1 renders'})")
     (page_dir / "index.html").write_text(build_html(chosen, missing, args.seed, title), encoding="utf-8")
     manifest = [{"font": s.font, "piece": s.piece, "page": s.page, "system": s.system, "voice": s.voice,
                  "case": s.case, "tokens": s.tokens} for s in chosen]
