@@ -134,3 +134,56 @@ perfectly, so they say nothing about real photos (synthetic divisi lacks "div." 
 - Arm vs Phase 2 mixes 3 extra epochs with the chord data. Only arm vs control isolates the chord data.
 - Synthetic gates show the method can work, not that it works on real photos.
 - Split stems and tuplets stay known-lost in v1.
+
+## 10. Amendments and method notes
+
+- **A1 (2026-10-15, chord member band; user-approved 2026-10-15):** injected chord members are restricted to staff positions -3..12
+  (`build_corpus.DIVISI_MEMBER_POSITIONS`), narrower than the section 3 rule "within `MIN_POSITION`..`MAX_POSITION`".
+  - Why: the first 3-piece smoke had 5 chordnote strips quarantined by the vocabulary guard, on tokens such as
+    `accidental.natural-S7`, `accidental.sharp-L-2` and `note.beamedLeft1-L-2`. The old VOCAB has all three
+    accidentals only at positions -3..12, and its note shapes cover uneven position ranges, so a member outside
+    -3..12 can make the whole strip out of vocabulary.
+  - Effect: no chordnote strip is quarantined on the smoke. The `chordnote-<pos>` tokens keep the frozen -6..16
+    range (section 2); only the injection is narrower.
+  - Firewall: the author has seen no Phase 4 notation. The band comes from the old VOCAB only.
+- **Flag-off identity method (ml-cv-lead review, build order step 2):**
+  - Rebuild all 739 Phase 1 MEI with the divisi flag off and byte-compare each `.mei` and `.plan.json` with the
+    frozen corpus.
+  - Compare HEAD vs the new converter tokens over 739 x 4 staves, and HEAD vs the new svg_check and vocab_guard
+    verdicts over every existing render.
+  - Rebuild the Phase 2 manifest and check its sha (`78165b43...`).
+  - Method correction (2026-10-15): a raw byte compare cannot pass, even for unchanged code. Verovio writes
+    random `xml:id`s and the build date into every MEI. The frozen corpus was built under another Python
+    (its `source` paths differ), and a later commit added the `source_fixes.cross_staff_ties_removed` key. The
+    compare therefore renames ids by order of first appearance, blanks dates and ignores those two plan fields.
+- **Flag-off identity results (2026-10-15, local CPU, worktree code, flag off):**
+  - Corpus: 739/739 `.mei` and 739/739 `.plan.json` equal to the frozen corpus after normalisation.
+  - Converter: 739 pieces x 4 staves, 0 token differences, HEAD vs worktree.
+  - svg_check and vocab_guard: 2195 renders (4857 pages), 0 verdict differences, HEAD vs worktree.
+  - Phase 2 manifest rebuilt with the new `build_manifest.py`: sha `78165b43...`, identical.
+  - Not done: a same-environment HEAD vs worktree corpus rebuild. It was stopped by the host for low memory;
+    the frozen-corpus compare above covers the same question.
+- **A2 (2026-10-15, head-only arm; user decision, ml-cv-lead GO with changes, frozen before any training and with
+  no Phase 4 data seen):**
+  - What: the Phase 2 seed-k checkpoint with CNN, BiLSTM and the old fc rows frozen. Only the 23 new chordnote fc
+    rows (weight and bias) are trained (`train_phase2.py --vocab-ext --head-only`). Pitch is still computed by
+    `infer_pitch`; this arm tests whether the frozen features already encode a second notehead.
+  - Optimisation: AdamW, lr 1e-3, weight_decay 0, cosine to 0 over 3 epochs, no warmup, clip 5.0, seeds 1 and 2,
+    `--select-last`. Same data as the arm (injected chord strips + Phase 1 replay + CPM mix).
+  - The backbone is kept in eval() during training (BatchNorm running stats), asserted at every step. The old fc
+    rows get zero gradient and no weight decay. At the end, every backbone tensor and old fc row must equal the
+    init bit for bit (`summary.json` `head_only_identity`), else the run fails.
+  - Guarantee, stated exactly: the old logits are identical to Phase 2. The decode is not guaranteed identical:
+    greedy CTC collapse is non-local, so a chordnote frame inside "X X X" decodes as "X chordnote X", a duplicated
+    X. This is counted as `chordnote_split_duplicates` on canary and val. Softmax probabilities also shrink with
+    the larger vocabulary, so Stage 3 `confidence` and the section 7 threshold (0.90) are not identical to v1.
+  - Gates: all section 5 gates apply unchanged, including the CPM canary, un-injected val SER, epoch-1 chordnote
+    recall >= 0.50 (a stop there is a head-only fail and a valid "features do not encode it" result), final
+    precision >= 0.90, recall >= 0.80, hallucination <= 0.5 per 100 notes and 0 chord samples zeroed.
+  - Control: none extra. With the backbone frozen, the Phase 2 init (epoch-0 decode) is the head-only control.
+    The existing control still isolates the chord data for the full arm only.
+  - Version-2 rule: the full arm is the primary version 2. The head-only arm becomes version 2 only if the full arm
+    fails any section 5 gate and the head-only arm passes all of them. Both arms and both seeds are reported
+    whatever the outcome.
+  - Kaggle order: arm s1, arm s2, control s1, control s2, head-only s1, head-only s2. Head-only is dropped first if
+    the Sat 2026-10-17 12:00 hard kill or the GPU quota is at risk.

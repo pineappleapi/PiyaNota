@@ -72,7 +72,7 @@ def labels_for(mei_path: Path) -> list[list[list[str]]]:
 
 
 def render_one(mei_path: Path, plan: dict[str, object], font: str, scale: int, out_dir: Path,
-               prov: dict[str, object]) -> dict[str, object]:
+               prov: dict[str, object], vocab_ext: bool = False) -> dict[str, object]:
     """Render, label and check one (piece, font). Returns the check summary; writes everything to out_dir."""
     out_dir.mkdir(parents=True, exist_ok=True)
     options = {**BASE_OPTIONS, "font": font, "scale": scale}
@@ -87,11 +87,11 @@ def render_one(mei_path: Path, plan: dict[str, object], font: str, scale: int, o
         png = resvg_py.svg_to_bytes(svg_string=svg, width=PNG_WIDTH_PX, background="white")
         (out_dir / f"page_{p}.png").write_bytes(bytes(png))
         svgs.append(svg)
-    return check_render(mei_path, plan, options, svgs, out_dir, prov)
+    return check_render(mei_path, plan, options, svgs, out_dir, prov, vocab_ext)
 
 
 def check_render(mei_path: Path, plan: dict[str, object], options: dict[str, object], svgs: list[str],
-                 out_dir: Path, prov: dict[str, object]) -> dict[str, object]:
+                 out_dir: Path, prov: dict[str, object], vocab_ext: bool = False) -> dict[str, object]:
     """Label the drawn pages, run the SVG check and the vocabulary guard, and write labels/check/meta.
 
     Split from `render_one` so `recheck_renders.py` can re-check existing SVGs against the current converter and
@@ -141,7 +141,7 @@ def check_render(mei_path: Path, plan: dict[str, object], options: dict[str, obj
         failures.append({"page": None, "system": None, "staff": None,
                          "diff": [f"systems: drawn {global_sys} planned {len(plan_systems)}"]})
     passed = not failures
-    oov_counts = apply_guard(label_rows)
+    oov_counts = apply_guard(label_rows, vocab_ext)
     oov_strips = [{"page": r["page"], "system": r["system"], "staff_n": r["staff_n"], "reason": r["quarantine"]}
                   for r in label_rows if r["quarantine"]]
     (out_dir / "labels.json").write_text(json.dumps(label_rows, indent=0), encoding="utf-8")
@@ -185,6 +185,8 @@ def main() -> None:
     parser.add_argument("--skip-existing", action="store_true",
                         help="keep (piece, font) renders that already passed instead of re-rendering them")
     parser.add_argument("--summary-name", default="render_summary.json")
+    parser.add_argument("--vocab-ext", action="store_true",
+                        help="divisi arm: guard against VOCAB_EXT_CHORD_TUPLET (chordnote tokens are in vocabulary)")
     args = parser.parse_args()
     prov = provenance()
     corpus = args.out / "corpus"
@@ -214,7 +216,7 @@ def main() -> None:
                     if d.exists():
                         shutil.rmtree(d)
                 try:
-                    res = render_one(mei_path, plan, font, scale, ok_dir, prov)
+                    res = render_one(mei_path, plan, font, scale, ok_dir, prov, args.vocab_ext)
                 except (ConversionError, ValueError, KeyError) as exc:
                     res = {"pass": False, "failures": [{"diff": [f"render error: {exc}"]}]}
                     ok_dir.mkdir(parents=True, exist_ok=True)

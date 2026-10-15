@@ -18,6 +18,9 @@ PrIMuS's own engine wrote those labels, so they are CPM conventions, not general
   beam is `beamedRight1 ... beamedLeft2`.
 * A multirest count is written digit by digit above the staff (`digit.2-S5 digit.4-S5 multirest-L3`); a
   time-signature numeral is one token (`digit.12-L4`).
+
+Same-stem chords (divisi arm, Verovio dialect only) follow `_Reader.chord`: the lowest head is a normal `note.*`
+token and each higher head a `chordnote-<pos>`; CPM has no chords, so G1 does not cover this rule (G1b does).
 """
 
 from __future__ import annotations
@@ -339,6 +342,45 @@ class _Reader:
         if starts_tie:
             self.out.append(f"slur.start-{position_suffix(p)}")
 
+    def chord(self, el: ET.Element, beam_role: str | None) -> None:
+        """Same-stem chord (divisi arm, chord-vocabulary plan 10.4, PHASE4_GT_FORMAT section 4).
+
+        Order: fermata, slur.end per tied-in member, accidentals bottom to top, the lowest head as `note.*` (beam
+        form), the others as `chordnote-<pos>` bottom to top, one dot per head per dot, slur.start per tied member.
+        Verovio dialect only: PrIMuS MEI has no chords and its accidental re-engraving is not defined for them.
+        """
+        if self.dialect != "verovio":
+            raise ConversionError("chord in primus dialect")
+        if "grace" in el.attrib:
+            raise ConversionError("grace chord")
+        dur = el.attrib.get("dur", "4")
+        if dur not in DUR_NAME:
+            raise ConversionError(f"chord dur {dur!r}")
+        members = el.findall(f"{{{MEI_NS}}}note")
+        heads = sorted((self.state.position(n.attrib["pname"], int(n.attrib["oct"])), n) for n in members)
+        if len(heads) < 2 or len({p for p, _ in heads}) != len(heads):
+            raise ConversionError("chord without two distinct head positions")
+        if self._has_fermata(el) or any(self._has_fermata(n) for _, n in heads):
+            self.out.append(f"fermata.above-{position_suffix(FERMATA_ABOVE_POSITION)}")
+        self.out += [f"slur.end-{position_suffix(p)}" for p, n in heads if id(n) in self.tie_ends]
+        for p, n in heads:
+            shown = self._shown_accidental(n, n.attrib["pname"], int(n.attrib["oct"]), id(n) in self.tie_ends,
+                                           id(n) in self.tie_starts)
+            if shown is not None:
+                self.out.append(f"accidental.{ALTER_GLYPH[shown]}-{position_suffix(p)}")
+        shape = f"beamed{beam_role}{FLAG_COUNT[dur]}" if beam_role else DUR_NAME[dur]
+        self.out.append(f"note.{shape}-{position_suffix(heads[0][0])}")
+        self.out += [f"chordnote-{position_suffix(p)}" for p, _ in heads[1:]]
+        # A line head's dot goes to the space above, or below when a higher head's dot already sits there (a
+        # dotted second); allocated top down, written bottom to top.
+        dot_at: list[int] = []
+        for p, _ in reversed(heads):
+            d = p if p % 2 else p + 1
+            dot_at.append(p - 1 if d in dot_at and p % 2 == 0 else d)
+        n_dots = int(el.attrib.get("dots", "0"))
+        self.out += [f"dot-{position_suffix(d)}" for d in sorted(dot_at) for _ in range(n_dots)]
+        self.out += [f"slur.start-{position_suffix(p)}" for p, n in heads if id(n) in self.tie_starts]
+
     def rest(self, el: ET.Element) -> None:
         dur = el.attrib.get("dur", "4")
         if dur not in DUR_NAME:
@@ -389,12 +431,15 @@ class _Reader:
     def walk(self, parent: ET.Element, beam_notes: list[ET.Element] | None = None) -> None:
         for el in parent:
             tag = _local(el.tag)
-            if tag == "note":
+            if tag in ("note", "chord"):
                 role = None
                 if beam_notes and len(beam_notes) > 1 and el in beam_notes:
                     i = beam_notes.index(el)
                     role = "Right" if i == 0 else "Left" if i == len(beam_notes) - 1 else "Both"
-                self.note(el, role)
+                if tag == "chord":
+                    self.chord(el, role)
+                else:
+                    self.note(el, role)
             elif tag == "rest":
                 self.rest(el)
             elif tag == "multiRest":
@@ -402,7 +447,10 @@ class _Reader:
             elif tag == "mRest":
                 self.mrest()
             elif tag == "beam":
-                notes = [n for n in el.iter(f"{{{MEI_NS}}}note")]
+                # A chord is one beam event; its member notes are not.
+                in_chord = {id(n) for c in el.iter(f"{{{MEI_NS}}}chord") for n in c.iter(f"{{{MEI_NS}}}note")}
+                notes = [n for n in el.iter() if _local(n.tag) == "chord"
+                         or (_local(n.tag) == "note" and id(n) not in in_chord)]
                 self.walk(el, notes)
             elif tag == "clef":
                 self.clef(el)
@@ -410,7 +458,7 @@ class _Reader:
                 self.inline_def(el)
             elif tag in LAYER_IGNORED:
                 continue
-            elif tag in ("chord", "tuplet", "bTrem", "fTrem"):
+            elif tag in ("tuplet", "bTrem", "fTrem"):
                 raise ConversionError(f"unsupported layer element <{tag}>")
             else:
                 raise ConversionError(f"unknown layer element <{tag}>")
@@ -482,7 +530,7 @@ def _fermata_ids(score: ET.Element, staff_n: str) -> set[int]:
         for staff in measure.findall(f"{{{MEI_NS}}}staff"):
             if staff.attrib.get("n") == staff_n:
                 for el in staff.iter():
-                    if _local(el.tag) in ("note", "rest") and XML_ID in el.attrib:
+                    if _local(el.tag) in ("note", "rest", "chord") and XML_ID in el.attrib:
                         events[el.attrib[XML_ID]] = el
     out: set[int] = set()
     for fermata in score.iter(f"{{{MEI_NS}}}fermata"):

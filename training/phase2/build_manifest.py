@@ -34,6 +34,7 @@ TERTILES = (1 / 3, 2 / 3)
 # Piece -> tune group (tune_groups.py). The split hashes the group, so harmonisations of one melody stay on one side
 # (ml-cv-lead P5 blocker 1, 2026-10-11).
 TUNE_GROUPS = Path(__file__).with_name("tune_groups.json")
+DIVISI_SUFFIX = "__divisi"              # training/phase1/build_corpus.py DIVISI_SUFFIX
 
 
 def token_class(tok: str) -> str:
@@ -72,7 +73,8 @@ def build(out_dir: Path) -> tuple[list[dict[str, object]], dict[str, object]]:
     groups = load_tune_groups()
     for pj in sorted((out_dir / "pages").rglob("*.json")):
         font, piece = pj.parent.parent.name, pj.parent.name
-        if piece not in groups:
+        group_key = piece.removesuffix(DIVISI_SUFFIX)   # a divisi copy inherits its source piece's tune group
+        if group_key not in groups:
             raise SystemExit(f"{piece} has no tune group: rerun training/phase2/tune_groups.py")
         page = json.loads(pj.read_text(encoding="utf-8"))
         params = page.get("params") if isinstance(page.get("params"), dict) else {}
@@ -87,7 +89,7 @@ def build(out_dir: Path) -> tuple[list[dict[str, object]], dict[str, object]]:
                 "voice": s["voice"], "off_paper_left": s.get("off_paper_left_frac"),
                 "off_paper_right": s.get("off_paper_right_frac"),
                 "line_mult": params.get("line_mult"), "interline_px": params.get("interline_px"),
-                "tune": groups[piece], "split": "val" if is_val_group(groups[piece]) else "train",
+                "tune": groups[group_key], "split": "val" if is_val_group(groups[group_key]) else "train",
             })
     for r in rows:
         r["final_system"] = r["system"] == last_system[(str(r["font"]), str(r["piece"]))]

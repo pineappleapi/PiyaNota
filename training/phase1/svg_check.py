@@ -41,7 +41,7 @@ TRANSLATE_RE = re.compile(r"translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)")
 TOKEN_RE = re.compile(r"^(.*)-([LS]-?\d+)$")   # 'note.quarter-L-1' -> ('note.quarter', 'L-1')
 PATH_HLINE_RE =re.compile(r"M\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*L\s*(-?[\d.]+)[ ,]+(-?[\d.]+)")
 COUNT_FIELDS: tuple[str, ...] = ("rests", "multirests", "multirest_digits", "meter_glyphs", "barlines", "dots",
-                                 "ties", "fermatas", "beams")
+                                 "ties", "fermatas", "beams", "chords")
 SEQUENCE_FIELDS: tuple[str, ...] = ("clefs", "accidentals", "notes", "rest_kinds")
 
 
@@ -194,6 +194,15 @@ def _read_staff(staff: ET.Element, view: StaffView, drawn_notes: set[str]) -> St
             return
         elif c == "beam":
             view.counts["beams"] += 1
+        elif c == "chord":
+            # Verovio draws chord members in MEI order; labels list heads and accidentals bottom to top.
+            n_notes, n_accids = len(view.notes), len(view.accidentals)
+            for child in el:
+                visit(child)
+            view.notes[n_notes:] = sorted(view.notes[n_notes:])
+            view.accidentals[n_accids:] = sorted(view.accidentals[n_accids:], key=lambda a: a[1])
+            view.counts["chords"] += 1
+            return
         for child in el:
             visit(child)
 
@@ -246,6 +255,7 @@ def read_page(svg_text: str, mei: MeiIndex) -> tuple[list[DrawnSystem], PageGeom
 
 def label_view(tokens: list[str]) -> StaffView:
     view = StaffView()
+    prev = ""
     for tok in tokens:
         m = TOKEN_RE.match(tok)
         if m is None:
@@ -255,8 +265,9 @@ def label_view(tokens: list[str]) -> StaffView:
             view.clefs.append(2 * (int(tok.split("-L")[1]) - 1))
         elif name.startswith("accidental."):
             view.accidentals.append((name.split(".", 1)[1], token_position(suffix)))
-        elif name.startswith(("note.", "gracenote.")):
+        elif name.startswith(("note.", "gracenote.")) or name == "chordnote":
             view.notes.append(token_position(suffix))
+            view.counts["chords"] += int(name == "chordnote" and not prev.startswith("chordnote"))
         elif name.startswith("rest."):
             view.counts["rests"] += 1
             view.rest_kinds.append(name.split(".", 1)[1])
@@ -278,6 +289,7 @@ def label_view(tokens: list[str]) -> StaffView:
             view.counts["fermatas"] += 1
         if "beamedRight" in name:
             view.counts["beams"] += 1
+        prev = tok
     return view
 
 

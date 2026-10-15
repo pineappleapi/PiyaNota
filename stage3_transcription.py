@@ -609,7 +609,14 @@ VOCAB = [
     "note.double_whole-S6",
     "note.eighth-L-2",
 ]
- 
+
+# Divisi arm (PIYA-106, docs/decisions/piya-106-divisi-arm-freeze.md section 2): one `chordnote-<pos>` per drawn
+# position L-2..L9 (Phase 1 MIN_POSITION -6 .. MAX_POSITION 16), appended so VOCAB stays a prefix and every old index
+# keeps its meaning. The name is frozen; tuplet tokens were cut. Only models trained by the arm emit these.
+CHORDNOTE_POSITIONS = range(-6, 17)
+VOCAB_EXT_CHORD_TUPLET = VOCAB + [
+    f"chordnote-L{p // 2 + 1}" if p % 2 == 0 else f"chordnote-S{(p - 1) // 2 + 1}" for p in CHORDNOTE_POSITIONS]
+
 BLANK_IDX  = 0
 VOCAB_SIZE = len(VOCAB)
 SYM_TO_IDX = {s: i for i, s in enumerate(VOCAB)}

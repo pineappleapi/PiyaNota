@@ -17,6 +17,9 @@ Usage (Kaggle GPU, via training/phase2/kaggle/phase2_kernel.py, or locally):
   python training/phase2/train_phase2.py --recut-out <dir with strips/ and pages/> --cpm-root <CameraPrIMuS root>
       --init <checkpoint.pt> --seed 1 --out <dir> [--expect-manifest-sha <sha>] [--smoke]
 --smoke runs a CPU-sized check (32 strips per pool, 2 steps, 1 epoch) and verifies save/reload gives identical logits.
+Divisi arm (docs/decisions/piya-106-divisi-arm-freeze.md): --vocab-ext --divisi-recut-out <dir> --select-last; its
+control: --control-rows N --select-last; head-only arm (amendment A2): add --head-only --lr 1e-3. With none of these
+flags a run is Phase 2 unchanged.
 """
 from __future__ import annotations
 
@@ -41,9 +44,10 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_manifest import FORBIDDEN_CLASS, WATCH_CLASSES, build, token_class  # noqa: E402
-from stage3_transcription import (BLANK_IDX, CRNN, IDX_TO_SYM, SYM_TO_IDX, VOCAB, VOCAB_SIZE,  # noqa: E402
-                                  _greedy_ctc_decode, compute_ser)
+from stage3_transcription import (BLANK_IDX, CRNN, IDX_TO_SYM, SYM_TO_IDX, VOCAB, VOCAB_EXT_CHORD_TUPLET,  # noqa: E402
+                                  VOCAB_SIZE, _greedy_ctc_decode, compute_ser)
 
+BASE_VOCAB_SIZE = VOCAB_SIZE   # before use_ext_vocab() rebinds the tables
 IMG_HEIGHT = 64
 BATCH_SIZE = 16
 CANARY_FRACTION = 0.1
@@ -58,6 +62,11 @@ WEIGHT_DECAY = 1e-4
 GATE_MODE = "soft_diagnostic_hard_cap_v1"
 SMOKE_N = 32
 SMOKE_STEPS = 2
+# Divisi arm head expansion (docs/decisions/piya-106-divisi-arm-freeze.md section 2).
+NEW_HEAD_WEIGHT_STD = 0.01
+NEW_HEAD_BIAS_STEP = 1.0
+NEW_HEAD_MAX_BIAS_STEPS = 10
+CHORDNOTE_PREFIX = "chordnote-"
 
 
 # ---- data (notebook code cells 6 and 7) -------------------------------------------------------------------------
@@ -287,13 +296,70 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def load_model(path: Path, device: torch.device) -> tuple[torch.nn.Module, dict[str, object]]:
+def use_ext_vocab() -> None:
+    """Divisi arm: switch this module's token tables to VOCAB_EXT_CHORD_TUPLET. The old VOCAB is its prefix, so every
+    old index keeps its meaning and CPM/Phase 1 labels encode exactly as before."""
+    global VOCAB, VOCAB_SIZE, SYM_TO_IDX, IDX_TO_SYM
+    VOCAB = list(VOCAB_EXT_CHORD_TUPLET)
+    VOCAB_SIZE = len(VOCAB)
+    SYM_TO_IDX = {s: i for i, s in enumerate(VOCAB)}
+    IDX_TO_SYM = dict(enumerate(VOCAB))
+
+
+def load_model(path: Path, device: torch.device, expand: bool = True,
+               bias_drop: float = 0.0) -> tuple[torch.nn.Module, dict[str, object]]:
+    """Load a checkpoint whose vocab is VOCAB or a prefix of it. With `expand`, a shorter head grows to VOCAB_SIZE:
+    old rows copied, new weights N(0, 0.01) from a fixed generator, new biases at the minimum old non-blank bias
+    minus `bias_drop` (freeze section 2), so new tokens start below every old one."""
     ckpt = torch.load(path, map_location=device)
-    if ckpt.get("vocab") is not None and ckpt["vocab"] != VOCAB:
-        raise ValueError(f"{path}: stored vocab differs from stage3_transcription.VOCAB; indices would misalign")
-    model = CRNN(VOCAB_SIZE).to(device)
-    model.load_state_dict(ckpt["model_state"], strict=True)
+    old = ckpt.get("vocab")
+    if old is not None and list(old) != VOCAB[:len(old)]:
+        raise ValueError(f"{path}: stored vocab is not a prefix of the active vocab; indices would misalign")
+    state = dict(ckpt["model_state"])
+    w, b = state["fc.weight"], state["fc.bias"]
+    if w.shape[0] > VOCAB_SIZE:
+        raise ValueError(f"{path}: head has {w.shape[0]} outputs, active vocab {VOCAB_SIZE}; pass --vocab-ext")
+    if expand and w.shape[0] < VOCAB_SIZE:
+        n_new = VOCAB_SIZE - w.shape[0]
+        gen = torch.Generator().manual_seed(0)
+        new_w = torch.randn(n_new, w.shape[1], generator=gen) * NEW_HEAD_WEIGHT_STD
+        floor = b[torch.arange(b.shape[0], device=b.device) != BLANK_IDX].min() - bias_drop
+        state["fc.weight"] = torch.cat([w, new_w.to(w)])
+        state["fc.bias"] = torch.cat([b, floor.repeat(n_new)])
+    model = CRNN(state["fc.weight"].shape[0]).to(device)
+    model.load_state_dict(state, strict=True)
     return model, ckpt
+
+
+def expand_init_head(path: Path, device: torch.device,
+                     loaders: list[DataLoader]) -> tuple[torch.nn.Module, dict[str, object], float]:
+    """Expand the init head and lower the new biases by 1.0 until the greedy decode of `loaders` is token-identical
+    to the unexpanded init (freeze section 2): training then starts from Phase 2's exact behaviour."""
+    ref, _ = load_model(path, device, expand=False)
+    want = [[p for p, _g in decode_batches(ref, ld, device)] for ld in loaders]
+    for k in range(NEW_HEAD_MAX_BIAS_STEPS + 1):
+        model, ckpt = load_model(path, device, bias_drop=k * NEW_HEAD_BIAS_STEP)
+        if [[p for p, _g in decode_batches(model, ld, device)] for ld in loaders] == want:
+            return model, ckpt, k * NEW_HEAD_BIAS_STEP
+    raise SystemExit(f"expanded head still changes the init decode after {NEW_HEAD_MAX_BIAS_STEPS} bias steps")
+
+
+def chordnote_metrics(pairs: list[tuple[list[str], list[str]]]) -> dict[str, object]:
+    """Chordnote precision/recall via one LCS per strip, and predicted chordnotes per 100 GT notes (on un-injected
+    strips every predicted chordnote is a hallucination)."""
+    gt_n = pred_n = hit = notes = split_dups = 0
+    for pred, gt in pairs:
+        # Greedy collapse is non-local: a chordnote frame inside a run "X X X" decodes as "X chordnote X".
+        split_dups += sum(pred[i].startswith(CHORDNOTE_PREFIX) and pred[i - 1] == pred[i + 1]
+                          for i in range(1, len(pred) - 1))
+        matched = lcs_matched_gt(pred, gt)
+        gt_n += sum(t.startswith(CHORDNOTE_PREFIX) for t in gt)
+        pred_n += sum(t.startswith(CHORDNOTE_PREFIX) for t in pred)
+        hit += sum(gt[i].startswith(CHORDNOTE_PREFIX) for i in matched)
+        notes += sum(t.startswith(("note.", CHORDNOTE_PREFIX)) for t in gt)
+    return {"chordnote_precision": hit / pred_n if pred_n else None, "chordnote_recall": hit / gt_n if gt_n else None,
+            "chordnote_gt": gt_n, "chordnote_pred": pred_n, "chordnote_split_duplicates": split_dups,
+            "chordnote_pred_per_100_notes": 100.0 * pred_n / notes if notes else None}
 
 
 # ---- run -------------------------------------------------------------------------------------------------------
@@ -314,9 +380,25 @@ def main() -> int:
     ap.add_argument("--patience", type=int, default=3)
     ap.add_argument("--expect-manifest-sha", default=None)
     ap.add_argument("--smoke", action="store_true")
+    # Divisi arm and its control (docs/decisions/piya-106-divisi-arm-freeze.md sections 2-4).
+    ap.add_argument("--vocab-ext", action="store_true", help="train on VOCAB_EXT_CHORD_TUPLET (expands the init head)")
+    ap.add_argument("--divisi-recut-out", type=Path, default=None,
+                    help="cut divisi corpus; its strips with a chordnote join train/val by their inherited split")
+    ap.add_argument("--expect-divisi-manifest-sha", default=None)
+    ap.add_argument("--control-rows", type=int, default=0,
+                    help="control run: add a seeded draw of this many extra Phase 1 train rows (same step count)")
+    ap.add_argument("--select-last", action="store_true", help="no patience; the last epoch is always selected")
+    ap.add_argument("--head-only", action="store_true",
+                    help="freeze the backbone and old head rows; train only the new chordnote rows (amendment A2)")
     a = ap.parse_args()
+    if a.head_only and not a.vocab_ext:
+        raise ValueError("--head-only needs --vocab-ext")
     if not 0.0 <= a.replay_ratio < 1.0:
         raise ValueError("--replay-ratio must be in [0, 1)")
+    if a.divisi_recut_out is not None and not a.vocab_ext:
+        raise ValueError("--divisi-recut-out needs --vocab-ext")
+    if a.vocab_ext:
+        use_ext_vocab()
 
     random.seed(a.seed)
     np.random.seed(a.seed)
@@ -337,6 +419,29 @@ def main() -> int:
         raise SystemExit(f"{FORBIDDEN_CLASS} in manifest labels")
     train_rows = [r for r in rows if r["split"] == "train"]
     val_rows = [r for r in rows if r["split"] == "val"]
+    divisi_val: list[dict[str, object]] = []
+    divisi_info: dict[str, object] = {}
+    if a.divisi_recut_out is not None:
+        drows, _dmeta = build(a.divisi_recut_out)
+        dbody = "".join(json.dumps(r, sort_keys=True, separators=(",", ":")) + "\n" for r in drows).encode("utf-8")
+        dsha = hashlib.sha256(dbody).hexdigest()
+        if a.expect_divisi_manifest_sha and dsha != a.expect_divisi_manifest_sha:
+            raise SystemExit(f"divisi manifest sha256 {dsha} != expected {a.expect_divisi_manifest_sha}")
+        # Only strips that carry a chord are kept (freeze section 3).
+        drows = [r for r in drows if any(str(t).startswith(CHORDNOTE_PREFIX) for t in r["tokens"])]  # type: ignore[union-attr]
+        for r in drows:   # absolute, so synth()'s recut_out join leaves it alone
+            r["path"] = str(a.divisi_recut_out.resolve() / str(r["path"]))
+        dtrain = [r for r in drows if r["split"] == "train"]
+        divisi_val = [r for r in drows if r["split"] == "val"]
+        train_tunes = {r["tune"] for r in train_rows + dtrain}
+        val_tunes = {r["tune"] for r in val_rows + divisi_val}
+        if train_tunes & val_tunes:
+            raise SystemExit(f"split assert: {len(train_tunes & val_tunes)} tunes on both sides")
+        train_rows = train_rows + dtrain
+        divisi_info = {"divisi_manifest_sha256": dsha, "divisi_train_strips": len(dtrain),
+                       "divisi_val_strips": len(divisi_val)}
+    if a.control_rows:
+        train_rows = train_rows + random.Random(f"control:{a.seed}").sample(train_rows, a.control_rows)
 
     def synth(rs: list[dict[str, object]]) -> list[tuple[str, str | None, list[int]]]:
         return [(str(a.recut_out / str(r["path"])), None, [SYM_TO_IDX[t] for t in r["tokens"]]) for r in rs]  # type: ignore[union-attr]
@@ -353,7 +458,9 @@ def main() -> int:
         for font_dir in sorted(p for p in Path(a.cpm_font_root).iterdir() if p.is_dir()):
             cpm_train += [s for s in cpm_samples(str(font_dir)) if Path(s[0]).stem not in canary_stems]
     if a.smoke:
-        train_rows, val_rows = train_rows[:SMOKE_N], val_rows[:SMOKE_N]
+        # Keep some divisi rows in the smoke train slice, so the chord path is exercised.
+        train_rows = train_rows[:SMOKE_N // 2] + train_rows[-(SMOKE_N // 2):]
+        val_rows, divisi_val = val_rows[:SMOKE_N], divisi_val[:SMOKE_N]
         canary, cpm_train = canary[:SMOKE_N], cpm_train[:SMOKE_N]
         a.max_epochs = 1
     assert not canary_stems & {Path(s[0]).stem for s in cpm_train}, "canary stem leaked into the replay pool"
@@ -369,8 +476,13 @@ def main() -> int:
     val_loader = DataLoader(StripDataset(synth(val_rows)), **eval_kw)
     canary_clean = DataLoader(StripDataset(canary), **eval_kw)
     canary_dist = DataLoader(StripDataset(canary, force_distorted=True), **eval_kw)
+    divisi_val_loader = DataLoader(StripDataset(synth(divisi_val)), **eval_kw) if divisi_val else None
 
-    model, _init_ckpt = load_model(a.init, device)
+    head_bias_drop = None
+    if a.vocab_ext:
+        model, _init_ckpt, head_bias_drop = expand_init_head(a.init, device, [canary_clean, val_loader])
+    else:
+        model, _init_ckpt = load_model(a.init, device)
     base_clean = [compute_ser(p, g) for p, g in decode_batches(model, canary_clean, device)]
     base_dist = [compute_ser(p, g) for p, g in decode_batches(model, canary_dist, device)]
     caps = {"canary_clean_hard_cap": float(np.mean(base_clean)) * CANARY_HARD_CAP_MULTIPLIER,
@@ -385,7 +497,7 @@ def main() -> int:
         "canary_baseline": {"clean": float(np.mean(base_clean)), "distorted": float(np.mean(base_dist))}, **caps,
         "stack": {"device": torch.cuda.get_device_name(0) if device.type == "cuda" else "cpu",
                   "torch": torch.__version__, "cuda": torch.version.cuda, "cudnn": torch.backends.cudnn.version()},
-        "gate_mode": GATE_MODE,
+        "gate_mode": GATE_MODE, "vocab_size": VOCAB_SIZE, "head_bias_drop": head_bias_drop, **divisi_info,
     }
     (a.out / "run_info.json").write_text(json.dumps(run_info, indent=1), encoding="utf-8")
     print(f"[run] seed={a.seed} manifest={manifest_sha[:12]} train={len(train_rows)}+{run_info['cpm_per_epoch']} cpm "
@@ -393,7 +505,22 @@ def main() -> int:
           f"stack={run_info['stack']}", flush=True)
 
     criterion = torch.nn.CTCLoss(blank=BLANK_IDX, zero_infinity=True)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=a.lr, weight_decay=WEIGHT_DECAY)
+    # Diagnostic only: counts the samples zero_infinity silently zeroes (gate: 0 chord samples, freeze section 5).
+    per_sample = torch.nn.CTCLoss(blank=BLANK_IDX, reduction="none", zero_infinity=False)
+    first_new = BASE_VOCAB_SIZE   # label indices at or above this are divisi-arm tokens
+    frozen_init: dict[str, torch.Tensor] = {}
+    if a.head_only:
+        # Old logits stay bit-identical: backbone frozen and in eval() (BatchNorm stats), old fc rows get zero
+        # gradient and no weight decay, so AdamW's update for them is exactly 0 (amendment A2).
+        frozen_init = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        for p in model.parameters():
+            p.requires_grad_(False)
+        for p in model.fc.parameters():
+            p.requires_grad_(True)
+            p.register_hook(lambda g: torch.cat([torch.zeros_like(g[:BASE_VOCAB_SIZE]), g[BASE_VOCAB_SIZE:]]))
+        optimizer = torch.optim.AdamW(model.fc.parameters(), lr=a.lr, weight_decay=0.0)
+    else:
+        optimizer = torch.optim.AdamW(model.parameters(), lr=a.lr, weight_decay=WEIGHT_DECAY)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=a.max_epochs)
     history: list[dict[str, object]] = []
     best_ser, best_epoch, since_improve = float("inf"), None, 0
@@ -402,13 +529,27 @@ def main() -> int:
     for epoch in range(1, a.max_epochs + 1):
         t0 = time.time()
         model.train()
+        if a.head_only:
+            model.cnn.eval()
+            model.rnn.eval()
         losses = []
+        zeroed = {"all": 0, "chord": 0}
         for step, (images, labels, in_lens, lb_lens) in enumerate(train_loader):
             if a.smoke and step >= SMOKE_STEPS:
                 break
+            if a.head_only:
+                assert not (model.cnn.training or model.rnn.training), "head-only backbone left in train mode"
             images, labels, in_lens, lb_lens = (x.to(device) for x in (images, labels, in_lens, lb_lens))
             log_probs = model(images)
-            loss = criterion(log_probs, labels, in_lens.clamp(max=log_probs.shape[0]), lb_lens)
+            in_clamped = in_lens.clamp(max=log_probs.shape[0])
+            loss = criterion(log_probs, labels, in_clamped, lb_lens)
+            with torch.no_grad():
+                inf = torch.isinf(per_sample(log_probs.detach(), labels, in_clamped, lb_lens)).tolist()
+                ends = torch.cumsum(lb_lens, 0).tolist()
+                for b, bad in enumerate(inf):
+                    if bad:
+                        zeroed["all"] += 1
+                        zeroed["chord"] += int(bool((labels[ends[b] - int(lb_lens[b]):ends[b]] >= first_new).any()))
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP)
@@ -416,11 +557,20 @@ def main() -> int:
             losses.append(loss.item())
         scheduler.step()
         vm = val_metrics(decode_batches(model, val_loader, device), val_rows)
-        c_clean = mean_ser(decode_batches(model, canary_clean, device))
+        cpairs = decode_batches(model, canary_clean, device)
+        c_clean = mean_ser(cpairs)
         c_dist = mean_ser(decode_batches(model, canary_dist, device))
         hard_ok = c_clean <= caps["canary_clean_hard_cap"] and c_dist <= caps["canary_distorted_hard_cap"]
         soft_breach = c_clean > caps["canary_clean_soft_floor"] or c_dist > caps["canary_distorted_soft_floor"]
+        chord: dict[str, object] = {}
+        if a.vocab_ext:
+            chord["uninjected_val"] = chordnote_metrics(decode_batches(model, val_loader, device))
+            chord["canary_clean"] = chordnote_metrics(cpairs)
+            if divisi_val_loader is not None:
+                dpairs = decode_batches(model, divisi_val_loader, device)
+                chord["divisi_val"] = {**chordnote_metrics(dpairs), "ser": mean_ser(dpairs)}
         rec = {"epoch": epoch, "train_loss": float(np.mean(losses)) if losses else float("nan"), **vm,
+               "zeroed_by_zero_infinity": zeroed, **({"chord": chord} if chord else {}),
                "canary_clean_ser": c_clean, "canary_distorted_ser": c_dist,
                "status": "HARD CAP BREACHED" if not hard_ok else ("soft floor breached" if soft_breach else "OK"),
                "seconds": round(time.time() - t0, 1)}
@@ -437,7 +587,10 @@ def main() -> int:
         if not hard_ok:
             print(f"  Stopping: canary hard cap breached; best stays epoch {best_epoch}.")
             break
-        if vm["val_ser"] < best_ser:  # type: ignore[operator]
+        if a.select_last:
+            best_ser, best_epoch = float(vm["val_ser"]), epoch  # type: ignore[arg-type]
+            torch.save(state, weights_best)
+        elif vm["val_ser"] < best_ser:  # type: ignore[operator]
             best_ser, best_epoch, since_improve = float(vm["val_ser"]), epoch, 0  # type: ignore[arg-type]
             torch.save(state, weights_best)
         else:
@@ -445,7 +598,15 @@ def main() -> int:
             if since_improve >= a.patience:
                 print(f"  Stopping: no val SER improvement for {a.patience} epochs.")
                 break
-    summary = {"best_epoch": best_epoch, "best_val_ser": best_ser, "epochs_run": len(history)}
+    summary: dict[str, object] = {"best_epoch": best_epoch, "best_val_ser": best_ser, "epochs_run": len(history)}
+    if a.head_only:
+        now = model.state_dict()
+        changed = [k for k, v in frozen_init.items()
+                   if not torch.equal(v[:BASE_VOCAB_SIZE] if k.startswith("fc.") else v,
+                                      now[k][:BASE_VOCAB_SIZE] if k.startswith("fc.") else now[k])]
+        summary["head_only_identity"] = not changed
+        if changed:
+            raise SystemExit(f"head-only identity broken: {changed}")
     (a.out / "summary.json").write_text(json.dumps(summary, indent=1), encoding="utf-8")
     print(f"[done] {summary}")
 
