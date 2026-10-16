@@ -21,7 +21,7 @@ import tarfile
 import time
 from pathlib import Path
 
-COMMIT = "0ebc5321fce7085cbfb76053e18d08411cd75f56"
+COMMIT = "b25cf99939335353077f068dac45fd8fb8e8aa5c"
 BRANCH = "piya106/stroke-calibration"
 WORKERS = 4
 CANARY_PAGES = 5
