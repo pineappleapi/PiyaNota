@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart' show CancelToken;
+import 'package:flutter/foundation.dart' show debugPrint;
 
 import '../models/score_details.dart';
 import 'fake_processing_api.dart';
@@ -42,7 +43,14 @@ class FakeScoreUploadApi implements ScoreUploadApi {
     required List<String> imagePaths,
     CancelToken? cancelToken,
     String? replacesJobId,
-  }) => _submit(details, imagePaths.length, cancelToken, replacesJobId);
+    int? fallbackTempoBpm,
+  }) => _submit(
+    details,
+    imagePaths.length,
+    cancelToken,
+    replacesJobId,
+    fallbackTempoBpm,
+  );
 
   @override
   Future<SubmittedJob> submitPdf({
@@ -50,10 +58,11 @@ class FakeScoreUploadApi implements ScoreUploadApi {
     required String pdfPath,
     CancelToken? cancelToken,
     String? replacesJobId,
+    int? fallbackTempoBpm,
   }) =>
       // The real PIYA-310 counts the pages itself; the fake has no PDF
       // parser, so the library card shows no page count.
-      _submit(details, null, cancelToken, replacesJobId);
+      _submit(details, null, cancelToken, replacesJobId, fallbackTempoBpm);
 
   /// Retakes never fail on the flaky accounts: the job they replace has
   /// already demoed a failure.
@@ -94,8 +103,15 @@ class FakeScoreUploadApi implements ScoreUploadApi {
     int? pageCount,
     CancelToken? cancelToken,
     String? replacesJobId,
+    int? fallbackTempoBpm,
   ) async {
     final account = await _accountAfterLatency(cancelToken);
+    // The fake library never uses a tempo, so the PIYA-323 field is only
+    // logged — enough to check on a device that Settings reached submit.
+    debugPrint(
+      'FakeScoreUploadApi submit: tempoBpm=${details.tempoBpm} '
+      'fallbackTempoBpm=$fallbackTempoBpm',
+    );
     if (replacesJobId != null) {
       return _submitRetake(account, details, pageCount, replacesJobId);
     }

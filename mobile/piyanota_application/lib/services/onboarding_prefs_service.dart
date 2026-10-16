@@ -29,4 +29,11 @@ class OnboardingPrefsService {
     if (stored == null) return null;
     return VoicePart.values.asNameMap()[stored];
   }
+
+  /// PIYA-212 AC7: Settings changes the same pref onboarding set, without
+  /// touching the completed flag.
+  Future<void> setDefaultVoicePart(VoicePart voice) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_defaultVoiceKey, voice.name);
+  }
 }

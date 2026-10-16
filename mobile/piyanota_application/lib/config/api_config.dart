@@ -31,6 +31,9 @@ class ApiConfig {
       '/api/auth/password-reset/request';
   static const String passwordResetConfirmPath =
       '/api/auth/password-reset/confirm';
+  // PIYA-322 is a stub: the ticket says `/auth/change-password`, prefixed
+  // here like the other assumed auth paths; reconcile in PIYA-214.
+  static const String changePasswordPath = '/api/auth/change-password';
 
   // PIYA-308/309 define methods and schemas but not paths or the search
   // parameter name — all three are assumed; reconcile in PIYA-215.

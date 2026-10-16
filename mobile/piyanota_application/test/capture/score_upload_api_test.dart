@@ -146,6 +146,25 @@ void main() {
       expect(keys, ['title']);
     });
 
+    test('fallbackTempoBpm is sent only for "Not sure" (PIYA-323)', () {
+      final fields = Map.fromEntries(
+        scoreFormFields(
+          const ScoreDetails(title: 'Ave'),
+          fallbackTempoBpm: 72,
+        ),
+      );
+      expect(fields, {'title': 'Ave', 'fallbackTempoBpm': '72'});
+    });
+
+    test('a chosen tempo is never sent with the fallback (PIYA-323 AC2)',
+        () {
+      final keys = scoreFormFields(
+        const ScoreDetails(title: 'Ave', tempoBpm: 96),
+        fallbackTempoBpm: 72,
+      ).map((e) => e.key);
+      expect(keys, ['title', 'tempoBpm']);
+    });
+
     test('sharp keys use ASCII #', () {
       expect(KeySignature.fSharp.apiValue, 'F#');
       expect(KeySignature.cFlat.apiValue, 'Cb');

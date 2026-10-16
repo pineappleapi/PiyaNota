@@ -19,12 +19,17 @@ class ScriptedAuthApi implements AuthApi {
     this.onSignUp,
     this.onRequestReset,
     this.onConfirmReset,
+    this.onChangePassword,
   });
 
   Future<AuthSession> Function()? onLogin;
   Future<AuthSession> Function()? onSignUp;
   Future<void> Function()? onRequestReset;
   Future<void> Function()? onConfirmReset;
+  Future<void> Function()? onChangePassword;
+  int changePasswordCalls = 0;
+  String? lastToken;
+  String? lastCurrentPassword;
   int loginCalls = 0;
   int signUpCalls = 0;
   int requestResetCalls = 0;
@@ -50,6 +55,19 @@ class ScriptedAuthApi implements AuthApi {
     lastResetToken = resetToken;
     lastNewPassword = newPassword;
     return onConfirmReset!();
+  }
+
+  @override
+  Future<void> changePassword({
+    required String token,
+    required String currentPassword,
+    required String newPassword,
+  }) {
+    changePasswordCalls++;
+    lastToken = token;
+    lastCurrentPassword = currentPassword;
+    lastNewPassword = newPassword;
+    return onChangePassword!();
   }
 
   @override

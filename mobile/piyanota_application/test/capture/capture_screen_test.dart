@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:piyanota_application/models/score_details.dart';
 import 'package:piyanota_application/screens/capture/capture_messages.dart';
 import 'package:piyanota_application/screens/capture/edit_page_screen.dart';
 import 'package:piyanota_application/services/capture/capture_permissions.dart';
@@ -469,6 +470,36 @@ void main() {
       tester.state<NavigatorState>(find.byType(Navigator)).pop();
       await tester.pumpAndSettle();
       expect(find.text(kLibraryMarker), findsOneWidget);
+    });
+
+    testWidgets('"Not sure" sends the Settings tempo as the fallback', (
+      tester,
+    ) async {
+      final h = CaptureHarness(settingsDefaultTempo: 72);
+      await pumpCapture(tester, h);
+      await _shoot(tester, 1);
+      await tester.tap(find.text(CaptureMessages.createScoreWith(1)));
+      await tester.pumpAndSettle();
+
+      expect(h.upload.detailsSent.single.tempoBpm, isNull);
+      expect(h.upload.fallbackTemposSent.single, 72);
+    });
+
+    testWidgets('a chosen Speed sends no fallback (PIYA-323 AC2)', (
+      tester,
+    ) async {
+      final h = CaptureHarness(settingsDefaultTempo: 72);
+      await pumpCapture(
+        tester,
+        h,
+        details: const ScoreDetails(title: 'Ave Maria', tempoBpm: 100),
+      );
+      await _shoot(tester, 1);
+      await tester.tap(find.text(CaptureMessages.createScoreWith(1)));
+      await tester.pumpAndSettle();
+
+      expect(h.upload.detailsSent.single.tempoBpm, 100);
+      expect(h.upload.fallbackTemposSent.single, isNull);
     });
 
     testWidgets('a PDF goes to PIYA-310', (tester) async {

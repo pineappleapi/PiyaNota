@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:piyanota_application/models/page_edit.dart';
 import 'package:piyanota_application/models/score_details.dart';
@@ -22,6 +23,7 @@ import 'package:piyanota_application/services/capture/page_image_source.dart';
 import 'package:piyanota_application/services/capture/page_picker.dart';
 import 'package:piyanota_application/services/score_upload_api.dart';
 import 'package:piyanota_application/services/session_storage.dart';
+import 'package:piyanota_application/services/settings_prefs_service.dart';
 import 'package:piyanota_application/state/auth_providers.dart';
 import 'package:piyanota_application/state/capture_providers.dart';
 import 'package:piyanota_application/state/processing_providers.dart';
@@ -192,6 +194,7 @@ class ScriptedScoreUploadApi implements ScoreUploadApi {
   final List<List<String>> imageCalls = [];
   final List<String> pdfCalls = [];
   final List<ScoreDetails> detailsSent = [];
+  final List<int?> fallbackTemposSent = [];
 
   static const job = SubmittedJob(
     jobId: 'job-42',
@@ -224,8 +227,10 @@ class ScriptedScoreUploadApi implements ScoreUploadApi {
     required List<String> imagePaths,
     CancelToken? cancelToken,
     String? replacesJobId,
+    int? fallbackTempoBpm,
   }) {
     detailsSent.add(details);
+    fallbackTemposSent.add(fallbackTempoBpm);
     replacesSent.add(replacesJobId);
     imageCalls.add(imagePaths);
     return _answer(cancelToken);
@@ -237,8 +242,10 @@ class ScriptedScoreUploadApi implements ScoreUploadApi {
     required String pdfPath,
     CancelToken? cancelToken,
     String? replacesJobId,
+    int? fallbackTempoBpm,
   }) {
     detailsSent.add(details);
+    fallbackTemposSent.add(fallbackTempoBpm);
     replacesSent.add(replacesJobId);
     pdfCalls.add(pdfPath);
     return _answer(cancelToken);
@@ -273,8 +280,15 @@ class CaptureHarness {
   CaptureHarness({
     FakeCapturePermissions? permissions,
     FakeDeviceChannel? device,
+    int? settingsDefaultTempo,
   }) : permissions = permissions ?? FakeCapturePermissions(),
-       device = device ?? FakeDeviceChannel();
+       device = device ?? FakeDeviceChannel() {
+    // Submit reads the Settings default tempo whenever Speed is "Not sure"
+    // (PIYA-212 AC8), so every harness gets a preferences store.
+    SharedPreferences.setMockInitialValues({
+      SettingsPrefsService.defaultTempoKey: ?settingsDefaultTempo,
+    });
+  }
 
   final FakeCapturePermissions permissions;
   final FakeDeviceChannel device;

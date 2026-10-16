@@ -98,6 +98,7 @@ abstract interface class ScoreUploadApi {
     required List<String> imagePaths,
     CancelToken? cancelToken,
     String? replacesJobId,
+    int? fallbackTempoBpm,
   });
 
   /// PIYA-310: one PDF, rasterised by the server. [replacesJobId] as for
@@ -107,6 +108,7 @@ abstract interface class ScoreUploadApi {
     required String pdfPath,
     CancelToken? cancelToken,
     String? replacesJobId,
+    int? fallbackTempoBpm,
   });
 
   /// PIYA-116: replaces page [pageIndex] (0-based) of the failed job
@@ -136,9 +138,14 @@ const String jobSupersededCode = 'job_superseded';
 /// The PIYA-101 AC8 text parts. Optional fields are left out when unset —
 /// never sent empty or as "null" — and "Other" time also leaves its field
 /// out.
+///
+/// [fallbackTempoBpm] is the Settings default tempo (PIYA-323). It is sent
+/// only when Speed is "Not sure": a chosen tempo always wins, and the
+/// server rejects both together as `duplicate_field` (AC2).
 List<MapEntry<String, String>> scoreFormFields(
   ScoreDetails details, {
   String? replacesJobId,
+  int? fallbackTempoBpm,
 }) {
   final arranger = details.arranger.trim();
   return [
@@ -146,7 +153,9 @@ List<MapEntry<String, String>> scoreFormFields(
     MapEntry('title', details.title.trim()),
     if (arranger.isNotEmpty) MapEntry('arranger', arranger),
     if (details.tempoBpm case final tempo?)
-      MapEntry('tempoBpm', tempo.toString()),
+      MapEntry('tempoBpm', tempo.toString())
+    else if (fallbackTempoBpm case final fallback?)
+      MapEntry('fallbackTempoBpm', fallback.toString()),
     if (details.keySignature case final key?)
       MapEntry('keySignature', key.apiValue),
     if (details.timeSignature?.apiValue case final time?)
@@ -174,10 +183,15 @@ class HttpScoreUploadApi implements ScoreUploadApi {
     required List<String> imagePaths,
     CancelToken? cancelToken,
     String? replacesJobId,
+    int? fallbackTempoBpm,
   }) async {
     // Part order is page order (PIYA-101 context note).
     final form = FormData()
-      ..fields.addAll(scoreFormFields(details, replacesJobId: replacesJobId));
+      ..fields.addAll(scoreFormFields(
+          details,
+          replacesJobId: replacesJobId,
+          fallbackTempoBpm: fallbackTempoBpm,
+        ));
     for (var i = 0; i < imagePaths.length; i++) {
       form.files.add(
         MapEntry(
@@ -240,9 +254,14 @@ class HttpScoreUploadApi implements ScoreUploadApi {
     required String pdfPath,
     CancelToken? cancelToken,
     String? replacesJobId,
+    int? fallbackTempoBpm,
   }) async {
     final form = FormData()
-      ..fields.addAll(scoreFormFields(details, replacesJobId: replacesJobId))
+      ..fields.addAll(scoreFormFields(
+          details,
+          replacesJobId: replacesJobId,
+          fallbackTempoBpm: fallbackTempoBpm,
+        ))
       ..files.add(
         MapEntry(
           'file',

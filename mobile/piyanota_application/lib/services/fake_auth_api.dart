@@ -118,6 +118,27 @@ class FakeAuthApi implements AuthApi {
     _passwordsByEmail[grant.email] = newPassword;
   }
 
+  /// PIYA-322 stand-in, same order as the draft ACs: session first, then
+  /// the current password, then the Sign-Up rule for the new one.
+  @override
+  Future<void> changePassword({
+    required String token,
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    await Future<void>.delayed(latency);
+    final email = _emailsByToken[token];
+    if (email == null) throw const AuthSessionExpiredException();
+    if (email.endsWith(offlineDomain)) throw const AuthNetworkException();
+    if (_passwordsByEmail[email] != currentPassword) {
+      throw const InvalidCredentialsException();
+    }
+    // PIYA-322 sends no confirmation field (the app checks the match), so
+    // the new password is its own confirmation here.
+    _checkNewPassword(newPassword, newPassword);
+    _passwordsByEmail[email] = newPassword;
+  }
+
   /// The code most recently "emailed" to [email], or null if nothing was
   /// sent (unregistered address) or it expired. Debug demo aid only — the
   /// real API never returns the code to the client.

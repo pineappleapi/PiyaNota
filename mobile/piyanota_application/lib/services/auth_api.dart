@@ -16,6 +16,13 @@ class InvalidCredentialsException extends AuthException {
   const InvalidCredentialsException();
 }
 
+/// 401 `session_expired` from an endpoint that needs a session (PIYA-322
+/// AC1). Kept apart from [InvalidCredentialsException] because the right
+/// action differs: log in again, not retype the current password.
+class AuthSessionExpiredException extends AuthException {
+  const AuthSessionExpiredException();
+}
+
 /// 409 `email_already_registered` from Sign-Up (PIYA-301 AC4).
 class EmailAlreadyRegisteredException extends AuthException {
   const EmailAlreadyRegisteredException();
@@ -66,6 +73,15 @@ abstract interface class AuthApi {
     required String resetToken,
     required String newPassword,
     required String newPasswordConfirmation,
+  });
+
+  /// PIYA-322 (stub). [token] is the current session's; a wrong
+  /// [currentPassword] is [InvalidCredentialsException], a dead session
+  /// [AuthSessionExpiredException].
+  Future<void> changePassword({
+    required String token,
+    required String currentPassword,
+    required String newPassword,
   });
 }
 
@@ -124,6 +140,19 @@ class HttpAuthApi implements AuthApi {
     });
   }
 
+  @override
+  Future<void> changePassword({
+    required String token,
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    await _post(
+      ApiConfig.changePasswordPath,
+      {'currentPassword': currentPassword, 'newPassword': newPassword},
+      headers: {'Authorization': 'Bearer $token'},
+    );
+  }
+
   Future<AuthSession> _postForSession(
     String path,
     Map<String, String> body,
@@ -140,10 +169,15 @@ class HttpAuthApi implements AuthApi {
 
   Future<Response<Map<String, dynamic>>> _post(
     String path,
-    Map<String, String> body,
-  ) async {
+    Map<String, String> body, {
+    Map<String, String>? headers,
+  }) async {
     try {
-      return await _dio.post<Map<String, dynamic>>(path, data: body);
+      return await _dio.post<Map<String, dynamic>>(
+        path,
+        data: body,
+        options: headers == null ? null : Options(headers: headers),
+      );
     } on DioException catch (e) {
       throw _mapDioError(e);
     }
@@ -174,6 +208,13 @@ class HttpAuthApi implements AuthApi {
         ? body['message'] as String
         : null;
 
+    // A 401 means "wrong password" everywhere except PIYA-322, where
+    // `session_expired` must send the user to Login instead (AC1 vs AC2).
+    if (response?.statusCode == _unauthorized &&
+        _errorCode(body) == _sessionExpiredCode) {
+      return const AuthSessionExpiredException();
+    }
+
     // 410 is mapped on status alone, not on the `reset_token_expired_or_
     // invalid` error code, because the error-envelope field holding that
     // code isn't pinned down by PIYA-304 (reconcile in PIYA-214).
@@ -183,6 +224,19 @@ class HttpAuthApi implements AuthApi {
       _gone => const ResetCodeInvalidException(),
       _badRequest => AuthValidationException(message),
       _ => const AuthServerException(),
+    };
+  }
+
+  static const String _sessionExpiredCode = 'session_expired';
+
+  /// The error code from the envelope. Where it sits isn't pinned down
+  /// (PIYA-214), so both `error.code` and a bare string `error` are read.
+  static String? _errorCode(Object? body) {
+    if (body is! Map<String, dynamic>) return null;
+    return switch (body['error']) {
+      {'code': final String code} => code,
+      final String code => code,
+      _ => null,
     };
   }
 }

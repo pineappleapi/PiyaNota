@@ -18,6 +18,7 @@ import '../../state/capture_providers.dart';
 import '../../state/processing_providers.dart';
 import '../../state/score_library_providers.dart';
 import '../../state/session_actions.dart';
+import '../../state/settings_providers.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/primary_pill_button.dart';
 import 'capture_messages.dart';
@@ -725,18 +726,25 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
       // AC8: a PDF goes to PIYA-310, camera/gallery photos to PIYA-101.
       final pdf = _session.pdf;
       final wholeRetake = widget.wholeRetake;
+      // PIYA-212 AC8: "Not sure" sends the Settings default as a fallback
+      // the pipeline uses only when it detects no tempo (PIYA-323).
+      final fallbackTempoBpm = details.tempoBpm == null
+          ? await readFallbackTempo(ref.read(settingsPrefsServiceProvider))
+          : null;
       final job = pdf != null
           ? await api.submitPdf(
               details: details,
               pdfPath: pdf.path,
               cancelToken: cancelToken,
               replacesJobId: wholeRetake?.replacesJobId,
+              fallbackTempoBpm: fallbackTempoBpm,
             )
           : await api.submitImages(
               details: details,
               imagePaths: [for (final page in _session.photos) page.path],
               cancelToken: cancelToken,
               replacesJobId: wholeRetake?.replacesJobId,
+              fallbackTempoBpm: fallbackTempoBpm,
             );
       if (!mounted) return;
       sent = true;

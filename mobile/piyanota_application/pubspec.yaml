@@ -50,6 +50,9 @@ dependencies:
   # Wall clock for the processing tracker's pause rule; flutter_test and
   # fake_async replace it with fake time, which DateTime.now can't do.
   clock: ^1.1.2
+  # Settings shows the installed build's version (PIYA-212 AC2), read from
+  # the APK so it can never drift from pubspec's `version:`.
+  package_info_plus: ^10.2.2
 
 dev_dependencies:
   flutter_test:
