@@ -18,7 +18,7 @@ import sys
 import time
 from pathlib import Path
 
-COMMIT = "SET_BEFORE_PUSH"  # full sha of the reviewed commit; the kernel refuses to train on anything else
+COMMIT = "22c49b24b5b132436bf629c4a9f0a94ab01f4921"  # full sha of the reviewed commit; the kernel refuses to train on anything else
 BRANCH = "piya106/stroke-calibration"
 CONTROL_ROWS = 6314   # A4: realised kept train chord strips of the full-2 manifest
 # (output folder, seed, arm). Freeze A2 order; head-only last so the budget guard drops it first.
