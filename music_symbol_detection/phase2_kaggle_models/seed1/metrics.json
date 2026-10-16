@@ -1,0 +1,242 @@
+[
+ {
+  "epoch": 1,
+  "train_loss": 0.36842579257436003,
+  "val_ser": 0.020314659985812018,
+  "val_ser_by_stratum": {
+   "font=Bravura": 0.020427925047386976,
+   "font=Gootville": 0.019525549707934912,
+   "font=Leipzig": 0.02006935973282041,
+   "font=Leland": 0.02025250384562899,
+   "font=Petaluma": 0.021379055602194757,
+   "interline_px_tertile=0": 0.023265449986175774,
+   "interline_px_tertile=1": 0.021671973991425158,
+   "interline_px_tertile=2": 0.01621331439351611,
+   "line_mult_tertile=0": 0.021128853586492077,
+   "line_mult_tertile=1": 0.01716769796366432,
+   "line_mult_tertile=2": 0.022411317956672873
+  },
+  "watch_recall": {
+   "note.whole": {
+    "recall": 0.8333333333333334,
+    "n": 60
+   },
+   "rest.half": {
+    "recall": null,
+    "n": 0
+   },
+   "fermata.above": {
+    "recall": 0.9714828897338403,
+    "n": 2630
+   },
+   "final_barline": {
+    "recall": 1.0,
+    "n": 383
+   }
+  },
+  "canary_clean_ser": 0.03652855540423378,
+  "canary_distorted_ser": 0.07203053253361472,
+  "status": "OK",
+  "seconds": 1464.9
+ },
+ {
+  "epoch": 2,
+  "train_loss": 0.16281619359648264,
+  "val_ser": 0.006100045529671496,
+  "val_ser_by_stratum": {
+   "font=Bravura": 0.006011923256587515,
+   "font=Gootville": 0.005630585350745823,
+   "font=Leipzig": 0.006288367091533525,
+   "font=Leland": 0.006600226325963816,
+   "font=Petaluma": 0.005959320938190646,
+   "interline_px_tertile=0": 0.007241964688792042,
+   "interline_px_tertile=1": 0.005684466165473331,
+   "interline_px_tertile=2": 0.0055376659549586415,
+   "line_mult_tertile=0": 0.006543028971499202,
+   "line_mult_tertile=1": 0.0050882249335912465,
+   "line_mult_tertile=2": 0.006551860332575248
+  },
+  "watch_recall": {
+   "note.whole": {
+    "recall": 0.8333333333333334,
+    "n": 60
+   },
+   "rest.half": {
+    "recall": null,
+    "n": 0
+   },
+   "fermata.above": {
+    "recall": 0.9790874524714829,
+    "n": 2630
+   },
+   "final_barline": {
+    "recall": 1.0,
+    "n": 383
+   }
+  },
+  "canary_clean_ser": 0.031789044731170266,
+  "canary_distorted_ser": 0.05796059221435948,
+  "status": "OK",
+  "seconds": 1294.9
+ },
+ {
+  "epoch": 3,
+  "train_loss": 0.12139527824076983,
+  "val_ser": 0.004049168451732536,
+  "val_ser_by_stratum": {
+   "font=Bravura": 0.003641341180192423,
+   "font=Gootville": 0.003743788596510026,
+   "font=Leipzig": 0.0041555451581471005,
+   "font=Leland": 0.004266682136708857,
+   "font=Petaluma": 0.004467599500407293,
+   "interline_px_tertile=0": 0.00510678028322315,
+   "interline_px_tertile=1": 0.003335033043690651,
+   "interline_px_tertile=2": 0.0038869236065743763,
+   "line_mult_tertile=0": 0.004789932429288122,
+   "line_mult_tertile=1": 0.003346049496717115,
+   "line_mult_tertile=2": 0.0038319888234036436
+  },
+  "watch_recall": {
+   "note.whole": {
+    "recall": 0.8166666666666667,
+    "n": 60
+   },
+   "rest.half": {
+    "recall": null,
+    "n": 0
+   },
+   "fermata.above": {
+    "recall": 0.9832699619771863,
+    "n": 2630
+   },
+   "final_barline": {
+    "recall": 1.0,
+    "n": 383
+   }
+  },
+  "canary_clean_ser": 0.028345287400465293,
+  "canary_distorted_ser": 0.052890006535679164,
+  "status": "OK",
+  "seconds": 1296.6
+ },
+ {
+  "epoch": 4,
+  "train_loss": 0.09735668643389078,
+  "val_ser": 0.0031365038711814778,
+  "val_ser_by_stratum": {
+   "font=Bravura": 0.0028700127691909574,
+   "font=Gootville": 0.0023257858679776905,
+   "font=Leipzig": 0.0034261296919715868,
+   "font=Leland": 0.0036058180971581624,
+   "font=Petaluma": 0.0034818121863992853,
+   "interline_px_tertile=0": 0.0036697298403257123,
+   "interline_px_tertile=1": 0.0030592276071787893,
+   "interline_px_tertile=2": 0.0027466965161336366,
+   "line_mult_tertile=0": 0.0038101904045265457,
+   "line_mult_tertile=1": 0.0026915496931898524,
+   "line_mult_tertile=2": 0.0027476709636137723
+  },
+  "watch_recall": {
+   "note.whole": {
+    "recall": 0.8666666666666667,
+    "n": 60
+   },
+   "rest.half": {
+    "recall": null,
+    "n": 0
+   },
+   "fermata.above": {
+    "recall": 0.9859315589353612,
+    "n": 2630
+   },
+   "final_barline": {
+    "recall": 1.0,
+    "n": 383
+   }
+  },
+  "canary_clean_ser": 0.027855881011569036,
+  "canary_distorted_ser": 0.04753010774638517,
+  "status": "OK",
+  "seconds": 1333.3
+ },
+ {
+  "epoch": 5,
+  "train_loss": 0.08723723219470518,
+  "val_ser": 0.002663508742221516,
+  "val_ser_by_stratum": {
+   "font=Bravura": 0.002041196785531177,
+   "font=Gootville": 0.002311072874926691,
+   "font=Leipzig": 0.0032369331590042802,
+   "font=Leland": 0.002966707471685414,
+   "font=Petaluma": 0.002769296905897101,
+   "interline_px_tertile=0": 0.003359121728472044,
+   "interline_px_tertile=1": 0.0024139457635688603,
+   "interline_px_tertile=2": 0.0023170164702484355,
+   "line_mult_tertile=0": 0.0029133292761987797,
+   "line_mult_tertile=1": 0.0024059031078531396,
+   "line_mult_tertile=2": 0.002610411778263313
+  },
+  "watch_recall": {
+   "note.whole": {
+    "recall": 0.9166666666666666,
+    "n": 60
+   },
+   "rest.half": {
+    "recall": null,
+    "n": 0
+   },
+   "fermata.above": {
+    "recall": 0.9855513307984791,
+    "n": 2630
+   },
+   "final_barline": {
+    "recall": 1.0,
+    "n": 383
+   }
+  },
+  "canary_clean_ser": 0.026885155435842842,
+  "canary_distorted_ser": 0.04271740660465936,
+  "status": "OK",
+  "seconds": 1697.1
+ },
+ {
+  "epoch": 6,
+  "train_loss": 0.08191611058868059,
+  "val_ser": 0.002591978239710504,
+  "val_ser_by_stratum": {
+   "font=Bravura": 0.002141424282826947,
+   "font=Gootville": 0.0022779663728614142,
+   "font=Leipzig": 0.003256941162205561,
+   "font=Leland": 0.002871902488498485,
+   "font=Petaluma": 0.002399070219880941,
+   "interline_px_tertile=0": 0.0034049346918496627,
+   "interline_px_tertile=1": 0.0021686066157497715,
+   "interline_px_tertile=2": 0.0023304974888234977,
+   "line_mult_tertile=0": 0.0028578668904196518,
+   "line_mult_tertile=1": 0.0024778118085872153,
+   "line_mult_tertile=2": 0.0023780716658256384
+  },
+  "watch_recall": {
+   "note.whole": {
+    "recall": 0.9,
+    "n": 60
+   },
+   "rest.half": {
+    "recall": null,
+    "n": 0
+   },
+   "fermata.above": {
+    "recall": 0.9855513307984791,
+    "n": 2630
+   },
+   "final_barline": {
+    "recall": 1.0,
+    "n": 383
+   }
+  },
+  "canary_clean_ser": 0.026954169596645414,
+  "canary_distorted_ser": 0.0431726251488973,
+  "status": "OK",
+  "seconds": 1318.7
+ }
+]

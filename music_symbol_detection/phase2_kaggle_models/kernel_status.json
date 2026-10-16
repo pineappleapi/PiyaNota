@@ -1,0 +1,43 @@
+{
+ "commit": "b5a213ddc52c99ee9c0b425d2ea6fb05ac58689c",
+ "started": "2026-10-10T18:48:08+0000",
+ "runs": {
+  "seed1": {
+   "seed": 1,
+   "augment_synth": true,
+   "returncode": 0,
+   "minutes": 144.2
+  },
+  "seed2": {
+   "seed": 2,
+   "augment_synth": true,
+   "returncode": 0,
+   "minutes": 135.4
+  },
+  "seed1_noaug": {
+   "seed": 1,
+   "augment_synth": false,
+   "returncode": 0,
+   "minutes": 85.8
+  }
+ },
+ "torch": "2.11.0+cu128",
+ "cuda": "12.8",
+ "gpu": "Tesla T4",
+ "recut_out": "/kaggle/input/notebooks/piamac/piyanota-recut-full-1/out",
+ "cpm_root": "/kaggle/input/datasets/piamac/cameraprimus/CameraPrIMuS - Copy",
+ "cpm_font_root": "/kaggle/input/datasets/piamac/cpm-font-augmented2",
+ "init": "crnn_cameraprimus_transcription.pt",
+ "train_args": [
+  "--augment-synth",
+  "--replay-ratio",
+  "0.5",
+  "--lr",
+  "3e-5",
+  "--max-epochs",
+  "6",
+  "--patience",
+  "3"
+ ],
+ "finished": "2026-10-11T00:53:44+0000"
+}

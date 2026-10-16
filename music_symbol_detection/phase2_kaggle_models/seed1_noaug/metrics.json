@@ -1,0 +1,162 @@
+[
+ {
+  "epoch": 1,
+  "train_loss": 0.2266337659633037,
+  "val_ser": 0.008009237827092248,
+  "val_ser_by_stratum": {
+   "font=Bravura": 0.007538954781009168,
+   "font=Gootville": 0.007210678168499061,
+   "font=Leipzig": 0.00763488600272066,
+   "font=Leland": 0.008833153886806892,
+   "font=Petaluma": 0.008887258811919485,
+   "interline_px_tertile=0": 0.008170711961850617,
+   "interline_px_tertile=1": 0.007776029200537921,
+   "interline_px_tertile=2": 0.008119722066533715,
+   "line_mult_tertile=0": 0.008293262196654156,
+   "line_mult_tertile=1": 0.006743234745209832,
+   "line_mult_tertile=2": 0.008906103882548543
+  },
+  "watch_recall": {
+   "note.whole": {
+    "recall": 0.8166666666666667,
+    "n": 60
+   },
+   "rest.half": {
+    "recall": null,
+    "n": 0
+   },
+   "fermata.above": {
+    "recall": 0.9756653992395438,
+    "n": 2630
+   },
+   "final_barline": {
+    "recall": 1.0,
+    "n": 383
+   }
+  },
+  "canary_clean_ser": 0.033905558512460326,
+  "canary_distorted_ser": 0.07825352015863839,
+  "status": "OK",
+  "seconds": 1243.3
+ },
+ {
+  "epoch": 2,
+  "train_loss": 0.10382074044687992,
+  "val_ser": 0.06074451247696047,
+  "val_ser_by_stratum": {
+   "font=Bravura": 0.05839085012680142,
+   "font=Gootville": 0.06383578405712827,
+   "font=Leipzig": 0.06620048052820696,
+   "font=Leland": 0.060089851108225796,
+   "font=Petaluma": 0.05477712682646327,
+   "interline_px_tertile=0": 0.05486588761246601,
+   "interline_px_tertile=1": 0.06358429671250916,
+   "interline_px_tertile=2": 0.06287679114371648,
+   "line_mult_tertile=0": 0.06372411997899041,
+   "line_mult_tertile=1": 0.05919325761234611,
+   "line_mult_tertile=2": 0.05861486722332841
+  },
+  "watch_recall": {
+   "note.whole": {
+    "recall": 0.8666666666666667,
+    "n": 60
+   },
+   "rest.half": {
+    "recall": null,
+    "n": 0
+   },
+   "fermata.above": {
+    "recall": 0.9802281368821293,
+    "n": 2630
+   },
+   "final_barline": {
+    "recall": 1.0,
+    "n": 383
+   }
+  },
+  "canary_clean_ser": 0.08197504625699345,
+  "canary_distorted_ser": 0.11047938483686273,
+  "status": "soft floor breached",
+  "seconds": 1265.4
+ },
+ {
+  "epoch": 3,
+  "train_loss": 0.07675016168313294,
+  "val_ser": 0.04602305821845367,
+  "val_ser_by_stratum": {
+   "font=Bravura": 0.04502129318945992,
+   "font=Gootville": 0.050164043485055994,
+   "font=Leipzig": 0.050621490931131746,
+   "font=Leland": 0.04595184630492173,
+   "font=Petaluma": 0.03775519472435838,
+   "interline_px_tertile=0": 0.04340857324205074,
+   "interline_px_tertile=1": 0.048757727097226956,
+   "interline_px_tertile=2": 0.04536837354332643,
+   "line_mult_tertile=0": 0.04690580587428577,
+   "line_mult_tertile=1": 0.04565747976622983,
+   "line_mult_tertile=2": 0.045299657321471475
+  },
+  "watch_recall": {
+   "note.whole": {
+    "recall": 0.8833333333333333,
+    "n": 60
+   },
+   "rest.half": {
+    "recall": null,
+    "n": 0
+   },
+   "fermata.above": {
+    "recall": 0.9836501901140684,
+    "n": 2630
+   },
+   "final_barline": {
+    "recall": 1.0,
+    "n": 383
+   }
+  },
+  "canary_clean_ser": 0.0734040764678333,
+  "canary_distorted_ser": 0.09451618111448169,
+  "status": "soft floor breached",
+  "seconds": 1260.6
+ },
+ {
+  "epoch": 4,
+  "train_loss": 0.06374966050498188,
+  "val_ser": 0.050529361068393674,
+  "val_ser_by_stratum": {
+   "font=Bravura": 0.04839041761044779,
+   "font=Gootville": 0.05315722900031743,
+   "font=Leipzig": 0.05484910308211656,
+   "font=Leland": 0.052532527464010305,
+   "font=Petaluma": 0.04317095723459647,
+   "interline_px_tertile=0": 0.047436255486178344,
+   "interline_px_tertile=1": 0.05381764120725428,
+   "interline_px_tertile=2": 0.049697109380795836,
+   "line_mult_tertile=0": 0.05155476529331183,
+   "line_mult_tertile=1": 0.0493466152693705,
+   "line_mult_tertile=2": 0.05043476028259673
+  },
+  "watch_recall": {
+   "note.whole": {
+    "recall": 0.95,
+    "n": 60
+   },
+   "rest.half": {
+    "recall": null,
+    "n": 0
+   },
+   "fermata.above": {
+    "recall": 0.9840304182509506,
+    "n": 2630
+   },
+   "final_barline": {
+    "recall": 1.0,
+    "n": 383
+   }
+  },
+  "canary_clean_ser": 0.0668141746606856,
+  "canary_distorted_ser": 0.0991802444932747,
+  "status": "soft floor breached",
+  "seconds": 1261.3
+ }
+]

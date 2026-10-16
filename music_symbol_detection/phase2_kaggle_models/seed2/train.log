@@ -1,0 +1,8 @@
+[run] seed=2 manifest=78165b43251f train=23997+17980 cpm val=1769 canary=399 base canary {'clean': 0.05005798605198014, 'distorted': 0.2087065638542128} stack={'device': 'Tesla T4', 'torch': '2.11.0+cu128', 'cuda': '12.8', 'cudnn': 91900}
+Epoch 01 | loss 0.3696 | val SER 0.0204 | canary 0.0360/0.0679 | OK | 1300.1s
+Epoch 02 | loss 0.1618 | val SER 0.0062 | canary 0.0303/0.0561 | OK | 1301.8s
+Epoch 03 | loss 0.1204 | val SER 0.0044 | canary 0.0299/0.0504 | OK | 1303.5s
+Epoch 04 | loss 0.0983 | val SER 0.0033 | canary 0.0271/0.0480 | OK | 1305.3s
+Epoch 05 | loss 0.0864 | val SER 0.0027 | canary 0.0263/0.0455 | OK | 1308.7s
+Epoch 06 | loss 0.0826 | val SER 0.0026 | canary 0.0274/0.0450 | OK | 1313.4s
+[done] {'best_epoch': 6, 'best_val_ser': 0.0026260043815037985, 'epochs_run': 6}

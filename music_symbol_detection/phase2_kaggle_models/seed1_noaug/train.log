@@ -1,0 +1,7 @@
+[run] seed=1 manifest=78165b43251f train=23997+17980 cpm val=1769 canary=399 base canary {'clean': 0.05005798605198014, 'distorted': 0.2087065638542128} stack={'device': 'Tesla T4', 'torch': '2.11.0+cu128', 'cuda': '12.8', 'cudnn': 91900}
+Epoch 01 | loss 0.2266 | val SER 0.0080 | canary 0.0339/0.0783 | OK | 1243.3s
+Epoch 02 | loss 0.1038 | val SER 0.0607 | canary 0.0820/0.1105 | soft floor breached | 1265.4s
+Epoch 03 | loss 0.0768 | val SER 0.0460 | canary 0.0734/0.0945 | soft floor breached | 1260.6s
+Epoch 04 | loss 0.0637 | val SER 0.0505 | canary 0.0668/0.0992 | soft floor breached | 1261.3s
+  Stopping: no val SER improvement for 3 epochs.
+[done] {'best_epoch': 1, 'best_val_ser': 0.008009237827092248, 'epochs_run': 4}
