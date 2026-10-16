@@ -26,6 +26,10 @@ class FakeExportService implements ExportService {
   final List<ExportFailure> _failures;
   Completer<void>? exportGate;
 
+  /// Runs while the picker is "open", before it returns: for things that
+  /// happen to Playback while the user is choosing a folder.
+  Future<void> Function()? onPick;
+
   int pickCalls = 0;
   final List<(ExportJob, String)> exports = [];
   final List<String> opened = [];
@@ -34,6 +38,7 @@ class FakeExportService implements ExportService {
   Future<String?> pickFolder() async {
     pickCalls++;
     if (pickFailure case final failure?) throw failure;
+    if (onPick case final hook?) await hook();
     return folder;
   }
 

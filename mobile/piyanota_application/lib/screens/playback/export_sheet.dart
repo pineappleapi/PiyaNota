@@ -85,6 +85,10 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
   Widget build(BuildContext context) {
     closeSheetWhenNotReady(context, ref, widget.scoreId);
     final state = ref.watch(playbackControllerProvider(widget.scoreId));
+    // A voice can fail while the sheet is open: follow Playback live so it
+    // is unticked and disabled here too. Assigned without setState because
+    // this build is already applying it.
+    _selection = exportableSelection(state, _selection);
     final view = exportView(state, _selection);
     final rows = <Widget>[];
     void divider() =>
@@ -182,7 +186,8 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
                 key: const ValueKey('export-error'),
                 message: _messageFor(failure),
                 actionLabel: ExportMessages.retry,
-                onAction: _busy ? null : _retry,
+                // Nothing left to retry once every ticked voice failed.
+                onAction: _busy || !_selection.canDownload ? null : _retry,
               ),
             ),
           Padding(
@@ -213,13 +218,14 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
   }
 
   Future<void> _download() async {
-    if (_busy) return;
+    if (_busy || !_selection.canDownload) return;
     final service = ref.read(exportServiceProvider);
     final provider = playbackControllerProvider(widget.scoreId);
     setState(() {
       _busy = true;
       _failure = null;
     });
+    var saved = false;
     try {
       final treeUri = _treeUri ?? await service.pickFolder();
       // AC11: picker cancelled, back to the sheet with the ticks kept.
@@ -236,13 +242,26 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
       if (!mounted) return;
       // Let the sheet close before the dialog opens (AC16).
       setState(() => _busy = false);
+      saved = true;
       Navigator.of(context)
           .pop<ExportSaved>((result: result, treeUri: treeUri));
     } on ExportFailure catch (failure) {
       if (mounted) setState(() => _failure = failure);
     } finally {
       if (mounted && _busy) setState(() => _busy = false);
+      if (mounted && !saved) _closeIfPlaybackGone();
     }
+  }
+
+  /// [closeSheetWhenNotReady] fires once, when Playback leaves ready; if
+  /// that happened mid-export, the PopScope (AC12) held the sheet open, so
+  /// it is closed here instead, onto Playback's error view.
+  void _closeIfPlaybackGone() {
+    final phase = ref.read(playbackControllerProvider(widget.scoreId)).phase;
+    if (phase == PlaybackPhase.ready) return;
+    // Navigator.pop, not maybePop: the PopScope's canPop is only rebuilt
+    // on the next frame, and the sheet must go now.
+    Navigator.of(context).pop();
   }
 
   static String _messageFor(ExportFailure failure) => switch (failure) {
@@ -250,6 +269,7 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
     PermissionDenied() => ExportMessages.permissionDenied,
     GenerationFailed() => ExportMessages.generationFailed,
     Interrupted() => ExportMessages.interrupted,
+    NoFolderPicker() => ExportMessages.noFolderPicker,
   };
 }
 

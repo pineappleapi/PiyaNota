@@ -16,6 +16,7 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileInputStream
+import java.io.FileNotFoundException
 import java.io.FileOutputStream
 import java.io.IOException
 import java.util.concurrent.ExecutorService
@@ -36,7 +37,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  *  - openFolder({treeUri}) -> whether a file manager could be opened.
  *
  * Error codes match the Dart ExportFailure types (AC18): storage_full,
- * permission_denied, generation_failed, interrupted, plus bad_args.
+ * permission_denied, generation_failed, interrupted, no_folder_picker,
+ * plus bad_args.
  */
 internal class ExportChannel(private val activity: Activity, messenger: BinaryMessenger) {
     private val channel = MethodChannel(messenger, CHANNEL)
@@ -65,8 +67,10 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
                 val inputs = call.argument<List<Map<String, Any?>>>("inputs")
                 val speed = call.argument<Double>("speed")
                 val outPath = call.argument<String>("outPath")
-                if (inputs == null || speed == null || speed <= 0 || outPath == null) {
-                    return badArgs(result, "inputs, speed > 0 and outPath")
+                // Dart never sends an empty job; refusing one here keeps an
+                // empty MP3 from ever being saved as a success.
+                if (inputs.isNullOrEmpty() || speed == null || speed <= 0 || outPath == null) {
+                    return badArgs(result, "non-empty inputs, speed > 0 and outPath")
                 }
                 runOffMain(result) {
                     render(inputs, speed, File(outPath))
@@ -104,9 +108,10 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
             pendingPick = result
             activity.startActivityForResult(intent, PICK_FOLDER_REQUEST)
         } catch (e: ActivityNotFoundException) {
-            // Some stripped-down ROMs ship without a documents UI.
+            // Some stripped-down ROMs ship without a documents UI. Its own
+            // code: "choose another folder" cannot help here.
             pendingPick = null
-            result.error("permission_denied", "no folder picker on this device", null)
+            result.error(NO_FOLDER_PICKER, "no folder picker on this device", null)
         }
     }
 
@@ -174,6 +179,9 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
     }
 
     private fun render(inputs: List<Map<String, Any?>>, speed: Double, out: File) {
+        // Before any decoding: a build without LAME would otherwise spend
+        // the whole decode before failing.
+        Mp3Encoder.ensureLoaded()
         val decoded = mutableListOf<File>()
         var complete = false
         try {
@@ -202,11 +210,11 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
     private fun save(tree: Uri, fileName: String, src: File): Map<String, String> {
         val resolver = activity.contentResolver
         val parent = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
-        val doc = DocumentsContract.createDocument(resolver, parent, MP3_MIME, fileName)
+        val doc = folderStep { DocumentsContract.createDocument(resolver, parent, MP3_MIME, fileName) }
             ?: throw SecurityException("the folder refused a new file")
         var complete = false
         try {
-            val stream = resolver.openOutputStream(doc, "w")
+            val stream = folderStep { resolver.openOutputStream(doc, "w") }
                 ?: throw SecurityException("the folder refused writing")
             stream.use { o ->
                 FileInputStream(src).use { i ->
@@ -228,9 +236,26 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
             }
         }
         // A provider may rename on its own; report the name it really used.
-        val savedName = resolver.query(doc, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)
-            ?.use { c -> if (c.moveToFirst()) c.getString(0) else null } ?: fileName
+        // The file is already saved, so a failing lookup must not turn
+        // that into an error: fall back to the name asked for.
+        val savedName = runCatching {
+            resolver.query(doc, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)
+                ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        }.onFailure { Log.w(TAG, "saved file name not readable", it) }.getOrNull() ?: fileName
         return mapOf("fileName" to savedName, "location" to describeLocation(tree))
+    }
+
+    /**
+     * A folder that was deleted or unmounted (SD card out) since it was
+     * picked makes SAF throw FileNotFoundException. That is the folder's
+     * fault, not the audio's, so it becomes [FolderGone] and is reported
+     * as permission_denied, which makes Retry ask for a folder again. The
+     * cause is kept so a full disk still reads as storage_full.
+     */
+    private fun <T> folderStep(step: () -> T): T = try {
+        step()
+    } catch (e: FileNotFoundException) {
+        throw FolderGone(e)
     }
 
     /**
@@ -289,7 +314,7 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
     private fun errorCode(e: Throwable): String = when {
         e is ExportCancelled || e is InterruptedException -> INTERRUPTED
         isOutOfSpace(e) -> STORAGE_FULL
-        e is SecurityException -> PERMISSION_DENIED
+        e is SecurityException || e is FolderGone -> PERMISSION_DENIED
         // An unreadable or missing folder surfaces as this from SAF.
         e is IllegalArgumentException && e.message?.contains("tree", ignoreCase = true) == true -> PERMISSION_DENIED
         else -> GENERATION_FAILED
@@ -334,5 +359,9 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
         const val PERMISSION_DENIED = "permission_denied"
         const val GENERATION_FAILED = "generation_failed"
         const val INTERRUPTED = "interrupted"
+        const val NO_FOLDER_PICKER = "no_folder_picker"
     }
+
+    /** See [folderStep]. */
+    private class FolderGone(cause: FileNotFoundException) : IOException(cause.message, cause)
 }

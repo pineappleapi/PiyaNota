@@ -21,7 +21,8 @@ internal class MixInput(val pcm: File, val gain: Float)
  * stereo frames to [sink].
  *
  * Two passes over the files: the first finds the peak of the summed
- * signal, the second scales by 1 / max(1, peak). Four loud voices plus
+ * signal, the second scales it down to [PEAK_CEILING] if it is louder
+ * (a quieter mix is left as the Mixer set it). Four loud voices plus
  * the click can sum past full scale; one fixed gain for the whole file
  * keeps the balance the singer set in the Voice Mixer, where a sample-
  * by-sample limiter would pump.
@@ -30,6 +31,13 @@ internal object Mixer {
     private const val CHUNK_FRAMES = 4096
     private const val FULL_SCALE = 32768f
     private const val UNITY_SPEED = 1.0
+
+    /**
+     * About -1 dBFS (10^(-1/20)). A mix peaking at exactly full scale
+     * clips once MP3 encoding and the time-stretch add their own small
+     * overshoots, so the loudest sample is held just below it.
+     */
+    private const val PEAK_CEILING = 0.891f
 
     /**
      * Sonic reports itself inactive (and then drops input) within this
@@ -44,7 +52,7 @@ internal object Mixer {
         cancelled: () -> Boolean,
     ) {
         val peak = scan(inputs, cancelled) { _, _ -> }
-        val scale = 1f / maxOf(1f, peak)
+        val scale = PEAK_CEILING / maxOf(PEAK_CEILING, peak)
         val stretcher = if (abs(speed - UNITY_SPEED) < SONIC_CLOSENESS) null else TimeStretcher(speed.toFloat(), sink)
         scan(inputs, cancelled) { mixed, frames ->
             val out = ShortArray(frames * PcmDecoder.OUT_CHANNELS)

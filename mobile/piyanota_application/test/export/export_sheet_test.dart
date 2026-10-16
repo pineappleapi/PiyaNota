@@ -468,6 +468,177 @@ void main() {
       expect(job.inputs.last.track, Uri.parse('test://click.wav'));
     });
   });
+
+  group('review findings', () {
+    testWidgets('M1: a voice failing while the sheet is open is unticked '
+        'live, and the file names only the voices exported', (tester) async {
+      final service = FakeExportService();
+      final h = harness(service);
+      await pumpPlayback(tester, h);
+      await openExport(tester);
+      await tick(tester, ExportMessages.voiceBox(VoicePart.soprano));
+      await tick(tester, ExportMessages.voiceBox(VoicePart.alto));
+
+      h.engine.fail(VoicePart.alto);
+      await tester.pump();
+      await tester.pump();
+
+      expect(
+        isEnabled(tester, ExportMessages.voiceBox(VoicePart.alto)),
+        isFalse,
+      );
+      expect(
+        isChecked(tester, ExportMessages.voiceBox(VoicePart.alto)),
+        isFalse,
+      );
+      expect(
+        find.text(ExportMessages.voiceUnavailable(VoicePart.alto)),
+        findsOneWidget,
+      );
+      // Dismiss the failed-voice alert Playback raises underneath.
+      if (find.text(PlaybackMessages.ok).evaluate().isNotEmpty) {
+        await tester.tap(find.text(PlaybackMessages.ok));
+        await tester.pumpAndSettle();
+      }
+      await tester.tap(download);
+      await settle(tester);
+      final (job, _) = service.exports.single;
+      expect(job.inputs.map((i) => i.track.pathSegments.last), ['soprano.mp3']);
+      expect(job.fileName, 'Bituin Walang Ningning_Soprano.mp3');
+    });
+
+    testWidgets('M1: the only ticked voice failing while the sheet is '
+        'open disables Download', (tester) async {
+      final service = FakeExportService();
+      final h = harness(service);
+      await pumpPlayback(tester, h);
+      await openExport(tester);
+      await tick(tester, ExportMessages.voiceBox(VoicePart.tenor));
+      expect(downloadEnabled(tester), isTrue);
+
+      h.engine.fail(VoicePart.tenor);
+      await tester.pump();
+      await tester.pump();
+      expect(downloadEnabled(tester), isFalse);
+    });
+
+    testWidgets('M1: the only ticked voice failing during the folder pick '
+        'makes nothing, not a click-only file', (tester) async {
+      final service = FakeExportService();
+      final h = harness(service);
+      await pumpPlayback(tester, h);
+      final plansBefore = h.clickPlans.length;
+      await openExport(tester);
+      await tick(tester, ExportMessages.voiceBox(VoicePart.tenor));
+      await tick(tester, ExportMessages.clickBox);
+      service.onPick = () async {
+        h.engine.fail(VoicePart.tenor);
+        await Future<void>.delayed(Duration.zero);
+      };
+
+      await tester.tap(download);
+      await settle(tester);
+      expect(service.exports, isEmpty);
+      expect(h.clickPlans.length, plansBefore);
+      expect(find.text(ExportMessages.generationFailed), findsOneWidget);
+      expect(find.text(ExportMessages.successTitle), findsNothing);
+    });
+
+    testWidgets('M1: buildExportJob leaves out a ticked voice that has '
+        'since failed, and names only the rest', (tester) async {
+      final service = FakeExportService();
+      final h = harness(service);
+      await pumpPlayback(tester, h);
+      final stale = ExportSelection.empty(playback(tester).available)
+          .toggleVoice(VoicePart.soprano)
+          .toggleVoice(VoicePart.alto);
+      h.engine.fail(VoicePart.alto);
+      await tester.pump();
+      await tester.pump();
+
+      final job = buildExportJob(playback(tester), stale, kTitle);
+      expect(job.inputs.single.track.pathSegments.last, 'soprano.mp3');
+      expect(job.fileName, 'Bituin Walang Ningning_Soprano.mp3');
+    });
+
+    testWidgets('M1: buildExportJob with no voice left fails, even with '
+        'the click', (tester) async {
+      final service = FakeExportService();
+      final h = harness(service);
+      await pumpPlayback(tester, h);
+      final stale = ExportSelection.empty(playback(tester).available)
+          .toggleVoice(VoicePart.alto)
+          .toggleClick();
+      h.engine.fail(VoicePart.alto);
+      await tester.pump();
+      await tester.pump();
+
+      expect(
+        () => buildExportJob(
+          playback(tester),
+          stale,
+          kTitle,
+          clickTrack: Uri.parse('test://click.wav'),
+        ),
+        throwsA(isA<GenerationFailed>()),
+      );
+    });
+
+    test('M4: the folder message names only what the user can do', () {
+      expect(
+        ExportMessages.permissionDenied,
+        'PiyaNota can\u2019t save to that folder. Choose another folder and '
+        'try again.',
+      );
+      expect(ExportMessages.permissionDenied, isNot(contains('Settings')));
+    });
+
+    testWidgets('M4: no folder picker on the phone has its own message', (
+      tester,
+    ) async {
+      final service = FakeExportService(pickFailure: const NoFolderPicker());
+      await pumpPlayback(tester, harness(service));
+      await openExport(tester);
+      await tick(tester, ExportMessages.voiceBox(VoicePart.soprano));
+      await tester.tap(download);
+      await settle(tester);
+
+      expect(find.text(ExportMessages.noFolderPicker), findsOneWidget);
+      expect(find.text(ExportMessages.permissionDenied), findsNothing);
+      expect(service.exports, isEmpty);
+    });
+
+    testWidgets('L10: Playback failing during an export that then fails '
+        'closes the sheet once it is no longer busy', (tester) async {
+      final service = FakeExportService(failures: const [GenerationFailed()])
+        ..exportGate = Completer<void>();
+      final h = PlaybackHarness(
+        ScriptedScoreResultApi([testResult()], timing: testTiming()),
+        engineFailAtLoad: {VoicePart.soprano, VoicePart.alto, VoicePart.tenor},
+        exportService: service,
+      );
+      await pumpPlayback(tester, h);
+      await tester.tap(find.text(PlaybackMessages.ok));
+      await tester.pumpAndSettle();
+      await openExport(tester);
+      await tick(tester, ExportMessages.voiceBox(VoicePart.bass));
+      await tester.tap(download);
+      await tester.pump();
+
+      h.engine.fail(VoicePart.bass, fatal: true);
+      await settle(tester);
+      // Held open while busy (AC12).
+      expect(sheet, findsOneWidget);
+
+      service.exportGate!.complete();
+      await settle(tester);
+      expect(sheet, findsNothing);
+      expect(
+        find.text(PlaybackMessages.errorHeading(PlaybackError.audio)),
+        findsOneWidget,
+      );
+    });
+  });
 }
 
 /// Thrown by the fake click writer; any error there is "couldn't be made".

@@ -28,9 +28,14 @@ class ExportMessages {
   // Failures (AC18, AC20); each one says what to do next.
   static const String storageFull =
       'Not enough space on this phone. Free up some space and try again.';
+  // Folder access is granted per folder through the picker; there is no
+  // app permission in Settings to point the user to.
   static const String permissionDenied =
-      'PiyaNota can’t save to that folder. Choose another folder, or allow '
-      'access in Settings > Apps > PiyaNota > Permissions.';
+      'PiyaNota can’t save to that folder. Choose another folder and try '
+      'again.';
+  static const String noFolderPicker =
+      'This phone has no app for choosing a folder, so the file can’t be '
+      'saved.';
   static const String generationFailed =
       'The audio file couldn’t be made. Try again.';
   static const String interrupted =

@@ -69,8 +69,12 @@ internal class Mp3Encoder(
         @Volatile
         private var loaded = false
 
+        /**
+         * Loads LAME, or throws [EncoderUnavailable]. Called by the export
+         * before it decodes anything, so a missing library fails at once.
+         */
         @Synchronized
-        private fun ensureLoaded() {
+        fun ensureLoaded() {
             if (loaded) return
             try {
                 // mp3lame first: the JNI wrapper links against it, and older

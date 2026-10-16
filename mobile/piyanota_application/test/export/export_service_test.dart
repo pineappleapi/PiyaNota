@@ -104,6 +104,31 @@ void main() {
     await expectLater(service().pickFolder(), throwsA(isA<PermissionDenied>()));
   });
 
+  test('pickFolder: no picker app on the phone is NoFolderPicker', () async {
+    mock((_) => throw PlatformException(code: 'no_folder_picker'));
+    await expectLater(service().pickFolder(), throwsA(isA<NoFolderPicker>()));
+  });
+
+  test('L5: export folders a killed run left behind are cleared first, '
+      'and nothing else in the cache is touched', () async {
+    final sep = Platform.pathSeparator;
+    final stale = Directory('${work.path}${sep}export_old')..createSync();
+    File('${stale.path}${sep}export.mp3').writeAsStringSync('x');
+    final other = Directory('${work.path}${sep}playback_demo')..createSync();
+    mock(
+      (call) => switch (call.method) {
+        'render' => null,
+        'listNames' => <String>[],
+        'save' => {'fileName': 'a.mp3', 'location': 'here'},
+        _ => throw MissingPluginException(),
+      },
+    );
+
+    await service().export(job(), 'content://tree/x');
+    expect(stale.existsSync(), isFalse);
+    expect(other.existsSync(), isTrue);
+  });
+
   test('openFolder: false on an error instead of throwing', () async {
     mock((_) => true);
     expect(await service().openFolder('content://tree/x'), isTrue);

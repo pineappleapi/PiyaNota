@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import 'voice_part.dart';
 
 /// What the Export Audio modal (PIYA-211) has ticked.
@@ -44,6 +46,18 @@ class ExportSelection {
       _with(voices: allVoices ? const {} : {...available});
 
   ExportSelection toggleClick() => _with(withClick: !withClick);
+
+  /// The same ticks against a new set of playable voices: a voice that
+  /// has since failed is unticked and disabled, so the sheet, the job and
+  /// the file name all follow what Playback can still play.
+  ExportSelection withAvailable(Set<VoicePart> next) {
+    if (setEquals(next, available)) return this;
+    return ExportSelection._(
+      available: Set.unmodifiable(next),
+      voices: Set.unmodifiable(voices.intersection(next)),
+      withClick: withClick,
+    );
+  }
 
   ExportSelection _with({Set<VoicePart>? voices, bool? withClick}) =>
       ExportSelection._(

@@ -61,6 +61,13 @@ final class Interrupted extends ExportFailure {
   const Interrupted();
 }
 
+/// The phone has no app for choosing a folder (some stripped-down ROMs
+/// ship without one). Kept apart from [PermissionDenied]: "choose another
+/// folder" is advice the user cannot follow here.
+final class NoFolderPicker extends ExportFailure {
+  const NoFolderPicker();
+}
+
 abstract interface class ExportService {
   /// The folder the user picked (AC10), or null if they cancelled (AC11).
   Future<String?> pickFolder();
@@ -83,6 +90,9 @@ class MethodChannelExportService implements ExportService {
 
   /// errno for "No space left on device" on Linux/Android.
   static const int _enospc = 28;
+
+  /// Prefix of each export's work folder in the cache.
+  static const String _workPrefix = 'export_';
 
   @override
   Future<String?> pickFolder() =>
@@ -108,7 +118,8 @@ class MethodChannelExportService implements ExportService {
   @override
   Future<ExportResult> export(ExportJob job, String treeUri) async {
     final base = await _workDir();
-    final dir = await base.createTemp('export_');
+    await _clearStaleWork(base);
+    final dir = await base.createTemp(_workPrefix);
     try {
       final inputs = <Map<String, Object>>[];
       for (final (index, input) in job.inputs.indexed) {
@@ -151,6 +162,26 @@ class MethodChannelExportService implements ExportService {
         // export over.
         debugPrint('Export: temp files not removed: $e');
       }
+    }
+  }
+
+  /// Removes work folders an earlier export left when the app was killed
+  /// mid-render (the finally below never ran). Only one export runs at a
+  /// time (the sheet is busy throughout), so none of these is in use.
+  static Future<void> _clearStaleWork(Directory base) async {
+    try {
+      await for (final entry in base.list(followLinks: false)) {
+        final name = entry.uri.pathSegments.lastWhere(
+          (segment) => segment.isNotEmpty,
+          orElse: () => '',
+        );
+        if (entry is Directory && name.startsWith(_workPrefix)) {
+          await entry.delete(recursive: true);
+        }
+      }
+    } on FileSystemException catch (e) {
+      // Only reclaims cache space; this export can still go ahead.
+      debugPrint('Export: stale work folders not removed: $e');
     }
   }
 
@@ -203,6 +234,7 @@ class MethodChannelExportService implements ExportService {
         'storage_full' => const StorageFull(),
         'permission_denied' => const PermissionDenied(),
         'interrupted' => const Interrupted(),
+        'no_folder_picker' => const NoFolderPicker(),
         _ => const GenerationFailed(),
       };
     } on MissingPluginException catch (e) {

@@ -31,23 +31,39 @@ PlaybackState exportView(PlaybackState state, ExportSelection selection) =>
       clickStatus: ClickStatus.ready,
     );
 
+/// [selection] narrowed to the voices that can still be exported: a voice
+/// that failed after it was ticked, or has no track, is dropped here so
+/// the file name never names a voice the file does not hold.
+ExportSelection exportableSelection(
+  PlaybackState state,
+  ExportSelection selection,
+) {
+  final tracks = state.result?.audioTracks ?? const <VoicePart, Uri>{};
+  return selection.withAvailable({
+    for (final voice in state.available)
+      if (tracks[voice] != null) voice,
+  });
+}
+
 /// The ticked voices (and the click) with their effective gains, at the
 /// Playback speed. A ticked voice the Mixer silences stays in at gain 0,
 /// so the file still runs the length of the piece.
+///
+/// Throws [GenerationFailed] when no ticked voice is left: a click-only or
+/// empty file must never be saved and reported as a success.
 ExportJob buildExportJob(
   PlaybackState state,
   ExportSelection selection,
   String title, {
   Uri? clickTrack,
 }) {
-  final view = exportView(state, selection);
+  final exported = exportableSelection(state, selection);
+  if (!exported.canDownload) throw const GenerationFailed();
+  final view = exportView(state, exported);
   final tracks = state.result?.audioTracks ?? const <VoicePart, Uri>{};
   final inputs = <ExportInput>[
     for (final voice in VoicePart.values)
-      // A voice that failed while the sheet was open is left out.
-      if (selection.voices.contains(voice) &&
-          state.available.contains(voice) &&
-          tracks[voice] != null)
+      if (exported.voices.contains(voice))
         (track: tracks[voice]!, gain: view.voiceGain(voice)),
     if (view.metronomeOn && clickTrack != null)
       (track: clickTrack, gain: view.clickGain),
@@ -55,7 +71,7 @@ ExportJob buildExportJob(
   return ExportJob(
     inputs: inputs,
     speed: state.speed,
-    fileName: exportFileName(title: title, selection: selection),
+    fileName: exportFileName(title: title, selection: exported),
   );
 }
 
@@ -70,6 +86,12 @@ Future<ExportResult> runExport({
   required String title,
   required String treeUri,
 }) async {
+  // Checked before the click is written, so a voice that failed while the
+  // folder picker was open costs nothing.
+  if (!exportableSelection(state, selection).canDownload) {
+    debugPrint('Export: no ticked voice can be played any more');
+    throw const GenerationFailed();
+  }
   final wantsClick = exportView(state, selection).metronomeOn;
   Uri? click;
   try {
