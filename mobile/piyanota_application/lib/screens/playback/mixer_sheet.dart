@@ -62,7 +62,7 @@ class VoiceMixerSheet extends ConsumerWidget {
           _MixerRow(
             key: ValueKey('mixer-row-${voice.name}'),
             name: voice.label,
-            label: _VoicePill(voice: voice),
+            label: SheetPill(label: voice.label, color: pillColors[voice]!),
             enabled: usable,
             disabledNote: PlaybackMessages.rowUnavailable(voice.label),
             soloed: state.soloed.contains(voice),
@@ -142,26 +142,6 @@ Future<void> _solo(
   if (!state.available.contains(voice)) return;
   if (!state.selected.contains(voice)) controller.toggleVoice(voice);
   controller.setVoiceSoloed(voice, soloed: true);
-}
-
-class _VoicePill extends StatelessWidget {
-  const _VoicePill({required this.voice});
-
-  final VoicePart voice;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 1),
-    decoration: BoxDecoration(
-      color: VoiceMixerSheet.pillColors[voice],
-      borderRadius: BorderRadius.circular(10),
-    ),
-    child: Text(
-      voice.label,
-      style: Theme.of(context).textTheme.titleMedium
-          ?.copyWith(color: Colors.white, fontWeight: FontWeight.w500),
-    ),
-  );
 }
 
 extension on VoiceMixerSheet {

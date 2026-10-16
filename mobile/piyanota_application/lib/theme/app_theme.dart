@@ -323,6 +323,26 @@ class AppTheme {
   // Speed sheet's metronome glyph. Sampled #1E9DCC (3.11:1; icon floor).
   static const Color speedMetronome = Color(0xFF1E9DCC);
 
+  // Export Audio modal (PIYA-211), dropper-sampled from
+  // references/PIYA211_ExportAudioModal_UI_1.png and _UI_2.png
+  // (2026-10-17). Handle, title, voice pills, close X, checkboxes,
+  // dividers and scrim sample to the Mixer's tokens above and reuse them;
+  // the "All Voices" pill samples #272960 (= playbackNavy, white 13.36:1).
+  static const Color exportAllVoicesPill = playbackNavy;
+  // Adjusted for AA, 2026-10-17: "Download Audio" is a left-to-right
+  // gradient sampled #39C2D6 → #1794CA, white text 2.13:1 → 3.43:1. The
+  // label is drawn at 18 sp bold (large text, 3:1 floor, as
+  // processingCancel), so only the left stop moves: HSL lightness −0.105
+  // (smallest 0.005 step) → #25A2B4 (3.04:1). The right stop is kept.
+  static const LinearGradient exportDownloadGradient = LinearGradient(
+    colors: [Color(0xFF25A2B4), Color(0xFF1794CA)],
+  );
+  // Success dialog: title sampled #383838 (= sheetText) on white.
+  // Adjusted for AA, 2026-10-17: the OK pill sampled #38A3D5
+  // (= onboardingButtonBlue, white 2.85:1); at 18 sp bold, HSL lightness
+  // −0.025 → #2D9ED3 (3.02:1).
+  static const Color exportOkFill = Color(0xFF2D9ED3);
+
   /// Darkens [color] for a pressed-state SOP (see frontend-piyanota.md
   /// "Interaction states") — reduces HSL lightness rather than overlaying
   /// opacity, so the result stays the same hue, just deeper.

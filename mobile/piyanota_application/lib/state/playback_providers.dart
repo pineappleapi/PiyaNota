@@ -731,6 +731,20 @@ class PlaybackController extends Notifier<PlaybackState> {
   ({Duration back, Duration? forward}) _targets() =>
       skipTargets(_eventsOf(state.timeline));
 
+  /// A fresh click track for Export (PIYA-211 AC7), planned exactly as
+  /// Playback's is for the current BPM, in track time (the export applies
+  /// the speed to the whole mix). A separate file, so the caller may
+  /// delete it without touching the one Playback is playing.
+  Future<Uri> writeExportClick() => ref.read(clickTrackWriterProvider)(
+    planClicks(
+      bars: _bars,
+      events: _eventsOf(state.timeline),
+      tempoBpm: state.tempoBpm,
+      chosenBpm: state.chosenBpm,
+      length: _engine?.duration ?? state.duration,
+    ),
+  );
+
   List<TimingEvent> _eventsOf(ScoreTimeline? timeline) =>
       timeline?.events ?? const [];
 

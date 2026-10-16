@@ -366,21 +366,13 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('play-pause')));
       await tester.pump();
 
-      for (final (open, title) in [
-        (
-          find.byTooltip(PlaybackMessages.download),
-          PlaybackMessages.exportSheetTitle,
-        ),
-      ]) {
-        await tester.tap(open);
-        await settle(tester);
-        expect(find.text(PlaybackMessages.comingSoon), findsOneWidget);
-        expect(find.text(title), findsWidgets);
-        expect(harness.engine.playing, isTrue, reason: title);
-        await tester.tap(find.byTooltip(PlaybackMessages.close));
-        await settle(tester);
-        expect(find.text(PlaybackMessages.comingSoon), findsNothing);
-      }
+      await tester.tap(find.byTooltip(PlaybackMessages.download));
+      await settle(tester);
+      expect(find.byKey(const ValueKey('export-sheet')), findsOneWidget);
+      expect(harness.engine.playing, isTrue);
+      await tester.tap(find.byTooltip(PlaybackMessages.close));
+      await settle(tester);
+      expect(find.byKey(const ValueKey('export-sheet')), findsNothing);
       expect(harness.engine.pauseCalls, 0);
       expect(find.text(kTitle), findsOneWidget);
     });

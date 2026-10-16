@@ -9,33 +9,46 @@ import 'playback_messages.dart';
 
 /// Opens a Playback sheet (Voice Mixer, Speed). A modal sheet, not a route
 /// push, so the music keeps playing and the seek bar keeps moving
-/// underneath (user decision 2026-10-09; 209 AC7, 210 AC5).
-Future<void> showPlaybackSheet(BuildContext context, WidgetBuilder builder) =>
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.white,
-      barrierColor: AppTheme.sheetScrim,
-      // Grows past the default half screen at large text sizes; scrolls
-      // past the top safe area instead of under it.
-      isScrollControlled: true,
-      useSafeArea: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: builder,
-    );
+/// underneath (user decision 2026-10-09; 209 AC7, 210 AC5). Completes
+/// with what the sheet pops with, or null when dismissed.
+///
+/// [enableDrag] false for a sheet that must sometimes refuse to close:
+/// a drag-down pops the route directly, past any PopScope.
+Future<T?> showPlaybackSheet<T>(
+  BuildContext context,
+  WidgetBuilder builder, {
+  bool enableDrag = true,
+}) => showModalBottomSheet<T>(
+  context: context,
+  enableDrag: enableDrag,
+  backgroundColor: Colors.white,
+  barrierColor: AppTheme.sheetScrim,
+  // Grows past the default half screen at large text sizes; scrolls
+  // past the top safe area instead of under it.
+  isScrollControlled: true,
+  useSafeArea: true,
+  shape: const RoundedRectangleBorder(
+    borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+  ),
+  builder: builder,
+);
 
 /// The mockups' frame: cyan handle, bold title, grey subtitle, grey X.
+/// Export Audio (PIYA-211) has no subtitle, so it is optional.
 class SheetFrame extends StatelessWidget {
   const SheetFrame({
     super.key,
     required this.title,
-    required this.subtitle,
+    this.subtitle,
     required this.children,
+    this.canClose = true,
   });
 
   final String title;
-  final String subtitle;
+  final String? subtitle;
+
+  /// False disables the X, as Export does while it is saving (AC12).
+  final bool canClose;
   final List<Widget> children;
 
   @override
@@ -81,18 +94,21 @@ class SheetFrame extends StatelessWidget {
                             ),
                           ),
                         ),
-                        Text(
-                          subtitle,
-                          style: textTheme.bodySmall?.copyWith(
-                            color: AppTheme.sheetSubtle,
+                        if (subtitle case final subtitle?)
+                          Text(
+                            subtitle,
+                            style: textTheme.bodySmall?.copyWith(
+                              color: AppTheme.sheetSubtle,
+                            ),
                           ),
-                        ),
                       ],
                     ),
                   ),
                   IconButton(
                     tooltip: PlaybackMessages.close,
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: canClose
+                        ? () => Navigator.of(context).pop()
+                        : null,
                     color: AppTheme.sheetClose,
                     iconSize: 28,
                     icon: const Icon(Icons.close_rounded),
@@ -354,6 +370,29 @@ class _SpeakerPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_SpeakerPainter oldDelegate) => oldDelegate.muted != muted;
+}
+
+/// The mockups' coloured voice label: white text on a rounded pill
+/// (Voice Mixer rows, Export rows).
+class SheetPill extends StatelessWidget {
+  const SheetPill({super.key, required this.label, required this.color});
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 1),
+    decoration: BoxDecoration(
+      color: color,
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: Text(
+      label,
+      style: Theme.of(context).textTheme.titleMedium
+          ?.copyWith(color: Colors.white, fontWeight: FontWeight.w500),
+    ),
+  );
 }
 
 /// A short grey note under a control that can't be used right now.

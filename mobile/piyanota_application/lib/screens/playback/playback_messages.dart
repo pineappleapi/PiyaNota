@@ -89,9 +89,7 @@ class PlaybackMessages {
   static const String voiceMixer = 'Voice Mixer';
   static const String speed = 'Speed';
 
-  // Placeholder sheet until PIYA-211.
-  static const String exportSheetTitle = 'Export Audio';
-  static const String comingSoon = 'Coming soon';
+  /// The X on every Playback sheet.
   static const String close = 'Close';
 
   // Voice Mixer sheet (PIYA-209), wording from the mockup.

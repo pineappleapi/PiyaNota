@@ -18,6 +18,7 @@ import '../../state/session_actions.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/primary_pill_button.dart';
 import '../retake/rephotograph.dart';
+import 'export_sheet.dart';
 import 'mixer_sheet.dart';
 import 'playback_alerts.dart';
 import 'playback_messages.dart';
@@ -355,13 +356,11 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
     }
   }
 
-  /// PIYA-211 lands later. A modal sheet, not a route push, so the
-  /// music keeps playing underneath (user decision 2026-10-09).
-  void _openPlaceholder(String title) {
-    unawaited(
-      showPlaybackSheet(context, (_) => _ComingSoonSheet(title: title)),
-    );
-  }
+  /// A modal sheet, not a route push, so the music keeps playing
+  /// underneath (user decision 2026-10-09).
+  void _openExport() => unawaited(
+    openExportAudio(context, ref, scoreId: widget.scoreId, title: widget.title),
+  );
 
   void _openMixer() => unawaited(
     showPlaybackSheet(
@@ -445,9 +444,7 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
                 title: widget.title,
                 arranger: state.arranger,
                 onBack: () => unawaited(_back()),
-                onDownload: ready
-                    ? () => _openPlaceholder(PlaybackMessages.exportSheetTitle)
-                    : null,
+                onDownload: ready ? _openExport : null,
               ),
               if (ready)
                 _VoiceChips(
@@ -1542,54 +1539,3 @@ ImageProvider? scoreImageFor(
   'http' || 'https' => NetworkImage(uri.toString()),
   _ => null,
 };
-
-class _ComingSoonSheet extends StatelessWidget {
-  const _ComingSoonSheet({required this.title});
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    final textTheme = Theme.of(context).textTheme;
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 8, 8, 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Semantics(
-                    header: true,
-                    child: Text(
-                      title,
-                      style: textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: AppTheme.playbackTitle,
-                      ),
-                    ),
-                  ),
-                ),
-                IconButton(
-                  tooltip: PlaybackMessages.close,
-                  onPressed: () => Navigator.of(context).pop(),
-                  color: AppTheme.playbackTitle,
-                  icon: const Icon(Icons.close_rounded),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              PlaybackMessages.comingSoon,
-              style: textTheme.bodyLarge?.copyWith(
-                color: AppTheme.playbackSubtle,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}

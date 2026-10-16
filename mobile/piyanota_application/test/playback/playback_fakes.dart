@@ -16,11 +16,13 @@ import 'package:piyanota_application/models/voice_failure.dart';
 import 'package:piyanota_application/models/voice_part.dart';
 import 'package:piyanota_application/routes/app_routes.dart';
 import 'package:piyanota_application/screens/playback/playback_screen.dart';
+import 'package:piyanota_application/services/export_service.dart';
 import 'package:piyanota_application/services/metronome_click.dart';
 import 'package:piyanota_application/services/playback_engine.dart';
 import 'package:piyanota_application/services/score_result_api.dart';
 import 'package:piyanota_application/services/session_storage.dart';
 import 'package:piyanota_application/state/auth_providers.dart';
+import 'package:piyanota_application/state/export_providers.dart';
 import 'package:piyanota_application/state/playback_providers.dart';
 import 'package:piyanota_application/state/processing_providers.dart';
 
@@ -417,7 +419,11 @@ class PlaybackHarness {
     this.clickWriteError,
     this.clickAttachGate,
     this.clickWriter,
+    this.exportService,
   });
+
+  /// Replaces the device export channel (PIYA-211).
+  final ExportService? exportService;
 
   /// Replaces the default click writer (which writes nothing).
   final Future<Uri> Function(ClickPlan plan)? clickWriter;
@@ -448,6 +454,8 @@ class PlaybackHarness {
   FakePlaybackEngine get engine => engines.last;
 
   List<Override> get overrides => [
+    if (exportService case final service?)
+      exportServiceProvider.overrideWithValue(service),
     scoreResultApiProvider.overrideWithValue(api),
     playbackEngineFactoryProvider.overrideWithValue(() {
       if (engineCreateError case final error?) throw error;
