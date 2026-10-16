@@ -621,6 +621,48 @@ BLANK_IDX  = 0
 VOCAB_SIZE = len(VOCAB)
 SYM_TO_IDX = {s: i for i, s in enumerate(VOCAB)}
 IDX_TO_SYM = {i: s for i, s in enumerate(VOCAB)}
+
+# The vocabularies a checkpoint may carry. Decoding with the wrong one maps every index past VOCAB to "<unk>" (or,
+# for a reordered list, to the wrong token), so anything else is refused rather than guessed.
+KNOWN_VOCABS: tuple[list[str], ...] = (VOCAB, VOCAB_EXT_CHORD_TUPLET)
+# _vocab_for_head picks a table by head size alone, so no two known vocabularies may share a length.
+assert len({len(v) for v in KNOWN_VOCABS}) == len(KNOWN_VOCABS), "known vocabularies must differ in length"
+
+
+def _vocab_for_checkpoint(ckpt: dict[str, Any]) -> list[str]:
+    """The token table a checkpoint was trained with.
+
+    A stored ``vocab`` must equal VOCAB or VOCAB_EXT_CHORD_TUPLET exactly; with none stored (pre-arm checkpoints)
+    it is VOCAB. Either way its length must equal the head's output rows.
+
+    Raises:
+        ValueError: unknown stored vocab, or its length differs from ``fc.weight`` rows.
+    """
+    rows = int(ckpt["model_state"]["fc.weight"].shape[0])
+    stored = ckpt.get("vocab")
+    if stored is None:
+        vocab = VOCAB
+    else:
+        match = [v for v in KNOWN_VOCABS if list(stored) == v]
+        if not match:
+            raise ValueError(f"checkpoint vocab ({len(stored)} tokens) is neither VOCAB nor VOCAB_EXT_CHORD_TUPLET")
+        vocab = match[0]
+    if len(vocab) != rows:
+        raise ValueError(f"checkpoint vocab has {len(vocab)} tokens but the head has {rows} outputs")
+    return vocab
+
+
+def _vocab_for_head(model: nn.Module) -> list[str]:
+    """The token table for a loaded CRNN, from its head size (the known vocabularies differ in length).
+
+    Raises:
+        ValueError: the head size matches no known vocabulary.
+    """
+    rows = int(model.fc.out_features)
+    match = [v for v in KNOWN_VOCABS if len(v) == rows]
+    if not match:
+        raise ValueError(f"CRNN head has {rows} outputs; no known vocabulary has that size")
+    return match[0]
  
  
 # ── Pitch tables ──────────────────────────────────────────────────────────────
@@ -835,6 +877,18 @@ KEY_SIG_ORDER: dict[str, dict[str, list[str]]] = {
 # strip. Hand-set, not tuned.
 MIN_MID_KEY_CHANGE_ACCIDENTALS = 2
 
+# Divisi chord validators (freeze doc section 6, docs/decisions/piya-106-divisi-arm-freeze.md): V1 member interval
+# over 12 semitones, V2 3 or more members, V4 sounding MIDI range per voice. Flag only (the notes still play), and
+# only on events with a chord_id, so monophonic output is unchanged.
+CHORD_MAX_INTERVAL = 12
+CHORD_MAX_MEMBERS = 2
+CHORD_VOICE_RANGE: dict[str, tuple[int, int]] = {
+    "Soprano": (58, 86),
+    "Alto":    (51, 79),
+    "Tenor":   (46, 71),
+    "Bass":    (38, 66),
+}
+
 
 class HeaderOverride(NamedTuple):
     """Clef, opening key and octave decided outside the CRNN (ClefKeyNet + voice rule, stage3_clefkey).
@@ -893,17 +947,26 @@ def _position_suffix(sym: str) -> Optional[str]:
     return sym.split("-", 1)[1] if "-" in sym else None
 
 
-def _next_note_position(symbols: list[str], idx: int) -> Optional[str]:
-    """Position of the first note after ``symbols[idx]`` in the same measure, or None.
+def _next_onset_positions(symbols: list[str], idx: int) -> set[str]:
+    """Staff positions of the next onset after ``symbols[idx]`` in the same measure.
 
-    A barline ends the search: an accidental never modifies a note in the next bar.
+    An onset is a ``note.*`` token plus the ``chordnote-*`` tokens directly after it (a same-stem divisi chord,
+    converter order: accidentals bottom to top, then the lowest head, then the other heads). Empty if a barline
+    comes first (an accidental never modifies a note in the next bar). Without chordnotes this is the first
+    note's position alone, so monophonic anchoring is unchanged.
     """
-    for sym in symbols[idx + 1:]:
+    for i in range(idx + 1, len(symbols)):
+        sym = symbols[i]
         if sym.startswith("barline"):
-            return None
+            return set()
         if sym.startswith("note."):
-            return _position_suffix(sym)
-    return None
+            onset = [sym]
+            for member in symbols[i + 1:]:
+                if not member.startswith("chordnote-"):
+                    break
+                onset.append(member)
+            return {pos for pos in map(_position_suffix, onset) if pos is not None}
+    return set()
 
 
 def _accidental_is_anchored(symbols: list[str], idx: int) -> bool:
@@ -918,7 +981,7 @@ def _accidental_is_anchored(symbols: list[str], idx: int) -> bool:
     and the greedy-CTC evidence rescue tried in BUG-033 did not recover it either.
     """
     pos = _position_suffix(symbols[idx])
-    return pos is not None and _next_note_position(symbols, idx) == pos
+    return pos is not None and pos in _next_onset_positions(symbols, idx)
 
 
 def _header_accidental_is_inline(symbols: list[str], idx: int) -> bool:
@@ -928,12 +991,25 @@ def _header_accidental_is_inline(symbols: list[str], idx: int) -> bool:
     engraved before the time signature and any rest, so a glyph followed by a metersign, digit, rest or
     multirest is a (misread) key-signature glyph, not the first note's accidental. Only slur and fermata
     tokens (engraved above/below the note, emitted before it) may sit between the accidental and its note.
+    A divisi chord's accidentals are stacked before its lowest head (converter order), so further accidental
+    tokens may also sit in between, but only when the onset reached is a chord; the accidental then belongs
+    to it if any member is on its position. A monophonic onset keeps the stop-at-first-token rule.
     """
     pos = _position_suffix(symbols[idx])
-    for sym in symbols[idx + 1:]:
+    skipped_accidental = False
+    for i in range(idx + 1, len(symbols)):
+        sym = symbols[i]
         if sym.startswith(("slur.", "fermata.")):
             continue
-        return pos is not None and sym.startswith("note.") and _position_suffix(sym) == pos
+        if sym.startswith("accidental."):
+            skipped_accidental = True
+            continue
+        if pos is None or not sym.startswith("note."):
+            return False
+        is_chord = i + 1 < len(symbols) and symbols[i + 1].startswith("chordnote-")
+        if not is_chord:
+            return not skipped_accidental and _position_suffix(sym) == pos
+        return pos in _next_onset_positions(symbols, i - 1)
     return False
 
 
@@ -975,7 +1051,7 @@ def _is_mid_key_change(burst: list[str], symbols: list[str], burst_end: int, acc
     positions = [_position_suffix(t) for t in burst]
     if positions != order[:len(burst)]:
         return False
-    return _next_note_position(symbols, burst_end - 1) != positions[-1]
+    return positions[-1] not in _next_onset_positions(symbols, burst_end - 1)
 
 
 def _burst_key_change(symbols: list[str], start: int, acc_type: str, active_clef: str,
@@ -1072,7 +1148,7 @@ def _natural_led_key_change(symbols: list[str], start: int, active_clef: str,
     # and the next note, so no glyph can be that note's accidental.
     meter_follows = _meter_at(symbols, end) is not None
     enough = len(glyphs) >= MIN_MID_KEY_CHANGE_ACCIDENTALS or result == confirmed or meter_follows
-    if not enough or (not meter_follows and _next_note_position(symbols, end - 1) == glyphs[-1]):
+    if not enough or (not meter_follows and glyphs[-1] in _next_onset_positions(symbols, end - 1)):
         return None
     return result + (end,)
 
@@ -1144,6 +1220,18 @@ def infer_pitch(
       Inline accidentals not on the next note's staff position are dropped as
       CRNN phantoms (_accidental_is_anchored).
 
+    Divisi chords (``note.* chordnote-*``, PIYA-106): each chordnote is a note event sharing the base note's
+    onset, duration, measure and time signature, and one ``chord_id`` (an int counted from 1 per call, so
+    it is unique only within one strip: key on (page_index, sys_idx, chord_id)); the cursor advances once.
+    Accidentals are paired by staff position, so each reaches its own member. Junk shapes are dropped or
+    flagged, never fatal, each with ``review_needed``: ``unison_chordnote_dropped`` (base; a chordnote on a
+    position the onset already has), ``orphan_chordnote_dropped`` (next emitted event; a chordnote with no
+    note before it in its onset), ``chordnote_below_base`` (that member; pitch kept). Chord members also get
+    the V1/V2/V4 flags (``chord_interval_over_octave``, ``chord_three_plus_members``,
+    ``chord_member_out_of_range``) and, with confidences, ``chord_confidence`` = min over the members (each
+    member's own confidence is the min of its chordnote and accidental tokens). Neither is a trust signal
+    (BUG-011). Monophonic input is unchanged (golden harness, training/phase2/stage3_golden.py).
+
     Key-signature state machine
     ───────────────────────────
     "clef"
@@ -1208,8 +1296,10 @@ def infer_pitch(
         if next_system_key is not None and next_system_key != header_override.key:
             confirmed_next = _signed_key_counts(next_system_key)
  
-    pending_acc: Optional[int] = None
-    pending_acc_conf       = 1.0
+    # Anchored inline accidentals waiting for their notehead, by staff position: (alteration, confidence,
+    # token). Keyed by position so each accidental of a divisi chord reaches its own member; in monophonic
+    # input every anchored accidental sits on the next note's position, so this holds at most one entry.
+    pending_accs: dict[str, tuple[int, float, str]] = {}
     # Inline accidental rejected by _accidental_is_anchored, kept until the next note so that note
     # carries a trace of it: a real accidental placed one step off plays a wrong pitch (BUG-033).
     dropped_acc: Optional[str] = None
@@ -1228,8 +1318,19 @@ def infer_pitch(
     dot_target: Optional[dict] = None
     dot_base               = 0
     dot_count              = 0
+    # Dot tokens per staff position since the dotted chord's onset: the converter writes one dot per head per
+    # dot, so the chord's dot count is the highest count at any one position, not the token total.
+    chord_dot_counts: dict[Optional[str], int] = {}
     chord_id               = 0
-    in_chord               = False
+    # The onset being read: a note event, then its chordnote members, and their staff positions. Closed by
+    # _close_onset before any token that is not a chordnote.
+    onset_events: list[dict] = []
+    onset_positions: set[str] = set()
+    onset_base_step        = 0
+    onset_open             = False
+    # A chordnote with no note before it in its onset (strip start, after a rest or barline, in the header),
+    # kept until the next emitted event so the dropped notehead stays visible for review.
+    orphan_chordnote: Optional[str] = None
     slur_active            = False
     slur_start_idx         = -1
     slur_end_pending       = False
@@ -1317,6 +1418,79 @@ def infer_pitch(
         })
         traced_events = len(events)
 
+    def _hold_accidental(sym: str, acc_type: str, tok_conf: float) -> None:
+        # Only anchored accidentals get here, and anchoring requires a position suffix.
+        pending_accs[sym.split("-", 1)[1]] = (ACCIDENTAL_OFFSET.get(acc_type, 0), tok_conf, sym)
+
+    def _member_pitch(pos_str: str, tok_conf: float) -> tuple[int, int, float]:
+        """(MIDI pitch, staff step, confidence) of a notehead at ``pos_str``; consumes its pending accidental.
+
+        Shared by a note and the chordnote members of its onset. Alteration precedence: A(p) in the docstring.
+        """
+        nonlocal last_note_step, last_note_alteration, last_note_alt_conf
+        # Camera-PrIMuS numbers the bottom line L1 and the space above it S1 (1-indexed), BUG-009.
+        step          = _staff_step(pos_str)
+        bottom_letter = CLEF_BOTTOM_LETTER.get(active_clef, "E")
+        delta         = _diatonic_delta(step, bottom_letter)
+        alt_conf      = 1.0   # key-signature alterations are excluded from confidence
+        pending       = pending_accs.pop(pos_str, None)
+        if pending is not None:
+            alteration, alt_conf = pending[0], pending[1]
+            measure_alterations[step] = (alteration, alt_conf)
+        elif slur_end_pending and last_note_step == step:
+            # Not stored in measure_alterations: a tie carries the accidental into the next bar for the
+            # tied note only, later notes on that step fall back to the key.
+            alteration, alt_conf = last_note_alteration, last_note_alt_conf
+        elif step in measure_alterations:
+            alteration, alt_conf = measure_alterations[step]
+        else:
+            alteration = key_alterations.get(_pitch_class_at_step(step, bottom_letter), 0)
+        last_note_step, last_note_alteration, last_note_alt_conf = step, alteration, alt_conf
+        midi = max(0, min(127, reference_pitch + delta + alteration))
+        return midi, step, min(tok_conf, alt_conf)
+
+    def _take_orphan(event: dict) -> None:
+        nonlocal orphan_chordnote
+        if orphan_chordnote is not None:
+            event["orphan_chordnote_dropped"] = orphan_chordnote
+            event["review_needed"] = True
+            orphan_chordnote = None
+
+    def _close_onset() -> None:
+        """Finish the open onset. A single note needs nothing (monophonic output stays as before)."""
+        nonlocal onset_open, dropped_acc_count
+        was_open, onset_open = onset_open, False
+        if not was_open or len(onset_events) < 2:
+            return
+        base = onset_events[0]
+        if pending_accs:
+            # Anchored to this onset (an accidental for the next onset comes after this point) but no member
+            # took it, e.g. its chordnote was a dropped unison.
+            # A lost member accidental changes a pitch, so it needs review; every token is named, none hidden.
+            leftovers = [tok for _, _, tok in pending_accs.values()]
+            prior = base.get("unanchored_accidental_dropped")
+            base["unanchored_accidental_dropped"] = " ".join(([prior] if prior else []) + leftovers)
+            base["review_needed"] = True
+            dropped_acc_count += len(leftovers)
+            pending_accs.clear()
+        pitches = [e["pitch"] for e in onset_events]
+        wide = max(pitches) - min(pitches) > CHORD_MAX_INTERVAL
+        crowded = len(onset_events) > CHORD_MAX_MEMBERS
+        voice_range = CHORD_VOICE_RANGE.get(voice)
+        chord_conf = min(e["confidence"] for e in onset_events) if with_conf else None
+        for e in onset_events:
+            if wide:
+                e["chord_interval_over_octave"] = True
+                e["review_needed"] = True
+            if crowded:
+                e["chord_three_plus_members"] = True
+                e["review_needed"] = True
+            if voice_range is not None and not voice_range[0] <= e["pitch"] <= voice_range[1]:
+                e["chord_member_out_of_range"] = True
+                e["review_needed"] = True
+            if chord_conf is not None:
+                e["chord_confidence"] = chord_conf
+
     # ── Main loop ─────────────────────────────────────────────────────────
     for tok_idx, sym in enumerate(symbols):
         if tok_idx:
@@ -1329,6 +1503,49 @@ def infer_pitch(
         is_sharp = sym.startswith("accidental.sharp")
         is_flat  = sym.startswith("accidental.flat")
         is_acc   = sym.startswith("accidental.")
+
+        # ── Chordnote (divisi member) ─────────────────────────────────────
+        # Handled before the key-sig state machine: it is never a header token, and outside an open onset
+        # (header stages included) it is an orphan.
+        if sym.startswith("chordnote-"):
+            pos_str = sym[len("chordnote-"):]
+            # Repeats are joined, space-separated, so no dropped token is lost.
+            if not onset_open:
+                orphan_chordnote = sym if orphan_chordnote is None else f"{orphan_chordnote} {sym}"
+            elif pos_str in onset_positions:
+                prior_unison = onset_events[0].get("unison_chordnote_dropped")
+                onset_events[0]["unison_chordnote_dropped"] = sym if prior_unison is None else f"{prior_unison} {sym}"
+                onset_events[0]["review_needed"] = True
+            else:
+                base = onset_events[0]
+                midi_pitch, step, member_conf = _member_pitch(pos_str, tok_conf)
+                if base["chord_id"] is None:
+                    chord_id += 1
+                    base["chord_id"] = chord_id
+                events.append({
+                    "type":           "note",
+                    "pitch":          midi_pitch,
+                    "duration_ticks": base["duration_ticks"],
+                    "voice":          voice,
+                    "page_index":     page_index,
+                    "sys_idx":        sys_idx,
+                    "chord_id":       base["chord_id"],
+                    "symbol":         sym,
+                    "tick_onset":     base["tick_onset"],
+                    # Ties into/out of a member are deferred (freeze section 1): only the base carries "end".
+                    "slur":           "middle" if slur_active else None,
+                    "measure_index":  base["measure_index"],
+                    "time_signature": base["time_signature"],
+                })
+                if with_conf:
+                    events[-1]["confidence"] = member_conf
+                if step < onset_base_step:
+                    events[-1]["chordnote_below_base"] = sym
+                    events[-1]["review_needed"] = True
+                onset_events.append(events[-1])
+                onset_positions.add(pos_str)
+            continue
+        _close_onset()
 
         # ══════════════════════════════════════════════════════════════════
         # KEY-SIG STATE MACHINE
@@ -1353,8 +1570,7 @@ def infer_pitch(
                     ks_stage = "keysig"
                 else:
                     if _accidental_is_anchored(symbols, tok_idx):
-                        pending_acc      = ACCIDENTAL_OFFSET.get(acc_type, 0)
-                        pending_acc_conf = tok_conf
+                        _hold_accidental(sym, acc_type, tok_conf)
                     else:
                         dropped_acc = sym
                         dropped_acc_count += 1
@@ -1390,8 +1606,7 @@ def infer_pitch(
                 continue
             elif is_acc:
                 if _header_accidental_is_inline(symbols, tok_idx):
-                    pending_acc      = ACCIDENTAL_OFFSET.get(acc_type, 0)
-                    pending_acc_conf = tok_conf
+                    _hold_accidental(sym, acc_type, tok_conf)
                 else:
                     header_dropped += 1
                 continue
@@ -1541,8 +1756,7 @@ def infer_pitch(
         # ── Inline accidental ─────────────────────────────────────────────
         if is_acc:
             if _accidental_is_anchored(symbols, tok_idx):
-                pending_acc      = ACCIDENTAL_OFFSET.get(acc_type, 0)
-                pending_acc_conf = tok_conf
+                _hold_accidental(sym, acc_type, tok_conf)
             else:
                 dropped_acc = sym
                 dropped_acc_count += 1
@@ -1550,6 +1764,23 @@ def infer_pitch(
  
         # ── Dot (augmentation) ────────────────────────────────────────────
         if sym.startswith("dot-"):
+            if events and events[-1]["chord_id"] is not None and events[-1] is onset_events[-1]:
+                # Every member takes the same duration and the cursor moves once. The dot is not folded into
+                # member confidence (freeze 10.6: a member's confidence is its note and accidental tokens).
+                base = onset_events[0]
+                if dot_target is not base:
+                    dot_target       = base
+                    dot_base         = base["duration_ticks"]
+                    chord_dot_counts = {}
+                pos = _position_suffix(sym)
+                chord_dot_counts[pos] = chord_dot_counts.get(pos, 0) + 1
+                old_ticks = base["duration_ticks"]
+                new_ticks = _dotted_ticks(dot_base, max(chord_dot_counts.values()))
+                for member in onset_events:
+                    member["duration_ticks"] = new_ticks
+                if base["tick_onset"] + old_ticks == current_tick:
+                    current_tick += new_ticks - old_ticks
+                continue
             # A dot never follows a multi-measure rest in engraving; stretching one would shift every
             # later bar of this voice, so a (misread) dot there is dropped.
             if events and not events[-1]["symbol"].startswith("multirest"):
@@ -1564,10 +1795,8 @@ def infer_pitch(
                 # The cursor already advanced by old_ticks when the note/rest
                 # was emitted; without also advancing by the extra half, every
                 # later onset overlaps the dotted note. Only when this event
-                # is the one that moved the cursor: a chord tail (in_chord)
-                # never advanced it, so dotting the tail must not either.
-                if (not in_chord and
-                        events[-1]["tick_onset"] + old_ticks == current_tick):
+                # is the one that moved the cursor.
+                if events[-1]["tick_onset"] + old_ticks == current_tick:
                     current_tick += new_ticks - old_ticks
                 if with_conf:
                     events[-1]["confidence"] = min(
@@ -1594,8 +1823,8 @@ def infer_pitch(
             })
             if with_conf:
                 events[-1]["confidence"] = tok_conf
+            _take_orphan(events[-1])
             current_tick += ticks
-            in_chord      = False
             slur_end_pending = False   # a tie cannot run into a rest
             continue
  
@@ -1619,52 +1848,9 @@ def infer_pitch(
                     }.get(beam_num, "eighth")
                     break
  
-            # Parse position suffix → diatonic step number.
-            # Camera-PrIMuS agnostic encoding numbers the bottom staff line
-            # L1 (not L0) and the space just above it S1 -- i.e. pos is
-            # 1-indexed from the bottom line, not 0-indexed -- so pos must be
-            # shifted down by one before doubling to land step=0 on the
-            # bottom line, matching STEP_TO_PITCH_CLASS/_diatonic_delta's own
-            # step=0-is-bottom-line convention (see BUG-009).
-            step = _staff_step(pos_str)
+            midi_pitch, step, note_conf = _member_pitch(pos_str, tok_conf)
 
-            bottom_letter = CLEF_BOTTOM_LETTER.get(active_clef, "E")
-            delta         = _diatonic_delta(step, bottom_letter)
- 
-            # Alteration precedence: see A(p) in the docstring.
-            alt_conf = 1.0   # key-signature alterations are excluded from confidence
-            if pending_acc is not None:
-                alteration, alt_conf = pending_acc, pending_acc_conf
-                measure_alterations[step] = (alteration, alt_conf)
-            elif slur_end_pending and last_note_step == step:
-                # Not stored in measure_alterations: a tie carries the accidental into the next bar for the
-                # tied note only, later notes on that step fall back to the key.
-                alteration, alt_conf = last_note_alteration, last_note_alt_conf
-            elif step in measure_alterations:
-                alteration, alt_conf = measure_alterations[step]
-            else:
-                alteration = key_alterations.get(_pitch_class_at_step(step, bottom_letter), 0)
-            note_conf = min(tok_conf, alt_conf)
-            pending_acc = None
-            last_note_step, last_note_alteration, last_note_alt_conf = step, alteration, alt_conf
-
-            midi_pitch  = max(0, min(127,
-                reference_pitch + delta + alteration))
- 
             ticks = NOTE_DURATION_TICKS.get(dur_name, 480)
- 
-            # Chord detection — consecutive notes sharing the same tick onset
-            if (events
-                    and events[-1]["type"] == "note"
-                    and events[-1]["tick_onset"] == current_tick):
-                if not in_chord:
-                    chord_id += 1
-                    events[-1]["chord_id"] = chord_id
-                in_chord = True
-                c_id     = chord_id
-            else:
-                in_chord = False
-                c_id     = None
  
             events.append({
                 "type":           "note",
@@ -1673,7 +1859,7 @@ def infer_pitch(
                 "voice":          voice,
                 "page_index":     page_index,
                 "sys_idx":        sys_idx,
-                "chord_id":       c_id,
+                "chord_id":       None,   # set by its first chordnote member
                 "symbol":         sym,
                 "tick_onset":     current_tick,
                 "slur":           ("end" if slur_end_pending
@@ -1686,22 +1872,25 @@ def infer_pitch(
             if dropped_acc is not None:
                 events[-1]["unanchored_accidental_dropped"] = dropped_acc
                 dropped_acc = None
+            _take_orphan(events[-1])
             if slur_end_pending:
                 # A tie chain (A~A~A) puts slur.end then slur.start on the
                 # middle note; the later "start" overwrites "slur", so the
                 # end mark is kept separately for Stage 4's tie inference.
                 events[-1]["slur_end"] = True
             slur_end_pending = False
-            if not in_chord:
-                current_tick += ticks
+            onset_events     = [events[-1]]
+            onset_positions  = {pos_str}
+            onset_base_step  = step
+            onset_open       = True
+            current_tick += ticks
             continue
  
         # ── Barline ───────────────────────────────────────────────────────
         if sym.startswith("barline"):
-            pending_acc = None      # stale inline accidental — discard
+            pending_accs.clear()    # stale inline accidentals — discard
             dropped_acc = None
             measure_alterations = {}
-            in_chord    = False
             ks_stage    = "post_bar"
             measure_index += 1
             if system_key_changes is not None and measure_index in system_key_changes:
@@ -1730,6 +1919,7 @@ def infer_pitch(
             })
             if with_conf:
                 events[-1]["confidence"] = tok_conf
+            _take_orphan(events[-1])
             current_tick += ticks
             # A multirest is engraved between exactly one pair of barlines
             # regardless of how many bars it spans (digit.N gives that count),
@@ -1742,7 +1932,6 @@ def infer_pitch(
             # still fires normally and supplies the final +1.
             measure_index          += (pending_multirest_bars - 1)
             pending_multirest_bars  = 1
-            in_chord                = False
             continue
  
         # ── Digit (multirest count) ───────────────────────────────────────
@@ -1780,6 +1969,14 @@ def infer_pitch(
 
     if symbols:
         _trace_token(len(symbols) - 1)
+    _close_onset()
+    if orphan_chordnote is not None:
+        # No later event to carry it: put it on the last one rather than lose it silently.
+        if events:
+            _take_orphan(events[-1])
+        else:
+            print(f"[Stage 3] {voice} p{page_index} s{sys_idx}: dropped orphan {orphan_chordnote} "
+                  "(no note or rest in the strip)")
     if dropped_acc_count:
         print(f"[Stage 3] {voice} p{page_index} s{sys_idx}: dropped {dropped_acc_count} "
               "unanchored accidental(s) (not on the next note's staff position)")
@@ -1975,7 +2172,11 @@ def transcribe_strip(
         List[str] symbols in reading order (default), or
         List[Tuple[str, float]] (symbol, confidence) pairs if
         return_confidence=True.
+
+    Raises:
+        ValueError: the model's head size matches no known vocabulary.
     """
+    idx_to_sym = dict(enumerate(_vocab_for_head(model)))
     if len(image.shape) == 3:
         image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
@@ -2004,13 +2205,13 @@ def transcribe_strip(
             spans_out.extend((s * px_per_frame, e * px_per_frame) for s, e in frame_spans)
 
     if return_confidence:
-        tokens = [(IDX_TO_SYM.get(i, "<unk>"), c) for i, c in zip(indices, confidences)]
+        tokens = [(idx_to_sym[i], c) for i, c in zip(indices, confidences)]
         logger.info("transcribe_strip strip_id=%s raw_tokens=%s", strip_id, [t for t, _ in tokens])
         return tokens
 
     if frame_spans is None:
         indices = _greedy_ctc_decode(log_probs)
-    tokens = [IDX_TO_SYM.get(i, "<unk>") for i in indices]
+    tokens = [idx_to_sym[i] for i in indices]
     logger.info("transcribe_strip strip_id=%s raw_tokens=%s", strip_id, tokens)
     return tokens
  
@@ -2753,8 +2954,8 @@ def transcribe_voice_sequences(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[Stage 3] Using device: {device}")
  
-    model = CRNN(VOCAB_SIZE).to(device)
     checkpoint = torch.load(model_weights, map_location=device)
+    model = CRNN(len(_vocab_for_checkpoint(checkpoint))).to(device)
     model.load_state_dict(checkpoint["model_state"])
     model.eval()
     print(f"[Stage 3] Loaded weights -> {model_weights} "
@@ -2912,8 +3113,8 @@ def load_model(model_weights: str,
     """Loads CRNN weights and returns (model, device)."""
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = CRNN(VOCAB_SIZE).to(device)
     ckpt  = torch.load(model_weights, map_location=device)
+    model = CRNN(len(_vocab_for_checkpoint(ckpt))).to(device)
     model.load_state_dict(ckpt["model_state"])
     model.eval()
     return model, device

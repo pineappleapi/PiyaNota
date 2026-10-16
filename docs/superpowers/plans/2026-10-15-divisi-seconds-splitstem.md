@@ -110,6 +110,8 @@ additions, no gate or schedule change).
 
 ### Task 4: Stage 3 chordnote parsing (after launch)
 
+> Superseded 2026-10-16 by `2026-10-16-stage3-divisi-pairing.md` (position-keyed pairing, ties, vocab loading).
+
 **Files:**
 - Modify: `stage3_transcription.py` (`infer_pitch` note branch ~1600-1680, dot branch ~1552)
 - Test: `tests/test_stage3_chordnote.py`
