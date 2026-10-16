@@ -1,0 +1,16 @@
+{
+  "id": "piamac/piyanota-divisi-full-1",
+  "title": "piyanota-divisi-full-1",
+  "code_file": "piyanota_divisi_full.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": "true",
+  "enable_gpu": "false",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": ["piamac/piyanota-divisi-code"],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": [],
+  "docker_image_pinning_type": "original"
+}

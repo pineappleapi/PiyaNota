@@ -195,6 +195,17 @@ perfectly, so they say nothing about real photos (synthetic divisi lacks "div." 
   strips, 6 per case (dyad, triad, dotted chord, member accidental, member on a ledger line). Realised interval
   mix on this subset (538 chords): 3rds .41, 6ths .28, 8ves .10, 4ths/5ths .18, 2nds .03 (target .35/.25/.20/
   .10/.10); 8ves and 2nds are short of candidates. Re-measured on the full build at the corpus gate.
+- **G1b result (2026-10-16, user-scored, export `g1b_results (3).json` at 2026-10-16T04:45:03Z): PASS.** 30/30
+  strips ok, 6/6 in each case (dyad, triad, dotted chord, member accidental, ledger member), 0 systematic errors.
+  One triad strip (Leipzig, bach_bwv427__divisi, page 4, Tenor) carries a truncated note ("should"), marked ok.
+- **Full build moved to Kaggle CPU (2026-10-16, user decision):** the local host kills large jobs for low memory.
+  Kernel `piamac/piyanota-divisi-full-1` (script `training/phase1/kaggle/divisi/piyanota_divisi_full.py`, code
+  dataset `piamac/piyanota-divisi-code`, bundle at `0ebc532`) pins music21 10.5.0 and verovio 6.3.0 (the G1/G1b
+  versions) on top of the recut pins. It first rebuilds the 12 G1b pieces in 5 fonts and aborts unless MEI (ids
+  and date normalised), plan (without `source`) and every `labels.json` equal the user-reviewed build (local dry
+  run at `0ebc532`: 0 differences, 60/60 renders). Then train and val are built separately and rendered in 2 and
+  5 fonts, the recut's 1-vs-4 worker check runs on 5 pages, and the whole set is cut; the x-order audit (A3) runs
+  on the merged renders.
 - **Chord data sources (2026-10-15, user decision):** CameraPrIMuS has no chords (0 of 3996 local samples, MEI and
   semantic), so it cannot supply chord strips. camera-grandstaff has many (3639 of 4623 val samples hold a chord)
   but needs an ekern converter, staff cropping and a split-voice filter, and is Verovio-rendered like Phase 1.
