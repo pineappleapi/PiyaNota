@@ -60,6 +60,7 @@ _Covers: UI tickets (Onboarding, Account, Score Library, Playback, Settings, Sys
 5. Displays specific error if email already registered ("An account with this email already exists"), with a link to Login.
 6. Successful account creation automatically logs the user in and stores session token, no separate login step.
 7. Displays loading state during request; disables repeated submission during that time.
+8. *(Added 2026-10-17 for version 1, user request.)* An "Already have an account? Log In" link is visible and routes to Login.
 
 ---
 
@@ -78,6 +79,7 @@ _Covers: UI tickets (Onboarding, Account, Score Library, Playback, Settings, Sys
 3. Unregistered email displays the **same** confirmation message, to avoid revealing which emails are registered.
 4. Reset flow allows setting a new password meeting same strength requirements as Sign-Up.
 5. Upon successful reset, user is routed to Login with success confirmation displayed.
+6. *(Added 2026-10-17 for version 1, user request.)* A "Resend code" action becomes available 30 seconds after a code is sent, with a visible countdown until then. After the countdown ends, the user can resend the code, which restarts the 30-second countdown.
 
 ---
 
