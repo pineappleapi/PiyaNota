@@ -1,0 +1,31 @@
+{
+ "train_chord_strips": 6314,
+ "feasibility": {
+  "infeasible": 0,
+  "rate": 0.0,
+  "slack_p1_p50": [
+   153,
+   201
+  ]
+ },
+ "column_collapse": {
+  "chord_columns": 10998,
+  "infeasible": 18,
+  "rate": 0.0016,
+  "by_heads": {
+   "2": 10627,
+   "3": 371
+  },
+  "infeasible_by_heads": {
+   "3": 18
+  },
+  "labels_minus_frames_hist": {
+   "-3": 1357,
+   "-2": 3839,
+   "-1": 5541,
+   "0": 243,
+   "1": 13,
+   "2": 5
+  }
+ }
+}

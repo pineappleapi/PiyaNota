@@ -259,3 +259,35 @@ perfectly, so they say nothing about real photos (synthetic divisi lacks "div." 
     recall stop and the final recall gate.
   - Realised dyad mix at (1, 4), train (not a gate, candidate-limited): 2nds .016, 3rds .428, 4ths/5ths .169,
     6ths .281, octaves .106.
+  - **Rebuild at (1, 1), 2026-10-17: every corpus gate PASS.** Kernel `piamac/piyanota-divisi-full-2` at
+    `b25cf99` (181 min): G1b parity identical, 1 vs 4 workers identical, 1405 pages cut, renders 678 train and
+    125 val passed. Manifest sha256 `4c369c27a2adf56e96bdf5adcb8263d8193c6dd08109011d0c388b6494c18ba6`, 11323
+    strips, 7437 with a chordnote (train 6314, val 1123).
+    - Chordnote share on kept chord strips: 13361 of 131505 = 10.16% (train 10.23%, val 9.8%); 7.1% over all
+      divisi strips. In 6-14%.
+    - Split assert: 0 tunes on both sides. Chordnote strips not cut: 0 (125 quarantined, 596 short systems).
+    - Feasibility (T = W/4, width at height 64 times the 0.9 minimum augment scale, labels plus a blank between
+      repeats): 0 of 6314 train chord strips infeasible; 99% have at least 153 spare frames.
+    - Column collapse (chord vocabulary plan 10.5; SVG x mapped linearly to strip x, leftmost accidental to
+      rightmost head or dot, against its drawn accidentals, heads and dots): 18 of 10998 chord columns infeasible
+      = 0.16%, all triads (371 triad columns, 10627 dyad columns). A clean-render estimate; the augmentation warp
+      is not modelled. Script: `training/phase1/divisi_column_gate.py`; no tuplet groups exist.
+    - x-order audit (A3): dyads 0 of 14306 mismatched, triads 31 of 496 (known-lost).
+    - Realised dyad mix at (1, 1), train: 2nds .016, 3rds .44, 4ths/5ths .169, 6ths .276, octaves .099
+      (6340 dyads, 213 triads; val 438 dyads, 14 triads).
+    - Control: `--control-rows 6314`.
+    - Gate output: `docs/decisions/piya-106-divisi-full2-column-gate.json`.
+- **A5 (2026-10-17, epoch-1 stop applied after the run; ml-cv-lead GO, frozen before launch and with no Phase 4
+  data seen):**
+  - `train_phase2.py` has no in-run stop. With `--select-last` and no patience, a stop would change no checkpoint,
+    only GPU time, so the not-learning stop (section 5) is read after the run.
+  - The gate is `metrics.json` epoch 1, `chord.divisi_val.chordnote_recall` >= 0.50. A miss is final for that arm
+    and seed, whatever epochs 2 and 3 show; their numbers are then reported as diagnostic only.
+  - For head-only, an epoch-1 miss is the valid A2 result "the frozen features do not encode a second note".
+  - Kernel `piamac/piyanota-divisi-train-1` (`training/phase2/kaggle/divisi/`): order arm s1, arm s2, control s1,
+    control s2, head-only s1, head-only s2; 3 epochs, last selected; inits pinned by sha256 (Phase 2 seed 1
+    `5c444ad3…af93`, seed 2 `f79892ac…aed4`).
+  - Post-run check: `train_strips` and `cpm_per_epoch` equal between arm and control (expected 30311 and 17980),
+    and the arm's `divisi_train_strips` = 6314 = `CONTROL_ROWS`.
+  - The real CPM share per epoch falls from about 43% (Phase 2) to about 37% in arm and control alike, so canary
+    drift is compared arm vs control as well as against Phase 2's logged canary.
