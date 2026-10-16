@@ -13,18 +13,36 @@ import 'screens/onboarding/onboarding_flow_screen.dart';
 import 'screens/placeholder/coming_soon_screen.dart';
 import 'screens/playback/playback_screen.dart';
 import 'screens/processing/processing_screen.dart';
+import 'screens/scan_status/scan_toast_host.dart';
 import 'state/onboarding_providers.dart';
 import 'theme/app_theme.dart';
 
 /// Root widget. Route table is populated as PIYA-2xx screens land.
-class PiyaNotaApp extends StatelessWidget {
+class PiyaNotaApp extends StatefulWidget {
   const PiyaNotaApp({super.key});
+
+  @override
+  State<PiyaNotaApp> createState() => _PiyaNotaAppState();
+}
+
+class _PiyaNotaAppState extends State<PiyaNotaApp> {
+  /// Lets the app-wide scan toast (PIYA-218 AC7), which sits above the
+  /// Navigator, open Processing or Playback.
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+  final ScanRouteStack _routes = ScanRouteStack();
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'PiyaNota',
       theme: AppTheme.light,
+      navigatorKey: _navigatorKey,
+      navigatorObservers: [_routes],
+      builder: (context, child) => ScanToastHost(
+        navigatorKey: _navigatorKey,
+        routes: _routes,
+        child: child ?? const SizedBox.shrink(),
+      ),
       home: const _AppEntryPoint(),
       routes: {
         AppRoutes.login: (context) {

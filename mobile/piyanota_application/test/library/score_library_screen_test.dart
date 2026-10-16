@@ -1453,7 +1453,9 @@ void main() {
       expect(find.text(_playbackMarker), findsNothing);
     });
 
-    testWidgets('a failed retake says the earlier version is still there', (
+    // PIYA-218 AC7: the app-wide toast now says the earlier version is
+    // still there (scan_toast_host_test); the library only reloads.
+    testWidgets('a failed retake reloads the list and keeps the old score', (
       tester,
     ) async {
       final processing = ScriptedProcessingApi([
@@ -1478,11 +1480,9 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
 
-      expect(
-        find.text(LibraryMessages.retakeFailed('Paraiso')),
-        findsOneWidget,
-      );
+      expect(find.text(LibraryMessages.retakeFailed('Paraiso')), findsNothing);
       expect(api.fetchCalls, greaterThan(1));
+      expect(find.byKey(const ValueKey('score-card-failed')), findsNothing);
       await tester.tap(find.text('Paraiso'));
       await tester.pumpAndSettle();
       expect(find.text(_playbackMarker), findsOneWidget);

@@ -12,6 +12,7 @@ import 'package:piyanota_application/services/processing_api.dart';
 import 'package:piyanota_application/services/session_storage.dart';
 import 'package:piyanota_application/state/auth_providers.dart';
 import 'package:piyanota_application/state/processing_providers.dart';
+import 'package:piyanota_application/state/scan_job_store.dart';
 
 import '../auth/auth_test_harness.dart';
 
@@ -94,6 +95,48 @@ ProcessingStatus failed(FailureReason reason, {int? pageIndex}) =>
       failedPageIndex: pageIndex,
     );
 
+/// [ScanJobStore] in memory: what the tracker saved, and what a "restart"
+/// restores ([stored]).
+class MemoryScanJobStore implements ScanJobStore {
+  MemoryScanJobStore([this.stored]);
+
+  /// The encoded jobs, as SharedPreferences would hold them.
+  String? stored;
+  int saves = 0;
+
+  /// Holds [load] until completed, to race a restore against the tracker.
+  Completer<void>? loadGate;
+
+  List<TrackedJob> get storedJobs =>
+      stored == null ? const [] : ScanJobStore.decodeJobs(stored!);
+
+  @override
+  Future<List<TrackedJob>> load() async {
+    if (loadGate case final gate?) await gate.future;
+    return storedJobs;
+  }
+
+  @override
+  Future<void> save(String encoded) async {
+    saves++;
+    stored = encoded;
+  }
+
+  @override
+  Future<void> clear() async => stored = null;
+}
+
+/// Lets a test switch the phone's network off and on (PIYA-218 AC10).
+class FakeNetwork {
+  final controller = StreamController<bool>.broadcast();
+  int get listeners => controller.hasListener ? 1 : 0;
+  void set(bool online) => controller.add(online);
+
+  /// What a one-off connectivity check reports; null means unknown.
+  bool? initial;
+  Future<bool?> check() async => initial;
+}
+
 const kJob = 'job-9';
 const kTitle = 'Ave Maria';
 const kLibrary = 'ROUTE:library';
@@ -144,6 +187,8 @@ class ProcessingHarness {
   ProcessingHarness(this.api);
 
   final ScriptedProcessingApi api;
+  final store = MemoryScanJobStore();
+  final network = FakeNetwork();
   final secureStorage = FaultySecureStorage({'session_token': 'sess_t'});
   late WidgetTester _tester;
 
@@ -154,6 +199,9 @@ class ProcessingHarness {
   List<Override> get overrides => [
     processingApiProvider.overrideWithValue(api),
     sessionStorageProvider.overrideWithValue(SessionStorage(secureStorage)),
+    scanJobStoreProvider.overrideWithValue(store),
+    networkAvailabilityProvider.overrideWithValue(network.controller.stream),
+    networkCheckProvider.overrideWithValue(network.check),
   ];
 
   TrackedJob? get job => container.read(processingJobsProvider)[kJob];

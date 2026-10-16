@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../../models/library_entry.dart';
 import '../../../theme/app_theme.dart';
+import '../../../state/processing_providers.dart';
+import '../../scan_status/scan_status_messages.dart';
 import '../library_messages.dart';
 
 /// Card geometry shared by the Add Score card, score cards and loading
@@ -31,12 +33,14 @@ class _CardShell extends StatelessWidget {
     required this.fill,
     required this.child,
     this.onTap,
+    this.onLongPress,
     this.overlays = const [],
   });
 
   final Color fill;
   final Widget child;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
   final List<Widget> overlays;
 
   @override
@@ -55,6 +59,7 @@ class _CardShell extends StatelessWidget {
         children: [
           InkWell(
             onTap: onTap,
+            onLongPress: onLongPress,
             splashFactory: NoSplash.splashFactory,
             highlightColor: AppTheme.darken(fill),
             child: ConstrainedBox(
@@ -175,11 +180,17 @@ class ScoreCard extends StatelessWidget {
     required this.onTap,
     required this.onDelete,
     this.isDeleting = false,
+    this.scanFailed = false,
   });
 
   final LibraryEntry entry;
   final VoidCallback onTap;
   final VoidCallback onDelete;
+
+  /// PIYA-218 AC2/AC3: this card's scan failed. The card says so in place
+  /// of its subtitle; tapping it opens the failure view, and it can still
+  /// be deleted from here.
+  final bool scanFailed;
 
   /// While a delete request is in flight the trash shows a spinner and both
   /// taps are disabled, so the user can't open a score that is about to
@@ -291,9 +302,22 @@ class ScoreCard extends StatelessWidget {
                   color: AppTheme.libraryCardTitle,
                 ),
               ),
+              if (scanFailed)
+                Text(
+                  ScanStatusMessages.failedCard,
+                  key: const ValueKey('score-card-failed'),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: textTheme.bodySmall?.copyWith(
+                    fontSize: _subtitleSize,
+                    height: 1.3,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.errorRed,
+                  ),
+                )
               // Left out entirely when every part is missing, rather than
               // leaving an empty line under the title.
-              if (subtitle.isNotEmpty)
+              else if (subtitle.isNotEmpty)
                 Text(
                   subtitle,
                   maxLines: 2,
@@ -305,6 +329,131 @@ class ScoreCard extends StatelessWidget {
                   ),
                 ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// PIYA-218 AC4: a score whose scan is still running. Title, a small bar,
+/// "Converting… N%" and a dimmed thumbnail; no chevron or trash, because
+/// it can't be played or deleted yet. Tap follows the navigation rule
+/// (Processing); long-press offers "Cancel scan". The percent is the
+/// tracker's own, so it always matches Processing and the bell (AC1).
+///
+/// Paused (no connection) shows a Try again button instead of a frozen
+/// bar, and 90 s without progress swaps the label for the stalled copy
+/// (AC10). When the scan completes the library swaps this for a
+/// [ScoreCard] in the same list row (the row's key, not this widget's),
+/// so it changes in place without reloading the list.
+class ScanningScoreCard extends StatelessWidget {
+  const ScanningScoreCard({
+    super.key,
+    required this.title,
+    required this.job,
+    required this.onTap,
+    required this.onLongPress,
+    required this.onRetry,
+    this.thumbnailUrl,
+  });
+
+  final String title;
+  final TrackedJob job;
+  final String? thumbnailUrl;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+  final VoidCallback onRetry;
+
+  static const double _titleSize = 18;
+  static const double _titleLineHeight = 1.15;
+  static const double _labelSize = 12;
+  static const double _barHeight = 4;
+  static const double _barGap = 6;
+  static const double _maxPercent = 100;
+  // Dimmed so the card reads as "not ready yet" (spec §4).
+  static const double _thumbnailOpacity = 0.4;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final paused = job.phase == TrackedPhase.paused;
+    final label = paused
+        ? ScanStatusMessages.paused
+        : job.isStalled
+        ? ScanStatusMessages.stalled
+        : ScanStatusMessages.converting(job.percent);
+
+    return Semantics(
+      button: true,
+      label: paused
+          ? ScanStatusMessages.pausedSemantics(title)
+          : ScanStatusMessages.cardSemantics(title, job.percent),
+      onLongPressHint: ScanStatusMessages.longPressHint,
+      child: _CardShell(
+        fill: AppTheme.libraryScoreCardFill,
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: ExcludeSemantics(
+          excluding: !paused,
+          child: _CardRow(
+            tileColor: Colors.white,
+            tile: Opacity(
+              key: const ValueKey('scanning-thumbnail'),
+              opacity: _thumbnailOpacity,
+              child: ScoreThumbnail(url: thumbnailUrl),
+            ),
+            text: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: textTheme.titleMedium?.copyWith(
+                    fontSize: _titleSize,
+                    fontWeight: FontWeight.w700,
+                    height: _titleLineHeight,
+                    color: AppTheme.libraryCardTitle,
+                  ),
+                ),
+                const SizedBox(height: _barGap),
+                LinearProgressIndicator(
+                  value: job.percent / _maxPercent,
+                  minHeight: _barHeight,
+                  color: AppTheme.processingSecondary,
+                  backgroundColor: Colors.white,
+                  borderRadius: BorderRadius.circular(_barHeight / 2),
+                ),
+                const SizedBox(height: _barGap),
+                Text(
+                  label,
+                  key: const ValueKey('scanning-label'),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: textTheme.bodySmall?.copyWith(
+                    fontSize: _labelSize,
+                    height: 1.3,
+                    color: AppTheme.libraryScoreSubtitle,
+                  ),
+                ),
+                if (paused)
+                  TextButton.icon(
+                    key: const ValueKey('scanning-retry'),
+                    onPressed: onRetry,
+                    style: TextButton.styleFrom(
+                      // The blue is only 3.2:1 on the card fill; the
+                      // card's own title colour keeps the label AA.
+                      foregroundColor: AppTheme.libraryCardTitle,
+                      minimumSize: const Size(48, 48),
+                      padding: EdgeInsets.zero,
+                    ),
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text(ScanStatusMessages.retry),
+                  ),
+              ],
+            ),
           ),
         ),
       ),

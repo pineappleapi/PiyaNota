@@ -134,7 +134,12 @@ class FakeScoreUploadApi implements ScoreUploadApi {
       pageCount: pageCount,
       details: details,
     );
-    return SubmittedJob(jobId: jobId, pageCount: pageCount, status: 'queued');
+    return SubmittedJob(
+      jobId: jobId,
+      pageCount: pageCount,
+      status: 'queued',
+      scoreId: scoreId,
+    );
   }
 
   /// PIYA-101 AC12. Never fails on the flaky accounts, like a page retake.
@@ -177,6 +182,11 @@ class FakeScoreUploadApi implements ScoreUploadApi {
       replacesJobId: replacesJobId,
       keepsScore: old.keepsScore,
     );
-    return SubmittedJob(jobId: jobId, pageCount: pageCount, status: 'queued');
+    return SubmittedJob(
+      jobId: jobId,
+      pageCount: pageCount,
+      status: 'queued',
+      scoreId: scoreId,
+    );
   }
 }

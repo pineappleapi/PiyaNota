@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../theme/app_theme.dart';
+import '../../scan_status/scan_bell.dart';
 import '../library_messages.dart';
 
 /// Gradient top section of the Score Library: "My Scores" and a status
@@ -40,6 +41,7 @@ class LibraryHeader extends StatelessWidget {
   /// content, so neither the logo nor the title touches the top edge.
   static const double topGap = 12;
   static const double _titleToLogoGap = 12;
+  static const double _bellToLogoGap = 4;
 
   /// Title top below the safe area, as in round 1 (61f5583): its 2 dp top
   /// gap + the 49 dp centred mark + a 10 dp gap. The mark has since moved
@@ -89,6 +91,14 @@ class LibraryHeader extends StatelessWidget {
             children: [
               if (showLogo)
                 const Positioned(top: 0, right: 0, child: _HeaderLogo()),
+              // PIYA-218 AC5. With the mark shown, the bell sits in the
+              // empty band above the title, just left of the mark; without
+              // it, in the title's row at the right edge.
+              Positioned(
+                top: 0,
+                right: showLogo ? _logoMarkWidth + _bellToLogoGap : 0,
+                child: const ScanBell(),
+              ),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -108,7 +118,7 @@ class LibraryHeader extends StatelessWidget {
                           padding: EdgeInsets.only(
                             right: showLogo
                                 ? _logoMarkWidth + _titleToLogoGap
-                                : 0,
+                                : ScanBell.size + _titleToLogoGap,
                           ),
                           child: Semantics(
                             header: true,
