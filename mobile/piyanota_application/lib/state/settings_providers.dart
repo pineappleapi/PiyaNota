@@ -20,10 +20,15 @@ final accountEmailProvider = FutureProvider.autoDispose<String?>(
 String formatAppVersion(String version, String buildNumber) =>
     buildNumber.isEmpty ? version : '$version ($buildNumber)';
 
-final appVersionProvider = FutureProvider<String>((ref) async {
-  final info = await PackageInfo.fromPlatform();
-  return formatAppVersion(info.version, info.buildNumber);
-});
+final appVersionProvider = FutureProvider<String>(
+  (ref) async {
+    final info = await PackageInfo.fromPlatform();
+    return formatAppVersion(info.version, info.buildNumber);
+  },
+  // The installed package can't change while the app runs, so Riverpod's
+  // automatic retry would only delay showing "Unknown".
+  retry: (_, _) => null,
+);
 
 /// Reads the Settings default tempo for a "Not sure" submit (PIYA-212 AC8).
 /// A preferences failure must not block the upload: the server then keeps

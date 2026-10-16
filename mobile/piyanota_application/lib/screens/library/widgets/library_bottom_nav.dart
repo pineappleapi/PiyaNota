@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 
 import '../../../theme/app_theme.dart';
 
+/// Which tab the bar marks as current.
+enum LibraryNavTab { library, settings }
+
 /// The mockup's bottom bar: Library and Settings on a vertical blue→teal
 /// gradient, with a raised white Capture button breaking its top edge.
 ///
@@ -17,8 +20,11 @@ class LibraryBottomNav extends StatelessWidget {
     required this.onLibrary,
     required this.onCapture,
     required this.onSettings,
+    this.selected = LibraryNavTab.library,
   });
 
+  /// Settings (PIYA-212) shows the same bar with its own tab marked.
+  final LibraryNavTab selected;
   final VoidCallback onLibrary;
   final VoidCallback onCapture;
   final VoidCallback onSettings;
@@ -113,7 +119,7 @@ class LibraryBottomNav extends StatelessWidget {
                   icon: CupertinoIcons.book_fill,
                   iconSize: _libraryIconSize,
                   labelStyle: labelStyle,
-                  selected: true,
+                  selected: selected == LibraryNavTab.library,
                   onTap: onLibrary,
                 ),
               ),
@@ -124,6 +130,7 @@ class LibraryBottomNav extends StatelessWidget {
                   icon: Icons.settings,
                   iconSize: _settingsIconSize,
                   labelStyle: labelStyle,
+                  selected: selected == LibraryNavTab.settings,
                   onTap: onSettings,
                 ),
               ),

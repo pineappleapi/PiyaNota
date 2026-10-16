@@ -32,7 +32,7 @@ class LibraryHeader extends StatelessWidget {
   // That lets the mark's top and right edges line up with the safe-area gap
   // and the search field's right edge exactly.
   static const double _logoMarkHeight = 72;
-  static const double _logoMarkWidth = 54;
+  static const double logoMarkWidth = 54;
   // 72 / 0.6165 (mark height fraction). The mark is centred on the canvas
   // to within 1 dp, so OverflowBox's default centring needs no offset.
   static const double _logoCanvasSize = 117;
@@ -40,39 +40,39 @@ class LibraryHeader extends StatelessWidget {
   /// Breathing room between the status bar (safe area) and the header
   /// content, so neither the logo nor the title touches the top edge.
   static const double topGap = 12;
-  static const double _titleToLogoGap = 12;
+  static const double titleToLogoGap = 12;
   static const double _bellToLogoGap = 4;
 
   /// Title top below the safe area, as in round 1 (61f5583): its 2 dp top
   /// gap + the 49 dp centred mark + a 10 dp gap. The mark has since moved
   /// to the corner, but the user asked to keep the text where it was
   /// (2026-10-08), so the offset stays even though the space is now empty.
-  static const double _titleTop = 61;
+  static const double titleTop = 61;
   static const double _subtitleToSearchGap = 10;
-  static const double _bottomGap = 16;
-  static const double _titleFontSize = 34;
-  static const double _titleLineHeight = 1.2;
-  static const double _subtitleLineHeight = 1.25;
+  static const double bottomGap = 16;
+  static const double titleFontSize = 34;
+  static const double titleLineHeight = 1.2;
+  static const double subtitleLineHeight = 1.25;
 
   /// The 34 sp heading and its subtitle stop growing past 1.5x. Android 14+
   /// already scales large text nonlinearly (a 34 sp title at 200% renders
   /// near 1.5x), and on a 320 dp phone at a linear 2x the heading alone
   /// filled the screen and pushed the list out of view (NFR-10). The search
   /// field and the cards keep the full system scale.
-  static const double _headingMaxTextScale = 1.5;
+  static const double headingMaxTextScale = 1.5;
 
   /// Above this scale the decorative mark is dropped so the heading gets
   /// the full width instead of wrapping word-by-word beside it.
-  static const double _logoMaxTextScale = 1.3;
-  static const double _subtitleFontSize = 15;
+  static const double logoMaxTextScale = 1.3;
+  static const double subtitleFontSize = 15;
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     final textScale =
-        MediaQuery.textScalerOf(context).scale(_subtitleFontSize) /
-        _subtitleFontSize;
-    final showLogo = textScale <= _logoMaxTextScale;
+        MediaQuery.textScalerOf(context).scale(subtitleFontSize) /
+        subtitleFontSize;
+    final showLogo = textScale <= logoMaxTextScale;
 
     return DecoratedBox(
       decoration: const BoxDecoration(gradient: AppTheme.libraryHeaderGradient),
@@ -83,20 +83,20 @@ class LibraryHeader extends StatelessWidget {
             horizontalPadding,
             topGap,
             horizontalPadding,
-            _bottomGap,
+            bottomGap,
           ),
           // The mark is laid out on its own layer so it can never move the
           // title or the search field.
           child: Stack(
             children: [
               if (showLogo)
-                const Positioned(top: 0, right: 0, child: _HeaderLogo()),
+                const Positioned(top: 0, right: 0, child: LibraryHeaderLogo()),
               // PIYA-218 AC5. With the mark shown, the bell sits in the
               // empty band above the title, just left of the mark; without
               // it, in the title's row at the right edge.
               Positioned(
                 top: 0,
-                right: showLogo ? _logoMarkWidth + _bellToLogoGap : 0,
+                right: showLogo ? logoMarkWidth + _bellToLogoGap : 0,
                 child: const ScanBell(),
               ),
               Column(
@@ -105,9 +105,9 @@ class LibraryHeader extends StatelessWidget {
                   // Round-1 position at normal sizes. At large text the
                   // mark is hidden and its band is dropped too, so on a
                   // 320 dp phone at 2x the results stay in view (NFR-10).
-                  SizedBox(height: showLogo ? _titleTop - topGap : 0),
+                  SizedBox(height: showLogo ? titleTop - topGap : 0),
                   MediaQuery.withClampedTextScaling(
-                    maxScaleFactor: _headingMaxTextScale,
+                    maxScaleFactor: headingMaxTextScale,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -117,17 +117,17 @@ class LibraryHeader extends StatelessWidget {
                           // keeps the full width.
                           padding: EdgeInsets.only(
                             right: showLogo
-                                ? _logoMarkWidth + _titleToLogoGap
-                                : ScanBell.size + _titleToLogoGap,
+                                ? logoMarkWidth + titleToLogoGap
+                                : ScanBell.size + titleToLogoGap,
                           ),
                           child: Semantics(
                             header: true,
                             child: Text(
                               LibraryMessages.title,
                               style: textTheme.headlineLarge?.copyWith(
-                                fontSize: _titleFontSize,
+                                fontSize: titleFontSize,
                                 fontWeight: FontWeight.w700,
-                                height: _titleLineHeight,
+                                height: titleLineHeight,
                                 color: Colors.white,
                               ),
                             ),
@@ -136,8 +136,8 @@ class LibraryHeader extends StatelessWidget {
                         Text(
                           subtitle,
                           style: textTheme.bodyLarge?.copyWith(
-                            fontSize: _subtitleFontSize,
-                            height: _subtitleLineHeight,
+                            fontSize: subtitleFontSize,
+                            height: subtitleLineHeight,
                             color: Colors.white,
                           ),
                         ),
@@ -159,15 +159,17 @@ class LibraryHeader extends StatelessWidget {
   }
 }
 
-class _HeaderLogo extends StatelessWidget {
-  const _HeaderLogo();
+/// The faded corner mark. Public, with the title metrics above, so Settings
+/// (PIYA-212) draws the same header instead of a lookalike copy.
+class LibraryHeaderLogo extends StatelessWidget {
+  const LibraryHeaderLogo({super.key});
 
   @override
   Widget build(BuildContext context) {
     return ExcludeSemantics(
       child: SizedBox(
         key: const ValueKey('library-header-logo'),
-        width: LibraryHeader._logoMarkWidth,
+        width: LibraryHeader.logoMarkWidth,
         height: LibraryHeader._logoMarkHeight,
         child: Opacity(
           opacity: AppTheme.libraryHeaderLogoOpacity,

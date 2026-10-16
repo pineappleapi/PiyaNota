@@ -343,6 +343,34 @@ class AppTheme {
   // −0.025 → #2D9ED3 (3.02:1).
   static const Color exportOkFill = Color(0xFF2D9ED3);
 
+  // Settings (PIYA-212). No mockup exists, so every token here is derived,
+  // not sampled: the screen reuses the Library header/nav and background,
+  // and these only name the brand colours its groups are drawn with.
+  // Derived (not sampled): group surfaces are plain white cards on
+  // libraryBackground, as the Library's cards sit on it.
+  static const Color settingsSurface = Colors.white;
+  // Derived (not sampled): secondary text inside the white groups, the
+  // Playback grey (#767676, 4.54:1 on white).
+  static const Color settingsSubtle = playbackSubtle;
+  // Derived (not sampled): group names sit on libraryBackground, where
+  // #767676 is only 3.71:1, so they use the Library's card subtitle grey
+  // (#575757, 5.90:1 on #E8E8E8) instead.
+  static const Color settingsGroupLabel = libraryScoreSubtitle;
+  // Derived (not sampled): row text, the sheets' #383838 (11.73:1).
+  static const Color settingsText = sheetText;
+  // Derived (not sampled): row dividers, the sheets' #E8E8E8.
+  static const Color settingsDivider = sheetDivider;
+  // Derived (not sampled): help "?" icon, the sheets' close-X grey
+  // (#939393, 3.07:1, over the 3:1 icon floor).
+  static const Color settingsHelpIcon = sheetClose;
+  // Derived (not sampled): tempo stepper buttons, Playback navy with a
+  // white glyph (13.36:1).
+  static const Color settingsStepperFill = playbackNavy;
+  // Derived (not sampled): "Log out" text. processingCancel #DF5757 is
+  // only 3.72:1 on white, too low for 16 sp text, so it is darkened to
+  // #D93636 (4.63:1) keeping the hue.
+  static const Color settingsLogOut = Color(0xFFD93636);
+
   /// Darkens [color] for a pressed-state SOP (see frontend-piyanota.md
   /// "Interaction states") — reduces HSL lightness rather than overlaying
   /// opacity, so the result stays the same hue, just deeper.

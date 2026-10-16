@@ -47,8 +47,10 @@ void main() {
       final prefs = OnboardingPrefsService();
       await prefs.completeOnboarding(defaultVoice: VoicePart.alto);
       await prefs.setDefaultVoicePart(VoicePart.bass);
-      expect(await OnboardingPrefsService().getDefaultVoicePart(),
-          VoicePart.bass);
+      expect(
+        await OnboardingPrefsService().getDefaultVoicePart(),
+        VoicePart.bass,
+      );
     });
 
     test('setting a voice does not mark onboarding complete', () async {

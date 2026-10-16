@@ -10,10 +10,10 @@ import 'screens/capture/capture_screen.dart';
 import 'screens/capture/score_details_screen.dart';
 import 'screens/library/score_library_screen.dart';
 import 'screens/onboarding/onboarding_flow_screen.dart';
-import 'screens/placeholder/coming_soon_screen.dart';
 import 'screens/playback/playback_screen.dart';
 import 'screens/processing/processing_screen.dart';
 import 'screens/scan_status/scan_toast_host.dart';
+import 'screens/settings/settings_screen.dart';
 import 'state/onboarding_providers.dart';
 import 'theme/app_theme.dart';
 
@@ -107,8 +107,8 @@ class _PiyaNotaAppState extends State<PiyaNotaApp> {
             retake: arguments,
           );
         },
-        // Settings lands in a later PIYA-2xx ticket.
-        AppRoutes.settings: (_) => const ComingSoonScreen(title: 'Settings'),
+        // PIYA-212 AC5: the gate sends an expired session to Login.
+        AppRoutes.settings: (_) => const SettingsGate(),
       },
     );
   }
