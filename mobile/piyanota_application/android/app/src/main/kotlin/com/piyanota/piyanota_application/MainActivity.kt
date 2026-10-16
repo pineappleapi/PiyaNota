@@ -1,10 +1,12 @@
 package com.piyanota.piyanota_application
 
+import android.content.Intent
 import android.graphics.pdf.PdfRenderer
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
+import com.piyanota.piyanota_application.export.ExportChannel
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -20,13 +22,18 @@ import java.util.concurrent.atomic.AtomicBoolean
  *    (Android 12L and older) or uses the permission-less photo picker.
  *  - pdfPageCount: counts pages with the platform PdfRenderer, so a PDF over
  *    20 pages is rejected before upload (AC6) without a Dart PDF parser.
+ *
+ * It also hosts "piyanota/export" (PIYA-211), see [ExportChannel].
  */
 class MainActivity : FlutterActivity() {
     private val pdfExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var exportChannel: ExportChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        exportChannel?.dispose()
+        exportChannel = ExportChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -83,8 +90,17 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    // FlutterActivity is a plain Activity, not a ComponentActivity, so the
+    // Activity Result API is not available; the classic callback is.
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (exportChannel?.onActivityResult(requestCode, resultCode, data) == true) return
+        super.onActivityResult(requestCode, resultCode, data)
+    }
+
     override fun onDestroy() {
         pdfExecutor.shutdown()
+        exportChannel?.dispose()
+        exportChannel = null
         super.onDestroy()
     }
 

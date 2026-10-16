@@ -4,6 +4,9 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+/** Present once the LAME 3.100 release sources are vendored. */
+val LAME_MARKER = "src/main/cpp/lame/libmp3lame/lame.c"
+
 android {
     namespace = "com.piyanota.piyanota_application"
     // permission_handler_android requires SDK 37; flutter.compileSdkVersion (36) is behind it.
@@ -30,6 +33,24 @@ android {
         versionName = flutter.versionName
     }
 
+    // PIYA-211: LAME 3.100 (MP3 encoding for Export Audio) is built from
+    // vendored sources. Without them the app still builds, but export
+    // fails with generation_failed, so warn loudly rather than silently.
+    if (file(LAME_MARKER).exists()) {
+        externalNativeBuild {
+            cmake {
+                path = file("src/main/cpp/CMakeLists.txt")
+                version = "3.22.1"
+            }
+        }
+    } else {
+        logger.warn(
+            "WARNING: LAME 3.100 sources not found at app/$LAME_MARKER. " +
+                "Export Audio will fail until lame-3.100.tar.gz is unpacked into " +
+                "app/src/main/cpp/lame (see THIRD_PARTY_NOTICES.md).",
+        )
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.
@@ -37,6 +58,13 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+}
+
+dependencies {
+    // Sonic time-stretch for the export (FR-9 pitch kept). Already in the
+    // APK through just_audio's ExoPlayer, pinned to the same version so the
+    // export stretches exactly as Playback does.
+    implementation("androidx.media3:media3-common:1.4.1")
 }
 
 kotlin {
