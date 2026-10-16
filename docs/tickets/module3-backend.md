@@ -189,6 +189,44 @@ Permanently deletes a user's account and associated data, on user request.
 }
 ```
 
+### PIYA-322 — Change Password API (stub)
+**Method:** POST `/auth/change-password`
+*(Stub added 2026-10-17 for PIYA-212 AC6, user request. **Needs backend-lead review**: path, rate limiting, and whether other sessions are revoked are not decided yet.)* The app's Settings screen calls it; until it exists the app uses a fake.
+
+**Request body:**
+```json
+{ "currentPassword": "old secret", "newPassword": "new Secret 1" }
+```
+
+**Acceptance Criteria (draft):**
+1. Requires a valid session token; returns 401 `session_expired` if missing, expired, or invalid.
+2. Returns 401 `invalid_credentials` if `currentPassword` does not match. The app tells this apart from (1) by the error code and shows "Your current password is incorrect."
+3. Returns 400 `weak_password` if `newPassword` fails the Sign-Up strength rules (PIYA-301), with the same rule wording.
+4. On success returns 200 and stores the new hash (PIYA-313). [confirm with backend-lead: revoke the account's other sessions?]
+
+**Response Schema:**
+```json
+{
+  "data": null,
+  "success": true,
+  "status": 200,
+  "message": "Password changed"
+}
+```
+
+---
+
+### PIYA-323 — Capture `fallbackTempoBpm` Field (stub)
+*(Stub added 2026-10-17 for PIYA-212 AC8, user request. **Needs backend-lead review**, and a matching note on PIYA-101 AC8 in `module1-pipeline.md` and PIYA-310 AC5.)*
+
+**Acceptance Criteria (draft):**
+1. PIYA-101 and PIYA-310 accept an optional text part `fallbackTempoBpm`, with the same rules and error code as `tempoBpm` (ASCII digits, integer 30–240, else 400 `invalid_tempo`).
+2. `fallbackTempoBpm` is the user's Settings default tempo. The app sends it only when the user chose "Not sure" for Speed, so it is never sent together with `tempoBpm`; if both arrive, 400 `duplicate_field`.
+3. Meaning: `tempoBpm` overrides any detected tempo. `fallbackTempoBpm` is used only when the pipeline detects no tempo. Today the pipeline never uses a detected tempo (PIYA-101 AC8, PIYA-109 AC2), so in practice `fallbackTempoBpm` replaces the default 90 for the stored `tempo_bpm`. [confirm with backend-lead]
+4. The response echoes the stored `tempoBpm` as now; `fallbackTempoBpm` is not echoed.
+
+---
+
 ## API Tickets — Score & File Management
 
 ### PIYA-308 — Get User Score Library API

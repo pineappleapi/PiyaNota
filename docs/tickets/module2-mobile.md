@@ -287,7 +287,7 @@ _Phone test results (2026-10-17, fake backend): 75 pass, 0 fail, 12 untested. Pe
 4. Deselecting "All Voices" deselects all four individual voices.
 5. Deselecting any individual voice automatically deselects "All Voices."
 6. Manually selecting all four individual voices automatically selects "All Voices."
-7. The "With Metronome Click" toggle applies to every selected voice. [confirm: separate click file vs. click mixed into each voice file]
+7. When "With Metronome Click" is ticked, the metronome click is mixed into the exported file, lined up with the bars (the same per-measure click Playback uses, PIYA-210 "Metronome click layout"). When it is not ticked, the file has no click. The checkbox is disabled, with the Speed modal's note, when the score has no known tempo (`tempoKnown == false`). *(Decided 2026-10-17, user decision: click mixed in, not a separate file.)*
 8. The **Download Audio** button is disabled until at least one voice option is selected.
 9. The user can dismiss the modal (close button, tap outside, or back gesture) without downloading. No files are created and the selections are discarded.
 
@@ -295,9 +295,9 @@ _Phone test results (2026-10-17, fake backend): 75 pass, 0 fail, 12 untested. Pe
 10. Tapping **Download Audio** prompts the user to choose a download location and confirm.
 11. Cancelling the location prompt returns the user to the modal with selections intact.
 12. While files are being prepared and saved, a progress indicator is shown and **Download Audio** is disabled to prevent duplicate downloads.
-13. Selecting multiple voices saves one separate file per voice (no zip). "All Voices" saves four files. [confirm]
-14. Files are saved as [MP3] [confirm] and named `[ScoreName]_[Voice].[ext]`, with `_Click` appended when the metronome is enabled (e.g., `ClairDeLune_Soprano_Click.mp3`).
-15. If a file with the same name already exists in the chosen location, the system [renames the new file with a number suffix] [confirm] rather than overwriting.
+13. The export is **one file**: the ticked voices mixed together. "All Voices" ticks every available voice, so it gives one file of the full choir. A voice that can't play (failed or unreadable) can't be ticked. *(Decided 2026-10-17, user decision: one mixed file, not one file per voice.)*
+14. The file is saved as MP3 and named `[ScoreName]_[Voices][_Click].mp3`. Voices is `AllVoices` when every voice is ticked, else the ticked voice names joined by `-` in SATB order. `_Click` is added when the click is included. Example: `ClairDeLune_Soprano-Alto_Click.mp3`. Characters not allowed in file names (`/ \ : * ? " < > |`) become `_`, and an empty title becomes `Score`. *(Decided 2026-10-17, user decision.)*
+15. If a file with the same name already exists in the chosen location, the new file gets a number suffix, ` (1)`, ` (2)` and so on (`X (1).mp3`), and nothing is overwritten. *(Decided 2026-10-17, user decision.)*
 
 *Success*
 16. On success, the system displays a confirmation with the saved file name(s) and location, and an option to open the location.
@@ -309,12 +309,16 @@ _Phone test results (2026-10-17, fake backend): 75 pass, 0 fail, 12 untested. Pe
     - Permission denied
     - File generation failed
     - Download interrupted (e.g., connection lost or app closed)
-19. If some files save and others fail, the system shows which succeeded and which failed, with a **Retry** option for the failed files only.
+19. On failure the modal keeps the selections and offers **Retry**. *(Decided 2026-10-17: with one file there is no partial success to report.)*
 20. If storage permission is denied, the error message explains how to enable it.
 
 *Non-functional*
 21. Checkbox and toggle labels are readable by screen readers, and the toggle's on/off state is announced.
 22. All tappable elements meet the minimum touch target size for the platform.
+
+*Playback settings*
+
+23. The export uses the current Playback speed (the Speed modal's BPM, as rate = chosen BPM ÷ `tempoBpm`, pitch kept per FR-9) and the Voice Mixer levels, Mute and Solo, including the Metronome Click row's level. A ticked voice that the Mixer mutes, or leaves out with a Solo, is noted under its row ("Muted in Voice Mixer"); the export is still allowed. *(Added 2026-10-17, user decision.)*
 
 ---
 
@@ -332,6 +336,10 @@ _Phone test results (2026-10-17, fake backend): 75 pass, 0 fail, 12 untested. Pe
 3. A Log Out action is present; tapping clears local session token and routes to Login.
 4. Log Out requires a confirmation step (e.g., "Are you sure you want to log out?") before executing.
 5. Settings screen only reachable with a valid session; if session expired, tapping Settings routes to Login instead.
+6. **Change password.** An in-app form with current password, new password and confirm new password. The new password follows the Sign-Up strength rules (PIYA-203). A 401 from the API shows "Your current password is incorrect." next to the current-password field. Calls the change-password API (PIYA-322 stub in `module3-backend.md`), faked until Module 3 builds it. *(Added 2026-10-17 for v1, user request.)*
+7. **Default voice.** Soprano, Alto, Tenor or Bass. It is the same preference onboarding writes (PIYA-201), so Playback (PIYA-208 AC3) picks it up when a score is opened. *(Added 2026-10-17 for v1, user request.)*
+8. **Default tempo.** 30–240 BPM, default 90. Used only when a score is submitted with Speed set to "Not sure" (sent as `fallbackTempoBpm`, see `module3-backend.md`). Scores already scanned keep their tempo. *(Added 2026-10-17 for v1, user request.)*
+9. **Help.** A help (ⓘ/?) button next to Default voice and Default tempo opens a short explanation of what each setting does. *(Added 2026-10-17 for v1, user request.)*
 
 ---
 
@@ -439,6 +447,6 @@ Wires Processing Status (PIYA-207) and Score Playback (PIYA-208) to PIYA-102 and
 Wires Export Audio (PIYA-211) and Settings (PIYA-212) to their data sources — direct CDN URLs from PIYA-103, and PIYA-305/306/307.
 
 **Acceptance Criteria:**
-1. Export downloads selected voice track(s) directly from the `audioTracks` URLs returned by PIYA-103 — no separate export endpoint call needed, consistent with PIYA-103's design.
+1. Export downloads selected voice track(s) directly from the `audioTracks` URLs returned by PIYA-103 — no separate export endpoint call needed, consistent with PIYA-103's design. *(2026-10-17: the app then mixes the ticked tracks, plus the click when ticked, on the device at the Playback speed and encodes one MP3, PIYA-211 AC13/AC23.)*
 2. Settings calls PIYA-306 on load to populate account info, and PIYA-305 on logout, clearing the securely stored session token (per PIYA-214) on success.
 3. Account deletion (if surfaced in Settings) calls PIYA-307, handles its password-confirmation requirement as a client-side prompt before the request is sent.
