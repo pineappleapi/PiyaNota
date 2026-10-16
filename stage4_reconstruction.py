@@ -69,6 +69,7 @@ ACTION_SCALED_RUN = "scaled_run"
 FLAG_TENOR_RANGE = "tenor_range_suspect"
 FLAG_BAR_INVARIANT = "bar_length_invariant_failed"
 FLAG_LOCAL_OVERRUN = "local_placement_overrun"
+FLAG_SPLIT_STEM = "divisi_rhythm_split_suspected"
 # Flags that also carry review_needed=True ask the user to confirm/fix the
 # bar; a flag without the key is informational (treat as review_needed=False).
 
@@ -98,6 +99,13 @@ RUN_MIN_SLOTS = 3
 RUN_MIN_NOTE_SLOTS = 2
 MIN_SCALED_SLOT_TICKS = 60
 BAR_SCALE_MIN = 0.75
+
+# Split-stem divisi (freeze amendment A3): one voice's bar at 1.75-2.25 bar
+# lengths (inclusive) while the other three fit reads as two rhythms in one
+# staff played in sequence. Hand-set; never tuned on Phase 4 or
+# piyanota_dataset.
+SPLIT_STEM_RATIO_MIN = 1.75
+SPLIT_STEM_RATIO_MAX = 2.25
 # Voice-level warning when more than this fraction of a voice's bars needed
 # run scaling, judged only once the voice has MIN_BARS_FOR_VOICE_FLAG bars.
 VOICE_RUN_SCALING_FRACTION = 0.25
@@ -208,11 +216,13 @@ def reconstruct_satb_with_report(voice_events: dict) -> tuple[dict, dict]:
 
     reconstructed: dict = {voice: [] for voice in VOICES}
     for key in sorted(strips):
+        split_ranks = _split_stem_ranks(strips[key], layout[key])
         for voice in VOICES:
             if voice in strips[key]:
                 reconstructed[voice].extend(_place_voice_strip(
                     voice, key, strips[key][voice], layout[key],
-                    pickup_ticks, voice_pickup.get(voice, 0), flags))
+                    pickup_ticks, voice_pickup.get(voice, 0), flags,
+                    split_ranks.get(voice, set())))
 
     for voice in VOICES:
         reconstructed[voice].sort(key=lambda e: e["tick_onset"])
@@ -831,6 +841,7 @@ def _place_voice_strip(
     pickup_ticks: int,
     own_pickup_ticks: int,
     flags: list[Flag],
+    split_ranks: Optional[set[int]] = None,
 ) -> list[Event]:
     """
     Moves one voice-strip's events onto the global timeline.
@@ -944,6 +955,27 @@ def _place_voice_strip(
                     flag(FLAG_BAR_UNDERFULL, bar_no, bar_ticks, total,
                          "bar shorter than the time signature (dropped "
                          "note/rest?); remainder plays as silence", "none")
+                elif split_ranks and rank in split_ranks:
+                    m_events, dropped = _clip_to_bar(
+                        m_events, first_local, bar_ticks)
+                    # _clip_to_bar keeps rests; the second rhythm's rests
+                    # would leak into the next bar and block its ties.
+                    m_events = [e for e in m_events if e["type"] == "note"
+                                or e["local_tick_onset"] - first_local
+                                < bar_ticks]
+                    for e in m_events:
+                        e["duration_ticks"] = min(
+                            e["duration_ticks"], bar_ticks
+                            - (e["local_tick_onset"] - first_local))
+                    flag(FLAG_SPLIT_STEM, bar_no, bar_ticks, total,
+                         f"bar is {total / bar_ticks:.2f} bar lengths while "
+                         "the other voices fit: likely two rhythms in one "
+                         "staff (split-stem divisi) read in sequence, or "
+                         "note values read at double length. Not scaled; "
+                         "played up to the bar end (the kept line may be "
+                         "either divisi part), dropped "
+                         f"{len(dropped)} note(s): {dropped}", ACTION_CLIPPED,
+                         review_needed=True)
                 elif total > bar_ticks + DURATION_MISMATCH_TOLERANCE_TICKS:
                     m_events, kind, detail, action = _repair_overflow(
                         m_events, first_local, bar_ticks, total)
@@ -954,6 +986,41 @@ def _place_voice_strip(
             e["global_bar"] = bar_no
             placed.append(e)
     return placed
+
+
+def _split_stem_ranks(voices: dict, info: dict) -> dict[str, set[int]]:
+    """{voice: bar ranks} of one system whose bar is SPLIT_STEM_RATIO_MIN-MAX
+    bar lengths while all three other voices fit that bar (a multirest fits).
+    The fit condition keeps a barline missed in every voice as
+    suspected_missing_barline; an underfull bar (dropped note) also fits.
+    If any voice is absent from the system or in local placement, the whole
+    system returns {}: "the other three fit" cannot be checked."""
+    bar_ticks = info["bar_ticks"]
+    totals: dict[str, dict[int, int]] = {}
+    for voice, events in voices.items():
+        measures = _measures(events)
+        if measures is None or info["voice_bars"].get(voice) != info["n_bars"]:
+            continue
+        base = info["voice_base"][voice]
+        totals[voice] = {}
+        for mi, m_events in measures.items():
+            if mi < base:
+                continue
+            _normalise_whole_rest(m_events, bar_ticks)
+            if _is_multirest(m_events):
+                for r in range(_measure_span(m_events, bar_ticks)):
+                    totals[voice][mi - base + r] = 0
+            else:
+                totals[voice][mi - base] = _measure_ticks(m_events)
+    if len(totals) != len(VOICES):
+        return {}
+    fit = bar_ticks + DURATION_MISMATCH_TOLERANCE_TICKS
+    return {voice: {r for r, t in ranks.items()
+                    if SPLIT_STEM_RATIO_MIN * bar_ticks <= t
+                    <= SPLIT_STEM_RATIO_MAX * bar_ticks
+                    and all(r in totals[v] and totals[v][r] <= fit
+                            for v in VOICES if v != voice)}
+            for voice, ranks in totals.items()}
 
 
 def _normalise_whole_rest(m_events: list, bar_ticks: int) -> None:
@@ -1381,8 +1448,9 @@ def _report(reconstructed: dict, report_data: dict) -> None:
         notes  = sum(1 for e in events if e["type"] == "note" and e["pitch"] is not None)
         rests  = sum(1 for e in events if e["type"] == "rest")
         tied   = sum(e.get("tie_span", 1) - 1 for e in events)
-        chords = len(set(e["chord_id"] for e in events
-                         if e.get("chord_id") is not None))
+        # chord_id restarts per strip, so a chord is keyed by its strip too.
+        chords = len({(e["page_index"], e["sys_idx"], e["chord_id"])
+                      for e in events if e.get("chord_id") is not None})
         print(f"  {voice}: {len(events)} events "
               f"({notes} notes, {rests} rests, {chords} chord groups, "
               f"{tied} tie-merged)")
