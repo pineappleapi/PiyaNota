@@ -238,3 +238,24 @@ perfectly, so they say nothing about real photos (synthetic divisi lacks "div." 
   - Stage 3/4 code otherwise follows chord vocabulary plan 10.6 (chordnote events, per-position accidentals,
     per-member ties, fix C dots, orphan and unison chordnotes dropped with `review_needed`); it is written after
     the Kaggle launch and before the version-2 eval.
+- **A4 (chordnote share remedy, 2026-10-16, before any training; ml-cv-lead GO with conditions):**
+  - The full build at commit 0ebc532 (`DIVISI_SPAN_BARS` = (1, 4); manifest sha256 d86cc00a…6c58, 11279 strips,
+    9660 with a chordnote) failed the share gate. The share is chordnote tokens over note plus chordnote tokens on
+    the kept chord strips: 32234 of 183740 = 17.5% (train 17.6%, val 17.0%). Over all divisi strips it is 15.7%,
+    which also fails, so the verdict does not depend on the reading. The other corpus gates passed (split assert
+    0 tunes, 0 chordnote strips among the 737 not cut, G1b parity identical).
+  - Remedy per section 3: only the span length changes, to (1, 1). Two estimates from the (1, 4) tokens bracket the
+    truth: one under-predicts (1, 4) at 15.2%, the other over-predicts at 21.7%. Scaled to their own baseline,
+    (1, 2) gives 15.0% and 12.0% (straddles 14%), and (1, 1) gives 12.4% and 8.6%. (1, 1) is the only span inside
+    6-14% under both. The chorded share now leans more on each piece's final chord.
+  - Kill rule: the rebuilt manifest must pass every corpus gate again. If (1, 1) misses, there is no third build
+    and the divisi arm is dropped.
+  - G1b: the parity reference is rebuilt at (1, 1) for the same 12 pieces; the injection and label mechanism is
+    unchanged, only which bar is chorded. The user's first 30-strip check was on (1, 4) strips, and
+    all 30 differ at (1, 1) (13 lost their chord). The user re-checked 30 new (1, 1) strips (`g1b_page.py --seed 1`,
+    6 per case) on 2026-10-16: 30 of 30 OK, 0 notes. All 60 renders pass their checks, 0 OOV. Gate G1b: PASS.
+  - Control: `--control-rows` equals the realised kept chord-strip count of the new manifest, not 9.5k.
+  - Expected cost, noted before training: less chord signal per step raises the risk of missing the epoch-1
+    recall stop and the final recall gate.
+  - Realised dyad mix at (1, 4), train (not a gate, candidate-limited): 2nds .016, 3rds .428, 4ths/5ths .169,
+    6ths .281, octaves .106.

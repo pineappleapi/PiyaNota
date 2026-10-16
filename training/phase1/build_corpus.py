@@ -76,7 +76,9 @@ DIVISI_INTERVALS: tuple[tuple[str, frozenset[int], float], ...] = (
     ("3rd", frozenset({3}), 0.35), ("6th", frozenset({6}), 0.25), ("8ve", frozenset({8}), 0.20),
     ("4th5th", frozenset({4, 5}), 0.10), ("2nd", frozenset({2}), 0.10))
 DIVISI_GENERICS: frozenset[int] = frozenset().union(*(g for _, g, _ in DIVISI_INTERVALS))
-DIVISI_SPAN_BARS = (1, 4)
+# (1, 4) gave a chordnote share of 17.5% on the full build, above the 6-14% gate; freeze section 3 allows only the
+# span length to change (2026-10-16). (1, 2) straddled 14% in both estimates, (1, 1) did not.
+DIVISI_SPAN_BARS = (1, 1)
 DIVISI_MAX_SEMITONES = 12
 # Old VOCAB has all three accidentals and the common note shapes only here; a member outside it made an OOV
 # accidental or head token and the guard quarantined the strip (smoke 2026-10-15, freeze Amendment A1).
@@ -339,7 +341,7 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
         str, object]:
     """Turn notes into same-stem chords that double another voice (freeze section 3); returns the realised stats.
 
-    One span of 1-4 bars per voice-system, plus each voice's final note. The interval class is drawn first by the
+    One span of DIVISI_SPAN_BARS bars per voice-system, plus each voice's final note. The interval class is drawn first by the
     frozen weights; when no other voice offers that class at the onset, the onset stays single (no redraw), so the
     realised mix is logged, not assumed. Uses only `drng`, never the Phase 1 stream.
     shortcut: tied, grace and tuplet notes are never chorded (counted as skipped), so the converter needs no tied or
