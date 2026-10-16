@@ -2,6 +2,8 @@
 
 _Covers: UI tickets (Onboarding, Account, Score Library, Playback, Settings, System States) and Integration tickets._
 
+_Phone test results (2026-10-17, fake backend): 75 pass, 0 fail, 12 untested. Per-AC detail in `docs/testing/module2-phone-test-2026-10-17.md`._
+
 ## UI Tickets
 
 ### PIYA-201 — Onboarding Guide UI
@@ -263,20 +265,56 @@ _Covers: UI tickets (Onboarding, Account, Score Library, Playback, Settings, Sys
 ---
 
 ### PIYA-211 — Export Audio Modal UI
+
 **User Story:** As a choir member, I want to download selected voice tracks, so that I can rehearse offline without needing the app open.
 
 **Process:**
-1. User taps download icon from Playback.
-2. System displays Export Audio modal.
-3. User selects voice(s)/options, taps Download Selected.
+1. User taps the download icon from Playback.
+2. System displays the Export Audio modal.
+3. User selects voice(s)/options and taps **Download Audio**.
+4. User selects a download location and taps confirm.
+5. System saves the file(s) and displays a success confirmation.
+
+**Preconditions:**
+- The download icon is available only for scores with status `completed` from processing stage.
 
 **Acceptance Criteria:**
-1. Displays a selectable checklist: Soprano, Alto, Tenor, Bass, All Voices, and a "With Metronome Click" toggle.
-2. Selecting "All Voices" automatically selects all four individual checkboxes; deselecting any individual voice automatically deselects "All Voices."
-3. Download Selected button disabled until at least one voice option is selected.
-4. Tapping Download Selected saves selected file(s) to local device storage, displays success confirmation with saved file name/location.
-5. Downloaded files remain accessible and playable without internet connection, per NFR-4.
-6. Download failure (e.g., storage full, permission denied) displays a specific error message distinct from a generic failure.
+
+*Modal and selection*
+1. The Export Audio modal displays a selectable checklist: Soprano, Alto, Tenor, Bass, All Voices, and a "With Metronome Click" toggle.
+2. All checkboxes and the metronome toggle are unselected by default each time the modal opens.
+3. Selecting "All Voices" automatically selects all four individual voices.
+4. Deselecting "All Voices" deselects all four individual voices.
+5. Deselecting any individual voice automatically deselects "All Voices."
+6. Manually selecting all four individual voices automatically selects "All Voices."
+7. The "With Metronome Click" toggle applies to every selected voice. [confirm: separate click file vs. click mixed into each voice file]
+8. The **Download Audio** button is disabled until at least one voice option is selected.
+9. The user can dismiss the modal (close button, tap outside, or back gesture) without downloading. No files are created and the selections are discarded.
+
+*Download flow*
+10. Tapping **Download Audio** prompts the user to choose a download location and confirm.
+11. Cancelling the location prompt returns the user to the modal with selections intact.
+12. While files are being prepared and saved, a progress indicator is shown and **Download Audio** is disabled to prevent duplicate downloads.
+13. Selecting multiple voices saves one separate file per voice (no zip). "All Voices" saves four files. [confirm]
+14. Files are saved as [MP3] [confirm] and named `[ScoreName]_[Voice].[ext]`, with `_Click` appended when the metronome is enabled (e.g., `ClairDeLune_Soprano_Click.mp3`).
+15. If a file with the same name already exists in the chosen location, the system [renames the new file with a number suffix] [confirm] rather than overwriting.
+
+*Success*
+16. On success, the system displays a confirmation with the saved file name(s) and location, and an option to open the location.
+17. Downloaded files remain accessible and playable without an internet connection, per NFR-4.
+
+*Errors*
+18. Download failure displays a specific error message distinct from a generic failure. At minimum:
+    - Storage full
+    - Permission denied
+    - File generation failed
+    - Download interrupted (e.g., connection lost or app closed)
+19. If some files save and others fail, the system shows which succeeded and which failed, with a **Retry** option for the failed files only.
+20. If storage permission is denied, the error message explains how to enable it.
+
+*Non-functional*
+21. Checkbox and toggle labels are readable by screen readers, and the toggle's on/off state is announced.
+22. All tappable elements meet the minimum touch target size for the platform.
 
 ---
 
