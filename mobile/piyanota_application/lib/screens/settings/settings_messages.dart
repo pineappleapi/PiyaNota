@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import '../capture/capture_messages.dart';
 
 /// Settings copy (PIYA-212). Tests assert on these constants, so change
@@ -34,6 +36,20 @@ class SettingsMessages {
   static const String sessionExpired =
       'Your session has expired. Log in again to change your password.';
   static const String logIn = 'Log in';
+
+  /// PIYA-322 AC5's 429. Minutes round up, at least 1, so the app never
+  /// promises a sooner retry than the server allows.
+  static String rateLimited(int? retryAfterSeconds) {
+    if (retryAfterSeconds == null) {
+      return 'Too many attempts. Try again later.';
+    }
+    final minutes = max(
+      1,
+      (retryAfterSeconds / Duration.secondsPerMinute).ceil(),
+    );
+    return 'Too many attempts. Try again in $minutes '
+        '${minutes == 1 ? 'minute' : 'minutes'}.';
+  }
 
   // AC7.
   static const String defaultVoice = 'Default voice';

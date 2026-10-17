@@ -22,7 +22,7 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
    |---|---|---|---|---|
    | `title` | yes | 1–120 characters after trimming | `title` | `title_required` (missing or blank), `title_too_long`, `title_invalid` |
    | `arranger` | no | at most 120 characters after trimming | `arranger`, NULL when absent | `arranger_too_long`, `arranger_invalid` |
-   | `tempoBpm` | no | ASCII digits only, integer 30–240; absent means 90 | `tempo_bpm`, always stored (90 when absent) | `invalid_tempo` |
+   | `tempoBpm` | no | ASCII digits only, integer 30–240; absent means `fallbackTempoBpm` if sent, else 90 (PIYA-323) | `tempo_bpm`, always stored (settled at submit; `tempo_source` records where it came from) | `invalid_tempo` |
    | `keySignature` | no | one of the 15 values below, exact case | `key_signature`, NULL when absent | `invalid_key_signature` |
    | `timeSignature` | no | one of `4/4`, `3/4`, `2/4`, `6/8`, `2/2` | `time_signature`, NULL when absent | `invalid_time_signature` |
 
@@ -38,6 +38,7 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
 
    - **Absent values.** "Not sure" (key) and "Other" (time signature) are both expressed by omitting the field, and the server stores NULL. Multipart cannot carry `null`; an optional field sent with an empty or whitespace-only value is treated as absent. The literal string `"null"` gets no special handling: it is an invalid enumerated value (400), and as `arranger` it would be stored as text, so the client must omit the field as agreed.
    - **Character counting.** Values are trimmed and NFC-normalized, then counted in Unicode code points (Python `len()`, PostgreSQL `char_length()`). Text containing control characters (Unicode category Cc, including newlines and tabs) is rejected with `title_invalid` / `arranger_invalid`.
+   - **`fallbackTempoBpm`** *(added 2026-10-17, PIYA-323 in `module3-backend.md`)*. Optional, same rule and error code as `tempoBpm`. Sent only when Speed is "Not sure"; sending it with `tempoBpm` returns 400 `duplicate_field`.
    - A field sent more than once returns 400 `duplicate_field`. Unrecognized field names are ignored and not stored, so a newer client still works against an older server.
    - **Meaning.** `keySignature` and `timeSignature` are display labels only. They are never passed to the pipeline; Stages 3–4 use their own clef/key/time-signature detection. `tempoBpm` is the default playback speed, and the four tracks are rendered at it (Stage 5 `bpm`). It counts **quarter notes per minute whatever the time signature** (Stage 5 writes a quarter-note MIDI tempo at 480 PPQ), so `6/8` at dotted-quarter = 60 is `tempoBpm` 90, and `2/2` at half = 60 is `tempoBpm` 120. The submitted (or default) tempo takes precedence over any detected tempo marking. *(added 2026-10-09, user decision: PIYA-109 AC2 now says the same. The tempo stays one quarter-note BPM for the whole piece, whatever the meter or meter changes; the metronome click works out each measure's beat from that BPM, see PIYA-210.)*
 9. **Errors** (added 2026-10-08, PIYA-206 / PIYA-215 AC3). Every error uses the standard envelope with an `error` object, so the app can map `error.code` to its own message. `message` is English text for logs, not for display:

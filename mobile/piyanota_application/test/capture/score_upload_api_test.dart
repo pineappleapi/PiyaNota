@@ -148,16 +148,12 @@ void main() {
 
     test('fallbackTempoBpm is sent only for "Not sure" (PIYA-323)', () {
       final fields = Map.fromEntries(
-        scoreFormFields(
-          const ScoreDetails(title: 'Ave'),
-          fallbackTempoBpm: 72,
-        ),
+        scoreFormFields(const ScoreDetails(title: 'Ave'), fallbackTempoBpm: 72),
       );
       expect(fields, {'title': 'Ave', 'fallbackTempoBpm': '72'});
     });
 
-    test('a chosen tempo is never sent with the fallback (PIYA-323 AC2)',
-        () {
+    test('a chosen tempo is never sent with the fallback (PIYA-323 AC2)', () {
       final keys = scoreFormFields(
         const ScoreDetails(title: 'Ave', tempoBpm: 96),
         fallbackTempoBpm: 72,
@@ -213,6 +209,56 @@ void main() {
         );
       },
     );
+
+    // PIYA-323 AC2: the Settings default rides in the real multipart form
+    // on both endpoints, and never next to a chosen tempo.
+    group('fallbackTempoBpm in the form (PIYA-323)', () {
+      Future<List<MapEntry<String, String>>> formFields(
+        ScoreDetails details, {
+        required bool asPdf,
+      }) async {
+        final adapter = _StubAdapter();
+        final api = _apiWith(adapter);
+        if (asPdf) {
+          await api.submitPdf(
+            details: details,
+            pdfPath: pdf,
+            fallbackTempoBpm: 72,
+          );
+        } else {
+          await api.submitImages(
+            details: details,
+            imagePaths: [page1],
+            fallbackTempoBpm: 72,
+          );
+        }
+        return (adapter.lastRequest!.data as FormData).fields;
+      }
+
+      for (final asPdf in [false, true]) {
+        final path = asPdf ? 'PDF' : 'image';
+        test('$path upload sends it when Speed is "Not sure"', () async {
+          final fields = await formFields(
+            const ScoreDetails(title: 'Ave'),
+            asPdf: asPdf,
+          );
+          expect(fields.map((e) => '${e.key}=${e.value}'), [
+            'title=Ave',
+            'fallbackTempoBpm=72',
+          ]);
+        });
+
+        test('$path upload never sends it alongside tempoBpm', () async {
+          final fields = await formFields(
+            const ScoreDetails(title: 'Ave', tempoBpm: 96),
+            asPdf: asPdf,
+          );
+          final keys = fields.map((e) => e.key).toList();
+          expect(keys, contains('tempoBpm'));
+          expect(keys, isNot(contains('fallbackTempoBpm')));
+        });
+      }
+    });
 
     test('no stored token fails before any request', () async {
       final adapter = _StubAdapter();

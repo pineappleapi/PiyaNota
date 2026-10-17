@@ -10,6 +10,7 @@ import 'package:piyanota_application/models/score_details.dart';
 import 'package:piyanota_application/models/voice_part.dart';
 import 'package:piyanota_application/routes/app_routes.dart';
 import 'package:piyanota_application/screens/auth/auth_messages.dart';
+import 'package:piyanota_application/screens/playback/playback_messages.dart';
 import 'package:piyanota_application/screens/settings/settings_messages.dart';
 import 'package:piyanota_application/screens/settings/settings_screen.dart';
 import 'package:piyanota_application/services/auth_api.dart';
@@ -35,6 +36,20 @@ AuthSession _liveSession() => AuthSession(
   expiresAt: DateTime.now().toUtc().add(const Duration(days: 7)),
 );
 
+/// Records every tempo save, and can fail them, so tests can count writes
+/// per gesture and check the rollback.
+class _RecordingTempoPrefs extends SettingsPrefsService {
+  final List<int> saves = [];
+  bool fail = false;
+
+  @override
+  Future<void> setDefaultTempo(int bpm) async {
+    saves.add(bpm);
+    if (fail) throw PlatformException(code: 'disk-full');
+    await super.setDefaultTempo(bpm);
+  }
+}
+
 class _Harness {
   _Harness({
     this.session,
@@ -47,6 +62,7 @@ class _Harness {
   }
 
   final AuthSession? session;
+  final _RecordingTempoPrefs tempoPrefs = _RecordingTempoPrefs();
 
   /// Null makes the version lookup fail.
   final String? version;
@@ -76,6 +92,7 @@ class _Harness {
         overrides: [
           authApiProvider.overrideWithValue(api),
           sessionStorageProvider.overrideWithValue(sessionStorage),
+          settingsPrefsServiceProvider.overrideWithValue(tempoPrefs),
           appVersionProvider.overrideWith(
             (ref) async =>
                 version ?? (throw PlatformException(code: 'no-package-info')),
@@ -173,6 +190,29 @@ Finder get _submitButton => find.descendant(
   of: find.byType(BottomSheet),
   matching: buttonLabelled(SettingsMessages.changePassword),
 );
+
+/// [text] drawn as part of the [index]th field of the sheet.
+Finder _fieldError(int index, String text) => find.descendant(
+  of: find
+      .descendant(
+        of: find.byType(BottomSheet),
+        matching: find.byType(TextFormField),
+      )
+      .at(index),
+  matching: find.text(text),
+);
+
+Future<void> _submitChangePassword(
+  WidgetTester tester,
+  _Harness harness,
+  Object error,
+) async {
+  harness.api.onChangePassword = () async => throw error;
+  await _openChangePassword(tester);
+  await _fillChangePassword(tester);
+  await tester.tap(_submitButton);
+  await tester.pumpAndSettle();
+}
 
 void main() {
   group('account and about (AC1, AC2)', () {
@@ -285,10 +325,11 @@ void main() {
   });
 
   group('default tempo (AC8)', () {
-    testWidgets('starts at 90 and steps by one, saving each step', (
+    testWidgets('starts at 90 and steps by one, saving each tap', (
       tester,
     ) async {
-      await _Harness(session: _liveSession()).pump(tester);
+      final harness = _Harness(session: _liveSession());
+      await harness.pump(tester);
       await _scrollTo(tester, _tempoValue);
       expect(find.text(SettingsMessages.tempoValue(90)), findsOneWidget);
 
@@ -301,13 +342,17 @@ void main() {
       await tester.tap(find.byIcon(Icons.remove_rounded));
       await tester.pumpAndSettle();
       expect(await SettingsPrefsService().getDefaultTempo(), 89);
+      expect(harness.tempoPrefs.saves, [91, 90, 89]);
     });
 
-    testWidgets('holding + repeats, and stops at 240', (tester) async {
-      await _Harness(
+    testWidgets('holding + repeats, stops at 240, and saves once on release', (
+      tester,
+    ) async {
+      final harness = _Harness(
         session: _liveSession(),
         prefs: {SettingsPrefsService.defaultTempoKey: 236},
-      ).pump(tester);
+      );
+      await harness.pump(tester);
       await _scrollTo(tester, _tempoValue);
       final gesture = await tester.startGesture(
         tester.getCenter(find.byIcon(Icons.add_rounded)),
@@ -320,6 +365,70 @@ void main() {
         await SettingsPrefsService().getDefaultTempo(),
         ScoreDetails.maxTempo,
       );
+      expect(harness.tempoPrefs.saves, [ScoreDetails.maxTempo]);
+    });
+
+    testWidgets('a long hold saves nothing until the finger lifts', (
+      tester,
+    ) async {
+      final harness = _Harness(session: _liveSession());
+      await harness.pump(tester);
+      await _scrollTo(tester, _tempoValue);
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byIcon(Icons.add_rounded)),
+      );
+      await tester.pump(const Duration(seconds: 2));
+      expect(harness.tempoPrefs.saves, isEmpty);
+      final shown = int.parse(
+        RegExp(r'\d+').firstMatch(tester.widget<Text>(_tempoValue).data!)![0]!,
+      );
+      expect(shown, greaterThan(100));
+
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(harness.tempoPrefs.saves, [shown]);
+    });
+
+    testWidgets('a failed save after a hold rolls back to the saved tempo', (
+      tester,
+    ) async {
+      final harness = _Harness(session: _liveSession());
+      await harness.pump(tester);
+      await _scrollTo(tester, _tempoValue);
+      harness.tempoPrefs.fail = true;
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byIcon(Icons.add_rounded)),
+      );
+      await tester.pump(const Duration(seconds: 1));
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      expect(harness.tempoPrefs.saves, hasLength(1));
+      expect(find.text(SettingsMessages.tempoValue(90)), findsOneWidget);
+      expect(find.text(SettingsMessages.saveFailed), findsOneWidget);
+
+      // The stepper counts on from the rolled-back value, not the lost one.
+      harness.tempoPrefs.fail = false;
+      await tester.tap(find.byIcon(Icons.add_rounded));
+      await tester.pumpAndSettle();
+      expect(find.text(SettingsMessages.tempoValue(91)), findsOneWidget);
+      expect(await SettingsPrefsService().getDefaultTempo(), 91);
+    });
+
+    testWidgets('a failed tap save rolls back to the saved tempo', (
+      tester,
+    ) async {
+      final harness = _Harness(
+        session: _liveSession(),
+        prefs: {SettingsPrefsService.defaultTempoKey: 100},
+      );
+      await harness.pump(tester);
+      await _scrollTo(tester, _tempoValue);
+      harness.tempoPrefs.fail = true;
+      await tester.tap(find.byIcon(Icons.remove_rounded));
+      await tester.pumpAndSettle();
+      expect(find.text(SettingsMessages.tempoValue(100)), findsOneWidget);
+      expect(find.text(SettingsMessages.saveFailed), findsOneWidget);
     });
 
     testWidgets('cannot go below 30', (tester) async {
@@ -393,10 +502,10 @@ void main() {
       expect(find.text(SettingsMessages.passwordChanged), findsOneWidget);
     });
 
-    testWidgets('a 401 marks the current-password field', (tester) async {
+    testWidgets('a 403 marks the current-password field', (tester) async {
       final harness = _Harness(session: _liveSession());
       harness.api.onChangePassword = () async =>
-          throw const InvalidCredentialsException();
+          throw const CurrentPasswordIncorrectException();
       await harness.pump(tester);
       await _openChangePassword(tester);
       await _fillChangePassword(tester);
@@ -459,6 +568,60 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text(loginMarker), findsOneWidget);
       expect(harness.storage.values, isEmpty);
+    });
+
+    testWidgets('rate limited says how many minutes to wait', (tester) async {
+      final harness = _Harness(session: _liveSession());
+      await harness.pump(tester);
+      // 125 s rounds up to 3 minutes: never promise sooner than the server.
+      await _submitChangePassword(
+        tester,
+        harness,
+        const AuthRateLimitedException(retryAfterSeconds: 125),
+      );
+      expect(
+        find.text('Too many attempts. Try again in 3 minutes.'),
+        findsOneWidget,
+      );
+      expect(find.byType(BottomSheet), findsOneWidget);
+    });
+
+    testWidgets('a weak_password 400 shows the Sign-Up rule under New', (
+      tester,
+    ) async {
+      final harness = _Harness(session: _liveSession());
+      await harness.pump(tester);
+      await _submitChangePassword(
+        tester,
+        harness,
+        const AuthValidationException(
+          'Server wording that must not be shown',
+          code: weakPasswordCode,
+          field: newPasswordField,
+        ),
+      );
+      expect(_fieldError(1, AuthMessages.passwordTooWeak), findsOneWidget);
+      expect(find.text('Server wording that must not be shown'), findsNothing);
+
+      // Editing the new password withdraws the server's verdict.
+      await tester.enterText(_sheetFields.at(1), 'Another1pass');
+      // Settle: the error fades out, so one frame still has it in the tree.
+      await tester.pumpAndSettle();
+      expect(find.text(AuthMessages.passwordTooWeak), findsNothing);
+    });
+
+    testWidgets('another 400 shows the app fallback, not the server text', (
+      tester,
+    ) async {
+      final harness = _Harness(session: _liveSession());
+      await harness.pump(tester);
+      await _submitChangePassword(
+        tester,
+        harness,
+        const AuthValidationException('raw server text', code: 'missing_field'),
+      );
+      expect(find.text(AuthMessages.validationFallback), findsOneWidget);
+      expect(find.text('raw server text'), findsNothing);
     });
 
     testWidgets('a network failure keeps the form with a banner', (
@@ -525,6 +688,23 @@ void main() {
     });
   });
 
+  group('rate-limit wording', () {
+    test('rounds up to whole minutes, at least one', () {
+      const one = 'Too many attempts. Try again in 1 minute.';
+      expect(SettingsMessages.rateLimited(0), one);
+      expect(SettingsMessages.rateLimited(1), one);
+      expect(SettingsMessages.rateLimited(60), one);
+      expect(
+        SettingsMessages.rateLimited(61),
+        'Too many attempts. Try again in 2 minutes.',
+      );
+      expect(
+        SettingsMessages.rateLimited(null),
+        'Too many attempts. Try again later.',
+      );
+    });
+  });
+
   group('NFR-10 layout', () {
     for (final (size, scale) in const [
       (Size(320, 568), 2.0),
@@ -558,5 +738,47 @@ void main() {
         expect(tester.takeException(), isNull);
       });
     }
+
+    testWidgets(
+      'no overflow at 320 dp, 2x text with the error banner and log-out '
+      'dialog',
+      (tester) async {
+        final harness = _Harness(session: _liveSession());
+        await harness.pump(
+          tester,
+          logicalSize: const Size(320, 568),
+          textScale: 2.0,
+        );
+        await _scrollTo(tester, find.text(SettingsMessages.changePasswordHint));
+        // The longest banner: it carries a Log in action too.
+        harness.api.onChangePassword = () async =>
+            throw const AuthSessionExpiredException();
+        await _openChangePassword(tester);
+        await _fillChangePassword(tester);
+        // At 2x text the sheet scrolls; the button starts below the fold.
+        await tester.ensureVisible(_submitButton);
+        await tester.pumpAndSettle();
+        await tester.tap(_submitButton);
+        await tester.pumpAndSettle();
+        final banner = find.text(SettingsMessages.sessionExpired);
+        expect(banner, findsOneWidget);
+        await tester.ensureVisible(banner);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+
+        final close = find.byTooltip(PlaybackMessages.close);
+        await tester.ensureVisible(close);
+        await tester.pumpAndSettle();
+        await tester.tap(close);
+        await tester.pumpAndSettle();
+        expect(find.byType(BottomSheet), findsNothing);
+
+        await _scrollTo(tester, find.text(SettingsMessages.logOut));
+        await tester.tap(find.text(SettingsMessages.logOut));
+        await tester.pumpAndSettle();
+        expect(find.text(SettingsMessages.logOutTitle), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
   });
 }

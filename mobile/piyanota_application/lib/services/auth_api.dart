@@ -16,11 +16,27 @@ class InvalidCredentialsException extends AuthException {
   const InvalidCredentialsException();
 }
 
-/// 401 `session_expired` from an endpoint that needs a session (PIYA-322
-/// AC1). Kept apart from [InvalidCredentialsException] because the right
-/// action differs: log in again, not retype the current password.
+/// Any 401 from an endpoint that needs a session (PIYA-322 AC1). Kept apart
+/// from [InvalidCredentialsException] because the right action differs:
+/// log in again, not retype a password.
 class AuthSessionExpiredException extends AuthException {
   const AuthSessionExpiredException();
+}
+
+/// 403 `invalid_current_password` from Change Password (PIYA-322 AC3). Its
+/// own type, not [InvalidCredentialsException], because Login's 401 means
+/// something else and the sheet marks one specific field.
+class CurrentPasswordIncorrectException extends AuthException {
+  const CurrentPasswordIncorrectException();
+}
+
+/// 429 `rate_limited` from Change Password (PIYA-322 AC5). The account is
+/// not locked; [retryAfterSeconds] is how long to wait, or null when the
+/// server gave no usable wait.
+class AuthRateLimitedException extends AuthException {
+  const AuthRateLimitedException({this.retryAfterSeconds});
+
+  final int? retryAfterSeconds;
 }
 
 /// 409 `email_already_registered` from Sign-Up (PIYA-301 AC4).
@@ -36,12 +52,21 @@ class ResetCodeInvalidException extends AuthException {
   const ResetCodeInvalidException();
 }
 
-/// 400 from any endpoint. [serverMessage] is shown as-is since the
-/// backend owns the validation policy wording (e.g. password strength).
+/// PIYA-322 AC4's `error.code` / `error.field` for a new password that
+/// fails the shared Sign-Up strength validator.
+const String weakPasswordCode = 'weak_password';
+const String newPasswordField = 'newPassword';
+
+/// 400 from any endpoint. [code] and [field] are the envelope's
+/// `error.code` / `error.field` when sent. Sign-Up and Reset still show
+/// [serverMessage]; Change Password does not, since PIYA-322 AC4 gives the
+/// wording to the client and PIYA-101 AC9 says `message` is for logs.
 class AuthValidationException extends AuthException {
-  const AuthValidationException(this.serverMessage);
+  const AuthValidationException(this.serverMessage, {this.code, this.field});
 
   final String? serverMessage;
+  final String? code;
+  final String? field;
 }
 
 /// No response at all — offline, DNS failure, timeout. Distinct from a
@@ -75,9 +100,12 @@ abstract interface class AuthApi {
     required String newPasswordConfirmation,
   });
 
-  /// PIYA-322 (stub). [token] is the current session's; a wrong
-  /// [currentPassword] is [InvalidCredentialsException], a dead session
-  /// [AuthSessionExpiredException].
+  /// PIYA-322. [token] is the current session's and stays valid on success
+  /// (other sessions are revoked). A wrong [currentPassword] is
+  /// [CurrentPasswordIncorrectException], any 401
+  /// [AuthSessionExpiredException], too many wrong attempts
+  /// [AuthRateLimitedException], a weak [newPassword] an
+  /// [AuthValidationException] with code [weakPasswordCode].
   Future<void> changePassword({
     required String token,
     required String currentPassword,
@@ -95,8 +123,10 @@ class HttpAuthApi implements AuthApi {
 
   static const int _badRequest = 400;
   static const int _unauthorized = 401;
+  static const int _forbidden = 403;
   static const int _conflict = 409;
   static const int _gone = 410;
+  static const int _tooManyRequests = 429;
 
   @override
   Future<AuthSession> login({required String email, required String password}) {
@@ -150,6 +180,7 @@ class HttpAuthApi implements AuthApi {
       ApiConfig.changePasswordPath,
       {'currentPassword': currentPassword, 'newPassword': newPassword},
       headers: {'Authorization': 'Bearer $token'},
+      mapStatus: _mapChangePasswordStatus,
     );
   }
 
@@ -167,10 +198,14 @@ class HttpAuthApi implements AuthApi {
     }
   }
 
+  /// [mapStatus] turns an error response into a failure. It is per call
+  /// because the same status means different things per endpoint: a 401 is
+  /// a wrong password on Login but a dead session on Change Password.
   Future<Response<Map<String, dynamic>>> _post(
     String path,
     Map<String, String> body, {
     Map<String, String>? headers,
+    AuthException Function(Response<dynamic>?) mapStatus = _mapStatus,
   }) async {
     try {
       return await _dio.post<Map<String, dynamic>>(
@@ -179,11 +214,14 @@ class HttpAuthApi implements AuthApi {
         options: headers == null ? null : Options(headers: headers),
       );
     } on DioException catch (e) {
-      throw _mapDioError(e);
+      throw _mapDioError(e, mapStatus);
     }
   }
 
-  AuthException _mapDioError(DioException e) {
+  static AuthException _mapDioError(
+    DioException e,
+    AuthException Function(Response<dynamic>?) mapStatus,
+  ) {
     switch (e.type) {
       case DioExceptionType.connectionTimeout:
       case DioExceptionType.sendTimeout:
@@ -191,7 +229,7 @@ class HttpAuthApi implements AuthApi {
       case DioExceptionType.connectionError:
         return const AuthNetworkException();
       case DioExceptionType.badResponse:
-        return _mapStatus(e.response);
+        return mapStatus(e.response);
       // A response arrived but couldn't be decoded in time — the network
       // worked, so this isn't the "check your internet" case.
       case DioExceptionType.transformTimeout:
@@ -202,19 +240,8 @@ class HttpAuthApi implements AuthApi {
     }
   }
 
-  AuthException _mapStatus(Response<dynamic>? response) {
-    final body = response?.data;
-    final message = body is Map<String, dynamic> && body['message'] is String
-        ? body['message'] as String
-        : null;
-
-    // A 401 means "wrong password" everywhere except PIYA-322, where
-    // `session_expired` must send the user to Login instead (AC1 vs AC2).
-    if (response?.statusCode == _unauthorized &&
-        _errorCode(body) == _sessionExpiredCode) {
-      return const AuthSessionExpiredException();
-    }
-
+  /// Sign-Up, Login and Password Reset (PIYA-301–304).
+  static AuthException _mapStatus(Response<dynamic>? response) {
     // 410 is mapped on status alone, not on the `reset_token_expired_or_
     // invalid` error code, because the error-envelope field holding that
     // code isn't pinned down by PIYA-304 (reconcile in PIYA-214).
@@ -222,12 +249,59 @@ class HttpAuthApi implements AuthApi {
       _unauthorized => const InvalidCredentialsException(),
       _conflict => const EmailAlreadyRegisteredException(),
       _gone => const ResetCodeInvalidException(),
-      _badRequest => AuthValidationException(message),
+      _badRequest => _validationFailure(response),
       _ => const AuthServerException(),
     };
   }
 
-  static const String _sessionExpiredCode = 'session_expired';
+  /// PIYA-322. Mapped on status, not body, wherever the contract allows:
+  /// AC1 says any 401 here is a dead session, so a proxy's bare 401 still
+  /// sends the user to Login instead of blaming their current password.
+  static AuthException _mapChangePasswordStatus(Response<dynamic>? response) {
+    return switch (response?.statusCode) {
+      _unauthorized => const AuthSessionExpiredException(),
+      _forbidden => const CurrentPasswordIncorrectException(),
+      _tooManyRequests => AuthRateLimitedException(
+        retryAfterSeconds: _retryAfterSeconds(response),
+      ),
+      _badRequest => _validationFailure(response),
+      _ => const AuthServerException(),
+    };
+  }
+
+  static AuthValidationException _validationFailure(
+    Response<dynamic>? response,
+  ) {
+    final body = response?.data;
+    final message = body is Map<String, dynamic> && body['message'] is String
+        ? body['message'] as String
+        : null;
+    final error = _errorObject(body);
+    return AuthValidationException(
+      message,
+      code: _errorCode(body),
+      field: error?['field'] is String ? error!['field'] as String : null,
+    );
+  }
+
+  /// PIYA-322 AC5 sends the wait twice; the body wins, as on uploads
+  /// (PIYA-101 AC6). Only the delta-seconds form of `Retry-After` is read:
+  /// the contract never sends an HTTP date, and a wrong guess is worse
+  /// than the sheet's "try again later".
+  static int? _retryAfterSeconds(Response<dynamic>? response) {
+    final fromBody = _errorObject(response?.data)?['retryAfterSeconds'];
+    if (fromBody is int && fromBody >= 0) return fromBody;
+    final header = int.tryParse(
+      response?.headers.value('retry-after')?.trim() ?? '',
+    );
+    return header != null && header >= 0 ? header : null;
+  }
+
+  static Map<String, dynamic>? _errorObject(Object? body) {
+    if (body is! Map<String, dynamic>) return null;
+    final error = body['error'];
+    return error is Map<String, dynamic> ? error : null;
+  }
 
   /// The error code from the envelope. Where it sits isn't pinned down
   /// (PIYA-214), so both `error.code` and a bare string `error` are read.

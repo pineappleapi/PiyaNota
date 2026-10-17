@@ -30,7 +30,7 @@ RENDER_SAMPLE_RATE = 44100
 
 # ── MIDI constants ────────────────────────────────────────────────────────────
 PPQ          = 480          # pulses per quarter note (ticks per beat)
-DEFAULT_BPM  = 90           # default tempo if not detected
+DEFAULT_BPM  = 90           # default tempo when none submitted
 MS_PER_MINUTE = 60_000
 ROUND_HALF_UP = 0.5         # ms values round half up: int(x + 0.5), same rule as the timing file
 # PIYA-103 AC10: the review code for a voice in failedVoices.

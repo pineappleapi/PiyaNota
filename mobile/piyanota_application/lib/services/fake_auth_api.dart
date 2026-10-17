@@ -31,6 +31,11 @@ class FakeAuthApi implements AuthApi {
   static const Duration resetCodeLifetime = Duration(minutes: 30);
   static const int resetCodeLength = AuthValidators.resetCodeLength;
 
+  /// PIYA-322 AC5: this many wrong current passwords within the window
+  /// rate-limit Change Password (the account itself is never locked).
+  static const int changePasswordMaxFailures = 5;
+  static const Duration changePasswordFailureWindow = Duration(minutes: 15);
+
   static const Duration _sessionLifetime = Duration(days: 30);
   static const String _defaultRole = 'choir_member';
   static const int _resetCodeSpace = 1000000;
@@ -49,6 +54,10 @@ class FakeAuthApi implements AuthApi {
   /// token's `userId` (PIYA-205 AC1 / PIYA-308 AC2).
   final Map<String, String> _emailsByToken = {};
   int _nextUserId = 1;
+
+  /// When each recent wrong current password happened, per account, for
+  /// the PIYA-322 AC5 sliding window.
+  final Map<String, List<DateTime>> _changePasswordFailures = {};
 
   @override
   Future<AuthSession> login({
@@ -118,8 +127,10 @@ class FakeAuthApi implements AuthApi {
     _passwordsByEmail[grant.email] = newPassword;
   }
 
-  /// PIYA-322 stand-in, same order as the draft ACs: session first, then
-  /// the current password, then the Sign-Up rule for the new one.
+  /// PIYA-322 stand-in, in the contract's order: session (AC1), rate limit
+  /// (AC5), current password (AC3), then the Sign-Up rule (AC4). The limit
+  /// is checked before the password so a limited caller can't keep
+  /// guessing; once limited, even the right password waits.
   @override
   Future<void> changePassword({
     required String token,
@@ -130,13 +141,35 @@ class FakeAuthApi implements AuthApi {
     final email = _emailsByToken[token];
     if (email == null) throw const AuthSessionExpiredException();
     if (email.endsWith(offlineDomain)) throw const AuthNetworkException();
-    if (_passwordsByEmail[email] != currentPassword) {
-      throw const InvalidCredentialsException();
+
+    final now = _now();
+    final failures = _changePasswordFailures.putIfAbsent(email, () => [])
+      ..removeWhere((at) => !now.isBefore(at.add(changePasswordFailureWindow)));
+    if (failures.length >= changePasswordMaxFailures) {
+      final freesAt = failures.first.add(changePasswordFailureWindow);
+      throw AuthRateLimitedException(
+        retryAfterSeconds: freesAt.difference(now).inSeconds,
+      );
     }
+    if (_passwordsByEmail[email] != currentPassword) {
+      failures.add(now);
+      throw const CurrentPasswordIncorrectException();
+    }
+
     // PIYA-322 sends no confirmation field (the app checks the match), so
-    // the new password is its own confirmation here.
-    _checkNewPassword(newPassword, newPassword);
+    // only the strength rule applies here.
+    if (!AuthValidators.meetsPasswordPolicy(newPassword)) {
+      throw const AuthValidationException(
+        AuthValidators.passwordPolicyDescription,
+        code: weakPasswordCode,
+        field: newPasswordField,
+      );
+    }
     _passwordsByEmail[email] = newPassword;
+    // AC6: every other session of the account ends; the caller's stays.
+    _emailsByToken.removeWhere(
+      (other, owner) => owner == email && other != token,
+    );
   }
 
   /// The code most recently "emailed" to [email], or null if nothing was

@@ -2,6 +2,8 @@
 
 _Covers: Authentication & Account API tickets, Score & File Management API tickets, Database tickets, Security & Authorization tickets._
 
+All Module 3 routes are served under the `/api` prefix (e.g. `/api/auth/change-password`); reconcile any path written without it in PIYA-214.
+
 ## API Tickets — Authentication & Account
 
 ### PIYA-300 — Database & Hosting Technology Selection
@@ -189,20 +191,23 @@ Permanently deletes a user's account and associated data, on user request.
 }
 ```
 
-### PIYA-322 — Change Password API (stub)
-**Method:** POST `/auth/change-password`
-*(Stub added 2026-10-17 for PIYA-212 AC6, user request. **Needs backend-lead review**: path, rate limiting, and whether other sessions are revoked are not decided yet.)* The app's Settings screen calls it; until it exists the app uses a fake.
+### PIYA-322 — Change Password API
+**Method:** POST `/api/auth/change-password`
+*(Stub added 2026-10-17 for PIYA-212 AC6, user request. Contract finalized 2026-10-17 after backend-lead and senior-reviewer review.)* The app's Settings screen calls it; until it exists the app uses a fake.
 
-**Request body:**
+**Request body:** no confirmation field; the client checks that the new password and its confirmation match before sending.
 ```json
 { "currentPassword": "old secret", "newPassword": "new Secret 1" }
 ```
 
-**Acceptance Criteria (draft):**
-1. Requires a valid session token; returns 401 `session_expired` if missing, expired, or invalid.
-2. Returns 401 `invalid_credentials` if `currentPassword` does not match. The app tells this apart from (1) by the error code and shows "Your current password is incorrect."
-3. Returns 400 `weak_password` if `newPassword` fails the Sign-Up strength rules (PIYA-301), with the same rule wording.
-4. On success returns 200 and stores the new hash (PIYA-313). [confirm with backend-lead: revoke the account's other sessions?]
+**Acceptance Criteria:**
+1. Requires a `Bearer` session token. A missing, expired or revoked token returns 401 per PIYA-314 AC5. On this endpoint **any** 401 means the session is invalid: the client sends the user to Login whatever the body says, and never reads a 401 as a wrong password.
+2. A missing `currentPassword` or `newPassword` returns 400 `missing_field`, with `error.field` naming the field.
+3. A `currentPassword` that does not match returns 403 `invalid_current_password`, the same status as PIYA-307 AC2. It is checked by hash comparison only (PIYA-313 AC4).
+4. A `newPassword` that fails the Sign-Up strength policy returns 400 `weak_password` with `error.field` `"newPassword"`. It uses the same shared validator as PIYA-301 AC3 and PIYA-304 AC2. The client shows its own wording of the rule, not `message`.
+5. **Rate limit.** 5 wrong current passwords per user within 15 minutes returns 429 `rate_limited`, with a `Retry-After` header and `error.retryAfterSeconds`. The counter is durable (it survives a server restart and is shared across workers). The account is never locked; only this endpoint is limited. Each wrong attempt is logged with a hashed user id and a timestamp, never the password (PIYA-313 AC3).
+6. **Success is one transaction:** store the new salted hash (PIYA-313) and revoke every other session token of the account. The calling token stays valid, so the user stays signed in on this device. If any step fails, nothing changes and the endpoint returns 500.
+7. Uses the PIYA-101 AC9 error envelope. Success returns 200:
 
 **Response Schema:**
 ```json
@@ -216,14 +221,15 @@ Permanently deletes a user's account and associated data, on user request.
 
 ---
 
-### PIYA-323 — Capture `fallbackTempoBpm` Field (stub)
-*(Stub added 2026-10-17 for PIYA-212 AC8, user request. **Needs backend-lead review**, and a matching note on PIYA-101 AC8 in `module1-pipeline.md` and PIYA-310 AC5.)*
+### PIYA-323 — Capture `fallbackTempoBpm` Field
+*(Stub added 2026-10-17 for PIYA-212 AC8, user request. Contract finalized 2026-10-17 after backend-lead and senior-reviewer review. Cross-referenced from PIYA-101 AC8 in `module1-pipeline.md`, PIYA-310 AC5 and PIYA-311 AC7.)*
 
-**Acceptance Criteria (draft):**
-1. PIYA-101 and PIYA-310 accept an optional text part `fallbackTempoBpm`, with the same rules and error code as `tempoBpm` (ASCII digits, integer 30–240, else 400 `invalid_tempo`).
-2. `fallbackTempoBpm` is the user's Settings default tempo. The app sends it only when the user chose "Not sure" for Speed, so it is never sent together with `tempoBpm`; if both arrive, 400 `duplicate_field`.
-3. Meaning: `tempoBpm` overrides any detected tempo. `fallbackTempoBpm` is used only when the pipeline detects no tempo. Today the pipeline never uses a detected tempo (PIYA-101 AC8, PIYA-109 AC2), so in practice `fallbackTempoBpm` replaces the default 90 for the stored `tempo_bpm`. [confirm with backend-lead]
-4. The response echoes the stored `tempoBpm` as now; `fallbackTempoBpm` is not echoed.
+**Acceptance Criteria:**
+1. PIYA-101 and PIYA-310 accept an optional text part `fallbackTempoBpm`, with the same rule as `tempoBpm` (ASCII digits only, integer 30–240). Anything else returns 400 `invalid_tempo` with `error.field` `"fallbackTempoBpm"`.
+2. `fallbackTempoBpm` is the user's Settings default tempo. The app sends it only when the user chose "Not sure" for Speed, so it is never sent together with `tempoBpm`. If both arrive, the request returns 400 `duplicate_field`.
+3. **Settled at submit.** The backend computes `tempo_bpm = tempoBpm ?? fallbackTempoBpm ?? 90` when the job is created, and stores `tempo_source` on the `jobs` row: `user` (from `tempoBpm`), `fallback` (from `fallbackTempoBpm`) or `default` (90). `tempo_source` is copied to the `scores` row in the PIYA-321 completion transaction.
+4. The pipeline only receives the settled `tempo_bpm`. It detects no tempo today (PIYA-109 AC2). If tempo detection is added later, a detected tempo may replace the stored tempo only when `tempo_source` is `fallback` or `default`, never `user`.
+5. The response echoes the stored `tempoBpm` only; `fallbackTempoBpm` and `tempo_source` are not echoed.
 
 ---
 
@@ -329,7 +335,7 @@ Permanently removes a saved score and its associated audio/image assets from a u
 2. Returns 400 if PDF exceeds 20 pages (per FR-6), before rasterization begins. *(2026-10-08: error code `too_many_pages`. Pages are counted from the parsed PDF; the client's own pre-upload check (PIYA-206 AC6) is not trusted.)*
 3. Returns 422 with error code `corrupt_or_encrypted_pdf` if file cannot be parsed or is password-protected.
 4. Rasterizes each page to the same image format/resolution standard used by camera and gallery inputs (per PIYA-320), preserving page order as `page_index`.
-5. On successful rasterization, automatically forwards resulting image array to PIYA-101, returns the same `jobId`/`status` response shape as PIYA-101, so the client doesn't need a separate call. *(2026-10-08: the metadata fields `title`, `arranger`, `tempoBpm`, `keySignature` and `timeSignature` are accepted here with the same rules and error codes as PIYA-101 AC8, and forwarded unchanged. `title` is required here too: the PDF filename is no longer used as the title (PIYA-321), and the PDF's embedded Title/Author metadata is never copied into `title` or `arranger`.)* *(2026-10-09: renamed from `composer`, user decision — the field holds the arranger.)*
+5. On successful rasterization, automatically forwards resulting image array to PIYA-101, returns the same `jobId`/`status` response shape as PIYA-101, so the client doesn't need a separate call. *(2026-10-08: the metadata fields `title`, `arranger`, `tempoBpm`, `keySignature` and `timeSignature` are accepted here with the same rules and error codes as PIYA-101 AC8, and forwarded unchanged. `title` is required here too: the PDF filename is no longer used as the title (PIYA-321), and the PDF's embedded Title/Author metadata is never copied into `title` or `arranger`.)* *(2026-10-09: renamed from `composer`, user decision — the field holds the arranger.)* *(2026-10-17, PIYA-323: the optional `fallbackTempoBpm` part is accepted here too, with the same rules, and the same `tempo_bpm` / `tempo_source` settling as PIYA-101.)*
 6. Rasterization for a 20-page PDF completes in under 15 seconds on deployed hardware.
 7. **Errors** (added 2026-10-08, PIYA-215 AC3). Same envelope, status codes, precedence order and 413 proxy rule as PIYA-101 AC9, so the app can show one set of messages for both endpoints: 400 / 413 / 415 / 422 / 429 each carry a distinct `error.code`, and 429 is `rate_limited` or `queue_full`. A submission through either endpoint counts toward the same per-user rate limit.
 8. **Uploaded PDF retention** (added 2026-10-08, backend-lead). The uploaded PDF is deleted once rasterization succeeds or fails. Only the standardized page images are kept, and they are covered by PIYA-309's deletion. As in PIYA-101 AC11, a failure leaves no job row and no orphaned page images.
@@ -369,6 +375,7 @@ Permanently removes a saved score and its associated audio/image assets from a u
    - `scores` gains `tempo_bpm`, `key_signature` and `time_signature` with the same types and CHECKs, alongside the `arranger` and `page_count` columns added under PIYA-308. `scores.title` gets the same NOT NULL and CHECK as `jobs.title`. *(2026-10-09: `jobs.composer` / `scores.composer` renamed to `jobs.arranger` / `scores.arranger`, user decision — the field holds the arranger. No migration has been written yet, so this is a spec change, not a rename migration.)*
    - Use CHECK constraints rather than PostgreSQL `ENUM` types: changing a value set is then a one-line migration with a simple rollback (PIYA-312).
    - `tempo_bpm` stores the concrete tempo the audio was rendered at (90 when the client sent none), never NULL, so a later change to the server default does not change what an existing score claims.
+   - *(Added 2026-10-17, PIYA-323.)* `jobs` and `scores` gain `tempo_source` (text, NOT NULL, CHECK in `user`, `fallback`, `default`): where `tempo_bpm` came from. Set on the job at submit and copied to the score in the PIYA-321 transaction.
 8. **Retake links** *(added 2026-10-14, user decision 2026-10-14; PIYA-101 AC12)*. `jobs` gains:
    - `replaces_job_id` (FK `jobs(id)`, nullable, ON DELETE SET NULL): the job this submission retakes.
    - `superseded_by_job_id` (FK `jobs(id)`, nullable, ON DELETE SET NULL): set on the old job when its retake is created (failed old job) or completes (completed old job).
@@ -425,7 +432,7 @@ Permanently removes a saved score and its associated audio/image assets from a u
 1. Tokens are cryptographically random, of sufficient length to resist brute-force guessing, unique per issuance.
 2. Each token has a defined expiration (e.g., 30 days for mobile sessions); expired tokens rejected with 401 on any subsequent request.
 3. Tokens transmitted only over HTTPS (per PIYA-317), never included in URL query strings or logged in plaintext.
-4. All active tokens for an account invalidated on password reset (PIYA-304) and account deletion (PIYA-307/PIYA-319).
+4. All active tokens for an account invalidated on password reset (PIYA-304) and account deletion (PIYA-307/PIYA-319), and on password change (PIYA-322), except the calling token. *(Amended 2026-10-17, PIYA-322.)*
 5. A revoked or expired token returns a consistent 401 response distinguishable from other auth failures only by status code, not by leaking why it was revoked.
 
 ---

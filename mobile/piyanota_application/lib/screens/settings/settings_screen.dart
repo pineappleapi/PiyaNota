@@ -92,6 +92,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   VoicePart? _voice;
   int _tempo = ScoreDetails.defaultTempo;
+  int _savedTempo = ScoreDetails.defaultTempo;
+  int _tempoSaveSeq = 0;
   bool _prefsLoaded = false;
 
   @override
@@ -116,6 +118,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     setState(() {
       _voice = voice;
       _tempo = tempo;
+      _savedTempo = tempo;
       _prefsLoaded = true;
     });
   }
@@ -134,15 +137,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
   }
 
-  Future<void> _setTempo(int bpm) async {
-    final previous = _tempo;
-    setState(() => _tempo = bpm);
+  /// Every step of a held button: display only, so a hold saves once.
+  void _showTempo(int bpm) => setState(() => _tempo = bpm);
+
+  /// Once per tap or per hold. A failure rolls back to [_savedTempo], the
+  /// last value known to be on disk, not to the value before this gesture,
+  /// which may itself never have saved.
+  Future<void> _commitTempo(int bpm) async {
+    final attempt = ++_tempoSaveSeq;
     try {
       await ref.read(settingsPrefsServiceProvider).setDefaultTempo(bpm);
+      // SharedPreferences applies writes in call order, so a success here
+      // means bpm is what is stored now unless a later save follows it.
+      if (attempt == _tempoSaveSeq) _savedTempo = bpm;
     } catch (e, stack) {
       debugPrint('Default tempo not saved: $e\n$stack');
-      if (!mounted) return;
-      setState(() => _tempo = previous);
+      // Only the latest gesture may roll back; an older failure must not
+      // undo a newer value the user is now looking at.
+      if (!mounted || attempt != _tempoSaveSeq) return;
+      setState(() => _tempo = _savedTempo);
       _showSnackBar(SettingsMessages.saveFailed);
     }
   }
@@ -355,7 +368,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             body: SettingsMessages.tempoHelpBody,
           ),
           control: _prefsLoaded
-              ? TempoStepper(value: _tempo, onChanged: _setTempo)
+              ? TempoStepper(
+                  value: _tempo,
+                  onChanged: _showTempo,
+                  onCommit: _commitTempo,
+                )
               : null,
           controlGap: _controlGap,
         ),
