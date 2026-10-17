@@ -319,6 +319,10 @@ _Phone test results (2026-10-17, fake backend): 75 pass, 0 fail, 12 untested. Pe
 *Playback settings*
 
 23. The export uses the current Playback speed (the Speed modal's BPM, as rate = chosen BPM ÷ `tempoBpm`, pitch kept per FR-9) and the Voice Mixer levels, Mute and Solo, including the Metronome Click row's level. A ticked voice that the Mixer mutes, or leaves out with a Solo, is noted under its row ("Muted in Voice Mixer"); the export is still allowed. *(Added 2026-10-17, user decision.)*
+    - Speed is applied per track, as Playback does: each ticked voice and the click is time-stretched separately (its own Sonic instance, same speed, pitch kept) and only then mixed with its gain and peak-limited, rather than stretching the finished mix. All stretched tracks start at the same instant, so the click stays on the bars, and the file runs to the end of the longest track. At unity speed nothing is stretched. *(Decided 2026-10-18, user decision: export must match Playback.)*
+    - If the Metronome Click row is soloed in the Voice Mixer, the voices are left out and the export holds only the click. This is accepted behaviour, not a bug. *(Decided 2026-10-18, user decision.)*
+
+**Merge hold:** the PIYA-211 branch is held from merge until the LAME sources are added to the build and the export passes the on-device (phone) test. *(Decided 2026-10-18, user decision.)*
 
 ---
 

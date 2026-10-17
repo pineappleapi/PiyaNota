@@ -31,8 +31,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  *  - pickFolder() -> tree Uri string, or null when cancelled (AC10, AC11).
  *    The permission is persisted so Open folder works afterwards.
  *  - listNames({treeUri}) -> display names already in that folder (AC15).
- *  - render({inputs: [{path, gain}], speed, outPath}) -> null. Decodes,
- *    mixes, time-stretches (pitch kept) and encodes one MP3 (AC13, AC23).
+ *  - render({inputs: [{path, gain}], speed, outPath}) -> null. Decodes
+ *    each input, time-stretches each one separately (pitch kept, as
+ *    Playback does per player), mixes with the gains and encodes one MP3
+ *    (AC13, AC23).
  *  - save({treeUri, fileName, srcPath}) -> {fileName, location} (AC16).
  *  - openFolder({treeUri}) -> whether a file manager could be opened.
  *
