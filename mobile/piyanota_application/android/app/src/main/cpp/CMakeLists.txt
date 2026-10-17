@@ -33,6 +33,10 @@ target_compile_definitions(mp3lame PRIVATE
     HAVE_FCNTL_H=1
     HAVE_STRCHR=1
     HAVE_MEMCPY=1
+    # config.h normally typedefs these; util.h needs them for fast_log2.
+    # A macro stands in for the typedef since there is no config.h.
+    ieee754_float32_t=float
+    ieee754_float64_t=double
     TAKEHIRO_IEEE754_HACK=1
     USE_FAST_LOG=1
     NDEBUG)
