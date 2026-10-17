@@ -38,6 +38,11 @@ class ExportMessages {
       'saved.';
   static const String generationFailed =
       'The audio file couldn’t be made. Try again.';
+  /// Every ticked voice failed while the folder picker was open, so there
+  /// is nothing to retry: no Retry, and no "try again".
+  static const String nothingToExport =
+      'The voices you picked can’t be played right now, so there’s nothing '
+      'to export.';
   static const String interrupted =
       'The download stopped before it finished. Try again.';
   static const String retry = 'Retry';

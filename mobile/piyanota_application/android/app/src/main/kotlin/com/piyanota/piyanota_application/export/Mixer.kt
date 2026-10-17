@@ -5,12 +5,9 @@ import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.SonicAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import java.io.BufferedInputStream
-import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileInputStream
-import java.io.FileOutputStream
 import java.io.InputStream
-import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.abs
@@ -28,20 +25,29 @@ internal class MixInput(val pcm: File, val gain: Float)
  * click, and the gains are applied after the stretch, as player volume
  * is. Sonic over the summed mix is not the same signal: its WSOLA splice
  * points follow the pitch of whatever it is fed, so one Sonic over four
- * voices would not match what Playback plays. The stretched tracks go to
- * temp files beside the decoded ones, never to memory. They all start at
- * frame 0, so voices and click stay sample-aligned, and the mix runs to
- * the end of the longest stretched track.
+ * voices would not match what Playback plays.
  *
- * Two passes over the stretched files: the first finds the peak of the
- * summed signal, the second scales it down to [PEAK_CEILING] if it is
- * louder (a quieter mix is left as the Mixer set it). Four loud voices
- * plus the click can sum past full scale; one fixed gain for the whole
- * file keeps the balance the singer set in the Voice Mixer, where a
- * sample-by-sample limiter would pump.
+ * The Sonic instances run in lockstep, in memory: each pass reads a chunk
+ * of every decoded file, stretches it, and keeps only what has not yet
+ * been mixed in a small per-track queue. No stretched audio is written to
+ * disk, so temp space stays at the decoded files whatever the speed (a
+ * slow speed makes the stretched audio several times longer than the
+ * decoded audio). Every track starts at frame 0, so voices and click stay
+ * sample-aligned, and the mix runs to the end of the longest stretched
+ * track; a track that has ended is silence from then on.
+ *
+ * Two passes: the first finds the peak of the summed signal and throws
+ * the audio away, the second stretches again with fresh Sonic instances
+ * and scales the sum down to [PEAK_CEILING] if it is louder (a quieter
+ * mix is left as the Mixer set it). Sonic is deterministic, and both
+ * passes feed it the same chunks, so the second pass reproduces the
+ * first exactly. Four loud voices plus the click can sum past full
+ * scale; one fixed gain for the whole file keeps the balance the singer
+ * set in the Voice Mixer, where a sample-by-sample limiter would pump.
  */
 internal object Mixer {
-    private const val CHUNK_FRAMES = 4096
+    /** Frames per mixed chunk, and per read from each decoded file. */
+    internal const val CHUNK_FRAMES = 4096
     private const val FULL_SCALE = 32768f
     private const val UNITY_SPEED = 1.0
     private const val BYTES_PER_SAMPLE = 2
@@ -52,7 +58,7 @@ internal object Mixer {
      * exactly full scale would still clip; the loudest sample is held just
      * below it.
      */
-    private const val PEAK_CEILING = 0.891f
+    internal const val PEAK_CEILING = 0.891f
 
     /**
      * Sonic reports itself inactive (and then drops input) within this
@@ -67,75 +73,50 @@ internal object Mixer {
         sink: (ShortArray, Int) -> Unit,
         cancelled: () -> Boolean,
     ) {
-        val stretched = mutableListOf<File>()
-        try {
-            val tracks = if (abs(speed - UNITY_SPEED) < SONIC_CLOSENESS) {
-                inputs
-            } else {
-                inputs.map { input ->
-                    val out = File.createTempFile("export_stretch", ".raw", input.pcm.parentFile)
-                    stretched += out
-                    stretch(input.pcm, out, speed.toFloat(), cancelled)
-                    // Only the stretched copy is read from here on. Freeing
-                    // the decoded file now caps temp space at the stretched
-                    // set plus one decoded track (the caller's own cleanup
-                    // of an already-deleted file is a no-op).
-                    input.pcm.delete()
-                    MixInput(out, input.gain)
-                }
+        val stretch = if (abs(speed - UNITY_SPEED) < SONIC_CLOSENESS) null else speed.toFloat()
+        val peak = scan(inputs, stretch, cancelled) { _, _ -> }
+        val scale = PEAK_CEILING / maxOf(PEAK_CEILING, peak)
+        // The sink (Mp3Encoder.encode) consumes the frames before
+        // returning, so one buffer serves every chunk.
+        val out = ShortArray(CHUNK_FRAMES * PcmDecoder.OUT_CHANNELS)
+        scan(inputs, stretch, cancelled) { mixed, frames ->
+            for (i in 0 until frames * PcmDecoder.OUT_CHANNELS) {
+                out[i] = (mixed[i] * scale * Short.MAX_VALUE).roundToInt()
+                    .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
             }
-            val peak = scan(tracks, cancelled) { _, _ -> }
-            val scale = PEAK_CEILING / maxOf(PEAK_CEILING, peak)
-            // The sink (Mp3Encoder.encode) consumes the frames before
-            // returning, so one buffer serves every chunk.
-            val out = ShortArray(CHUNK_FRAMES * PcmDecoder.OUT_CHANNELS)
-            scan(tracks, cancelled) { mixed, frames ->
-                for (i in 0 until frames * PcmDecoder.OUT_CHANNELS) {
-                    out[i] = (mixed[i] * scale * Short.MAX_VALUE).roundToInt()
-                        .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
-                }
-                sink(out, frames)
-            }
-        } finally {
-            stretched.forEach { it.delete() }
+            sink(out, frames)
         }
     }
 
     /**
-     * Reads every input in step, sums them with their gains (as floats in
-     * -1..1, so the sum can exceed 1), and passes each chunk to [onChunk].
-     * A track shorter than the longest is treated as silence after its end.
-     * Returns the largest absolute summed sample.
+     * One lockstep pass: every track (stretched by [speed], or as decoded
+     * when it is null) is summed with its gain, as floats in -1..1 so the
+     * sum can exceed 1, and each chunk goes to [onChunk]. Returns the
+     * largest absolute summed sample.
      */
     private fun scan(
         inputs: List<MixInput>,
+        speed: Float?,
         cancelled: () -> Boolean,
         onChunk: (FloatArray, Int) -> Unit,
     ): Float {
-        val streams: List<InputStream> = inputs.map { BufferedInputStream(FileInputStream(it.pcm)) }
+        val lanes = mutableListOf<Lane>()
         try {
-            val bytes = ByteArray(CHUNK_FRAMES * PcmDecoder.BYTES_PER_FRAME)
+            inputs.forEach { lanes += Lane(it, speed) }
             val mixed = FloatArray(CHUNK_FRAMES * PcmDecoder.OUT_CHANNELS)
-            val open = BooleanArray(inputs.size) { true }
             var peak = 0f
-            while (open.any { it }) {
+            while (true) {
                 if (cancelled()) throw ExportCancelled()
-                mixed.fill(0f)
-                var frames = 0
-                for ((k, input) in inputs.withIndex()) {
-                    if (!open[k]) continue
-                    val n = readFully(streams[k], bytes)
-                    if (n < bytes.size) open[k] = false
-                    val count = n / PcmDecoder.BYTES_PER_FRAME
-                    frames = maxOf(frames, count)
-                    val shorts = ByteBuffer.wrap(bytes, 0, count * PcmDecoder.BYTES_PER_FRAME)
-                        .order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
-                    var i = 0
-                    while (shorts.hasRemaining()) {
-                        mixed[i++] += shorts.get() / FULL_SCALE * input.gain
-                    }
+                // Topping every lane up to a full chunk means a chunk is
+                // only short once every track has ended, which is the end
+                // of the mix.
+                for (lane in lanes) {
+                    while (!lane.ended && lane.availableFrames < CHUNK_FRAMES) lane.pump()
                 }
+                val frames = minOf(CHUNK_FRAMES, lanes.maxOfOrNull { it.availableFrames } ?: 0)
                 if (frames == 0) break
+                mixed.fill(0f)
+                for (lane in lanes) lane.takeInto(mixed, frames)
                 for (i in 0 until frames * PcmDecoder.OUT_CHANNELS) {
                     peak = maxOf(peak, abs(mixed[i]))
                 }
@@ -143,63 +124,7 @@ internal object Mixer {
             }
             return peak
         } finally {
-            streams.forEach { s -> runCatching { s.close() } }
-        }
-    }
-
-    /**
-     * Pitch-preserving speed change (FR-9) of one track file into [dst],
-     * using the same Sonic WSOLA implementation ExoPlayer applies to each
-     * player in Playback. A fresh instance per track, so no track's audio
-     * shapes another's splice points. Streams in chunks; the output starts
-     * at frame 0 like the input, and the end-of-stream drain writes the
-     * tail Sonic still holds.
-     */
-    @OptIn(UnstableApi::class)
-    private fun stretch(src: File, dst: File, speed: Float, cancelled: () -> Boolean) {
-        val sonic = SonicAudioProcessor()
-        sonic.setSpeed(speed)
-        sonic.setPitch(1f)
-        sonic.configure(
-            AudioProcessor.AudioFormat(
-                PcmDecoder.OUT_RATE,
-                PcmDecoder.OUT_CHANNELS,
-                android.media.AudioFormat.ENCODING_PCM_16BIT,
-            ),
-        )
-        // configure() only stages the format; flush() applies it.
-        sonic.flush()
-        try {
-            BufferedInputStream(FileInputStream(src)).use { input ->
-                BufferedOutputStream(FileOutputStream(dst)).use { output ->
-                    val drain = SonicDrain(output)
-                    val bytes = ByteArray(CHUNK_FRAMES * PcmDecoder.BYTES_PER_FRAME)
-                    // Sonic reads shorts in the buffer's own byte order, so the
-                    // file's little-endian order is stated, not assumed.
-                    val queue = ByteBuffer.allocateDirect(bytes.size).order(ByteOrder.LITTLE_ENDIAN)
-                    while (true) {
-                        if (cancelled()) throw ExportCancelled()
-                        val n = readFully(input, bytes)
-                        val whole = n - n % PcmDecoder.BYTES_PER_FRAME
-                        if (whole > 0) {
-                            queue.clear()
-                            queue.put(bytes, 0, whole)
-                            queue.flip()
-                            // queueInput takes the whole buffer, so it is free
-                            // to refill on the next chunk.
-                            sonic.queueInput(queue)
-                            drain.from(sonic)
-                        }
-                        if (n < bytes.size) break
-                    }
-                    sonic.queueEndOfStream()
-                    while (!sonic.isEnded) {
-                        if (!drain.from(sonic)) break
-                    }
-                }
-            }
-        } finally {
-            sonic.reset()
+            lanes.forEach { it.close() }
         }
     }
 
@@ -213,26 +138,130 @@ internal object Mixer {
         return total
     }
 
-    /** Writes Sonic's output to a little-endian PCM stream, reusing its buffers. */
+    /**
+     * One track in a pass: its decoded file, its own Sonic (pitch-kept
+     * speed change, FR-9, the same WSOLA implementation ExoPlayer applies
+     * to each player in Playback) and a queue of samples not yet mixed.
+     * The queue only ever holds under one chunk plus what Sonic returned
+     * for the last chunk read, and its buffers are reused.
+     */
     @OptIn(UnstableApi::class)
-    private class SonicDrain(private val output: OutputStream) {
-        private var shorts = ShortArray(0)
-        private var bytes = ByteArray(0)
-
-        /** Returns whether any output was written. */
-        fun from(sonic: SonicAudioProcessor): Boolean {
-            val out = sonic.output.order(ByteOrder.nativeOrder())
-            val n = out.remaining() / BYTES_PER_SAMPLE
-            if (n == 0) return false
-            if (shorts.size < n) {
-                shorts = ShortArray(n)
-                bytes = ByteArray(n * BYTES_PER_SAMPLE)
+    private class Lane(private val input: MixInput, speed: Float?) {
+        private val sonic: SonicAudioProcessor? = speed?.let { s ->
+            SonicAudioProcessor().apply {
+                setSpeed(s)
+                setPitch(1f)
+                configure(
+                    AudioProcessor.AudioFormat(
+                        PcmDecoder.OUT_RATE,
+                        PcmDecoder.OUT_CHANNELS,
+                        android.media.AudioFormat.ENCODING_PCM_16BIT,
+                    ),
+                )
+                // configure() only stages the format; flush() applies it.
+                // The metadata overload: from media3 1.8 Sonic implements only
+                // that one, and the no-argument flush() throws.
+                flush(AudioProcessor.StreamMetadata.DEFAULT)
             }
-            out.asShortBuffer().get(shorts, 0, n)
-            ByteBuffer.wrap(bytes, 0, n * BYTES_PER_SAMPLE).order(ByteOrder.LITTLE_ENDIAN)
-                .asShortBuffer().put(shorts, 0, n)
-            output.write(bytes, 0, n * BYTES_PER_SAMPLE)
+        }
+        // Opened after Sonic, so a Sonic that fails to set up leaks no file.
+        private val stream: InputStream = BufferedInputStream(FileInputStream(input.pcm))
+        private val bytes = ByteArray(CHUNK_FRAMES * PcmDecoder.BYTES_PER_FRAME)
+
+        // Sonic reads shorts in the buffer's own byte order, so the file's
+        // little-endian order is stated, not assumed.
+        private val queue = ByteBuffer.allocateDirect(bytes.size).order(ByteOrder.LITTLE_ENDIAN)
+        private var fifo = ShortArray(bytes.size / BYTES_PER_SAMPLE)
+        private var head = 0
+        private var tail = 0
+
+        /** The file is read to its end and Sonic fully drained. */
+        var ended = false
+            private set
+
+        val availableFrames: Int get() = (tail - head) / PcmDecoder.OUT_CHANNELS
+
+        /** Reads one chunk of the file and queues what it yields. */
+        fun pump() {
+            val n = readFully(stream, bytes)
+            // A trailing partial frame is dropped, as the decoder never
+            // writes one.
+            val whole = n - n % PcmDecoder.BYTES_PER_FRAME
+            val atEnd = n < bytes.size
+            if (sonic == null) {
+                if (whole > 0) {
+                    val shorts = ByteBuffer.wrap(bytes, 0, whole).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+                    val count = shorts.remaining()
+                    shorts.get(room(count), tail, count)
+                    tail += count
+                }
+                if (atEnd) ended = true
+                return
+            }
+            if (whole > 0) {
+                queue.clear()
+                queue.put(bytes, 0, whole)
+                queue.flip()
+                // queueInput takes the whole buffer, so it is free to refill
+                // on the next chunk.
+                sonic.queueInput(queue)
+                drain(sonic)
+            }
+            if (atEnd) {
+                sonic.queueEndOfStream()
+                while (!sonic.isEnded) {
+                    if (!drain(sonic)) break
+                }
+                ended = true
+            }
+        }
+
+        /**
+         * Adds up to [frames] queued frames, times the gain, into [mixed].
+         * Past what is queued the lane adds nothing: an ended track is
+         * silence, and a live one always has a full chunk queued.
+         */
+        fun takeInto(mixed: FloatArray, frames: Int) {
+            val count = minOf(frames * PcmDecoder.OUT_CHANNELS, tail - head)
+            for (i in 0 until count) {
+                mixed[i] += fifo[head + i] / FULL_SCALE * input.gain
+            }
+            head += count
+        }
+
+        fun close() {
+            runCatching { stream.close() }
+            sonic?.reset()
+        }
+
+        /** Returns whether Sonic had any output. */
+        private fun drain(sonic: SonicAudioProcessor): Boolean {
+            val out = sonic.output.order(ByteOrder.nativeOrder())
+            val count = out.remaining() / BYTES_PER_SAMPLE
+            if (count == 0) return false
+            out.asShortBuffer().get(room(count), tail, count)
+            tail += count
             return true
+        }
+
+        /**
+         * Makes space for [count] more samples at [tail]: mixed samples are
+         * dropped from the front first, and the array only grows when the
+         * unmixed ones plus [count] do not fit.
+         */
+        private fun room(count: Int): ShortArray {
+            if (tail + count <= fifo.size) return fifo
+            val live = tail - head
+            if (live + count > fifo.size) {
+                val grown = ShortArray(maxOf(live + count, fifo.size * 2))
+                System.arraycopy(fifo, head, grown, 0, live)
+                fifo = grown
+            } else {
+                System.arraycopy(fifo, head, fifo, 0, live)
+            }
+            head = 0
+            tail = live
+            return fifo
         }
     }
 }

@@ -540,7 +540,10 @@ void main() {
       await settle(tester);
       expect(service.exports, isEmpty);
       expect(h.clickPlans.length, plansBefore);
-      expect(find.text(ExportMessages.generationFailed), findsOneWidget);
+      // L-c: Retry cannot help, so the banner says why and offers none.
+      expect(find.text(ExportMessages.nothingToExport), findsOneWidget);
+      expect(find.text(ExportMessages.generationFailed), findsNothing);
+      expect(find.text(ExportMessages.retry), findsNothing);
       expect(find.text(ExportMessages.successTitle), findsNothing);
     });
 

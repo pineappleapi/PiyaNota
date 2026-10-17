@@ -62,9 +62,14 @@ android {
 
 dependencies {
     // Sonic time-stretch for the export (FR-9 pitch kept). Already in the
-    // APK through just_audio's ExoPlayer, pinned to the same version so the
-    // export stretches exactly as Playback does.
-    implementation("androidx.media3:media3-common:1.4.1")
+    // APK through just_audio's ExoPlayer, and Gradle resolves both to the
+    // higher version, so the export always runs Playback's Sonic. Declared
+    // at the version just_audio brings in (check with `gradlew
+    // :app:dependencies`), so this line says what actually ships.
+    implementation("androidx.media3:media3-common:1.9.0")
+
+    // JVM tests of the export mixer (Sonic runs on the plain JVM).
+    testImplementation("junit:junit:4.13.2")
 }
 
 kotlin {

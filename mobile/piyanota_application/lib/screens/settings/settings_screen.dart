@@ -94,6 +94,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   int _tempo = ScoreDetails.defaultTempo;
   int _savedTempo = ScoreDetails.defaultTempo;
   int _tempoSaveSeq = 0;
+
+  /// The attempt [_savedTempo] came from, so an older save finishing late
+  /// cannot overwrite a newer one that already succeeded.
+  int _savedTempoSeq = 0;
   bool _prefsLoaded = false;
 
   @override
@@ -148,8 +152,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     try {
       await ref.read(settingsPrefsServiceProvider).setDefaultTempo(bpm);
       // SharedPreferences applies writes in call order, so a success here
-      // means bpm is what is stored now unless a later save follows it.
-      if (attempt == _tempoSaveSeq) _savedTempo = bpm;
+      // means bpm is on disk at least until a later save lands. Recorded
+      // even while a newer save is in flight: if that one fails, this is
+      // the value to roll back to.
+      if (attempt > _savedTempoSeq) {
+        _savedTempoSeq = attempt;
+        _savedTempo = bpm;
+      }
     } catch (e, stack) {
       debugPrint('Default tempo not saved: $e\n$stack');
       // Only the latest gesture may roll back; an older failure must not

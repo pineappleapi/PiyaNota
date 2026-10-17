@@ -32,9 +32,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  *    The permission is persisted so Open folder works afterwards.
  *  - listNames({treeUri}) -> display names already in that folder (AC15).
  *  - render({inputs: [{path, gain}], speed, outPath}) -> null. Decodes
- *    each input, time-stretches each one separately (pitch kept, as
- *    Playback does per player), mixes with the gains and encodes one MP3
- *    (AC13, AC23).
+ *    each input to a temp PCM file, time-stretches each one separately
+ *    (pitch kept, as Playback does per player) in memory, mixes with the
+ *    gains and encodes one MP3 (AC13, AC23). Temp space is the decoded
+ *    files plus the MP3, whatever the speed: no stretched copy is kept.
  *  - save({treeUri, fileName, srcPath}) -> {fileName, location} (AC16).
  *  - openFolder({treeUri}) -> whether a file manager could be opened.
  *

@@ -69,6 +69,10 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
   bool _busy = false;
   ExportFailure? _failure;
 
+  /// The last failure was every ticked voice failing before the file was
+  /// made, which Retry cannot fix.
+  bool _nothingLeft = false;
+
   /// The folder of the last attempt, so Retry after a dropped connection
   /// or a failed encode does not ask for it again.
   String? _treeUri;
@@ -184,9 +188,11 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
               padding: const EdgeInsets.fromLTRB(0, 0, 8, 16),
               child: AuthErrorBanner(
                 key: const ValueKey('export-error'),
-                message: _messageFor(failure),
-                actionLabel: ExportMessages.retry,
+                message: _nothingLeft
+                    ? ExportMessages.nothingToExport
+                    : _messageFor(failure),
                 // Nothing left to retry once every ticked voice failed.
+                actionLabel: _nothingLeft ? null : ExportMessages.retry,
                 onAction: _busy || !_selection.canDownload ? null : _retry,
               ),
             ),
@@ -224,7 +230,9 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
     setState(() {
       _busy = true;
       _failure = null;
+      _nothingLeft = false;
     });
+    final selection = _selection;
     var saved = false;
     try {
       final treeUri = _treeUri ?? await service.pickFolder();
@@ -235,7 +243,7 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
         service: service,
         controller: ref.read(provider.notifier),
         state: ref.read(provider),
-        selection: _selection,
+        selection: selection,
         title: widget.title,
         treeUri: treeUri,
       );
@@ -246,7 +254,13 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
       Navigator.of(context)
           .pop<ExportSaved>((result: result, treeUri: treeUri));
     } on ExportFailure catch (failure) {
-      if (mounted) setState(() => _failure = failure);
+      if (mounted) {
+        setState(() {
+          _failure = failure;
+          _nothingLeft = failure is GenerationFailed &&
+              !exportableSelection(ref.read(provider), selection).canDownload;
+        });
+      }
     } finally {
       if (mounted && _busy) setState(() => _busy = false);
       if (mounted && !saved) _closeIfPlaybackGone();

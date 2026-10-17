@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -42,9 +44,19 @@ class _RecordingTempoPrefs extends SettingsPrefsService {
   final List<int> saves = [];
   bool fail = false;
 
+  /// When set, each save waits on its own entry in [held]: completing it
+  /// with true lets the save through, false fails it.
+  bool hold = false;
+  final List<Completer<bool>> held = [];
+
   @override
   Future<void> setDefaultTempo(int bpm) async {
     saves.add(bpm);
+    if (hold) {
+      final gate = Completer<bool>();
+      held.add(gate);
+      if (!await gate.future) throw PlatformException(code: 'disk-full');
+    }
     if (fail) throw PlatformException(code: 'disk-full');
     await super.setDefaultTempo(bpm);
   }
@@ -429,6 +441,29 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text(SettingsMessages.tempoValue(100)), findsOneWidget);
       expect(find.text(SettingsMessages.saveFailed), findsOneWidget);
+    });
+
+    testWidgets('an older save that lands while a newer one is in flight '
+        'is what a later failure rolls back to', (tester) async {
+      final harness = _Harness(session: _liveSession());
+      await harness.pump(tester);
+      await _scrollTo(tester, _tempoValue);
+      harness.tempoPrefs.hold = true;
+      await tester.tap(find.byIcon(Icons.add_rounded));
+      await tester.pump();
+      await tester.tap(find.byIcon(Icons.add_rounded));
+      await tester.pump();
+      expect(harness.tempoPrefs.saves, [91, 92]);
+
+      harness.tempoPrefs.held[0].complete(true);
+      await tester.pumpAndSettle();
+      harness.tempoPrefs.held[1].complete(false);
+      await tester.pumpAndSettle();
+
+      // 91 is on disk, so the failed 92 falls back to it, not to 90.
+      expect(find.text(SettingsMessages.tempoValue(91)), findsOneWidget);
+      expect(find.text(SettingsMessages.saveFailed), findsOneWidget);
+      expect(await SettingsPrefsService().getDefaultTempo(), 91);
     });
 
     testWidgets('cannot go below 30', (tester) async {

@@ -49,8 +49,8 @@ ExportSelection exportableSelection(
 /// Playback speed. A ticked voice the Mixer silences stays in at gain 0,
 /// so the file still runs the length of the piece.
 ///
-/// Throws [GenerationFailed] when no ticked voice is left: a click-only or
-/// empty file must never be saved and reported as a success.
+/// Throws [GenerationFailed] when no ticked voice is left: a file with no
+/// ticked voice must never be saved and reported as a success.
 ExportJob buildExportJob(
   PlaybackState state,
   ExportSelection selection,
