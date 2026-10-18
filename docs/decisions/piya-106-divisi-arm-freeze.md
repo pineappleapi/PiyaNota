@@ -291,3 +291,29 @@ perfectly, so they say nothing about real photos (synthetic divisi lacks "div." 
     and the arm's `divisi_train_strips` = 6314 = `CONTROL_ROWS`.
   - The real CPM share per epoch falls from about 43% (Phase 2) to about 37% in arm and control alike, so canary
     drift is compared arm vs control as well as against Phase 2's logged canary.
+- **Train-1 result (2026-10-18): FAIL, both arms, both seeds.** Kernel `piamac/piyanota-divisi-train-1` at
+  `22c49b2`, all 6 runs rc 0; logs and metrics in `D:/PiyaNota/datasets/phase2_divisi_train1`.
+  - A5 epoch-1 gate (chordnote recall >= 0.50): arm .194 (s1) / .273 (s2), head-only .163 / .127. Final for both.
+  - Diagnostic only (epoch 3): arm chordnote P .67-.69, R .54-.60; head-only P .95, R .28-.30.
+  - Non-chord gates held: hallucination 0, canary under caps, val SER within 2x.
+  - Outcome (ml-cv-lead, 2026-10-18): v1 ships with chords off; Phase 4 is scored with Phase 2 alone; no arm or
+    head-only checkpoint is run on Phase 4. Same-stem divisi is a known silent loss in v1, counted in the Phase 4
+    report.
+  - Zero-GPU diagnostic (head-level, synthetic divisi val): the frozen v1 features do not carry a second notehead
+    (linear probe peaks at P .67 / R .54), and arm recall follows the training count per interval (2nds 1.8% of
+    train chord columns, read .03-.16). Detail: `piya-106-divisi-a6-design.md` section 2.
+- **A6 (2026-10-18, route B': full fine-tune on a rebuilt, balanced divisi corpus; user-approved, ml-cv-lead
+  signed off with fixes; frozen before any build and with no Phase 4 data seen).** The full spec is
+  `docs/decisions/piya-106-divisi-a6-design.md` (sections 3-9), frozen as of this entry. It is a new experiment,
+  not a re-run of train-1. Frozen values:
+  - 8 epochs, lr 3e-5, init Phase 2 seed k, CPM replay 0.5, divisi share 20% ±3 pp of the synthetic (non-CPM)
+    strips per epoch (train-1 realised 20.8%), drawn fresh each epoch, seeds 1 and 2.
+  - Corpus mix as design section 4: 60/40 free/copied members; dyads 2nd 12, 3rd 16, 4th 12, 5th 12, 6th 12,
+    7th 5 (minor only), 8ve 16 (%); triads 15%; >= 30% of 2nds stems down; durations whole 12, half 20, dotted 15,
+    quarter 33, beamed 20; >= 12% of chord columns with a drawn accidental; members within voice range + 2
+    semitones, clipped to steps -5..13; choral-conductor's spelling and shape rules; 25% chord-free strips, the
+    rest 20-60% chord columns; Gootville held out of chord training; ties 8% only after a G1b tie re-check.
+  - Split: inherited from Phase 2; tuning/test halves are crc32 even/odd val pieces; a separate test render (3
+    distinct injection seeds, 5 fonts) targets >= 600 in-font and >= 300 Gootville heads per bucket.
+  - Gates and kill rule: design section 6. Selection, tie-break and the epoch-4 2nd fallback: design section 9.
+  - The control arm is dropped; the confound is recorded in design section 9.
