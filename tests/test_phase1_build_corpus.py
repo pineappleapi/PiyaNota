@@ -286,7 +286,8 @@ def test_a6_tie_path_chords_both_sides(monkeypatch: pytest.MonkeyPatch) -> None:
 # (merge kind, duration class, enabling flag, a chorale offering several such pairs)
 MERGE_CASES = [("whole", "whole", "MERGE_TO_WHOLE", "bwv66.6"), ("half", "half", "MERGE_TO_HALF", "bwv66.6"),
                ("dotted_half", "dotted", "MERGE_TO_DOTTED_HALF", "bwv17.7"),
-               ("dotted_quarter", "dotted", "MERGE_TO_DOTTED_QUARTER", "bwv102.7")]
+               ("dotted_quarter", "dotted", "MERGE_TO_DOTTED_QUARTER", "bwv102.7"),
+               ("dotted_half_3q", "dotted", "MERGE_TO_DOTTED_HALF_3Q", "bwv66.6")]
 
 
 def _bar_lengths(parts: list[music21.stream.Part]) -> list[list[float]]:

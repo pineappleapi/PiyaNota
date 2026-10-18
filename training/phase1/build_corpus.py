@@ -114,10 +114,15 @@ MERGE_TO_WHOLE = True                # a whole 4/4 or 2/2 bar
 MERGE_TO_HALF = True                 # quarter + quarter
 MERGE_TO_DOTTED_HALF = True          # half + quarter
 MERGE_TO_DOTTED_QUARTER = True       # quarter (on a beat) + eighth
+MERGE_TO_DOTTED_HALF_3Q = True       # quarter + quarter + quarter (ruling 2026-10-18, round 3: dotted supply)
 # Allowed start offsets (quarter lengths into the bar) of the merged note, per meter: beats 1/3 of 4/4, beat 1 of
 # 2/2 and 3/4 for a half; beats 1/2 of 4/4 and beat 1 of 3/4 for a dotted half.
 MERGE_HALF_STARTS: dict[str, tuple[float, ...]] = {"4/4": (0.0, 2.0), "2/2": (0.0,), "3/4": (0.0,)}
 MERGE_DOTTED_HALF_STARTS: dict[str, tuple[float, ...]] = {"4/4": (0.0, 1.0), "3/4": (0.0,)}
+MERGE_DOTTED_HALF_3Q_STARTS: dict[str, tuple[float, ...]] = {"4/4": (0.0, 1.0), "3/4": (0.0,)}
+# A duration class whose running share is above its target by more than this is not drawn at all (round 3): the
+# deficit floor alone still let quarters and beamed notes fill strips once the scarce classes ran out.
+DURATION_OVER_TARGET = 0.01
 # Share of chord-bearing strips expected to end below CHORD_DENSITY[0] and be restored to plain; the chord-free draw
 # is lowered by it so all plain strips together aim at P_CHORD_FREE_STRIP (3-piece smoke, round 1).
 EXPECTED_DENSITY_SHORT = 0.05
@@ -581,12 +586,15 @@ def _base_conflicts(base: music21.pitch.Pitch, vi: int, t: float, t_end: float,
 
 def _merge_pairs(measure: music21.stream.Measure, meter: str | None
                  ) -> list[tuple[str, str, list[music21.note.Note], float | None]]:
-    """Two-note merges in one bar: (merge kind, duration class, notes, offset of the eighth that loses its beam).
+    """Two- or three-note merges in one bar: (merge kind, duration class, notes, offset of the eighth that loses its
+    beam).
 
     Why: Bach offers ~3% chord-capable dotted and ~6% half notes against 15% / 20% targets (ruling 2026-10-18), so
     adjacent notes are folded into one note of the target length, only at the metric positions where that note is
     normal notation and never across a barline. A dotted quarter takes the eighth of a quarter-eighth-eighth figure;
     the remaining eighth then stands alone, so its two-note beam is dropped (it becomes a flagged eighth).
+    Half + quarter alone left dotted at 11% against 15% (10-piece smoke, round 2), so three plain quarters starting on
+    beat 1 or 2 of 4/4 or beat 1 of 3/4 also fold into a dotted half (`dotted_half_3q`).
     """
     if meter is None:
         return []
@@ -606,6 +614,12 @@ def _merge_pairs(measure: music21.stream.Measure, meter: str | None
         if MERGE_TO_DOTTED_HALF and _is_plain_type(a, "half") and _is_plain_type(b, "quarter") \
                 and off in MERGE_DOTTED_HALF_STARTS.get(meter, ()):
             out.append(("dotted_half", "dotted", [a, b], None))
+        c3 = items[k + 2] if k + 2 < len(items) else None
+        if (MERGE_TO_DOTTED_HALF_3Q and c3 is not None and _plain(c3) and _is_plain_type(a, "quarter")
+                and _is_plain_type(b, "quarter") and _is_plain_type(c3, "quarter")
+                and float(measure.elementOffset(c3)) == off + 2 * float(a.quarterLength)
+                and off in MERGE_DOTTED_HALF_3Q_STARTS.get(meter, ())):
+            out.append(("dotted_half_3q", "dotted", [a, b, c3], None))
         if MERGE_TO_DOTTED_QUARTER and _is_plain_type(a, "quarter") and _is_plain_type(b, "eighth") \
                 and off % beat == 0:
             beams = b.beams.beamsList
@@ -673,6 +687,10 @@ def _draw_members(base: music21.pitch.Pitch, mi: int, offset: float, t: float, t
     `class_weights` cover A6_INTERVALS then the triad. Returns the bucket name instead when MAX_REDRAWS attempts all
     fail, so the caller logs a shortfall; the class is drawn once and kept, so a hard class shows up as shortfall,
     not as a silent swap. Each member tries its preferred source (free or copied) first and the other one second.
+    While copied is under target (`prefer_copied`, ruling round 3) a member is copied whenever a copied candidate
+    passes every check (range/member_ok, cross-relation, crossing budget); a dyad whose drawn class has none switches
+    to another dyad class still in deficit that has one, and only then falls back to a free member. Triad members
+    keep their drawn class (they are not steered per class).
     Crossing is judged over the whole span (a member crossing the adjacent voice anywhere counts). Copied members
     may be any pitch another voice sounds in the span (`_span_pitches`), so a copied member is always rejected
     when another voice sounds the same step and octave with a different alter during the span. For a merged note
@@ -684,6 +702,24 @@ def _draw_members(base: music21.pitch.Pitch, mi: int, offset: float, t: float, t
     above = [p.ps for s, e, p in sounding[vi - 1] if s < t_end and e > t] if vi > 0 else []
     below = [p.ps for s, e, p in sounding[vi + 1] if s < t_end and e > t] if vi + 1 < len(sounding) else []
     weights = [w for _, _, w in A6_INTERVALS]
+
+    def fits(q: music21.pitch.Pitch, generic: int, chosen: list[music21.pitch.Pitch]) -> bool:
+        semis = abs(q.ps - base.ps)
+        if abs(q.alter) > 1 or (generic == 8 and semis != OCTAVE_SEMITONES) or (
+                generic == 7 and semis != MINOR_SEVENTH_SEMITONES):
+            return False
+        if not member_ok([base] + chosen + [q], vi):
+            return False
+        if any(o.step == q.step and o.octave == q.octave and o.alter != q.alter for o in span_others):
+            return False
+        crosses = bool((above and q.ps > min(above)) or (below and q.ps < max(below)))
+        return not (crosses and crossing + 1 > MAX_CROSSING * (done + 1))
+
+    def copied_fits(ci: int, chosen: list[music21.pitch.Pitch]) -> list[music21.pitch.Pitch]:
+        generic = A6_INTERVALS[ci][1]
+        return [q for q in _divisi_candidates(base, [base] + chosen, span_others, vi, frozenset({generic}))
+                if fits(q, generic, chosen)]
+
     dyad = drng.choices(range(len(A6_INTERVALS) + 1), weights=class_weights)[0]
     triad = dyad == len(A6_INTERVALS)
     bucket = "triad" if triad else A6_INTERVALS[dyad][0]
@@ -692,15 +728,26 @@ def _draw_members(base: music21.pitch.Pitch, mi: int, offset: float, t: float, t
         members: list[music21.pitch.Pitch] = []
         sources: list[str] = []
         for ci in classes:
+            fitting = copied_fits(ci, members) if prefer_copied else []
+            if prefer_copied and not fitting and not triad:
+                deficit = [cj for cj in range(len(A6_INTERVALS)) if cj != ci
+                           and class_weights[cj] > DEFICIT_FLOOR * A6_INTERVALS[cj][2]]
+                options = [(cj, f) for cj in deficit for f in [copied_fits(cj, members)] if f]
+                if options:
+                    ci, fitting = drng.choices(options, weights=[class_weights[cj] for cj, _ in options])[0]
+                    bucket = A6_INTERVALS[ci][0]
             generic = A6_INTERVALS[ci][1]
             copied = _divisi_candidates(base, [base] + members, span_others, vi, frozenset({generic}))
             chromatic = [p for p in copied if _chromatic(p, fifths)]
             p: music21.pitch.Pitch | None = None
             src = "copied"
-            if prefer_chromatic and attempt == 0 and not members and chromatic:
+            if fitting:
+                chromatic_fit = [q for q in fitting if _chromatic(q, fifths)]
+                p = drng.choice(chromatic_fit if prefer_chromatic and not members and chromatic_fit else fitting)
+            elif prefer_chromatic and attempt == 0 and not members and chromatic and not prefer_copied:
                 p = drng.choice(chromatic)
             else:
-                for src in (("copied", "free") if prefer_copied else ("free", "copied")):
+                for src in (("free",) if prefer_copied else ("free", "copied")):
                     if src == "free":
                         p = free_member(base, generic, drng.choice((1, -1)), in_force, key)
                     else:
@@ -868,7 +915,10 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                 use_ties = bool(ties) and (not plain or drng.random() < P_TIE_CHORD)
                 choose_from = ties if use_ties else plain
                 dur_done = collections.Counter(str(r["cls"]) for r in records) + stats["duration"]
-                offered = [c for c in dur_names if any(s.cls == c for s in choose_from)]
+                offered = [c for c in dur_names if any(s.cls == c for s in choose_from)
+                           and not (done and dur_done[c] / done > A6_DURATIONS[c] + DURATION_OVER_TARGET)]
+                if not offered:
+                    break                      # only over-target classes left; density-short undo may follow
                 cls_w = _deficit_weights([A6_DURATIONS[c] for c in offered], [dur_done[c] for c in offered], done)
                 cls = drng.choices(offered, weights=cls_w)[0]
                 of_cls = [s for s in choose_from if s.cls == cls]
