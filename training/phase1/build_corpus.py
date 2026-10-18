@@ -1325,6 +1325,17 @@ def check_labels(mei_path: Path, plan: PiecePlan) -> None:
         plan.tokens_per_voice[VOICES[s - 1]] = sum(len(t) for t in systems)
 
 
+def missing_pieces(requested: set[str], log: list[dict[str, object]]) -> tuple[list[str], dict[str, str]]:
+    """(requested pieces not built, reason per skipped piece).
+
+    A requested piece is missing unless the log says "included": one never reached AND one the build skipped
+    (unsupported source, ConversionError). Why: a skipped test-half piece must not shrink the test set unseen.
+    """
+    built = {str(e["piece_id"]) for e in log if e["status"] == "included"}
+    skipped = {str(e["piece_id"]): str(e.get("reason", "")) for e in log if e["status"] != "included"}
+    return sorted(requested - built), skipped
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, required=True)
@@ -1412,11 +1423,11 @@ def main() -> None:
     included = sum(1 for e in log if e["status"] == "included")
     print(f"included {included} / {len(log)}")
     if args.divisi is not None:
-        missing = sorted(set(split_of) - {str(e["piece_id"]) for e in log})
+        missing, skipped = missing_pieces(only, log)
         realised: dict[str, object] = {k: dict(v) for k, v in totals.items()}
         realised.update(scalar_totals)
-        summary = {"pieces_missing_from_build": missing, "seed": args.divisi_seed, "realised": realised,
-                   **list_totals, "stems": stems_all}
+        summary = {"pieces_missing_from_build": missing, "skipped_pieces": skipped, "seed": args.divisi_seed,
+                   "realised": realised, **list_totals, "stems": stems_all}
         (args.out / "divisi_summary.json").write_text(json.dumps(summary, indent=1), encoding="utf-8")
         print(json.dumps(realised, indent=1))
 

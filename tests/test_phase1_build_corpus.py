@@ -35,6 +35,13 @@ def _measure(n: int, attrs: str = "", note_id: str = "") -> str:
             '</layer></staff></measure>')
 
 
+def test_skipped_and_unreached_pieces_count_as_missing() -> None:
+    log = [{"piece_id": "a", "status": "included"}, {"piece_id": "b", "status": "skipped", "reason": "unsupported: x"}]
+    missing, skipped = build_corpus.missing_pieces({"a", "b", "c"}, log)
+    assert missing == ["b", "c"] and skipped == {"b": "unsupported: x"}
+    assert build_corpus.missing_pieces({"a"}, log) == ([], {"b": "unsupported: x"})
+
+
 def test_repeats_become_double_or_plain_barlines() -> None:
     score = _score(_measure(1, ' left="rptstart"') + _measure(2, ' right="rptend"') + _measure(3, ' right="rptboth"')
                    + _measure(4, ' right="end"'))

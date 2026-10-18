@@ -44,6 +44,7 @@ from torch.utils.data import ConcatDataset, DataLoader, Dataset, Sampler, Subset
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "phase1"))   # divisi_halves
 from build_manifest import FORBIDDEN_CLASS, WATCH_CLASSES, build, token_class  # noqa: E402
 from stage3_transcription import (BLANK_IDX, CRNN, IDX_TO_SYM, SYM_TO_IDX, VOCAB, VOCAB_EXT_CHORD_TUPLET,  # noqa: E402
                                   VOCAB_SIZE, _greedy_ctc_decode, compute_ser)
@@ -194,6 +195,21 @@ def cpm_samples(root: str) -> list[tuple[str, str | None, list[int]]]:
         if label:
             out.append((img_path, distorted if os.path.exists(distorted) else None, label))
     return out
+
+
+def tuning_half_rows(rows: list[dict[str, object]], groups: dict[str, str]) -> list[dict[str, object]]:
+    """Divisi val rows of the tuning half only (A6.1): test-half pieces are never scored during training.
+
+    Why: per-epoch chord metrics steer checkpoint selection, so any test-half row seen there would make the test half
+    a tuning set. Halves are tune groups (divisi_halves), not pieces.
+
+    Raises:
+        AssertionError: a test-half row survived the filter.
+    """
+    import divisi_halves  # noqa: PLC0415 (sibling phase1 folder on sys.path)
+    kept = [r for r in rows if not divisi_halves.is_test_half(str(r["piece"]), groups)]
+    assert not any(divisi_halves.is_test_half(str(r["piece"]), groups) for r in kept)
+    return kept
 
 
 class ReplaySampler(Sampler[int]):
@@ -444,6 +460,8 @@ def main() -> int:
     ap.add_argument("--divisi-recut-out", type=Path, default=None,
                     help="cut divisi corpus; its strips with a chordnote join train/val by their inherited split")
     ap.add_argument("--expect-divisi-manifest-sha", default=None)
+    ap.add_argument("--halves", type=Path, default=None,
+                    help="A6.1: halves.json from the build kernel; per-epoch divisi val uses the tuning half only")
     ap.add_argument("--divisi-share", type=float, default=None,
                     help="A6: divisi strips are this fraction of the synthetic strips each epoch, a fresh draw from "
                          "the whole divisi train pool (chord-free strips kept); omit for the train-1 filter and mix")
@@ -461,6 +479,8 @@ def main() -> int:
         raise ValueError("--replay-ratio must be in [0, 1)")
     if a.divisi_recut_out is not None and not a.vocab_ext:
         raise ValueError("--divisi-recut-out needs --vocab-ext")
+    if a.divisi_recut_out is not None and a.halves is None:
+        raise ValueError("--divisi-recut-out needs --halves (test-half pieces must not be scored during training)")
     if (a.divisi_share is not None or a.holdout_chord_font) and a.divisi_recut_out is None:
         raise ValueError("--divisi-share and --holdout-chord-font need --divisi-recut-out")
     if a.divisi_share is not None and not 0.0 < a.divisi_share < 1.0:
@@ -507,7 +527,11 @@ def main() -> int:
         val_tunes = {r["tune"] for r in val_rows + divisi_val}
         if train_tunes & val_tunes:
             raise SystemExit(f"split assert: {len(train_tunes & val_tunes)} tunes on both sides")
-        divisi_info = {"divisi_manifest_sha256": dsha, "divisi_val_strips": len(divisi_val)}
+        import divisi_halves  # noqa: PLC0415
+        n_val_all = len(divisi_val)
+        divisi_val = tuning_half_rows(divisi_val, divisi_halves.load_groups(a.halves))
+        divisi_info = {"divisi_manifest_sha256": dsha, "divisi_val_strips": len(divisi_val),
+                       "divisi_val_strips_test_half_excluded": n_val_all - len(divisi_val)}
         if a.holdout_chord_font:
             held = a.holdout_chord_font.casefold()
             before = len(dtrain)

@@ -317,3 +317,31 @@ perfectly, so they say nothing about real photos (synthetic divisi lacks "div." 
     distinct injection seeds, 5 fonts) targets >= 600 in-font and >= 300 Gootville heads per bucket.
   - Gates and kill rule: design section 6. Selection, tie-break and the epoch-4 2nd fallback: design section 9.
   - The control arm is dropped; the confound is recorded in design section 9.
+  - **A6.1 pre-launch amendment (2026-10-18; senior-reviewer "fix first", ml-cv-lead GO-with-changes).** Written before
+    any test build, any Kaggle run and any training; it replaces the "Split" bullet's halves and test-seed count.
+    1. **Halves by tune group, not by piece.** `training/phase1/divisi_halves.py`: pieces whose soprano starts with
+       the same first 12 melodic intervals (semitones, transposition-invariant hash; shorter melodies use all) or
+       that carry the same hymn title form one group; group key = smallest piece id; a piece with no melody is its own
+       group. Test half = odd `crc32(group key + "__divisi")`. Never re-rolled, imbalance is reported. The kernel,
+       `eval_divisi_a6.py` and `train_phase2.py` all use this one function; the kernel writes `halves.json` (groups,
+       half per val piece, which test pieces share a tune with a Phase 2 train piece).
+    2. **Adaptive test seeds** `divisi-t1`..`divisi-t20`, frozen in `test_plan.json` before the first test render
+       (seed list, stopping rule, cap 20, time budget, duplicate rule). Phase A (5 fonts per seed) until every bucket
+       except the 7th has >= 600 unique in-font heads; phase B (Gootville only) until every bucket except the 7th has
+       >= 300 unique Gootville heads. No new seed unless 90 min of the 12 h session would remain after an estimated
+       seed. Counted after cut and manifest from rendered labels. Unique head = (piece, voice, system, column index,
+       chord step set, font), first seed wins; the duplicate rate is reported. Each strip's phase is recorded
+       (`paired` / `gootville_only`). Every test seed's RNG hash must differ from the corpus seed's for the val
+       pieces. The sha256 of every test manifest is written into `test_plan.json` after the last seed.
+    3. **Verdict rules.** A test bucket short of its target is UNDERPOWERED, never PASS (the 7th does not fail the
+       run). The kernel always exits 0 once started and writes `kernel_status.json` with status ok | gate_fail |
+       kernel_error, the failing gates and the test manifest hashes. Skipped or unreached pieces count in
+       `pieces_missing_from_build`. The worker-determinism canary runs before any test-seed build or cut. Gootville
+       absent from the final train manifests is re-checked.
+    6. **No test-half scoring during training.** The per-epoch divisi val chord metrics use tuning-half rows only.
+    7. **Evaluation.** Unique heads (item 2 key) are the unit. The held-out-font delta's primary figure uses `paired`
+       strips only; Gootville recall over all seeds is a diagnostic. Each bucket reports its largest single-piece
+       share of heads and the design effect. `min_bucket_recall` drops tuning-half buckets with fewer than 100 heads
+       (zero included) and lists them as `underpowered_buckets`; an epoch is ineligible only if every bucket is
+       dropped, and `select_epoch` follows that. A clean-subset diagnostic gates only test-half pieces whose group
+       shares no tune with a train piece. The bootstrap stays percentile, B = 1000, seed 0, resampling pieces.

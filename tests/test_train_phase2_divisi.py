@@ -38,3 +38,17 @@ def test_divisi_draw_is_fresh_each_epoch_and_seeded() -> None:
 def test_train1_order_unchanged_without_divisi_args() -> None:
     s = ReplaySampler(6, 5, 3, _gen())
     assert (list(s), list(s)) == TRAIN1_EPOCHS and s.last_epoch_divisi == 0
+
+
+def test_divisi_val_is_tuning_half_only() -> None:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "training" / "phase1"))
+    import divisi_halves as dh
+    from train_phase2 import tuning_half_rows
+
+    pieces = [f"bach_{i:03d}__divisi" for i in range(30)]
+    groups = {p.removesuffix("__divisi"): p.removesuffix("__divisi") for p in pieces}
+    rows = [{"piece": p, "n": i} for i, p in enumerate(pieces)]
+    kept = tuning_half_rows(rows, groups)
+    assert kept and len(kept) < len(rows)
+    assert not any(dh.is_test_half(str(r["piece"]), groups) for r in kept)
+    assert {r["piece"] for r in rows if dh.is_test_half(str(r["piece"]), groups)}.isdisjoint(r["piece"] for r in kept)

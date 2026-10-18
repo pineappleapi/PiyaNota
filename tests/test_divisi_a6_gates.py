@@ -118,9 +118,9 @@ def test_test_render_buckets(tmp_path):
     d = make_test_dir(tmp_path, "t1", 600, 299)
     gates = by_name(g.test_gates([d])[0])
     assert gates["test.3rd.in_font"]["status"] == g.PASS
-    assert gates["test.3rd.held_out"]["status"] == g.FAIL       # 299 < 300
-    assert gates["test.7th.in_font"]["status"] == g.WARN         # absent bucket: warn, not fail
-    assert gates["test.8ve.in_font"]["status"] == g.FAIL
+    assert gates["test.3rd.held_out"]["status"] == g.UNDERPOWERED       # 299 < 300: never PASS
+    assert gates["test.7th.in_font"]["status"] == g.UNDERPOWERED and gates["test.7th.in_font"]["exempt"]
+    assert gates["test.8ve.in_font"]["status"] == g.UNDERPOWERED and not gates["test.8ve.in_font"]["exempt"]
     assert g.test_gates([])[0][0]["status"] == g.NOT_RUN
 
 
@@ -194,3 +194,34 @@ def test_induced_accidentals_report_only():
     s["realised"]["induced_accidentals"] = 10
     gates = by_name(g.summary_gates(s))
     assert gates["induced_accidentals"]["status"] == g.INFO and gates["induced_accidentals"]["value"] == 10
+
+
+def test_unique_heads_count_a_repeated_head_once_and_other_fonts_separately(tmp_path):
+    chord = ["note.quarter-L1", "chordnote-L2"]
+    d1 = make_test_dir(tmp_path, "t1", 2, 1)
+    d2 = tmp_path / "t2"                                  # same strips again (a second seed hits the same heads)
+    (d2 / "manifest").mkdir(parents=True)
+    for name in ("manifest/phase2_manifest.jsonl", "divisi_summary.json"):
+        (d2 / name).write_text((d1 / name).read_text(encoding="utf-8"), encoding="utf-8")
+    rep = g.unique_head_counts([d1, d2])
+    assert rep["counts"]["in_font"]["3rd"] == 2 and rep["counts"]["held_out"]["3rd"] == 1
+    assert rep["chord_columns"] == 6 and rep["duplicate_columns"] == 3 and rep["duplicate_rate"] == 0.5
+    assert g.indexed_chord_columns(["note.half-L1", *chord, "rest.quarter", *chord]) == [
+        (1, "note.quarter-L1", ["chordnote-L2"]), (2, "note.quarter-L1", ["chordnote-L2"])]
+
+
+def test_unique_head_key_uses_column_index_and_step_set():
+    r = {"piece": "p", "voice": "Alto", "system": 0, "font": "Bravura"}
+    a = g.head_key(r, 0, "note.quarter-L1", ["chordnote-L2"])
+    assert a != g.head_key(r, 1, "note.quarter-L1", ["chordnote-L2"])
+    assert a != g.head_key(r, 0, "note.quarter-L1", ["chordnote-L3"])
+    assert a != g.head_key({**r, "font": "Gootville"}, 0, "note.quarter-L1", ["chordnote-L2"])
+
+
+def test_phase_file_splits_counts_by_phase(tmp_path):
+    d1 = make_test_dir(tmp_path, "t1", 1, 1)
+    d2 = make_test_dir(tmp_path, "t2", 0, 1)
+    (d2 / g.PHASE_FILE).write_text(json.dumps({"phase": "gootville_only"}), encoding="utf-8")
+    rep = g.unique_head_counts([d1, d2])
+    assert rep["by_phase"]["paired"]["held_out"]["3rd"] == 1
+    assert "gootville_only" in rep["by_phase"] and rep["by_phase"]["gootville_only"]["held_out"]["3rd"] == 1

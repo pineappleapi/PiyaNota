@@ -131,13 +131,42 @@ def test_empty_recall_bucket_is_missing_status():
     assert g["recall 3rd"]["status"] == "MISSING"
 
 
-def test_min_bucket_recall_reports_missing_and_select_skips_them():
+def test_min_bucket_recall_drops_thin_buckets_and_none_when_all_dropped():
     import eval_divisi_a6 as ev
-    b = {"3rd": [9, 10], "4th": [8, 10]}
-    rec, missing = ev.min_bucket_recall(b, drop_second=False)
-    assert rec == .8 and "5th" in missing and "2nd_up" in missing
-    _, m2 = ev.min_bucket_recall(b, drop_second=True)
-    assert "2nd_up" not in m2 and "5th" in m2
-    rows = [{"min_recall": .99, "P": .97, "canary_ok": True, "missing_buckets": ["7th"]},
-            {"min_recall": .5, "P": .97, "canary_ok": True, "missing_buckets": []}]
+    b = {"3rd": [190, 200], "4th": [160, 200], "5th": [99, 99], "7th": [0, 0]}
+    rec, thin = ev.min_bucket_recall(b, drop_second=False)
+    assert rec == .8 and "5th" in thin and "7th" in thin and "2nd_up" in thin and "3rd" not in thin
+    _, thin2 = ev.min_bucket_recall(b, drop_second=True)
+    assert "2nd_up" not in thin2 and "5th" in thin2
+    assert ev.min_bucket_recall({"3rd": [9, 10]}, drop_second=False)[0] is None
+    assert ev.min_bucket_recall({"4th": [100, 100]}, drop_second=False, floor=100)[0] == 1.0
+
+
+def test_select_epoch_ignores_epochs_with_every_bucket_dropped():
+    rows = [{"min_recall": None, "P": .97, "canary_ok": True},
+            {"min_recall": .5, "P": .97, "canary_ok": True}]
     assert select_epoch(rows) == 2
+    with pytest.raises(ValueError):
+        select_epoch([{"min_recall": None, "P": .97, "canary_ok": True}])
+
+
+def test_cluster_stats_share_and_design_effect():
+    import eval_divisi_a6 as ev
+    s = ev.cluster_stats({"a": 10, "b": 0}, {"a": 10, "b": 10})        # all hits in one piece: rho = 1
+    assert s["max_piece_share"] == .5 and s["design_effect"] == pytest.approx(10.0)
+    iid = ev.cluster_stats({"a": 5, "b": 5}, {"a": 10, "b": 10})       # same rate: no clustering
+    assert iid["design_effect"] == pytest.approx(1.0)
+    assert ev.cluster_stats({"a": 1}, {"a": 4})["design_effect"] is None
+
+
+def test_dedup_columns_counts_a_repeated_head_once():
+    import eval_divisi_a6 as ev
+    toks = ["clef.G-L2", "note.quarter-L3", "chordnote-L5", "note.quarter-L2"]
+    row = {"piece": "p", "voice": "S", "system": 1, "font": "Bravura"}
+    seen: set = set()
+    a, b = head_scores(toks, toks), head_scores(toks, toks)
+    assert ev.dedup_columns(a, row, seen) == 0 and a["bucket"]
+    assert ev.dedup_columns(b, row, seen) == 1 and b["bucket"] == {}
+    row2 = {**row, "font": "Gootville"}
+    c = head_scores(toks, toks)
+    assert ev.dedup_columns(c, row2, seen) == 0 and c["bucket"]

@@ -34,7 +34,7 @@ LEDGER_LOW, LEDGER_HIGH = -2, 10          # a member at or beyond these steps is
 TEST_MIN_IN_FONT = 600
 TEST_MIN_HELD_OUT = 300
 HELD_OUT_FONT = "Gootville"
-UNDERPOWERED_OK = frozenset({"7th"})      # warn, never fail, when short (design section 4)
+UNDERPOWERED_OK = frozenset({"7th"})      # reported UNDERPOWERED but never fails the run when short (design section 4)
 STEMLESS = "none"                         # build_corpus.STEMLESS
 STEM_MISMATCH_MAX = 0.01                  # share of chord strips whose stems list may not line up with the tokens
 A5_SHA256 = "78165b43251f67751afc91500e812a3ce7fa06d8980a275ddadd7014d8782824"
@@ -47,6 +47,10 @@ INTERVAL_BY_STEPS: dict[int, str] = {1: "2nd", 2: "3rd", 3: "4th", 4: "5th", 5: 
 TEST_BUCKETS = ("2nd_up", "2nd_down", "3rd", "4th", "5th", "6th", "7th", "8ve", "triad", "ledger")
 POSITION = re.compile(r"-([LS])(-?\d+)$")
 PASS, FAIL, WARN, MISSING, NOT_RUN, INFO = "pass", "fail", "warn", "missing", "not_run", "info"
+UNDERPOWERED = "underpowered"             # a count short of its target: reported, never PASS (A6.1)
+PHASE_FILE = "test_phase.json"            # written by the build kernel into every test folder
+DEFAULT_PHASE = "paired"                  # a folder without a phase file (e.g. the val renders) is all-font
+IN_FONT, HELD_OUT = "in_font", "held_out"
 
 
 def step_of(tok: str) -> int:
@@ -94,6 +98,80 @@ def chord_columns(tokens: Sequence[str]) -> list[tuple[str, list[str]]]:
         else:
             i += 1
     return cols
+
+
+def indexed_chord_columns(tokens: Sequence[str]) -> list[tuple[int, str, list[str]]]:
+    """(index among the strip's note columns, note token, chordnote tokens) for every chord column, left to right."""
+    cols: list[tuple[int, str, list[str]]] = []
+    col = -1
+    i = 0
+    while i < len(tokens):
+        if not tokens[i].startswith("note."):
+            i += 1
+            continue
+        col += 1
+        j = i + 1
+        while j < len(tokens) and tokens[j].startswith("chordnote-"):
+            j += 1
+        if j > i + 1:
+            cols.append((col, tokens[i], list(tokens[i + 1:j])))
+        i = j
+    return cols
+
+
+def head_key(row: Mapping[str, object], col: int, note: str, ext: Sequence[str]) -> tuple[object, ...]:
+    """Identity of one chord head set: (piece, voice, system, column index, chord step set, font).
+
+    Two test seeds that happen to inject the same chord on the same note of the same strip in the same font give the
+    same key and count once; a different font is a different image, so it counts separately.
+    """
+    steps = tuple(sorted({step_of(note)} | {step_of(t) for t in ext}))
+    return (row["piece"], row["voice"], row["system"], col, steps, row["font"])
+
+
+def phase_of(folder: Path) -> str:
+    """`paired` (5 fonts) or `gootville_only` from the folder's phase file; the default when there is none."""
+    path = folder / PHASE_FILE
+    return str(json.loads(path.read_text(encoding="utf-8"))["phase"]) if path.is_file() else DEFAULT_PHASE
+
+
+def unique_head_counts(dirs: Sequence[Path]) -> dict[str, object]:
+    """Unique heads per bucket over test folders, counted from the rendered labels (manifest tokens), not the summary.
+
+    Folders are read in the order given and the first occurrence of a `head_key` wins, so the count depends on nothing
+    but the order of the seeds. Returns the group totals (`in_font` / `held_out`), the same split by phase, the number
+    of chord columns, how many were duplicates of an earlier one, and the folders that could not be read.
+    """
+    counts: dict[str, collections.Counter[str]] = {IN_FONT: collections.Counter(), HELD_OUT: collections.Counter()}
+    by_phase: dict[str, dict[str, collections.Counter[str]]] = {}
+    seen: set[tuple[object, ...]] = set()
+    columns = duplicates = 0
+    unreadable: list[str] = []
+    for d in dirs:
+        rows = read_rows(d / "manifest" / "phase2_manifest.jsonl")
+        summ = d / "divisi_summary.json"
+        if rows is None or not summ.is_file():
+            unreadable.append(d.name)
+            continue
+        stems = json.loads(summ.read_text(encoding="utf-8"))["stems"]
+        phase = by_phase.setdefault(phase_of(d), {IN_FONT: collections.Counter(), HELD_OUT: collections.Counter()})
+        for r in rows:
+            cols = indexed_chord_columns(list(r["tokens"]))  # type: ignore[call-overload]
+            strip_stems = stems.get(f"{r['piece']}|{r['voice']}|{r['system']}")
+            aligned = strip_stems is not None and len(strip_stems) == len(cols)
+            group = HELD_OUT if r["font"] == HELD_OUT_FONT else IN_FONT
+            for k, (col, note, ext) in enumerate(cols):
+                columns += 1
+                key = head_key(r, col, note, ext)
+                if key in seen:
+                    duplicates += 1
+                    continue
+                seen.add(key)
+                names = bucket_of(note, ext, strip_stems[k] if aligned and strip_stems else "")
+                counts[group].update(names)
+                phase[group].update(names)
+    return {"counts": counts, "by_phase": by_phase, "chord_columns": columns, "duplicate_columns": duplicates,
+            "duplicate_rate": duplicates / columns if columns else 0.0, "unreadable": unreadable}
 
 
 def mix_report(rows: Iterable[Mapping[str, object]],
@@ -219,28 +297,36 @@ def manifest_gates(build: Path, summary: Mapping[str, object]) -> tuple[list[dic
 
 
 def test_gates(dirs: Sequence[Path]) -> tuple[list[dict[str, object]], dict[str, object]]:
-    """Heads per bucket over all test renders (every font and injection seed); never used for training."""
+    """Unique heads per bucket over all test renders (every font and injection seed); never used for training.
+
+    A bucket short of its target is UNDERPOWERED, never PASS (the 7th is exempt from failing the run, design section 4,
+    but still reports UNDERPOWERED). Duplicate chord columns across seeds are counted once.
+    """
     if not dirs:
         return [gate("test_buckets", "no --test dirs", "-", True, NOT_RUN)], {}
-    total: dict[str, collections.Counter[str]] = {"in_font": collections.Counter(), "held_out": collections.Counter()}
     out: list[dict[str, object]] = []
     for d in dirs:
-        rows = read_rows(d / "manifest" / "phase2_manifest.jsonl")
         summ = d / "divisi_summary.json"
-        if rows is None or not summ.is_file():
+        if read_rows(d / "manifest" / "phase2_manifest.jsonl") is None or not summ.is_file():
             out.append(gate(f"test_render:{d.name}", "manifest or divisi_summary.json not found", "-", False, MISSING))
             continue
-        rep = mix_report(rows, json.loads(summ.read_text(encoding="utf-8"))["stems"])
-        for k in total:
-            total[k].update(rep["buckets"][k])  # type: ignore[index]
+        missing = json.loads(summ.read_text(encoding="utf-8")).get("pieces_missing_from_build") or []
+        out.append(gate(f"test_pieces_missing:{d.name}", len(missing), "== 0", not missing))
+    rep = unique_head_counts(dirs)
+    total: dict[str, collections.Counter[str]] = rep["counts"]  # type: ignore[assignment]
+    by_phase: dict[str, dict[str, collections.Counter[str]]] = rep["by_phase"]  # type: ignore[assignment]
     for b in TEST_BUCKETS:
-        for grp, need in (("in_font", TEST_MIN_IN_FONT), ("held_out", TEST_MIN_HELD_OUT)):
+        for grp, need in ((IN_FONT, TEST_MIN_IN_FONT), (HELD_OUT, TEST_MIN_HELD_OUT)):
             n = total[grp][b]
-            ok = n >= need
-            status = PASS if ok else (WARN if b in UNDERPOWERED_OK else FAIL)
-            out.append(gate(f"test.{b}.{grp}", n, f">= {need}" + (" (warn: underpowered)" if b in UNDERPOWERED_OK else ""),
-                            ok, status))
-    return out, {k: dict(v) for k, v in total.items()}
+            exempt = b in UNDERPOWERED_OK
+            g = gate(f"test.{b}.{grp}", n, f">= {need} unique heads" + (" (exempt from failing)" if exempt else ""),
+                     n >= need, PASS if n >= need else UNDERPOWERED)
+            g["exempt"] = exempt
+            out.append(g)
+    return out, {"buckets": {k: dict(v) for k, v in total.items()},
+                 "by_phase": {ph: {k: dict(v) for k, v in grp.items()} for ph, grp in by_phase.items()},
+                 "chord_columns": rep["chord_columns"], "duplicate_columns": rep["duplicate_columns"],
+                 "duplicate_rate": rep["duplicate_rate"], "unit": "unique heads (head_key), first seed wins"}
 
 
 def format_table(gates: Sequence[Mapping[str, object]]) -> str:
@@ -263,7 +349,7 @@ def load_summary(build: Path) -> tuple[dict[str, object] | None, str]:
 def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--build", type=Path, required=True)
-    ap.add_argument("--test", type=Path, nargs="*", default=[], help="test-render build folders (3 seeds)")
+    ap.add_argument("--test", type=Path, nargs="*", default=[], help="test-render build folders (adaptive seeds)")
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--a5-manifest", type=Path, default=A5_DEFAULT_MANIFEST,
                     help="Phase 2 manifest whose sha256 must be the A5 value; missing fails the gate")
@@ -283,7 +369,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         t_gates = [gate("test_buckets", "no --test dirs", "test renders required (--allow-no-test to skip)", False)]
     gates += t_gates + [a5_gate(args.a5_manifest)]
     not_run = any(x["status"] == NOT_RUN for x in gates)
-    failed = [str(x["name"]) for x in gates if x["status"] not in (PASS, WARN, NOT_RUN, INFO)]
+    failed = [str(x["name"]) for x in gates
+              if x["status"] not in (PASS, WARN, NOT_RUN, INFO) and not x.get("exempt")]
     ok = not failed and not not_run
     args.out.write_text(json.dumps({"ok": ok, "test_buckets_checked": not not_run, "gates": gates,
                                     "train_manifest": train_rep, "test_buckets": test_rep}, indent=1),
