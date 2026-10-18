@@ -46,7 +46,7 @@ DURATION_TARGETS: dict[str, float] = {"whole": .12, "half": .20, "dotted": .15, 
 INTERVAL_BY_STEPS: dict[int, str] = {1: "2nd", 2: "3rd", 3: "4th", 4: "5th", 5: "6th", 6: "7th", 7: "8ve"}
 TEST_BUCKETS = ("2nd_up", "2nd_down", "3rd", "4th", "5th", "6th", "7th", "8ve", "triad", "ledger")
 POSITION = re.compile(r"-([LS])(-?\d+)$")
-PASS, FAIL, WARN, MISSING, NOT_RUN = "pass", "fail", "warn", "missing", "not_run"
+PASS, FAIL, WARN, MISSING, NOT_RUN, INFO = "pass", "fail", "warn", "missing", "not_run", "info"
 
 
 def step_of(tok: str) -> int:
@@ -170,8 +170,11 @@ def summary_gates(s: Mapping[str, object]) -> list[dict[str, object]]:
     steps = [int(k.split(":")[1]) for k in r["steps"]]  # type: ignore[attr-defined]
     out.append(gate("member_steps_summary", [min(steps), max(steps)] if steps else [], f"within {list(MEMBER_STEPS)}",
                     bool(steps) and MEMBER_STEPS[0] <= min(steps) and max(steps) <= MEMBER_STEPS[1]))
-    for key in ("free_new_accidentals", "induced_accidentals"):
-        out.append(gate(key, r[key], "== 0", int(r[key]) == 0))  # type: ignore[call-overload]
+    out.append(gate("free_new_accidentals", r["free_new_accidentals"], "== 0",
+                    int(r["free_new_accidentals"]) == 0))  # type: ignore[call-overload]
+    # Report-only (ruling 2026-10-18): a merge or copied member re-engraves later original heads from the same MEI,
+    # so image and labels agree and pitch is unchanged; the conductor rule is enforced by free_new_accidentals.
+    out.append(gate("induced_accidentals", r["induced_accidentals"], "report only (no gate)", True, INFO))
     missing = s.get("pieces_missing_from_build") or []
     out.append(gate("pieces_missing_from_build", len(missing), "== 0", not missing))  # type: ignore[arg-type]
     return out
@@ -280,7 +283,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         t_gates = [gate("test_buckets", "no --test dirs", "test renders required (--allow-no-test to skip)", False)]
     gates += t_gates + [a5_gate(args.a5_manifest)]
     not_run = any(x["status"] == NOT_RUN for x in gates)
-    failed = [str(x["name"]) for x in gates if x["status"] not in (PASS, WARN, NOT_RUN)]
+    failed = [str(x["name"]) for x in gates if x["status"] not in (PASS, WARN, NOT_RUN, INFO)]
     ok = not failed and not not_run
     args.out.write_text(json.dumps({"ok": ok, "test_buckets_checked": not not_run, "gates": gates,
                                     "train_manifest": train_rep, "test_buckets": test_rep}, indent=1),

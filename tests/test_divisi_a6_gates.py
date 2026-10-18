@@ -69,12 +69,12 @@ def good_summary():
 
 def test_summary_gates_pass_and_fail():
     s = good_summary()
-    assert all(x["status"] == g.PASS for x in g.summary_gates(s)), g.format_table(g.summary_gates(s))
+    assert all(x["status"] in (g.PASS, g.INFO) for x in g.summary_gates(s)), g.format_table(g.summary_gates(s))
     s["realised"]["class"]["Alto:3rd"] = 22
-    s["realised"]["induced_accidentals"] = 1
+    s["realised"]["free_new_accidentals"] = 1
     s["realised"]["steps"]["Alto:14"] = 1
     bad = {n for n, x in by_name(g.summary_gates(s)).items() if x["status"] != g.PASS}
-    assert {"interval.3rd", "induced_accidentals", "member_steps_summary"} <= bad
+    assert {"interval.3rd", "free_new_accidentals", "member_steps_summary"} <= bad
 
 
 def test_stems_down_gate():
@@ -187,3 +187,10 @@ def test_main_missing_summary_writes_report(tmp_path):
     (b / "divisi_summary.json").write_text(json.dumps({"realised": {}}), encoding="utf-8")
     assert g.main(["--build", str(b), "--out", str(out), "--allow-no-test"]) == 1
     assert by_name(json.loads(out.read_text(encoding="utf-8"))["gates"])["divisi_summary"]["status"] == g.MISSING
+
+
+def test_induced_accidentals_report_only():
+    s = good_summary()
+    s["realised"]["induced_accidentals"] = 10
+    gates = by_name(g.summary_gates(s))
+    assert gates["induced_accidentals"]["status"] == g.INFO and gates["induced_accidentals"]["value"] == 10
