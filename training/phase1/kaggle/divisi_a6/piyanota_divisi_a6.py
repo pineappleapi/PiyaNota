@@ -16,7 +16,7 @@ One launch, no GPU. Structure follows the full-2 build kernel (`../divisi/piyano
 4. Gates (`divisi_a6_gates.py`) run on the finished build and the test folders. A short test bucket is UNDERPOWERED,
    never PASS. The kernel always exits 0 once its directories exist and writes kernel_status.json with `status` in
    ok | gate_fail | kernel_error (an exception is caught and its traceback recorded), the failing gates and the sha256
-   of every test manifest. The only non-zero exit is an unreviewed COMMIT, before any directory is made.
+   of every test manifest (test_plan_result.json; test_plan.json stays as frozen, its hash is in the status). The only non-zero exit is an unreviewed COMMIT, before any directory is made.
 5. The worker 1-vs-N determinism canary runs first, before any test-seed build or cut. The main cut runs before the
    test seeds so the adaptive seeds only spend what the cut leaves of the session.
 
@@ -402,6 +402,8 @@ def run(args: argparse.Namespace) -> str:  # noqa: C901
     }
     plan_path = WORK / "test_plan.json"
     plan_path.write_text(json.dumps(plan, indent=1), encoding="utf-8")
+    status["test_plan_sha256"] = sha256_file(plan_path)   # the plan as frozen; the outcome goes to test_plan_result.json
+    save_status()
     test_dirs: list[Path] = []
     done: list[tuple[str, float]] = []
     phases: dict[str, str] = {}
@@ -431,7 +433,10 @@ def run(args: argparse.Namespace) -> str:  # noqa: C901
             render(tdir, TEST_FONTS)
         else:
             render(tdir, 1, tuple(f for f in FONT_NAMES if f != HELD_OUT_FONT))
-        cut(out_dir / "out", tdir / "renders", cut_limit, workers)
+        left = KAGGLE_SESSION_MINUTES - TEST_RESERVE_MINUTES - (time.time() - T0) / 60
+        if left <= 0:
+            abort(f"test seed {seed}: no session time left for its cut (reserve {TEST_RESERVE_MINUTES} min)")
+        cut(out_dir / "out", tdir / "renders", cut_limit, workers, left)   # a stuck seed stops here, not at 720 min
         cut_complete(out_dir / "out", tdir / "renders", f"test_t{n}")
         make_manifest(out_dir / "out", out_dir / "manifest")
         shutil.copytree(tdir / "corpus", out_dir / "corpus", dirs_exist_ok=True)
@@ -447,7 +452,7 @@ def run(args: argparse.Namespace) -> str:  # noqa: C901
         save_status()
     status["test_minutes"] = round((time.time() - T0) / 60, 1)
     final = gates_mod.unique_head_counts(test_dirs)
-    plan["result"] = {
+    result = {
         "seeds_run": [d.name for d in test_dirs], "phases": phases, "stop_reason": stop_reason,
         "unique_heads": {g: dict(c) for g, c in final["counts"].items()},          # type: ignore[union-attr]
         "unique_heads_by_phase": {ph: {g: dict(c) for g, c in grp.items()}          # type: ignore[union-attr]
@@ -455,9 +460,10 @@ def run(args: argparse.Namespace) -> str:  # noqa: C901
         "chord_columns": final["chord_columns"], "duplicate_columns": final["duplicate_columns"],
         "duplicate_rate": final["duplicate_rate"],
         "manifest_sha256": {d.name: sha256_file(d / "manifest" / "phase2_manifest.jsonl") for d in test_dirs},
+        "test_plan_sha256": status["test_plan_sha256"],
     }
-    plan_path.write_text(json.dumps(plan, indent=1), encoding="utf-8")
-    status["test_manifest_sha256"] = plan["result"]["manifest_sha256"]
+    (WORK / "test_plan_result.json").write_text(json.dumps(result, indent=1), encoding="utf-8")
+    status["test_manifest_sha256"] = result["manifest_sha256"]
     status["test_stop_reason"] = stop_reason
     save_status()
 
@@ -499,12 +505,14 @@ def run(args: argparse.Namespace) -> str:  # noqa: C901
     if gates.returncode not in (0, 1) or not report_path.is_file():
         raise KernelError(f"gates script crashed (exit {gates.returncode}); no verdict")
     report = json.loads(report_path.read_text(encoding="utf-8"))
+    if "ok" not in report or bool(report["ok"]) != (gates.returncode == 0):
+        raise KernelError(f"gate report ok={report.get('ok')!r} disagrees with exit code {gates.returncode}")
     status["failing_gates"] = [g["name"] for g in report["gates"]
                                if g["status"] not in ("pass", "warn", "not_run", "info") and not g.get("exempt")]
     status["underpowered_gates"] = [g["name"] for g in report["gates"] if g["status"] == "underpowered"]
     if leaks:
         status["failing_gates"].append(f"gootville_absent_from_train ({leaks} rows)")   # type: ignore[union-attr]
-    return "gate_fail" if gates.returncode != 0 or leaks else "ok"
+    return "ok" if report["ok"] and not leaks else "gate_fail"   # the report's verdict, cross-checked above
 
 
 if __name__ == "__main__":

@@ -44,7 +44,7 @@ from torch.utils.data import ConcatDataset, DataLoader, Dataset, Sampler, Subset
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "phase1"))   # divisi_halves
+sys.path.append(str(Path(__file__).resolve().parents[1] / "phase1"))   # divisi_halves; appended so phase1/kaggle cannot shadow the kaggle package
 from build_manifest import FORBIDDEN_CLASS, WATCH_CLASSES, build, token_class  # noqa: E402
 from stage3_transcription import (BLANK_IDX, CRNN, IDX_TO_SYM, SYM_TO_IDX, VOCAB, VOCAB_EXT_CHORD_TUPLET,  # noqa: E402
                                   VOCAB_SIZE, _greedy_ctc_decode, compute_ser)

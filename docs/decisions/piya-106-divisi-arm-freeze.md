@@ -332,7 +332,7 @@ perfectly, so they say nothing about real photos (synthetic divisi lacks "div." 
        seed. Counted after cut and manifest from rendered labels. Unique head = (piece, voice, system, column index,
        chord step set, font), first seed wins; the duplicate rate is reported. Each strip's phase is recorded
        (`paired` / `gootville_only`). Every test seed's RNG hash must differ from the corpus seed's for the val
-       pieces. The sha256 of every test manifest is written into `test_plan.json` after the last seed.
+       pieces. The sha256 of every test manifest is written to `test_plan_result.json` after the last seed; the plan itself is never rewritten and its hash is in `kernel_status.json`.
     3. **Verdict rules.** A test bucket short of its target is UNDERPOWERED, never PASS (the 7th does not fail the
        run). The kernel always exits 0 once started and writes `kernel_status.json` with status ok | gate_fail |
        kernel_error, the failing gates and the test manifest hashes. Skipped or unreached pieces count in
