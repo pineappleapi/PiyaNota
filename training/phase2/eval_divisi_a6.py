@@ -52,7 +52,8 @@ SECOND_BUCKETS = ("2nd_up", "2nd_down")
 ACCIDENTAL = "accidental."
 NOT_RUN_GATES = ("canary clean/distorted SER", "non-chord val SER <= +0.5 pp", "dev pitch recall <= -1 pp",
                  "zero_infinity samples == 0")
-PASS, FAIL, UNDERPOWERED = "PASS", "FAIL", "UNDERPOWERED"
+PASS, FAIL, UNDERPOWERED, MISSING = "PASS", "FAIL", "UNDERPOWERED", "MISSING"
+MISSING_KEYS_SHOWN = 5
 
 
 def shape(tok: str) -> str:
@@ -136,6 +137,7 @@ def head_scores(pred: Sequence[str], gt: Sequence[str], stems: Sequence[str] | N
     aligned = dict(lcs_pairs([shape(c[1]) for c in gcols], [shape(c[1]) for c in pcols]))
     chord_gi = [k for k, c in enumerate(gcols) if c[2]]
     stem_by_col: dict[int, str] = {}
+    stem_mismatch = int(stems is not None and bool(chord_gi) and len(stems) != len(chord_gi))
     for n, k in enumerate(chord_gi):
         if stems is None:
             stem_by_col[k] = FALLBACK_BUCKET
@@ -144,7 +146,7 @@ def head_scores(pred: Sequence[str], gt: Sequence[str], stems: Sequence[str] | N
     out: dict[str, Any] = {"bucket": collections.defaultdict(lambda: [0, 0]), "tp": 0, "gt_heads": 0,
                            "fp_chord": 0, "fp_plain": 0, "plain_cols": 0, "plain_extra": 0, "untrained_step": 0,
                            "triad_exact": [0, 0], "acc_member": [0, 0], "chord_cols": len(chord_gi),
-                           "unaligned": 0, "pred_chordnotes": sum(t.startswith("chordnote-") for t in pred),
+                           "unaligned": 0, "stem_mismatch": stem_mismatch, "pred_chordnotes": sum(t.startswith("chordnote-") for t in pred),
                            "gt_notes": len(gcols), "head_conf": []}
     for _i, _note, ext, _acc in pcols:
         out["untrained_step"] += sum(1 for t in ext
@@ -267,7 +269,8 @@ def select_epoch(per_epoch: Sequence[Mapping[str, Any]]) -> int:
     """
     best, best_recall = 0, -1.0
     for k, e in enumerate(per_epoch, start=1):
-        if e["P"] >= SELECT_MIN_PRECISION and e["canary_ok"] and e["min_recall"] > best_recall:
+        if (e["P"] >= SELECT_MIN_PRECISION and e["canary_ok"] and not e.get("missing_buckets")
+                and e["min_recall"] > best_recall):
             best, best_recall = k, e["min_recall"]
     if best == 0:
         raise ValueError("no epoch has P >= .95 with the canary under its caps")
@@ -279,11 +282,16 @@ def fallback_fired(epoch4_seed1: float, epoch4_seed2: float) -> bool:
     return epoch4_seed1 < FALLBACK_SECOND_RECALL and epoch4_seed2 < FALLBACK_SECOND_RECALL
 
 
-def min_bucket_recall(buckets: Mapping[str, Sequence[int]], drop_second: bool) -> float:
-    """Lowest recall over the gated buckets (2nd buckets dropped only if the fallback fired)."""
-    rec = [h / n for b, (h, n) in buckets.items()
-           if b in GATE_RECALL_MIN and n and not (drop_second and b in SECOND_BUCKETS)]
-    return min(rec) if rec else 0.0
+def min_bucket_recall(buckets: Mapping[str, Sequence[int]], drop_second: bool) -> tuple[float, list[str]]:
+    """(lowest recall over the gated buckets, gated buckets with no heads).
+
+    2nd buckets are left out only if the fallback fired. A bucket with n == 0 is reported, not skipped: a minimum
+    over fewer buckets would flatter the epoch (`select_epoch` treats any missing bucket as ineligible).
+    """
+    names = [b for b in GATE_RECALL_MIN if not (drop_second and b in SECOND_BUCKETS)]
+    missing = [b for b in names if not buckets.get(b, [0, 0])[1]]
+    rec = [buckets[b][0] / buckets[b][1] for b in names if b not in missing]
+    return (min(rec) if rec else 0.0), missing
 
 
 def head_pr(s: Mapping[str, Any]) -> tuple[float, float]:
@@ -346,16 +354,30 @@ def evaluate(model: Any, build: Path, rows: Sequence[Mapping[str, Any]],
              stems: Mapping[str, Sequence[str]] | None) -> dict[str, Any]:
     """Scores every row; returns totals, per-piece bucket counters and per-font-group totals."""
     all_parts, by_piece, by_group = [], {}, {"in_font": [], "held_out": []}
+    missing_keys: list[str] = []
     for r in rows:
         pred, conf = decode_strip(model, build / "out" / r["path"])
         key = f"{r['piece']}|{r['voice']}|{r['system']}"
-        sc = head_scores(pred, r["tokens"], None if stems is None else stems.get(key), conf)
+        strip_stems = None if stems is None else stems.get(key)
+        n_chord = sum(1 for c in columns(r["tokens"]) if c[2])
+        if stems is not None and strip_stems is None and n_chord:
+            missing_keys.append(key)
+            strip_stems = [""] * n_chord      # unknown stem: 2nd_unknown, outside the 2nd gates
+        sc = head_scores(pred, r["tokens"], strip_stems, conf)
         all_parts.append(sc)
         by_piece.setdefault(r["piece"], []).append(sc)
         by_group["held_out" if r["font"] == HELD_OUT_FONT else "in_font"].append(sc)
         if not any(t.startswith("chordnote-") for t in r["tokens"]):
             sc["uninjected"] = [sc["pred_chordnotes"], sc["gt_notes"]]
-    return {"total": merge_scores(all_parts),
+    mismatched = sum(p["stem_mismatch"] for p in all_parts)
+    if missing_keys:
+        print(f"WARNING: {len(missing_keys)} chord strips have no stems entry (first: "
+              f"{missing_keys[:MISSING_KEYS_SHOWN]}); their 2nds are 2nd_unknown", file=sys.stderr)
+    if mismatched:
+        print(f"WARNING: {mismatched} chord strips have a stems list of the wrong length; their 2nds are "
+              "2nd_unknown", file=sys.stderr)
+    return {"stems_missing_key": len(missing_keys), "stems_wrong_length": mismatched,
+            "total": merge_scores(all_parts),
             "piece_buckets": {p: merge_scores(v)["bucket"] for p, v in by_piece.items()},
             "groups": {g: merge_scores(v) for g, v in by_group.items() if v},
             "uninjected": merge_scores([{"u": p["uninjected"]} for p in all_parts if "uninjected" in p])
@@ -372,7 +394,7 @@ def gate_table(ev: Mapping[str, Any]) -> list[dict[str, Any]]:
         ns = {p: b.get(name, [0, 0])[1] for p, b in ev["piece_buckets"].items()}
         wl, bl = wilson_lb(h, n), piece_bootstrap_lb(hits, ns)
         lb = min(wl, bl)
-        status = FAIL if n == 0 else UNDERPOWERED if n < UNDERPOWERED_N else PASS if lb >= floor else FAIL
+        status = MISSING if n == 0 else UNDERPOWERED if n < UNDERPOWERED_N else PASS if lb >= floor else FAIL
         out.append({"gate": f"recall {name}", "hit": h, "n": n, "recall": h / n if n else None,
                     "wilson_lb": wl, "bootstrap_lb": bl, "target": f">= {floor}", "status": status})
     t_h, t_n = tot.get("triad_exact", [0, 0])
@@ -445,10 +467,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         ev = evaluate(load_cpu_model(path), a.build, rows, stems)
         rec, prec = head_pr(ev["total"])
         gates = gate_table(ev)
-        entry = {"head_recall": rec, "head_precision": prec, "gates": gates, "diagnostics": diagnostics(ev),
+        min_rec, missing_b = min_bucket_recall(ev["total"]["bucket"], drop_second=False)
+        entry = {"stems_missing_key": ev["stems_missing_key"], "stems_wrong_length": ev["stems_wrong_length"],
+                 "head_recall": rec, "head_precision": prec, "gates": gates, "diagnostics": diagnostics(ev),
                  "buckets": ev["total"]["bucket"], "counters": {k: v for k, v in ev["total"].items()
                                                                 if k not in ("bucket", "head_conf")},
-                 "min_recall": min_bucket_recall(ev["total"]["bucket"], drop_second=False),
+                 "min_recall": min_rec, "missing_buckets": missing_b,
                  "P": prec, "canary_ok": label in a.canary_ok}
         result["checkpoints"][label] = entry
         print(f"== {label}: head recall {rec:.4f} precision {prec:.4f} (gt heads {ev['total']['gt_heads']})")
@@ -456,7 +480,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"  [{g['status']}] {g['gate']}: " + ", ".join(f"{k}={v:.4f}" if isinstance(v, float) else f"{k}={v}"
                                                                 for k, v in g.items()
                                                                 if k not in ("gate", "status")))
-            exit_code |= g["status"] == FAIL
+            exit_code |= g["status"] in (FAIL, MISSING)
         print(f"  diagnostics: {json.dumps(_jsonable(entry['diagnostics']))}")
     a.out.write_text(json.dumps(_jsonable(result), indent=1), encoding="utf-8")
     return int(exit_code)

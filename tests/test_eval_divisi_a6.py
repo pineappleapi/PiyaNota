@@ -106,3 +106,38 @@ def test_mcnemar_exact():
 def nf_mcnemar(a, b):
     import eval_dev_nofermata as nf
     return nf.mcnemar_exact(a, b)
+
+
+def test_wrong_length_stems_are_unknown_and_counted():
+    gt = ["note.quarter-L2", "chordnote-S2"]
+    s = head_scores(gt, gt, stems=["up", "down"])
+    assert s["stem_mismatch"] == 1 and s["bucket"]["2nd_unknown"] == [1, 1] and "2nd_up" not in s["bucket"]
+
+
+def test_missing_stem_key_is_unknown_not_2nd_up(monkeypatch):
+    import eval_divisi_a6 as ev
+    monkeypatch.setattr(ev, "decode_strip", lambda m, p: (["note.quarter-L2", "chordnote-S2"], [.9, .9]))
+    row = {"piece": "p", "voice": "Alto", "system": 0, "path": "x.png", "font": "Bravura",
+           "tokens": ["note.quarter-L2", "chordnote-S2"]}
+    out = ev.evaluate(None, Path("."), [row], {"other|Alto|0": ["up"]})
+    assert out["stems_missing_key"] == 1 and out["stems_wrong_length"] == 0
+    assert out["total"]["bucket"] == {"2nd_unknown": [1, 1]}
+
+
+def test_empty_recall_bucket_is_missing_status():
+    import eval_divisi_a6 as ev
+    tot = ev.merge_scores([head_scores(["note.half-L1"], ["note.half-L1"])])
+    g = {x["gate"]: x for x in ev.gate_table({"total": tot, "piece_buckets": {}, "groups": {}, "uninjected": [0, 0]})}
+    assert g["recall 3rd"]["status"] == "MISSING"
+
+
+def test_min_bucket_recall_reports_missing_and_select_skips_them():
+    import eval_divisi_a6 as ev
+    b = {"3rd": [9, 10], "4th": [8, 10]}
+    rec, missing = ev.min_bucket_recall(b, drop_second=False)
+    assert rec == .8 and "5th" in missing and "2nd_up" in missing
+    _, m2 = ev.min_bucket_recall(b, drop_second=True)
+    assert "2nd_up" not in m2 and "5th" in m2
+    rows = [{"min_recall": .99, "P": .97, "canary_ok": True, "missing_buckets": ["7th"]},
+            {"min_recall": .5, "P": .97, "canary_ok": True, "missing_buckets": []}]
+    assert select_epoch(rows) == 2
