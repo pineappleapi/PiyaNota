@@ -22,7 +22,7 @@ import io
 import json
 import random
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from PIL import Image
@@ -57,7 +57,26 @@ CHORD_CASES: dict[str, str] = {
     "chord_accidental": "Accidental on a chord member (accidentals bottom to top, before the note)",
     "chord_ledger": "Chord member on a ledger line, above or below the staff",
 }
+# A6 chord cases (divisi plan Task 4): what the 2026-10-18 generator can draw and the user scores by eye. Stem
+# direction is not a token, so the second cases read it from the build's divisi_summary.json.
+A6_CHORD_CASES: dict[str, str] = {
+    "chord_second_up": "Chord with a 2nd, stem up (the displaced head sits right of the stem)",
+    "chord_second_down": "Chord with a 2nd, stem down (the displaced head sits left of the stem)",
+    "chord_whole_second": "Whole-note chord with a 2nd (no stem; heads side by side)",
+    "chord_seventh": "Two-note chord a 7th apart",
+    "chord_cluster": "Three-note chord containing a 2nd",
+    "chord_triad_accidental": "Three-note chord with an accidental on a member",
+    "chord_ledger_above": "Chord member on a ledger line above the staff",
+    "chord_ledger_below": "Chord member on a ledger line below the staff",
+    "chord_tie": "Tied chord (slur.start / slur.end next to the chord tokens)",
+}
+CHORD_CASES.update(A6_CHORD_CASES)
 CASES.update(CHORD_CASES)
+STEMS_FILE = "divisi_summary.json"
+STEM_UP, STEM_DOWN = "up", "down"
+SEVENTH_STEPS = 6                       # L1 = step 0; a 7th spans 6 staff steps (an octave spans 7)
+LEDGER_ABOVE_STEP = 10                  # L6: first ledger line above the staff (L5 = 8)
+LEDGER_BELOW_STEP = -2                  # L0: first ledger line below the staff
 # Cases that only arise from Palestrina's source handling; the Bach page never lists them as missing.
 PALESTRINA_ONLY: frozenset[str] = frozenset({"breve", "clef_normalised"})
 
@@ -72,6 +91,8 @@ class Strip:
     tokens: list[str]
     case: str
     render_dir: Path
+    stems: dict[int, str] = field(default_factory=dict)   # chord column (left to right in the strip) -> stem
+    column: int | None = None                              # chord column the case was found on
 
 
 def _split(tok: str) -> tuple[str, str]:
@@ -174,8 +195,72 @@ def _ledger(pos: str) -> bool:
     return n <= (0 if pos[0] == "L" else -1) or n >= 6
 
 
-def chord_cases(tokens: list[str]) -> set[str]:
-    found: set[str] = set()
+def _step(pos: str) -> int:
+    """Staff step with L1 = 0, S1 = 1, L2 = 2 ...; ledger positions continue the same scale."""
+    n = int(pos[1:])
+    return 2 * (n - 1) if pos[0] == "L" else 2 * n - 1
+
+
+def _chord_columns(tokens: list[str]) -> list[dict[str, object]]:
+    """Every chord in the strip, left to right: head steps, whole-note flag, accidental steps, tie marks."""
+    columns: list[dict[str, object]] = []
+    i = 0
+    while i < len(tokens):
+        name, pos = _split(tokens[i])
+        if not (name.startswith("note.") and i + 1 < len(tokens) and tokens[i + 1].startswith("chordnote-")):
+            i += 1
+            continue
+        steps = [_step(pos)]
+        j = i + 1
+        while j < len(tokens) and tokens[j].startswith("chordnote-"):
+            steps.append(_step(_split(tokens[j])[1]))
+            j += 1
+        before = i - 1
+        acc_steps: list[int] = []
+        while before >= 0 and tokens[before].startswith("accidental."):
+            acc_steps.append(_step(_split(tokens[before])[1]))
+            before -= 1
+        after = j
+        while after < len(tokens) and tokens[after].startswith("dot"):
+            after += 1
+        tied = ((before >= 0 and tokens[before].startswith("slur."))
+                or (after < len(tokens) and tokens[after].startswith("slur.")))
+        columns.append({"steps": sorted(steps), "whole": name == "note.whole", "acc": acc_steps, "tied": tied})
+        i = j
+    return columns
+
+
+def chord_case_columns(tokens: list[str], stems: dict[int, str] | None = None) -> dict[str, int]:
+    """Case -> first chord column showing it. A 2nd case needs a known stem (it is not in the tokens)."""
+    stems = stems or {}
+    found: dict[str, int] = {}
+    for col, c in enumerate(_chord_columns(tokens)):
+        steps: list[int] = c["steps"]  # type: ignore[assignment]
+        has_second = any(b - a == 1 for a, b in zip(steps, steps[1:]))
+        cases: list[str] = []
+        if has_second and c["whole"]:
+            cases.append("chord_whole_second")
+        elif has_second and stems.get(col) in (STEM_UP, STEM_DOWN):
+            cases.append(f"chord_second_{stems[col]}")
+        if len(steps) == 2 and steps[1] - steps[0] == SEVENTH_STEPS:
+            cases.append("chord_seventh")
+        if len(steps) == 3 and has_second:
+            cases.append("chord_cluster")
+        if len(steps) == 3 and set(c["acc"]) & set(steps):  # type: ignore[arg-type]
+            cases.append("chord_triad_accidental")
+        if steps[-1] >= LEDGER_ABOVE_STEP:
+            cases.append("chord_ledger_above")
+        if steps[0] <= LEDGER_BELOW_STEP:
+            cases.append("chord_ledger_below")
+        if c["tied"]:
+            cases.append("chord_tie")
+        for case in cases:
+            found.setdefault(case, col)
+    return found
+
+
+def chord_cases(tokens: list[str], stems: dict[int, str] | None = None) -> set[str]:
+    found: set[str] = set(chord_case_columns(tokens, stems))
     for i, t in enumerate(tokens):
         if not t.startswith("chordnote-"):
             continue
@@ -200,8 +285,17 @@ def chord_cases(tokens: list[str]) -> set[str]:
     return found
 
 
+def _load_stems(out: Path) -> dict[str, list[str]]:
+    """Per-strip chord stems written by the divisi build, keyed `<piece>|<voice>|<system>`; {} if the build has none."""
+    path = out / STEMS_FILE
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8")).get("stems", {})
+
+
 def collect(out: Path, composer: str, divisi: bool = False) -> list[Strip]:
     strips: list[Strip] = []
+    stems_all = _load_stems(out) if divisi else {}
     for font in FONTS:
         for render_dir in sorted((out / "renders" / font).glob(f"{composer}_*")):
             labels_path, plan_path = render_dir / "labels.json", out / "corpus" / f"{render_dir.name}.plan.json"
@@ -214,12 +308,17 @@ def collect(out: Path, composer: str, divisi: bool = False) -> list[Strip]:
                 if r.get("quarantine"):
                     continue   # OOV strip (vocab_guard): never used for training, so not worth a hand check
                 prev = by_key.get((r["voice"], r["system"] - 1))
-                found = (chord_cases(r["tokens"]) if divisi else
-                         strip_cases(r["tokens"], prev["tokens"] if prev else None, r["system"], r["voice"], plan,
-                                     plan["systems"]))
+                stems = dict(enumerate(stems_all.get(f"{render_dir.name}|{r['voice']}|{r['system']}", [])))
+                columns: dict[str, int] = {}
+                if divisi:
+                    columns = chord_case_columns(r["tokens"], stems)
+                    found = chord_cases(r["tokens"], stems)
+                else:
+                    found = strip_cases(r["tokens"], prev["tokens"] if prev else None, r["system"], r["voice"],
+                                        plan, plan["systems"])
                 for case in found:
                     strips.append(Strip(font, render_dir.name, r["page"], r["system"], r["voice"], r["tokens"],
-                                        case, render_dir))
+                                        case, render_dir, stems, columns.get(case)))
     return strips
 
 
@@ -323,6 +422,14 @@ document.getElementById('export').addEventListener('click',()=>{const out=[...do
 """
 
 
+def _chord_hint(s: Strip) -> str:
+    """Which chord of the strip the case refers to, and its stem, so the scorer looks at the right one."""
+    if s.column is None:
+        return ""
+    stem = s.stems.get(s.column)
+    return f"<span>chord {s.column + 1} from the left{f', stem {stem}' if stem else ''}</span>"
+
+
 def build_html(chosen: list[Strip], missing: list[str], seed: int, title: str) -> str:
     cards: list[str] = []
     for i, s in enumerate(chosen, 1):
@@ -336,7 +443,7 @@ def build_html(chosen: list[Strip], missing: list[str], seed: int, title: str) -
             f'<div class="meta"><span class="case">#{i} {html.escape(CASES[s.case])}</span></div>'
             f'<div class="meta muted"><span>font {s.font}</span><span>piece {html.escape(s.piece)}</span>'
             f'<span>page {s.page}</span><span>system {s.system + 1}</span><span>voice {s.voice}</span>'
-            f'<span>{len(s.tokens)} tokens</span></div>'
+            f'<span>{len(s.tokens)} tokens</span>{_chord_hint(s)}</div>'
             f'<div class="chips">{chips}</div>'
             f'<div class="row"><label class="ok"><input type="checkbox"> labels match the strip</label></div>'
             f'<textarea placeholder="Note (what is wrong, token index...)"></textarea></section>')
@@ -369,7 +476,7 @@ def main() -> None:
     args = parser.parse_args()
     rng = random.Random(args.seed)
     if args.divisi:
-        cases = list(CHORD_CASES)
+        cases = list(A6_CHORD_CASES)
     else:
         cases = [c for c in CASES if c not in CHORD_CASES
                  and (args.composer == "palestrina" or c not in PALESTRINA_ONLY)]

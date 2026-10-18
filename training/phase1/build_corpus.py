@@ -1337,7 +1337,11 @@ def main() -> None:
                         "split; use a separate --out, the Phase 1 corpus is never rewritten")
     parser.add_argument("--divisi-seed", default="divisi", help="injection seed prefix (corpus: divisi; test "
                         "renders: divisi-t1..t3); the layout never depends on it")
+    parser.add_argument("--ties", action="store_true", help="sample builds only: chord tied notes (TIES_ENABLED); the "
+                        "committed default stays off until G1b passes the tied-chord case")
     args = parser.parse_args()
+    global TIES_ENABLED
+    TIES_ENABLED = TIES_ENABLED or args.ties
     corpus_dir = args.out / "corpus"
     work_dir = args.out / "work"
     corpus_dir.mkdir(parents=True, exist_ok=True)
