@@ -3,7 +3,11 @@
 Repeats are a known limitation (docs/bug-tracker.md): no repeat token exists, so no rpt* barline may be rendered.
 """
 
+import json
+import random
 import sys
+import tempfile
+import types
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -12,8 +16,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "training" / "phase1"))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "training"))
 import music21  # noqa: E402
-from build_corpus import (MEI_NS, _normalise_control_events, assert_no_repeats, bar_accidentals,  # noqa: E402
-                          free_member, member_ok)
+import build_corpus  # noqa: E402
+from build_corpus import (MEI_NS, _normalise_clefs, _normalise_control_events, _satb_order,  # noqa: E402
+                          assert_no_repeats, bar_accidentals, build_divisi, free_member, inject_divisi, member_ok)
 from music_to_agnostic import convert_staff, split_systems  # noqa: E402
 
 SCORE_DEF = ('<scoreDef meter.count="4" meter.unit="4"><staffGrp><staffDef n="1" lines="5" clef.shape="G" '
@@ -140,3 +145,138 @@ def test_bar_accidentals_reports_key_and_earlier_same_bar_only() -> None:
     assert early["C5"] == 1 and early["F4"] == 1 and early["F5"] == 1    # C#5 sounded earlier; F# from the key
     assert "G4" not in early
     assert bar_accidentals(0, 0.0, [part]).get("C5") is None            # not yet sounded at the downbeat
+
+
+def test_bar_accidentals_reads_injected_chord_members() -> None:
+    """An accidental on a member injected earlier in the bar is in force for later free members (ruling 4)."""
+    part = music21.stream.Part()
+    m = music21.stream.Measure(number=1)
+    m.insert(0, music21.chord.Chord(["D4", "F#4"], quarterLength=1))
+    m.insert(1, music21.note.Note("A4", quarterLength=1))
+    part.append(m)
+    assert bar_accidentals(0, 1.0, [part])["F4"] == 1
+
+
+# A6 injection (docs/decisions/piya-106-divisi-a6-design.md section 4). Two-bar systems give one 10-bar chorale
+# ~20 strips, so the per-strip draws are less noisy than with the real 4-5 bar layout.
+FIXTURE_SYSTEM_BARS = 2
+
+
+def _parts_of(source: "str | music21.stream.Score") -> list[music21.stream.Part]:
+    score = music21.corpus.parse(f"bach/{source}") if isinstance(source, str) else source
+    parts = _satb_order(score)
+    assert parts is not None
+    _normalise_clefs(parts)
+    return parts
+
+
+def run_inject(source: "str | music21.stream.Score", seed: str) -> dict[str, object]:
+    parts = _parts_of(source)
+    n = len(parts[0].getElementsByClass(music21.stream.Measure))
+    systems = [list(range(i, min(i + FIXTURE_SYSTEM_BARS, n))) for i in range(0, n, FIXTURE_SYSTEM_BARS)]
+    return inject_divisi(parts, systems, random.Random(seed))
+
+
+def all_tied_fixture() -> music21.stream.Score:
+    """Four voices whose every note is part of one tie chain, so no note is chord-capable."""
+    score = music21.stream.Score()
+    for name, pitch in (("Soprano", "C5"), ("Alto", "E4"), ("Tenor", "G3"), ("Bass", "C3")):
+        part = music21.stream.Part()
+        part.partName = name
+        notes = []
+        for i in range(8):
+            m = music21.stream.Measure(number=i + 1)
+            if i == 0:
+                m.insert(0, music21.meter.TimeSignature("4/4"))
+            for off in (0, 2):
+                n = music21.note.Note(pitch, quarterLength=2)
+                m.insert(off, n)
+                notes.append(n)
+            part.append(m)
+        for i, n in enumerate(notes):
+            n.tie = music21.tie.Tie("start" if i == 0 else "stop" if i == len(notes) - 1 else "continue")
+        score.insert(0, part)
+    return score
+
+
+def build_divisi_fixture(seed: str) -> types.SimpleNamespace:
+    path = Path(str(music21.corpus.getWork("bach/bwv66.6")))
+    with tempfile.TemporaryDirectory() as tmp:
+        plan, mei, _ = build_divisi(path, "bach", Path(tmp), inject_seed=seed)
+    return types.SimpleNamespace(systems=plan.systems, pages=plan.pages, measure_n=plan.measure_n, mei=mei)
+
+
+def test_a6_inject_chord_free_share_and_density():
+    stats = run_inject("bwv66.6", seed="divisi")
+    s = stats["strips"]; free = stats["chord_free_strips"]
+    assert abs(free / s - 0.25) <= 0.15            # one piece: loose; corpus gate checks ±3 pp
+    for dens in stats["density_per_strip"]:
+        assert dens == 0 or 0.20 - 1e-9 <= dens <= 0.60 + 1e-9
+
+
+def test_a6_chord_free_decision_is_per_voice_system():
+    a = run_inject("bwv66.6", seed="divisi"); b = run_inject("bwv66.6", seed="divisi")
+    assert a["chord_free_keys"] == b["chord_free_keys"]       # deterministic, font-independent
+
+
+def test_a6_never_invents_accidentals_on_free_members():
+    stats = run_inject("bwv66.6", seed="divisi")
+    assert stats["free_new_accidentals"] == 0
+
+
+def test_a6_strip_without_chordable_note_stays_plain():
+    stats = run_inject(all_tied_fixture(), seed="divisi")
+    assert stats["chords_total"] == 0 and stats["skipped"]["tie"] > 0
+
+
+def test_a6_injection_seed_changes_chords_not_layout():
+    p1 = build_divisi_fixture(seed="divisi"); p2 = build_divisi_fixture(seed="divisi-t1")
+    assert (p1.systems, p1.pages, p1.measure_n) == (p2.systems, p2.pages, p2.measure_n)
+    assert p1.mei != p2.mei
+
+
+def test_a6_stats_shape_and_stems_per_chord_column() -> None:
+    stats = run_inject("bwv66.6", seed="divisi")
+    json.dumps(stats)                                  # written verbatim into plan.json / divisi_summary.json
+    stems = stats["stems"]
+    assert sum(len(v) for v in stems.values()) == stats["chords_total"] > 0
+    assert all(d in ("up", "down") for v in stems.values() for d in v)
+    assert sum(stats["duration"].values()) == stats["chords_total"]
+    assert stats["ties"] == 0                          # TIES_ENABLED is off until G1b passes the tie case
+    assert stats["crossing"] <= build_corpus.MAX_CROSSING * stats["chords_total"] + 1e-9
+
+
+def test_a6_whole_note_merge_makes_whole_chords(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bach has almost no whole notes (Task 1), so whole-note chords come from merging a 4/4 bar."""
+    monkeypatch.setattr(build_corpus, "A6_DURATIONS", {"whole": 1.0})
+    monkeypatch.setattr(build_corpus, "P_CHORD_FREE_STRIP", 0.0)
+    parts = _parts_of("bwv66.6")
+    n = len(parts[0].getElementsByClass(music21.stream.Measure))
+    stats = inject_divisi(parts, [list(range(i, min(i + 2, n))) for i in range(0, n, 2)], random.Random("divisi"))
+    assert stats["merged_whole"] > 0 and stats["duration"].get("whole", 0) == stats["chords_total"]
+    for part in parts:
+        for m in part.getElementsByClass(music21.stream.Measure):
+            assert m.duration.quarterLength <= 4.0     # never merged across a barline
+            for c in m.getElementsByClass(music21.chord.Chord):
+                assert c.duration.type == "whole" and c.offset == 0
+
+
+def test_a6_tie_path_chords_both_sides(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(build_corpus, "TIES_ENABLED", True)
+    monkeypatch.setattr(build_corpus, "P_TIE_CHORD", 1.0)
+    monkeypatch.setattr(build_corpus, "P_CHORD_FREE_STRIP", 0.0)
+    score = all_tied_fixture()
+    for part in score.parts:                           # one start->stop pair per bar, inside one system
+        for m in part.getElementsByClass(music21.stream.Measure):
+            first, second = m.getElementsByClass(music21.note.Note)
+            first.tie, second.tie = music21.tie.Tie("start"), music21.tie.Tie("stop")
+    stats = run_inject(score, seed="divisi")
+    assert stats["ties"] > 0 and stats["skipped"].get("tie", 0) == 0
+    for part in score.parts:
+        for m in part.getElementsByClass(music21.stream.Measure):
+            items = list(m.notes)
+            if any(isinstance(x, music21.chord.Chord) for x in items):
+                a, b = items
+                assert isinstance(a, music21.chord.Chord) and isinstance(b, music21.chord.Chord)
+                assert [p.nameWithOctave for p in a.pitches] == [p.nameWithOctave for p in b.pitches]
+                assert all(n.tie.type == "start" for n in a.notes) and all(n.tie.type == "stop" for n in b.notes)
