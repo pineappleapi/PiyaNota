@@ -315,3 +315,25 @@ def test_a6_merge_kind_keeps_bars_and_labels(monkeypatch: pytest.MonkeyPatch, ki
         mei_path = Path(tmp) / "piece.mei"
         mei_path.write_text(mei, encoding="utf-8")
         check_labels(mei_path, plan)
+
+
+def test_a6_copied_candidates_cover_the_whole_span() -> None:
+    """A pitch another voice reaches later while the chord still sounds is offered as a copied member."""
+    P = music21.pitch.Pitch
+    sounding = [[(0.0, 4.0, P("C5"))], [(0.0, 2.0, P("E4")), (2.0, 4.0, P("A4"))], [], []]
+    names = lambda cands: {p.nameWithOctave for p in cands}           # noqa: E731
+    def offered(t_end: float) -> set[str]:
+        span = build_corpus._span_pitches(sounding, 0, 0.0, t_end)
+        return names(build_corpus._divisi_candidates(P("C5"), [P("C5")], span, 0, frozenset({3})))
+    assert "A4" in offered(4.0)               # reached at beat 3, inside the chord's span
+    assert "A4" not in offered(2.0)           # the span ends before the alto reaches A4
+
+
+def test_a6_merged_base_checked_over_the_span() -> None:
+    """The merged note holds its first pitch; a later crossing or cross-relation in the span rejects the merge."""
+    P = music21.pitch.Pitch
+    crossing = [[(0.0, 2.0, P("E5")), (2.0, 4.0, P("B4"))], [], [], []]           # soprano drops below C5
+    assert not build_corpus._base_conflicts(P("C5"), 1, 0.0, 2.0, crossing)
+    assert build_corpus._base_conflicts(P("C5"), 1, 0.0, 4.0, crossing)
+    relation = [[(0.0, 4.0, P("A5"))], [], [(0.0, 4.0, P("C4"))], [(2.0, 4.0, P("F#4"))]]   # bass F#4 vs F4
+    assert build_corpus._base_conflicts(P("F4"), 1, 0.0, 4.0, relation)

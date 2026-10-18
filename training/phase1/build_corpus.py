@@ -546,6 +546,39 @@ def _mergeable(measure: music21.stream.Measure, meter: str | None) -> bool:
     return sum(float(n.quarterLength) for n in items) == WHOLE_NOTE_QL
 
 
+def _span_pitches(sounding: list[list[tuple[float, float, music21.pitch.Pitch]]], voice_index: int, t: float,
+                  t_end: float) -> list[music21.pitch.Pitch]:
+    """Distinct pitches the other voices sound anywhere in the chord's span [t, t_end): the copied-member pool.
+
+    Why: taking only the pitches sounding at the onset left the copied pool empty so often that the member mix sat
+    at 74/26 free/copied against the frozen 60/40 (two smokes, review round 2). A pitch another voice reaches later
+    while the chord still sounds is just as much in the texture. `_draw_members` still applies member_ok, the
+    crossing budget and the cross-relation check to every copied member.
+    """
+    found: dict[str, music21.pitch.Pitch] = {}
+    for vj, spans in enumerate(sounding):
+        if vj != voice_index:
+            for s, e, p in spans:
+                if s < t_end and e > t:
+                    found.setdefault(p.nameWithOctave, p)
+    return list(found.values())
+
+
+def _base_conflicts(base: music21.pitch.Pitch, vi: int, t: float, t_end: float,
+                    sounding: list[list[tuple[float, float, music21.pitch.Pitch]]]) -> bool:
+    """True when a merged note's held base pitch crosses the adjacent voice or cross-relates during its span.
+
+    Why: the merge holds the first pitch over notes that were different pitches, so a base that was fine at the
+    downbeat can collide with the other voices later in the span (review round 2).
+    """
+    above = [p.ps for s, e, p in sounding[vi - 1] if s < t_end and e > t] if vi > 0 else []
+    below = [p.ps for s, e, p in sounding[vi + 1] if s < t_end and e > t] if vi + 1 < len(sounding) else []
+    if (above and base.ps > min(above)) or (below and base.ps < max(below)):
+        return True
+    return any(q.step == base.step and q.octave == base.octave and q.alter != base.alter
+               for vj, spans in enumerate(sounding) if vj != vi for s, e, q in spans if s < t_end and e > t)
+
+
 def _merge_pairs(measure: music21.stream.Measure, meter: str | None
                  ) -> list[tuple[str, str, list[music21.note.Note], float | None]]:
     """Two-note merges in one bar: (merge kind, duration class, notes, offset of the eighth that loses its beam).
@@ -640,14 +673,14 @@ def _draw_members(base: music21.pitch.Pitch, mi: int, offset: float, t: float, t
     `class_weights` cover A6_INTERVALS then the triad. Returns the bucket name instead when MAX_REDRAWS attempts all
     fail, so the caller logs a shortfall; the class is drawn once and kept, so a hard class shows up as shortfall,
     not as a silent swap. Each member tries its preferred source (free or copied) first and the other one second.
-    Crossing is judged over the whole span (a member crossing the adjacent voice anywhere counts). For a merged note
-    (`check_cross_relation`) the accidentals in force are those at its downbeat, so a member is also rejected when
-    another voice sounds the same step and octave with a different alter during the span.
+    Crossing is judged over the whole span (a member crossing the adjacent voice anywhere counts). Copied members
+    may be any pitch another voice sounds in the span (`_span_pitches`), so a copied member is always rejected
+    when another voice sounds the same step and octave with a different alter during the span. For a merged note
+    (`check_cross_relation`) the accidentals in force are those at its downbeat, so that check covers every member.
     """
     in_force = bar_accidentals(mi, offset, parts)
     key = music21.key.KeySignature(fifths).asKey("major")    # signature only; in_force carries the bar's alters
-    others = [p for vj, spans in enumerate(sounding) if vj != vi for s, e, p in spans if s <= t < e]
-    span_others = [p for vj, spans in enumerate(sounding) if vj != vi for s, e, p in spans if s < t_end and e > t]
+    span_others = _span_pitches(sounding, vi, t, t_end)     # computed once; reused by every member attempt
     above = [p.ps for s, e, p in sounding[vi - 1] if s < t_end and e > t] if vi > 0 else []
     below = [p.ps for s, e, p in sounding[vi + 1] if s < t_end and e > t] if vi + 1 < len(sounding) else []
     weights = [w for _, _, w in A6_INTERVALS]
@@ -660,7 +693,7 @@ def _draw_members(base: music21.pitch.Pitch, mi: int, offset: float, t: float, t
         sources: list[str] = []
         for ci in classes:
             generic = A6_INTERVALS[ci][1]
-            copied = _divisi_candidates(base, [base] + members, others, vi, frozenset({generic}))
+            copied = _divisi_candidates(base, [base] + members, span_others, vi, frozenset({generic}))
             chromatic = [p for p in copied if _chromatic(p, fifths)]
             p: music21.pitch.Pitch | None = None
             src = "copied"
@@ -683,8 +716,8 @@ def _draw_members(base: music21.pitch.Pitch, mi: int, offset: float, t: float, t
             sources.append(src)
         if len(members) != len(classes) or not member_ok([base] + members, vi):
             continue
-        if check_cross_relation and any(q.step == p.step and q.octave == p.octave and q.alter != p.alter
-                                        for p in members for q in span_others):
+        if any(q.step == p.step and q.octave == p.octave and q.alter != p.alter
+               for p, src in zip(members, sources) if check_cross_relation or src == "copied" for q in span_others):
             continue
         cross = any((above and p.ps > min(above)) or (below and p.ps < max(below)) for p in members)
         if cross and crossing + 1 > MAX_CROSSING * (done + 1):
@@ -852,6 +885,9 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                 offset = float(m.elementOffset(base_note))
                 t = float(m.offset) + offset
                 t_end = t + sum(float(n.quarterLength) for _, n in site.heads)
+                if site.kind == "merge" and _base_conflicts(base_note.pitch, vi, t, t_end, sounding):
+                    stats["skipped"]["merge_base_conflict"] += 1
+                    continue
                 crossing = scalars["crossing"] + sum(1 for r in records if r["cross"])
                 bucket_done = collections.Counter(str(r["bucket"]).split("_")[0] for r in records)
                 for key_, count in stats["class"].items():
