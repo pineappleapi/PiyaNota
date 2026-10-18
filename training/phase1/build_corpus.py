@@ -109,6 +109,19 @@ ACCIDENTAL_COL_TARGET = 0.12         # chord columns with a drawn accidental on 
 ACCIDENTAL_SITE_BOOST = 4.0          # site weight factor for chromatic notes while the piece is under target
 MERGE_METERS: frozenset[str] = frozenset({"4/4", "2/2"})
 WHOLE_NOTE_QL = 4.0
+# Merges (ruling 2026-10-18): plain notes in one bar become one longer note on the first pitch, always chorded.
+MERGE_TO_WHOLE = True                # a whole 4/4 or 2/2 bar
+MERGE_TO_HALF = True                 # quarter + quarter
+MERGE_TO_DOTTED_HALF = True          # half + quarter
+MERGE_TO_DOTTED_QUARTER = True       # quarter (on a beat) + eighth
+# Allowed start offsets (quarter lengths into the bar) of the merged note, per meter: beats 1/3 of 4/4, beat 1 of
+# 2/2 and 3/4 for a half; beats 1/2 of 4/4 and beat 1 of 3/4 for a dotted half.
+MERGE_HALF_STARTS: dict[str, tuple[float, ...]] = {"4/4": (0.0, 2.0), "2/2": (0.0,), "3/4": (0.0,)}
+MERGE_DOTTED_HALF_STARTS: dict[str, tuple[float, ...]] = {"4/4": (0.0, 1.0), "3/4": (0.0,)}
+# Share of chord-bearing strips expected to end below CHORD_DENSITY[0] and be restored to plain; the chord-free draw
+# is lowered by it so all plain strips together aim at P_CHORD_FREE_STRIP (3-piece smoke, round 1).
+EXPECTED_DENSITY_SHORT = 0.05
+STEMLESS = "none"                    # stems entry for a whole-note chord
 MIDDLE_LINE_POSITION = 4             # L3 with L1 = 0
 OCTAVE_SEMITONES = 12
 # Per-piece mix steering: a class already at or above its target keeps this fraction of its weight, so the draw
@@ -498,7 +511,7 @@ def _stem_direction(pitches: list[music21.pitch.Pitch], voice_index: int, drng: 
 
 @dataclass(eq=False)
 class _Site:
-    """One place a chord can go: a note, a bar to merge into one whole note, or a tied note pair.
+    """One place a chord can go: a note, a run of notes merged into one longer note, or a tied note pair.
 
     eq=False: music21 notes compare by value, so two equal-looking sites would let `pool.remove` drop the wrong one.
     """
@@ -508,6 +521,19 @@ class _Site:
     mi: int                                              # measure index of the first head
     heads: list[tuple[int, music21.note.Note]]           # (measure index, note), in order
     chromatic: bool
+    merge: str = ""                                      # merge kind ("whole", "half", ...) when kind == "merge"
+    unbeam_offset: float | None = None                   # dotted quarter: offset of the eighth that loses its beam
+
+
+def _plain(n: music21.base.Music21Object) -> bool:
+    """A note that may be folded into a merged note: nothing on it (tie, tuplet, grace, fermata, articulation) that
+    the single merged note would have to carry or would silently drop."""
+    return (isinstance(n, music21.note.Note) and not n.duration.isGrace and not n.duration.tuplets
+            and n.tie is None and not n.expressions and not n.articulations)
+
+
+def _is_plain_type(n: music21.base.Music21Object, dur_type: str) -> bool:
+    return isinstance(n, music21.note.Note) and n.duration.type == dur_type and n.duration.dots == 0
 
 
 def _mergeable(measure: music21.stream.Measure, meter: str | None) -> bool:
@@ -515,12 +541,48 @@ def _mergeable(measure: music21.stream.Measure, meter: str | None) -> bool:
     if meter not in MERGE_METERS:
         return False
     items = list(measure.notesAndRests)
-    if len(items) < 2 or not all(isinstance(n, music21.note.Note) for n in items):
-        return False
-    if any(n.duration.isGrace or n.duration.tuplets or n.tie is not None or n.expressions or n.articulations
-           for n in items):
+    if len(items) < 2 or not all(_plain(n) for n in items):
         return False
     return sum(float(n.quarterLength) for n in items) == WHOLE_NOTE_QL
+
+
+def _merge_pairs(measure: music21.stream.Measure, meter: str | None
+                 ) -> list[tuple[str, str, list[music21.note.Note], float | None]]:
+    """Two-note merges in one bar: (merge kind, duration class, notes, offset of the eighth that loses its beam).
+
+    Why: Bach offers ~3% chord-capable dotted and ~6% half notes against 15% / 20% targets (ruling 2026-10-18), so
+    adjacent notes are folded into one note of the target length, only at the metric positions where that note is
+    normal notation and never across a barline. A dotted quarter takes the eighth of a quarter-eighth-eighth figure;
+    the remaining eighth then stands alone, so its two-note beam is dropped (it becomes a flagged eighth).
+    """
+    if meter is None:
+        return []
+    beat = float(music21.meter.TimeSignature(meter).beatDuration.quarterLength)
+    items = list(measure.notesAndRests)
+    out: list[tuple[str, str, list[music21.note.Note], float | None]] = []
+    for k in range(len(items) - 1):
+        a, b = items[k], items[k + 1]
+        if not (_plain(a) and _plain(b)):
+            continue
+        off = float(measure.elementOffset(a))
+        if float(measure.elementOffset(b)) != off + float(a.quarterLength):
+            continue
+        if MERGE_TO_HALF and _is_plain_type(a, "quarter") and _is_plain_type(b, "quarter") \
+                and off in MERGE_HALF_STARTS.get(meter, ()):
+            out.append(("half", "half", [a, b], None))
+        if MERGE_TO_DOTTED_HALF and _is_plain_type(a, "half") and _is_plain_type(b, "quarter") \
+                and off in MERGE_DOTTED_HALF_STARTS.get(meter, ()):
+            out.append(("dotted_half", "dotted", [a, b], None))
+        if MERGE_TO_DOTTED_QUARTER and _is_plain_type(a, "quarter") and _is_plain_type(b, "eighth") \
+                and off % beat == 0:
+            beams = b.beams.beamsList
+            c = items[k + 2] if k + 2 < len(items) else None
+            if not beams:
+                out.append(("dotted_quarter", "dotted", [a, b], None))
+            elif (len(beams) == 1 and beams[0].type == "start" and c is not None and _is_plain_type(c, "eighth")
+                  and len(c.beams.beamsList) == 1 and c.beams.beamsList[0].type == "stop"):
+                out.append(("dotted_quarter", "dotted", [a, b], float(measure.elementOffset(c))))
+    return out
 
 
 def _strip_sites(measures: list[music21.stream.Measure], meters: list[str | None], fifths: list[int],
@@ -528,7 +590,8 @@ def _strip_sites(measures: list[music21.stream.Measure], meters: list[str | None
     """Chord sites and note-column count of one (voice, system) strip; notes never chordable count in `skipped`.
 
     A tie pair is a site only with TIES_ENABLED and both notes inside the strip, so a chord never spills into the
-    next system (that strip's density was drawn on its own)."""
+    next system (that strip's density was drawn on its own). Merge sites overlap the note sites of their notes; the
+    caller drops every site sharing a note with one already used."""
     notes = [(mi, n) for mi in system for n in measures[mi].getElementsByClass(music21.note.Note)]
     columns = sum(1 for _, n in notes if not n.duration.isGrace)
     sites: list[_Site] = []
@@ -555,28 +618,38 @@ def _strip_sites(measures: list[music21.stream.Measure], meters: list[str | None
             continue
         sites.append(_Site("note", cls, mi, [(mi, n)], _chromatic(n.pitch, fifths[mi])))
     for mi in system:
-        if _mergeable(measures[mi], meters[mi]):
-            bar = list(measures[mi].getElementsByClass(music21.note.Note))
-            sites.append(_Site("merge", "whole", mi, [(mi, n) for n in bar], _chromatic(bar[0].pitch, fifths[mi])))
+        m = measures[mi]
+        if MERGE_TO_WHOLE and "whole" in A6_DURATIONS and _mergeable(m, meters[mi]):
+            bar = list(m.getElementsByClass(music21.note.Note))
+            sites.append(_Site("merge", "whole", mi, [(mi, n) for n in bar], _chromatic(bar[0].pitch, fifths[mi]),
+                               merge="whole"))
+        for kind, cls, pair, unbeam in _merge_pairs(m, meters[mi]):
+            if cls in A6_DURATIONS:
+                sites.append(_Site("merge", cls, mi, [(mi, n) for n in pair], _chromatic(pair[0].pitch, fifths[mi]),
+                                   merge=kind, unbeam_offset=unbeam))
     return sites, columns
 
 
-def _draw_members(base: music21.pitch.Pitch, mi: int, offset: float, t: float, vi: int,
+def _draw_members(base: music21.pitch.Pitch, mi: int, offset: float, t: float, t_end: float, vi: int,
                   parts: list[music21.stream.Part], sounding: list[list[tuple[float, float, music21.pitch.Pitch]]],
                   fifths: int, drng: random.Random, class_weights: list[float], prefer_copied: bool,
-                  prefer_chromatic: bool, crossing: int, done: int
-                  ) -> tuple[list[music21.pitch.Pitch], list[str], str, bool, int] | str:
-    """Members for a chord on `base`: (members, sources, bucket, crosses, free members off the in-force rule).
+                  prefer_chromatic: bool, crossing: int, done: int, check_cross_relation: bool
+                  ) -> tuple[list[music21.pitch.Pitch], list[str], str, bool] | str:
+    """Members for a chord on `base` sounding over [t, t_end): (members, sources, bucket, crosses).
 
     `class_weights` cover A6_INTERVALS then the triad. Returns the bucket name instead when MAX_REDRAWS attempts all
     fail, so the caller logs a shortfall; the class is drawn once and kept, so a hard class shows up as shortfall,
     not as a silent swap. Each member tries its preferred source (free or copied) first and the other one second.
+    Crossing is judged over the whole span (a member crossing the adjacent voice anywhere counts). For a merged note
+    (`check_cross_relation`) the accidentals in force are those at its downbeat, so a member is also rejected when
+    another voice sounds the same step and octave with a different alter during the span.
     """
     in_force = bar_accidentals(mi, offset, parts)
     key = music21.key.KeySignature(fifths).asKey("major")    # signature only; in_force carries the bar's alters
     others = [p for vj, spans in enumerate(sounding) if vj != vi for s, e, p in spans if s <= t < e]
-    above = [p.ps for s, e, p in sounding[vi - 1] if s <= t < e] if vi > 0 else []
-    below = [p.ps for s, e, p in sounding[vi + 1] if s <= t < e] if vi + 1 < len(sounding) else []
+    span_others = [p for vj, spans in enumerate(sounding) if vj != vi for s, e, p in spans if s < t_end and e > t]
+    above = [p.ps for s, e, p in sounding[vi - 1] if s < t_end and e > t] if vi > 0 else []
+    below = [p.ps for s, e, p in sounding[vi + 1] if s < t_end and e > t] if vi + 1 < len(sounding) else []
     weights = [w for _, _, w in A6_INTERVALS]
     dyad = drng.choices(range(len(A6_INTERVALS) + 1), weights=class_weights)[0]
     triad = dyad == len(A6_INTERVALS)
@@ -610,28 +683,47 @@ def _draw_members(base: music21.pitch.Pitch, mi: int, offset: float, t: float, v
             sources.append(src)
         if len(members) != len(classes) or not member_ok([base] + members, vi):
             continue
+        if check_cross_relation and any(q.step == p.step and q.octave == p.octave and q.alter != p.alter
+                                        for p in members for q in span_others):
+            continue
         cross = any((above and p.ps > min(above)) or (below and p.ps < max(below)) for p in members)
         if cross and crossing + 1 > MAX_CROSSING * (done + 1):
             continue
-        free_new = sum(1 for p, src in zip(members, sources) if src == "free"
-                       and int(p.alter) != in_force.get(f"{p.step}{p.octave}", _key_alter(fifths, p.step)))
-        return members, sources, bucket, cross, free_new
+        return members, sources, bucket, cross
     return bucket
 
 
 def _make_chord(pitches: list[music21.pitch.Pitch], src: music21.note.Note, stem: str,
-                whole: bool = False) -> music21.chord.Chord:
+                merged_ql: float | None = None) -> music21.chord.Chord:
+    """Chord on `src`'s rhythm, or of `merged_ql` for a merged note (which carries no beams, marks or lyrics)."""
     chord = music21.chord.Chord([copy.deepcopy(p) for p in pitches])
-    if whole:
-        chord.duration = music21.duration.Duration(WHOLE_NOTE_QL)
+    if merged_ql is not None:
+        chord.duration = music21.duration.Duration(merged_ql)
     else:
         chord.duration = copy.deepcopy(src.duration)
         chord.beams = copy.deepcopy(src.beams)
         chord.expressions = list(src.expressions)
         chord.articulations = list(src.articulations)
         chord.lyrics = list(src.lyrics)
-    chord.stemDirection = stem
+    if stem != STEMLESS:
+        chord.stemDirection = stem
     return chord
+
+
+def _accidental_display(part: music21.stream.Part, fresh: bool) -> dict[tuple[int, float, str], bool]:
+    """Shown-accidental flag of every single-note head, keyed (measure index, offset, pitch).
+
+    `fresh` runs makeAccidentals on a copy first (the pre-injection baseline); otherwise the part is read as is.
+    """
+    if fresh:
+        part = copy.deepcopy(part)
+        part.makeAccidentals(inPlace=True, overrideStatus=True)
+    out: dict[tuple[int, float, str], bool] = {}
+    for mi, m in enumerate(part.getElementsByClass(music21.stream.Measure)):
+        for n in m.getElementsByClass(music21.note.Note):
+            acc = n.pitch.accidental
+            out[(mi, float(m.elementOffset(n)), n.pitch.nameWithOctave)] = bool(acc is not None and acc.displayStatus)
+    return out
 
 
 def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], drng: random.Random) -> dict[
@@ -640,35 +732,47 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
 
     Why it is shaped this way:
     * The chord-free decision and density are drawn per (voice, system) before anything else, from `drng` only, so
-      they depend on the seed alone and every font render of a strip agrees (injection happens before render).
+      they depend on the seed alone and every font render of a strip agrees (injection happens before render). The
+      chord-free draw is lowered by EXPECTED_DENSITY_SHORT so that all plain strips (drawn chord-free plus strips
+      undone for short density) together aim at P_CHORD_FREE_STRIP; `chord_free_strips` counts both kinds.
     * Sites: the duration class is drawn by `_deficit_weights` over A6_DURATIONS among the classes the strip still
-      offers, then a site of that class. (The plan's static A6_DURATIONS[c] / available[c] weights realised 53%
-      quarters on bwv66.6: a bar's whole-note site vanishes once any note of it is chorded.) Bach has almost no
-      whole notes (Task 1), so a 4/4 or 2/2 bar of plain notes may be merged into one whole note on its first pitch;
-      labels come from the MEI, so they stay exact. Interval class (incl. triad) and member source are steered the
-      same way toward A6_INTERVALS / P_TRIAD_A6 and P_FREE_MEMBER.
-    * Members follow `_draw_members` (conductor rules, re-draws, crossing budget); a failed site stays single and is
-      logged in `shortfall`, so the realised mix is measured, not assumed.
+      offers, then a site of that class, real notes before merged ones. (The plan's static A6_DURATIONS[c] /
+      available[c] weights realised 53% quarters on bwv66.6.) Bach has few whole, half and dotted notes, so plain
+      notes inside one bar may be merged (whole bar in 4/4 or 2/2; quarter+quarter, half+quarter, quarter+eighth at
+      normal metric positions) into one note on the first pitch, which is then always chorded; labels come from the
+      MEI, so they stay exact. Interval class (incl. triad) and member source are steered the same way toward
+      A6_INTERVALS / P_TRIAD_A6 and P_FREE_MEMBER.
+    * Members follow `_draw_members` (conductor rules, re-draws, crossing budget over the chord's whole span); a
+      failed draw goes back to the pool up to MAX_REDRAWS times, then the site stays single. Failures are logged in
+      `shortfall`, so the realised mix is measured, not assumed.
     * Accidental columns are never invented: while the piece is under ACCIDENTAL_COL_TARGET, chromatic sites weigh
-      ACCIDENTAL_SITE_BOOST times more and a chromatic copied member is tried first.
-    * A strip that cannot reach CHORD_DENSITY[0] is restored to plain (`skipped["density_short"]`), so every strip
-      is either chord-free or inside CHORD_DENSITY.
+      ACCIDENTAL_SITE_BOOST times more and a chromatic copied member is tried first. `free_new_accidentals` is a
+      post-hoc audit on the final score (not the rule free_member used), and `induced_accidentals` counts original
+      heads whose shown accidental changed because of the injection (reported, no gate).
+    * A strip that cannot reach CHORD_DENSITY[0] is restored to plain (`density_short_keys`), so every strip is
+      either plain or inside CHORD_DENSITY.
+    * Whole-note chords have no stem; their entry in `stems` is STEMLESS so the list stays one entry per chord.
     shortcut: tied notes are chorded only when TIES_ENABLED (both sides, same members); off until G1b passes ties.
     """
     stats: dict[str, collections.Counter[str]] = {k: collections.Counter() for k in
-                                                   ("class", "duration", "steps", "skipped", "shortfall")}
+                                                   ("class", "duration", "steps", "skipped", "shortfall", "merged")}
     scalars: collections.Counter[str] = collections.Counter({k: 0 for k in (
         "accidental_cols", "ties", "crossing", "free", "copied", "chord_free_strips", "strips",
-        "free_new_accidentals", "chords_total", "merged_whole")})
+        "free_new_accidentals", "induced_accidentals", "chords_total", "merged_whole")})
     stems: dict[str, list[str]] = {}
     density_per_strip: list[float] = []
     chord_free_keys: list[str] = []
+    density_short_keys: list[str] = []
     est_accidental_cols = 0      # predicted (chromatic head) columns, steers the site bias before makeAccidentals
+    baseline = [_accidental_display(part, fresh=True) for part in parts]
+    audit: list[tuple[int, music21.stream.Measure, music21.chord.Chord, list[music21.pitch.Pitch], list[str],
+                      int]] = []
 
+    p_free = max(0.0, (P_CHORD_FREE_STRIP - EXPECTED_DENSITY_SHORT) / (1 - EXPECTED_DENSITY_SHORT))
     decisions: dict[tuple[int, int], float | None] = {}
     for vi in range(len(parts)):
         for si in range(len(systems)):
-            decisions[(vi, si)] = None if drng.random() < P_CHORD_FREE_STRIP else drng.uniform(*CHORD_DENSITY)
+            decisions[(vi, si)] = None if drng.random() < p_free else drng.uniform(*CHORD_DENSITY)
 
     per_voice: list[tuple[list[music21.stream.Measure], list[int], list[tuple[list[_Site], int]]]] = []
     dur_names = list(A6_DURATIONS)
@@ -696,6 +800,7 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                 stats["skipped"].update(skipped)
         per_voice.append((measures, fifths, strips))
 
+    injected_voices: list[int] = []
     for vi, part in enumerate(parts):
         voice = VOICES[vi]
         measures, fifths, strips = per_voice[vi]
@@ -715,12 +820,11 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
             records: list[dict[str, object]] = []
             undo: list[Callable[[], None]] = []
             cols, n_cols = 0, columns
-            touched: set[int] = set()      # measures holding a chord: no longer mergeable
-            merged: set[int] = set()       # merged measures: their old notes are gone
+            used: set[int] = set()         # ids of notes already chorded or merged away
+            tries: collections.Counter[int] = collections.Counter()
             pool = list(sites)
             while cols / n_cols < density:
-                pool = [s for s in pool if (s.mi not in touched if s.kind == "merge"
-                                            else all(hmi not in merged for hmi, _ in s.heads))]
+                pool = [s for s in pool if all(id(n) not in used for _, n in s.heads)]
                 if not pool:
                     break
                 done = scalars["chords_total"] + len(records)
@@ -735,6 +839,7 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                 cls_w = _deficit_weights([A6_DURATIONS[c] for c in offered], [dur_done[c] for c in offered], done)
                 cls = drng.choices(offered, weights=cls_w)[0]
                 of_cls = [s for s in choose_from if s.cls == cls]
+                of_cls = [s for s in of_cls if s.kind != "merge"] or of_cls     # real notes before merged ones
                 site = drng.choices(of_cls, weights=[ACCIDENTAL_SITE_BOOST if boost and s.chromatic else 1.0
                                                      for s in of_cls])[0]
                 pool.remove(site)
@@ -744,7 +849,9 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                     continue
                 mi, base_note = site.heads[0]
                 m = measures[mi]
-                offset = 0.0 if site.kind == "merge" else float(m.elementOffset(base_note))
+                offset = float(m.elementOffset(base_note))
+                t = float(m.offset) + offset
+                t_end = t + sum(float(n.quarterLength) for _, n in site.heads)
                 crossing = scalars["crossing"] + sum(1 for r in records if r["cross"])
                 bucket_done = collections.Counter(str(r["bucket"]).split("_")[0] for r in records)
                 for key_, count in stats["class"].items():
@@ -754,55 +861,71 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                 copied_done = scalars["copied"] + strip_sources.count("copied")
                 members_done = scalars["free"] + scalars["copied"] + len(strip_sources)
                 prefer_copied = copied_done < (1 - P_FREE_MEMBER) * (members_done + 1)
-                drawn = _draw_members(base_note.pitch, mi, offset, float(m.offset) + offset, vi, parts, sounding,
-                                      fifths[mi], drng, class_w, prefer_copied, boost, crossing, done)
+                drawn = _draw_members(base_note.pitch, mi, offset, t, t_end, vi, parts, sounding, fifths[mi], drng,
+                                      class_w, prefer_copied, boost, crossing, done, site.kind == "merge")
                 if isinstance(drawn, str):
                     stats["shortfall"][drawn] += 1
+                    tries[id(site)] += 1
+                    if tries[id(site)] < MAX_REDRAWS:
+                        pool.append(site)          # scarce duration sites get another class, not lost
                     continue
-                members, sources, bucket, cross, free_new = drawn
+                members, sources, bucket, cross = drawn
                 pitches = [base_note.pitch] + members
-                stem = _stem_direction(pitches, vi, drng)
+                stem = STEMLESS if site.cls == "whole" else _stem_direction(pitches, vi, drng)
                 common: dict[str, object] = {
                     "bucket": f"2nd_{stem}" if bucket == "2nd" else bucket, "stem": stem, "members": members,
-                    "sources": sources, "cross": cross, "free_new": free_new,
+                    "sources": sources, "cross": cross, "fifths": fifths[mi],
                     "est_acc": any(_chromatic(p, fifths[mi]) for p in pitches), "tie": site.kind == "tie"}
                 if site.kind == "merge":
                     old = [(float(m.elementOffset(n)), n) for _, n in site.heads]
-                    chord = _make_chord(pitches, base_note, stem, whole=True)
+                    chord = _make_chord(pitches, base_note, stem, merged_ql=t_end - t)
                     for _, n in old:
                         m.remove(n)
-                    m.insert(0.0, chord)
+                    m.insert(offset, chord)
+                    partner: music21.note.NotRest | None = None
+                    old_beams = music21.beam.Beams()
+                    if site.unbeam_offset is not None:
+                        partner = next(x for x in m.getElementsByClass((music21.note.Note, music21.chord.Chord))
+                                       if float(m.elementOffset(x)) == site.unbeam_offset)
+                        old_beams = partner.beams
+                        partner.beams = music21.beam.Beams()
 
                     def _undo_merge(m: music21.stream.Measure = m, chord: music21.chord.Chord = chord,
-                                    old: list[tuple[float, music21.note.Note]] = old) -> None:
+                                    old: list[tuple[float, music21.note.Note]] = old,
+                                    partner: music21.note.NotRest | None = partner,
+                                    old_beams: music21.beam.Beams = old_beams) -> None:
+                        if partner is not None:
+                            partner.beams = old_beams
                         m.remove(chord)
                         for off, n in old:
                             m.insert(off, n)
                     undo.append(_undo_merge)
-                    merged.add(mi)
-                    records.append({**common, "t": float(m.offset), "cls": "whole", "chord": chord, "merge": True})
+                    records.append({**common, "t": t, "cls": site.cls, "chord": chord, "merge": site.merge,
+                                    "mi": mi, "measure": m})
                 else:
                     for k, (hmi, n) in enumerate(site.heads):
                         hm = measures[hmi]
                         chord = _make_chord(pitches, n, stem)
                         if site.kind == "tie":
                             chord.tie = music21.tie.Tie("start" if k == 0 else "stop")
-                        t = float(hm.offset + hm.elementOffset(n))
+                        t_head = float(hm.offset + hm.elementOffset(n))
                         hm.replace(n, chord)
 
                         def _undo_replace(hm: music21.stream.Measure = hm, chord: music21.chord.Chord = chord,
                                           n: music21.note.Note = n) -> None:
                             hm.replace(chord, n)
                         undo.append(_undo_replace)
-                        touched.add(hmi)
-                        records.append({**common, "t": t, "cls": _duration_class(n.duration), "chord": chord,
-                                        "merge": False})
+                        records.append({**common, "t": t_head, "cls": _duration_class(n.duration), "chord": chord,
+                                        "merge": "", "mi": hmi, "measure": hm})
+                used.update(id(n) for _, n in site.heads)
                 cols += add_cols
                 n_cols += add_n
             if cols / n_cols < CHORD_DENSITY[0]:
                 for fn in reversed(undo):
                     fn()
                 stats["skipped"]["density_short"] += 1
+                scalars["chord_free_strips"] += 1
+                density_short_keys.append(strip_key)
                 density_per_strip.append(0.0)
                 continue
             density_per_strip.append(cols / n_cols)
@@ -816,19 +939,34 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                 stats["steps"].update(f"{voice}:{_drawn_position(p, vi)}" for p in members_r)
                 scalars.update(sources_r)
                 scalars["crossing"] += int(bool(r["cross"]))
-                scalars["free_new_accidentals"] += int(r["free_new"])  # type: ignore[call-overload]
                 scalars["ties"] += int(bool(r["tie"]))
-                scalars["merged_whole"] += int(bool(r["merge"]))
+                if r["merge"]:
+                    stats["merged"][str(r["merge"])] += 1
+                    scalars["merged_whole"] += int(r["merge"] == "whole")
                 est_accidental_cols += int(bool(r["est_acc"]))
                 injected.append(r["chord"])  # type: ignore[arg-type]
+                audit.append((int(r["mi"]), r["measure"], r["chord"], members_r, sources_r,  # type: ignore[arg-type]
+                              int(r["fifths"])))  # type: ignore[call-overload]
             scalars["chords_total"] += len(records)
         if injected:
             part.makeAccidentals(inPlace=True, overrideStatus=True)
             scalars["accidental_cols"] += sum(1 for c in injected if any(
                 p.accidental is not None and p.accidental.displayStatus for p in c.pitches))
+            injected_voices.append(vi)
+    for mi, m, chord, members, sources, fx in audit:      # post-hoc: the final score, not the rule that drew them
+        in_force = bar_accidentals(mi, float(m.elementOffset(chord)), parts)
+        for p, src in zip(members, sources):
+            key_alter = _key_alter(fx, p.step)
+            if src == "free" and int(p.alter) not in (key_alter, in_force.get(f"{p.step}{p.octave}", key_alter)):
+                scalars["free_new_accidentals"] += 1
+    for vi in injected_voices:
+        after = _accidental_display(parts[vi], fresh=False)
+        scalars["induced_accidentals"] += sum(1 for k, shown in after.items()
+                                              if k in baseline[vi] and baseline[vi][k] != shown)
     out: dict[str, object] = {k: dict(v) for k, v in stats.items()}
     out.update(scalars)
-    out.update(stems=stems, density_per_strip=density_per_strip, chord_free_keys=sorted(chord_free_keys))
+    out.update(stems=stems, density_per_strip=density_per_strip, chord_free_keys=sorted(chord_free_keys),
+               density_short_keys=sorted(density_short_keys))
     return out
 
 
@@ -971,7 +1109,7 @@ def build_divisi(path: Path, composer: str, work_dir: Path, inject_seed: str = "
     The layout must come out identical, since the hook never touches the Phase 1 stream. A difference means it did,
     so it raises RuntimeError (a hard stop for the whole run, not a skipped piece). `inject_seed` "divisi" reproduces
     the corpus seed string `divisi:<piece>`; test renders use other seeds on the same layout. Strip keys in the stats
-    (`stems`, `chord_free_keys`) are prefixed with the output piece id, as `<piece>|<voice>|<system>`."""
+    (`stems`, `chord_free_keys`, `density_short_keys`) are prefixed with the output piece id, as `<piece>|<voice>|<system>`."""
     piece_id = f"{composer}_{path.stem}".replace(" ", "_")
     base, _ = build_piece(path, composer, random.Random(f"phase1:{piece_id}"), work_dir)
     # plan.systems index MEI measures, which include a constructed multirest ("mr"); music21 measures do not. A
@@ -988,6 +1126,8 @@ def build_divisi(path: Path, composer: str, work_dir: Path, inject_seed: str = "
     stems: dict[str, list[str]] = stats["stems"]  # type: ignore[assignment]
     stats["stems"] = {f"{plan.piece_id}|{k}": v for k, v in stems.items()}
     stats["chord_free_keys"] = [f"{plan.piece_id}|{k}" for k in stats["chord_free_keys"]]  # type: ignore[attr-defined]
+    stats["density_short_keys"] = [f"{plan.piece_id}|{k}"  # type: ignore[attr-defined]
+                                   for k in stats["density_short_keys"]]
     return plan, mei_text, stats
 
 

@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "training"))
 import music21  # noqa: E402
 import build_corpus  # noqa: E402
 from build_corpus import (MEI_NS, _normalise_clefs, _normalise_control_events, _satb_order,  # noqa: E402
-                          assert_no_repeats, bar_accidentals, build_divisi, free_member, inject_divisi, member_ok)
+                          assert_no_repeats, bar_accidentals, build_divisi, check_labels, free_member, inject_divisi, member_ok)
 from music_to_agnostic import convert_staff, split_systems  # noqa: E402
 
 SCORE_DEF = ('<scoreDef meter.count="4" meter.unit="4"><staffGrp><staffDef n="1" lines="5" clef.shape="G" '
@@ -240,7 +240,8 @@ def test_a6_stats_shape_and_stems_per_chord_column() -> None:
     json.dumps(stats)                                  # written verbatim into plan.json / divisi_summary.json
     stems = stats["stems"]
     assert sum(len(v) for v in stems.values()) == stats["chords_total"] > 0
-    assert all(d in ("up", "down") for v in stems.values() for d in v)
+    assert all(d in ("up", "down", build_corpus.STEMLESS) for v in stems.values() for d in v)
+    assert sum(v.count(build_corpus.STEMLESS) for v in stems.values()) == stats["duration"].get("whole", 0)
     assert sum(stats["duration"].values()) == stats["chords_total"]
     assert stats["ties"] == 0                          # TIES_ENABLED is off until G1b passes the tie case
     assert stats["crossing"] <= build_corpus.MAX_CROSSING * stats["chords_total"] + 1e-9
@@ -280,3 +281,37 @@ def test_a6_tie_path_chords_both_sides(monkeypatch: pytest.MonkeyPatch) -> None:
                 assert isinstance(a, music21.chord.Chord) and isinstance(b, music21.chord.Chord)
                 assert [p.nameWithOctave for p in a.pitches] == [p.nameWithOctave for p in b.pitches]
                 assert all(n.tie.type == "start" for n in a.notes) and all(n.tie.type == "stop" for n in b.notes)
+
+
+# (merge kind, duration class, enabling flag, a chorale offering several such pairs)
+MERGE_CASES = [("whole", "whole", "MERGE_TO_WHOLE", "bwv66.6"), ("half", "half", "MERGE_TO_HALF", "bwv66.6"),
+               ("dotted_half", "dotted", "MERGE_TO_DOTTED_HALF", "bwv17.7"),
+               ("dotted_quarter", "dotted", "MERGE_TO_DOTTED_QUARTER", "bwv102.7")]
+
+
+def _bar_lengths(parts: list[music21.stream.Part]) -> list[list[float]]:
+    return [[sum(float(x.quarterLength) for x in m.notesAndRests) for m in part.getElementsByClass(
+        music21.stream.Measure)] for part in parts]
+
+
+@pytest.mark.parametrize("kind,cls,flag,piece", MERGE_CASES)
+def test_a6_merge_kind_keeps_bars_and_labels(monkeypatch: pytest.MonkeyPatch, kind: str, cls: str, flag: str,
+                                             piece: str) -> None:
+    """Each merge kind alone: bar lengths and measure count unchanged, and the MEI still passes check_labels."""
+    for _, _, other, _ in MERGE_CASES:
+        monkeypatch.setattr(build_corpus, other, other == flag)
+    monkeypatch.setattr(build_corpus, "A6_DURATIONS", {cls: 1.0})
+    monkeypatch.setattr(build_corpus, "P_CHORD_FREE_STRIP", 0.0)
+    parts = _parts_of(piece)
+    before = _bar_lengths(parts)
+    stats = inject_divisi(parts, [list(range(i, min(i + 2, len(before[0])))) for i in range(0, len(before[0]), 2)],
+                          random.Random("divisi"))
+    assert stats["merged"].get(kind, 0) > 0
+    assert _bar_lengths(parts) == before
+    path = Path(str(music21.corpus.getWork(f"bach/{piece}")))
+    with tempfile.TemporaryDirectory() as tmp:
+        plan, mei, built = build_divisi(path, "bach", Path(tmp), inject_seed="divisi")
+        assert built["merged"].get(kind, 0) > 0
+        mei_path = Path(tmp) / "piece.mei"
+        mei_path.write_text(mei, encoding="utf-8")
+        check_labels(mei_path, plan)
