@@ -1,0 +1,49 @@
+{
+  "manifest": "D:\\PiyaNota\\datasets\\phase1_divisi_full2\\manifest\\phase2_manifest.jsonl",
+  "pieces_in_manifest": 337,
+  "pieces_counted": 337,
+  "missing_pieces": [],
+  "total_chord_capable": 78324,
+  "by_class": {
+    "whole": 230,
+    "half": 4838,
+    "dotted": 2461,
+    "quarter": 41650,
+    "beamed": 29145,
+    "other": 0
+  },
+  "by_voice": {
+    "Soprano": {
+      "half": 1612,
+      "quarter": 11776,
+      "whole": 64,
+      "beamed": 3179,
+      "dotted": 595
+    },
+    "Alto": {
+      "half": 1089,
+      "quarter": 10241,
+      "whole": 58,
+      "dotted": 720,
+      "beamed": 7458
+    },
+    "Tenor": {
+      "half": 1075,
+      "quarter": 10085,
+      "whole": 51,
+      "dotted": 686,
+      "beamed": 8542
+    },
+    "Bass": {
+      "half": 1062,
+      "quarter": 9548,
+      "whole": 57,
+      "dotted": 460,
+      "beamed": 9966
+    }
+  },
+  "whole_share_target": 0.12,
+  "planned_chord_share": 0.4,
+  "whole_count_threshold": 3759.552,
+  "merge_to_whole_needed": true
+}

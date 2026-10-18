@@ -182,3 +182,22 @@ and the gate in section 6 checks it.
 - Re-draw limits when a target cannot be met within a piece. Log the shortfall rather than looping.
 - The Kaggle kernel layout, which is a copy of `phase2_divisi_kernel.py` with a new run table, epochs and pinned shas.
 - The exact duration-weighting scheme, as long as the realised mix passes section 5.2.
+
+## 10. Feasibility (Task 1)
+
+Counted by `training/phase1/divisi_a6_feasibility.py` over the 337 train-split Bach pieces of the full-2 Phase 2
+manifest (all 337 found and four-part), chord-capable notes only (not tied, grace or tuplet), after `_normalise_clefs`.
+Full numbers by voice: `docs/decisions/piya-106-divisi-a6-feasibility.json`.
+
+| class | count |
+|---|---|
+| whole | 230 |
+| half | 4838 |
+| dotted | 2461 |
+| quarter | 41650 |
+| beamed | 29145 |
+| other | 0 |
+| total | 78324 |
+
+Rule: whole count must be at least 0.12 x 0.4 x 78324 = 3759.6. It is 230 (0.29% of notes), so duration weighting alone
+cannot reach 12% of chord columns. **Decision: `merge_to_whole_needed = true`; Task 3 enables `merge_to_whole`.**
