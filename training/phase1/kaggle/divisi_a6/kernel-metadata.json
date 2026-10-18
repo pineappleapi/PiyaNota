@@ -1,0 +1,16 @@
+{
+  "id": "piamac/piyanota-divisi-a6-build",
+  "title": "piyanota-divisi-a6-build",
+  "code_file": "piyanota_divisi_a6.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": "true",
+  "enable_gpu": "false",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": ["piamac/piyanota-divisi-a6-code"],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": [],
+  "docker_image_pinning_type": "original"
+}

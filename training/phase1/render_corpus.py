@@ -30,6 +30,7 @@ import sys
 import time
 from dataclasses import asdict
 from pathlib import Path
+from typing import Sequence
 
 import resvg_py
 import verovio
@@ -52,6 +53,15 @@ BASE_OPTIONS: dict[str, object] = {
     "breaks": "encoded", "pageWidth": PAGE_WIDTH, "pageHeight": PAGE_HEIGHT, "adjustPageHeight": True,
     "footer": "none", "header": "auto", "svgHtml5": True, "svgAdditionalAttribute": ["staff@n"],
 }
+
+
+def fonts_for_piece(index: int, per_piece: int, pool: Sequence[str] = FONTS) -> list[str]:
+    """Fonts rendered for the piece at `index` of the sorted plan list, rotated so every pool font is used equally.
+
+    Why a pool: the divisi A6 train renders hold one font out (`--exclude-font`); rotating over the reduced pool keeps
+    the remaining fonts equally used. With the default pool (all of FONTS) this is the original rotation exactly.
+    """
+    return [pool[(index % len(pool) + k) % len(pool)] for k in range(per_piece)]
 
 
 def provenance() -> dict[str, object]:
@@ -178,6 +188,8 @@ def main() -> None:
     parser.add_argument("--composers", default="bach,palestrina")
     parser.add_argument("--fonts-per-piece", type=int, default=len(FONTS),
                         help="fonts per piece, rotated so every font is used equally (default all 5)")
+    parser.add_argument("--exclude-font", action="append", default=[], choices=FONTS, metavar="FONT",
+                        help="divisi A6 train renders: leave this font out of the rotation (repeatable); default none")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--start", type=int, default=0,
                         help="first plan index per composer; with --limit this renders one chunk, so a killed run "
@@ -188,6 +200,9 @@ def main() -> None:
     parser.add_argument("--vocab-ext", action="store_true",
                         help="divisi arm: guard against VOCAB_EXT_CHORD_TUPLET (chordnote tokens are in vocabulary)")
     args = parser.parse_args()
+    pool = tuple(f for f in FONTS if f not in args.exclude_font)
+    if args.fonts_per_piece > len(pool):
+        parser.error(f"--fonts-per-piece {args.fonts_per_piece} exceeds the {len(pool)} fonts left after --exclude-font")
     prov = provenance()
     corpus = args.out / "corpus"
     results: list[dict[str, object]] = []
@@ -201,8 +216,7 @@ def main() -> None:
             plan = json.loads(plan_path.read_text(encoding="utf-8"))
             mei_path = corpus / f"{plan['piece_id']}.mei"
             rng = random.Random(f"phase1-render:{plan['piece_id']}")
-            start = i % len(FONTS)
-            fonts = [FONTS[(start + k) % len(FONTS)] for k in range(args.fonts_per_piece)]
+            fonts = fonts_for_piece(i, args.fonts_per_piece, pool)
             for font in fonts:
                 scale = rng.choice(SCALES)
                 ok_dir = args.out / "renders" / font / plan["piece_id"]

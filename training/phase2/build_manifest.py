@@ -52,6 +52,8 @@ def load_tune_groups() -> dict[str, str]:
 def quantiles(values: list[float], qs: tuple[float, ...]) -> list[float]:
     """Linear-interpolated quantiles without numpy, so the Kaggle and local results match exactly."""
     v = sorted(values)
+    if not v:   # A6 test folders hold val pieces only, so there are no train rows to take edges from
+        return []
     out = []
     for q in qs:
         pos = q * (len(v) - 1)
