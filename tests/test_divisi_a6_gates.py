@@ -122,3 +122,68 @@ def test_test_render_buckets(tmp_path):
     assert gates["test.7th.in_font"]["status"] == g.WARN         # absent bucket: warn, not fail
     assert gates["test.8ve.in_font"]["status"] == g.FAIL
     assert g.test_gates([])[0][0]["status"] == g.NOT_RUN
+
+
+def write_build(tmp_path, rows, summary=None):
+    b = tmp_path / "build"
+    (b / "manifest").mkdir(parents=True)
+    (b / "manifest" / "phase2_manifest.jsonl").write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+    if summary is not None:
+        (b / "divisi_summary.json").write_text(json.dumps(summary), encoding="utf-8")
+    return b
+
+
+def test_manifest_gates_gootville_and_clean(tmp_path):
+    toks = ["note.quarter-L1", "chordnote-L2"]
+    stems = {"p__divisi|Alto|0": ["up"]}
+    bad = write_build(tmp_path, [row("Gootville", toks)])
+    assert by_name(g.manifest_gates(bad, {"stems": stems})[0])["gootville_chord_strips_in_train"]["status"] == g.FAIL
+    (tmp_path / "c").mkdir()
+    clean = write_build(tmp_path / "c", [row("Bravura", toks), row("Gootville", toks, split="val")])
+    assert all(x["status"] == g.PASS for x in g.manifest_gates(clean, {"stems": stems})[0])
+
+
+def full_build(tmp_path):
+    s = good_summary()
+    s["stems"] = {"p__divisi|Alto|0": ["up"]}
+    return write_build(tmp_path, [row("Bravura", ["note.quarter-L1", "chordnote-L2"])], s)
+
+
+def test_main_requires_test_unless_allowed(tmp_path, capsys, monkeypatch):
+    b = full_build(tmp_path)
+    a5 = b / "divisi_summary.json"                       # any file; its hash is declared the A5 value
+    monkeypatch.setattr(g, "A5_SHA256", g.sha256_of(a5))
+    out = tmp_path / "r.json"
+    args = ["--build", str(b), "--out", str(out), "--a5-manifest", str(a5)]
+    assert g.main(args) == 1
+    assert by_name(json.loads(out.read_text(encoding="utf-8"))["gates"])["test_buckets"]["status"] == g.FAIL
+    capsys.readouterr()
+    assert g.main(args + ["--allow-no-test"]) == 1       # NOT_RUN never counts as ok
+    text = capsys.readouterr().out
+    assert "TEST BUCKETS NOT CHECKED" in text and "ALL GATES PASS" not in text
+    rep = json.loads(out.read_text(encoding="utf-8"))
+    assert not rep["ok"] and not rep["test_buckets_checked"]
+
+
+def test_main_all_gates_pass_with_test_dir(tmp_path, capsys, monkeypatch):
+    b = full_build(tmp_path)
+    a5 = b / "divisi_summary.json"
+    monkeypatch.setattr(g, "A5_SHA256", g.sha256_of(a5))
+    monkeypatch.setattr(g, "TEST_MIN_IN_FONT", 1)
+    monkeypatch.setattr(g, "TEST_MIN_HELD_OUT", 1)
+    monkeypatch.setattr(g, "TEST_BUCKETS", ("3rd",))
+    d = make_test_dir(tmp_path, "t1", 1, 1)
+    out = tmp_path / "r.json"
+    assert g.main(["--build", str(b), "--test", str(d), "--out", str(out), "--a5-manifest", str(a5)]) == 0
+    assert "ALL GATES PASS" in capsys.readouterr().out
+
+
+def test_main_missing_summary_writes_report(tmp_path):
+    b = tmp_path / "empty"
+    b.mkdir()
+    out = tmp_path / "r.json"
+    assert g.main(["--build", str(b), "--out", str(out), "--allow-no-test"]) == 1
+    assert by_name(json.loads(out.read_text(encoding="utf-8"))["gates"])["divisi_summary"]["status"] == g.MISSING
+    (b / "divisi_summary.json").write_text(json.dumps({"realised": {}}), encoding="utf-8")
+    assert g.main(["--build", str(b), "--out", str(out), "--allow-no-test"]) == 1
+    assert by_name(json.loads(out.read_text(encoding="utf-8"))["gates"])["divisi_summary"]["status"] == g.MISSING

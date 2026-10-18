@@ -246,25 +246,52 @@ def format_table(gates: Sequence[Mapping[str, object]]) -> str:
                      for g in gates)
 
 
-def main() -> int:
+def load_summary(build: Path) -> tuple[dict[str, object] | None, str]:
+    """divisi_summary.json, or (None, reason) when it is absent or has no `realised` / `stems`."""
+    path = build / "divisi_summary.json"
+    if not path.is_file():
+        return None, f"{path} not found"
+    summary = json.loads(path.read_text(encoding="utf-8"))
+    if "stems" not in summary or "realised" not in summary:
+        return None, "divisi_summary.json lacks `realised` or `stems`"
+    return summary, ""
+
+
+def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--build", type=Path, required=True)
     ap.add_argument("--test", type=Path, nargs="*", default=[], help="test-render build folders (3 seeds)")
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--a5-manifest", type=Path, default=A5_DEFAULT_MANIFEST,
                     help="Phase 2 manifest whose sha256 must be the A5 value; missing fails the gate")
-    args = ap.parse_args()
-    summary = json.loads((args.build / "divisi_summary.json").read_text(encoding="utf-8"))
-    gates = summary_gates(summary)
-    m_gates, train_rep = manifest_gates(args.build, summary)
+    ap.add_argument("--allow-no-test", action="store_true",
+                    help="run without test renders: the test-bucket gates are then NOT checked and the run says so")
+    args = ap.parse_args(argv)
+    summary, why = load_summary(args.build)
+    train_rep: dict[str, object] = {}
+    if summary is None:
+        gates = [gate("divisi_summary", why, "present with realised + stems", False, MISSING)]
+    else:
+        gates = summary_gates(summary)
+        m_gates, train_rep = manifest_gates(args.build, summary)
+        gates += m_gates
     t_gates, test_rep = test_gates(args.test)
-    gates += m_gates + t_gates + [a5_gate(args.a5_manifest)]
-    ok = all(g["status"] in (PASS, WARN, NOT_RUN) for g in gates)
-    args.out.write_text(json.dumps({"ok": ok, "gates": gates, "train_manifest": train_rep, "test_buckets": test_rep},
-                                   indent=1), encoding="utf-8")
+    if not args.test and not args.allow_no_test:
+        t_gates = [gate("test_buckets", "no --test dirs", "test renders required (--allow-no-test to skip)", False)]
+    gates += t_gates + [a5_gate(args.a5_manifest)]
+    not_run = any(x["status"] == NOT_RUN for x in gates)
+    failed = [str(x["name"]) for x in gates if x["status"] not in (PASS, WARN, NOT_RUN)]
+    ok = not failed and not not_run
+    args.out.write_text(json.dumps({"ok": ok, "test_buckets_checked": not not_run, "gates": gates,
+                                    "train_manifest": train_rep, "test_buckets": test_rep}, indent=1),
+                        encoding="utf-8")
     print(format_table(gates))
-    print("ALL GATES PASS" if ok else "GATES FAILED: " + ", ".join(str(g["name"]) for g in gates
-                                                                   if g["status"] not in (PASS, WARN, NOT_RUN)))
+    if failed:
+        print("GATES FAILED: " + ", ".join(failed))
+    elif not_run:
+        print("TEST BUCKETS NOT CHECKED (--allow-no-test); other gates pass")
+    else:
+        print("ALL GATES PASS")
     return 0 if ok else 1
 
 
