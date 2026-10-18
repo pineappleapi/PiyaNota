@@ -338,3 +338,35 @@ def test_a6_merged_base_checked_over_the_span() -> None:
     assert build_corpus._base_conflicts(P("C5"), 1, 0.0, 4.0, crossing)
     relation = [[(0.0, 4.0, P("A5"))], [], [(0.0, 4.0, P("C4"))], [(2.0, 4.0, P("F#4"))]]   # bass F#4 vs F4
     assert build_corpus._base_conflicts(P("F4"), 1, 0.0, 4.0, relation)
+
+
+def test_a6_merge_keeps_accidentals_free_members_rely_on() -> None:
+    """Round 3 smoke: an alto free F#4 on beat 3 of bwv101.7 bar 9 relied on the alto's own F#4 eighth, which a
+    dotted-quarter merge drawn later in the strip folded away, so the final score audit found a new accidental."""
+    path = Path(str(music21.corpus.getWork("bach/bwv101.7")))
+    with tempfile.TemporaryDirectory() as tmp:
+        _, _, built = build_divisi(path, "bach", Path(tmp), inject_seed="divisi")
+    assert built["free_new_accidentals"] == 0
+
+
+def test_a6_merge_drops_relied_accidental_only_when_used_later() -> None:
+    """A removed F#4 at beat 2 licenses a free F#4 at beat 3 in the same bar (G major has F#, so use C major)."""
+    P = music21.pitch.Pitch
+    removed = [(1.0, P("F#4"))]
+    assert build_corpus._merge_drops_relied_accidental(removed, 8, [(8, 2.0, P("F#4"), 0)])
+    assert not build_corpus._merge_drops_relied_accidental(removed, 8, [(8, 0.5, P("F#4"), 0)])   # before it
+    assert not build_corpus._merge_drops_relied_accidental(removed, 9, [(8, 2.0, P("F#4"), 0)])   # other bar
+    assert not build_corpus._merge_drops_relied_accidental(removed, 8, [(8, 2.0, P("F#4"), 1)])   # key has F#
+    assert not build_corpus._merge_drops_relied_accidental(removed, 8, [(8, 2.0, P("F#5"), 0)])   # other octave
+
+
+def test_a6_stems_down_2nds_steered() -> None:
+    """A forced 2nd is stems down; a chord without a 2nd keeps the engraving rule; the piece share meets the gate."""
+    P = music21.pitch.Pitch
+    drng = random.Random(0)
+    assert all(build_corpus._stem_direction([P("G4"), P("A4")], 0, drng, True) == "down" for _ in range(20))
+    assert build_corpus._stem_direction([P("G4"), P("B4")], 0, drng, True) == "up"
+    stats = run_inject("bwv66.6", seed="divisi")
+    down = sum(v for k, v in stats["class"].items() if k.endswith(":2nd_down"))
+    up = sum(v for k, v in stats["class"].items() if k.endswith(":2nd_up"))
+    assert up + down > 0 and down / (up + down) >= 0.30          # frozen: >= 30% of 2nds stems down
