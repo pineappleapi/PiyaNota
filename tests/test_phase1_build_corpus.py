@@ -11,7 +11,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "training" / "phase1"))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "training"))
-from build_corpus import MEI_NS, _normalise_control_events, assert_no_repeats  # noqa: E402
+import music21  # noqa: E402
+from build_corpus import (MEI_NS, _normalise_control_events, assert_no_repeats, bar_accidentals,  # noqa: E402
+                          free_member, member_ok)
 from music_to_agnostic import convert_staff, split_systems  # noqa: E402
 
 SCORE_DEF = ('<scoreDef meter.count="4" meter.unit="4"><staffGrp><staffDef n="1" lines="5" clef.shape="G" '
@@ -82,3 +84,59 @@ def test_tie_joining_two_staves_removed_same_staff_tie_kept() -> None:
     kept = [t.attrib.get("{http://www.w3.org/XML/1998/namespace}id") for t in score.iter(f"{{{MEI_NS}}}tie")]
     assert kept == ["same"]
     assert fixes["cross_staff_ties_removed"] == 1 and fixes["open_ties_removed"] == 0
+
+
+def test_free_member_minor_natural_seventh_by_default() -> None:
+    key = music21.key.Key("a")
+    assert free_member(music21.pitch.Pitch("A4"), 7, -1, {}, key).nameWithOctave == "B3"
+    assert free_member(music21.pitch.Pitch("A4"), 2, -1, {}, key).nameWithOctave == "G4"   # natural, no G#
+
+
+def test_free_member_uses_raised_seventh_only_when_bar_has_it() -> None:
+    key = music21.key.Key("a")
+    assert free_member(music21.pitch.Pitch("A4"), 2, -1, {"G4": 1}, key).nameWithOctave == "G#4"
+
+
+def test_free_member_after_key_change_follows_new_key() -> None:
+    assert free_member(music21.pitch.Pitch("D5"), 3, -1, {}, music21.key.Key("D")).nameWithOctave == "B4"
+    assert free_member(music21.pitch.Pitch("D5"), 3, -1, {}, music21.key.Key("F")).nameWithOctave == "B-4"
+
+
+def test_free_member_seventh_only_when_minor() -> None:
+    key = music21.key.Key("C")
+    assert free_member(music21.pitch.Pitch("C4"), 7, 1, {}, key) is None            # B4 is a major 7th
+    assert free_member(music21.pitch.Pitch("D4"), 7, 1, {}, key).nameWithOctave == "C5"
+
+
+@pytest.mark.parametrize("pitches", [["C4", "C#4"], ["F4", "G#4"], ["F4", "B4"], ["B3", "F4"], ["C#4", "B-4"]])
+def test_member_ok_rejects_forbidden_intervals(pitches: list[str]) -> None:
+    assert not member_ok([music21.pitch.Pitch(p) for p in pitches], 0)
+
+
+def test_member_ok_range_and_steps() -> None:
+    assert member_ok([music21.pitch.Pitch("E4"), music21.pitch.Pitch("G4")], 0)
+    assert not member_ok([music21.pitch.Pitch("A5"), music21.pitch.Pitch("C6")], 0)   # above A5 + 2 st
+    assert not member_ok([music21.pitch.Pitch(p) for p in ("C4", "E4", "G4", "B4")], 0)   # 4 notes
+
+
+def test_member_ok_rejects_generic_unison_and_wide_span() -> None:
+    assert not member_ok([music21.pitch.Pitch("E4"), music21.pitch.Pitch("E4")], 0)
+    assert not member_ok([music21.pitch.Pitch("C4"), music21.pitch.Pitch("E5")], 0)   # 16 semitones
+
+
+def _bar_part() -> music21.stream.Part:
+    part = music21.stream.Part()
+    m = music21.stream.Measure(number=1)
+    m.insert(0, music21.key.KeySignature(1))
+    m.insert(0, music21.note.Note("C#5", quarterLength=1))
+    m.insert(1, music21.note.Note("F4", quarterLength=1))
+    part.append(m)
+    return part
+
+
+def test_bar_accidentals_reports_key_and_earlier_same_bar_only() -> None:
+    part = _bar_part()
+    early = bar_accidentals(0, 1.0, [part])
+    assert early["C5"] == 1 and early["F4"] == 1 and early["F5"] == 1    # C#5 sounded earlier; F# from the key
+    assert "G4" not in early
+    assert bar_accidentals(0, 0.0, [part]).get("C5") is None            # not yet sounded at the downbeat

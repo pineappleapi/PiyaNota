@@ -84,6 +84,26 @@ DIVISI_MAX_SEMITONES = 12
 # accidental or head token and the guard quarantined the strip (smoke 2026-10-15, freeze Amendment A1).
 DIVISI_MEMBER_POSITIONS = (-3, 12)
 P_TRIAD = 0.05
+# A6 member sampler (docs/superpowers/plans/2026-10-18-divisi-a6.md Task 2). Dyad weights renormalise over 0.85;
+# triads (P_TRIAD_A6) are drawn separately. 7ths are minor only.
+A6_INTERVALS: tuple[tuple[str, int, float], ...] = (
+    ("2nd", 2, 0.12), ("3rd", 3, 0.16), ("4th", 4, 0.12), ("5th", 5, 0.12), ("6th", 6, 0.12), ("7th", 7, 0.05),
+    ("8ve", 8, 0.16))
+P_FREE_MEMBER = 0.6
+P_TRIAD_A6 = 0.15
+P_STEMS_DOWN_2ND = 0.30
+MAX_MEMBER_STEPS = (-5, 13)          # inclusive, L1 = 0
+RANGE_SLACK_SEMITONES = 2
+# Sounding pitches: Tenor is written in treble-8vb, so its sounding range is C3-A4.
+VOICE_RANGES: dict[str, tuple[str, str]] = {
+    "Soprano": ("C4", "A5"), "Alto": ("G3", "D5"), "Tenor": ("C3", "A4"), "Bass": ("E2", "E4")}
+MAX_REDRAWS = 8
+MAX_CHORD_NOTES = 3
+MAX_CHORD_SEMITONES = 12
+MINOR_SEVENTH_SEMITONES = 10
+KEY_ACCIDENTAL_OCTAVES = range(1, 8)
+# Simple-interval names a conductor would not write on one stem: aug unison, aug 2nd, aug 4th, dim 5th, dim 7th, dim 2nd.
+FORBIDDEN_MEMBER_INTERVALS: frozenset[str] = frozenset({"A1", "d2", "A2", "A4", "d5", "d7"})
 DIVISI_SUFFIX = "__divisi"
 
 
@@ -335,6 +355,86 @@ def _divisi_candidates(base: music21.pitch.Pitch, members: list[music21.pitch.Pi
             continue
         found[p.nameWithOctave] = p
     return [found[k] for k in sorted(found, key=lambda k: (found[k].ps, k))]
+
+
+def bar_accidentals(measure_index: int, offset: float, parts: list[music21.stream.Part]) -> dict[str, int]:
+    """Alter in force per step+octave (e.g. "G4" -> 1) at `offset` of the measure, across all voices.
+
+    Why: choral free members may only use accidentals already printed in the bar, so the chord never adds a new
+    accidental the choir has not seen. Covers the key signature in effect (mid-piece changes included, per part)
+    and every note sounded strictly before `offset` in the same measure, in any voice.
+    """
+    in_force: dict[str, int] = {}
+    for part in parts:
+        measures = list(part.getElementsByClass(music21.stream.Measure))
+        key_sig: music21.key.KeySignature | None = None
+        for m in measures[:measure_index + 1]:
+            for ks in m.getElementsByClass(music21.key.KeySignature):
+                key_sig = ks
+        if key_sig is not None:
+            for letter in "CDEFGAB":
+                acc = key_sig.accidentalByStep(letter)
+                if acc is not None:
+                    for octave in KEY_ACCIDENTAL_OCTAVES:
+                        in_force[f"{letter}{octave}"] = int(acc.alter)
+    for part in parts:
+        measures = list(part.getElementsByClass(music21.stream.Measure))
+        if measure_index >= len(measures):
+            continue
+        for n in sorted(measures[measure_index].getElementsByClass(music21.note.Note), key=lambda x: x.offset):
+            if n.offset < offset:
+                in_force[f"{n.pitch.step}{n.pitch.octave}"] = int(n.pitch.alter)
+    return in_force
+
+
+def free_member(base: music21.pitch.Pitch, generic: int, direction: int, in_force: dict[str, int],
+                key: music21.key.Key) -> music21.pitch.Pitch | None:
+    """Diatonic member `generic` steps (2 = second .. 8 = octave) above/below `base` in `key`, or None.
+
+    Natural minor is the default for minor keys because the key signature carries it; a raised degree appears
+    only when `in_force` has it for that step and octave. Returns None for a 7th that is not a minor 7th (the
+    frozen rule is "7th: minor only"; the caller re-draws) and for a result needing a double accidental.
+    """
+    index = base.octave * 7 + "CDEFGAB".index(base.step) + direction * (generic - 1)
+    octave, step_i = divmod(index, 7)
+    letter = "CDEFGAB"[step_i]
+    key_acc = key.accidentalByStep(letter)
+    alter = in_force.get(f"{letter}{octave}", int(key_acc.alter) if key_acc is not None else 0)
+    if abs(alter) > 1:
+        return None
+    result = music21.pitch.Pitch(letter + {-1: "-", 0: "", 1: "#"}[alter] + str(octave))
+    if generic == 7 and abs(result.ps - base.ps) != MINOR_SEVENTH_SEMITONES:
+        return None
+    return result
+
+
+def member_ok(chord: list[music21.pitch.Pitch], voice_index: int) -> bool:
+    """True when `chord` (all notes on one stem) is singable and drawable for the voice.
+
+    Why each check: range+slack and steps -5..13 keep every head readable on the voice's staff; span and note
+    count keep the stem a normal choral divisi; the interval ban is the conductor rule (no aug/dim leaps, no
+    chromatic second or unison) and a generic unison would overprint two heads.
+    """
+    low, high = VOICE_RANGES[VOICES[voice_index]]
+    lo_ps = music21.pitch.Pitch(low).ps - RANGE_SLACK_SEMITONES
+    hi_ps = music21.pitch.Pitch(high).ps + RANGE_SLACK_SEMITONES
+    if len(chord) > MAX_CHORD_NOTES:
+        return False
+    for p in chord:
+        if not lo_ps <= p.ps <= hi_ps:
+            return False
+        if not MAX_MEMBER_STEPS[0] <= _drawn_position(p, voice_index) <= MAX_MEMBER_STEPS[1]:
+            return False
+    if max(p.ps for p in chord) - min(p.ps for p in chord) > MAX_CHORD_SEMITONES:
+        return False
+    for i, a in enumerate(chord):
+        for b in chord[i + 1:]:
+            if (a.step, a.octave) == (b.step, b.octave):
+                return False
+            lower, upper = sorted((a, b), key=lambda p: p.ps)
+            if music21.interval.Interval(lower, upper).simpleName in FORBIDDEN_MEMBER_INTERVALS:
+                return False
+    return True
 
 
 def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], drng: random.Random) -> dict[
