@@ -620,6 +620,25 @@ def _merge_drops_relied_accidental(removed: list[tuple[float, music21.pitch.Pitc
                for roff, r in removed for pmi, poff, p, fx in free_placed)
 
 
+def _member_overrides_relied_accidental(members: list[music21.pitch.Pitch], placements: list[tuple[int, float]],
+                                        free_placed: list[tuple[int, float, music21.pitch.Pitch, int]]) -> bool:
+    """True when a new member would change the alter in force for a free member already placed later in the bar.
+
+    Why: the same hole as `_merge_drops_relied_accidental`, from the other side (review round 5). C major: a soprano
+    F#4 eighth at offset 2.0 licenses an alto free F#4 at 3.0; a tenor copied F4 natural placed at 2.5 (from a bass
+    F4) passes its own span check [2.5, 3.0), yet `bar_accidentals` at 3.0 then reads F4 = 0 and the audit finds a
+    new accidental. Any member counts, not only copied ones, since every head before the free member is read.
+
+    Args:
+        members: the chord's added pitches (the base note is already in the score).
+        placements: (measure index, offset in the bar) of each head the chord is written on.
+        free_placed: (measure index, offset in the bar, pitch, key fifths) of every free member placed so far.
+    """
+    return any(pmi == hmi and hoff < poff and (q.step, q.octave) == (p.step, p.octave) and q.alter != p.alter
+               and int(p.alter) != _key_alter(fx, p.step)
+               for q in members for hmi, hoff in placements for pmi, poff, p, fx in free_placed)
+
+
 def _free_members_of(record: dict[str, object]) -> list[tuple[int, float, music21.pitch.Pitch, int]]:
     """(measure index, offset in the bar, pitch, key fifths) of each free member of an injected chord record.
 
@@ -882,7 +901,8 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
       either plain or inside CHORD_DENSITY. Over-target duration classes are skipped only once the strip has reached
       that floor; below it the least over-target class is taken, so the duration skip does not empty strips.
     * A merge that would remove a head whose accidental an already placed free member uses is skipped
-      (`skipped["merge_accidental_relied_on"]`), so the post-hoc audit stays 0.
+      (`skipped["merge_accidental_relied_on"]`), and so is a chord whose member would change that accidental
+      (`skipped["member_overrides_relied_accidental"]`), so the post-hoc audit stays 0.
     * Whole-note chords have no stem; their entry in `stems` is STEMLESS so the list stays one entry per chord.
     shortcut: tied notes are chorded only when TIES_ENABLED (both sides, same members); off until G1b passes ties.
     """
@@ -1020,11 +1040,18 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                         pool.append(site)          # scarce duration sites get another class, not lost
                     continue
                 members, sources, bucket, cross = drawn
+                placements = [(mi, offset)] if site.kind == "merge" else [
+                    (hmi, float(measures[hmi].elementOffset(n))) for hmi, n in site.heads]
+                if _member_overrides_relied_accidental(members, placements, free_placed + [
+                        r_free for r in records for r_free in _free_members_of(r)]):
+                    stats["skipped"]["member_overrides_relied_accidental"] += 1
+                    continue
                 pitches = [base_note.pitch] + members
                 strip_2nds = [r["stem"] for r in records if r["second"]]
                 seconds_n = seconds_done + len(strip_2nds)
                 down_n = seconds_down + strip_2nds.count("down")
-                force_down = seconds_n == 0 or down_n / seconds_n < STEMS_DOWN_2ND_TARGET
+                # The first 2nd of a piece uses the plain draw: forcing it down biased by voice/position (round 5).
+                force_down = seconds_n > 0 and down_n / seconds_n < STEMS_DOWN_2ND_TARGET
                 stem = STEMLESS if site.cls == "whole" else _stem_direction(pitches, vi, drng, force_down)
                 common: dict[str, object] = {
                     "bucket": f"2nd_{stem}" if bucket == "2nd" else bucket, "stem": stem, "members": members,

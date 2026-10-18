@@ -361,7 +361,8 @@ def test_a6_merge_drops_relied_accidental_only_when_used_later() -> None:
 
 
 def test_a6_stems_down_2nds_steered() -> None:
-    """A forced 2nd is stems down; a chord without a 2nd keeps the engraving rule; the piece share meets the gate."""
+    """A forced 2nd is stems down; a chord without a 2nd keeps the engraving rule; the piece share meets the gate.
+    The first 2nd of a piece is not forced (round 5), so steering only starts from the second 2nd."""
     P = music21.pitch.Pitch
     drng = random.Random(0)
     assert all(build_corpus._stem_direction([P("G4"), P("A4")], 0, drng, True) == "down" for _ in range(20))
@@ -370,3 +371,17 @@ def test_a6_stems_down_2nds_steered() -> None:
     down = sum(v for k, v in stats["class"].items() if k.endswith(":2nd_down"))
     up = sum(v for k, v in stats["class"].items() if k.endswith(":2nd_up"))
     assert up + down > 0 and down / (up + down) >= 0.30          # frozen: >= 30% of 2nds stems down
+
+
+def test_a6_member_overriding_relied_accidental_is_rejected() -> None:
+    """C major: an alto free F#4 at 3.0 relies on a soprano F#4 at 2.0; a tenor F4 natural at 2.5 would override it."""
+    P = music21.pitch.Pitch
+    placed = [(8, 3.0, P("F#4"), 0)]
+    check = build_corpus._member_overrides_relied_accidental
+    assert check([P("F4")], [(8, 2.5)], placed)
+    assert not check([P("F4")], [(8, 3.0)], placed)          # same onset: not before the free member
+    assert not check([P("F4")], [(8, 3.5)], placed)          # after it
+    assert not check([P("F#4")], [(8, 2.5)], placed)         # same alter keeps the licence
+    assert not check([P("F5")], [(8, 2.5)], placed)          # other octave
+    assert not check([P("F4")], [(9, 2.5)], placed)          # other bar
+    assert not check([P("F4")], [(8, 2.5)], [(8, 3.0, P("F#4"), 1)])   # G major: F# is the key alter
