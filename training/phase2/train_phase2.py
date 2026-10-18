@@ -198,19 +198,32 @@ def cpm_samples(root: str) -> list[tuple[str, str | None, list[int]]]:
 
 class ReplaySampler(Sampler[int]):
     """Per epoch: every synthetic index once plus a fresh draw of CPM indices, shuffled together. The generator is
-    reseeded by run() exactly like the notebook reseeds the train loader, so a seed fixes the whole order."""
+    reseeded by run() exactly like the notebook reseeds the train loader, so a seed fixes the whole order.
 
-    def __init__(self, n_synth: int, n_cpm_pool: int, n_cpm_per_epoch: int, generator: torch.Generator) -> None:
+    A6 divisi pool: indices [n_synth + n_pool, n_synth + n_pool + n_divisi_pool) are redrawn each epoch
+    (n_divisi_per_epoch of them), so the model sees different divisi strips every epoch instead of one fixed subset.
+    The divisi draw is skipped entirely when n_divisi_per_epoch is 0, so train-1 consumes the generator exactly as
+    before and keeps its order for a given seed."""
+
+    def __init__(self, n_synth: int, n_cpm_pool: int, n_cpm_per_epoch: int, generator: torch.Generator,
+                 n_divisi_pool: int = 0, n_divisi_per_epoch: int = 0) -> None:
         self.n_synth, self.n_pool, self.n_cpm = n_synth, n_cpm_pool, min(n_cpm_per_epoch, n_cpm_pool)
+        self.n_divisi_pool, self.n_divisi = n_divisi_pool, min(n_divisi_per_epoch, n_divisi_pool)
         self.generator = generator
+        self.last_epoch_divisi = 0   # divisi indices in the most recent epoch's draw, for divisi_share_realised
 
     def __len__(self) -> int:
-        return self.n_synth + self.n_cpm
+        return self.n_synth + self.n_cpm + self.n_divisi
 
     def __iter__(self) -> Iterator[int]:
         cpm = (torch.randperm(self.n_pool, generator=self.generator)[:self.n_cpm] + self.n_synth).tolist()
         idx = list(range(self.n_synth)) + cpm
-        return iter([idx[i] for i in torch.randperm(len(idx), generator=self.generator).tolist()])
+        if self.n_divisi:
+            base = self.n_synth + self.n_pool
+            idx += (torch.randperm(self.n_divisi_pool, generator=self.generator)[:self.n_divisi] + base).tolist()
+        order = [idx[i] for i in torch.randperm(len(idx), generator=self.generator).tolist()]
+        self.last_epoch_divisi = sum(i >= self.n_synth + self.n_pool for i in order)
+        return iter(order)
 
 
 # ---- evaluation ------------------------------------------------------------------------------------------------
@@ -431,6 +444,11 @@ def main() -> int:
     ap.add_argument("--divisi-recut-out", type=Path, default=None,
                     help="cut divisi corpus; its strips with a chordnote join train/val by their inherited split")
     ap.add_argument("--expect-divisi-manifest-sha", default=None)
+    ap.add_argument("--divisi-share", type=float, default=None,
+                    help="A6: divisi strips are this fraction of the synthetic strips each epoch, a fresh draw from "
+                         "the whole divisi train pool (chord-free strips kept); omit for the train-1 filter and mix")
+    ap.add_argument("--holdout-chord-font", default=None,
+                    help="A6: drop divisi train rows of this font (case-insensitive), then assert none remain")
     ap.add_argument("--control-rows", type=int, default=0,
                     help="control run: add a seeded draw of this many extra Phase 1 train rows (same step count)")
     ap.add_argument("--select-last", action="store_true", help="no patience; the last epoch is always selected")
@@ -443,6 +461,10 @@ def main() -> int:
         raise ValueError("--replay-ratio must be in [0, 1)")
     if a.divisi_recut_out is not None and not a.vocab_ext:
         raise ValueError("--divisi-recut-out needs --vocab-ext")
+    if (a.divisi_share is not None or a.holdout_chord_font) and a.divisi_recut_out is None:
+        raise ValueError("--divisi-share and --holdout-chord-font need --divisi-recut-out")
+    if a.divisi_share is not None and not 0.0 < a.divisi_share < 1.0:
+        raise ValueError("--divisi-share must be in (0, 1)")
     if a.vocab_ext:
         use_ext_vocab()
 
@@ -473,8 +495,10 @@ def main() -> int:
         dsha = hashlib.sha256(dbody).hexdigest()
         if a.expect_divisi_manifest_sha and dsha != a.expect_divisi_manifest_sha:
             raise SystemExit(f"divisi manifest sha256 {dsha} != expected {a.expect_divisi_manifest_sha}")
-        # Only strips that carry a chord are kept (freeze section 3).
-        drows = [r for r in drows if any(str(t).startswith(CHORDNOTE_PREFIX) for t in r["tokens"])]  # type: ignore[union-attr]
+        if a.divisi_share is None:
+            # Train-1: only strips that carry a chord are kept (freeze section 3). A6 keeps the chord-free ones too,
+            # so the model also sees divisi-page strips with no chord and does not learn "divisi means chord".
+            drows = [r for r in drows if any(str(t).startswith(CHORDNOTE_PREFIX) for t in r["tokens"])]  # type: ignore[union-attr]
         for r in drows:   # absolute, so synth()'s recut_out join leaves it alone
             r["path"] = str(a.divisi_recut_out.resolve() / str(r["path"]))
         dtrain = [r for r in drows if r["split"] == "train"]
@@ -483,9 +507,22 @@ def main() -> int:
         val_tunes = {r["tune"] for r in val_rows + divisi_val}
         if train_tunes & val_tunes:
             raise SystemExit(f"split assert: {len(train_tunes & val_tunes)} tunes on both sides")
-        train_rows = train_rows + dtrain
-        divisi_info = {"divisi_manifest_sha256": dsha, "divisi_train_strips": len(dtrain),
-                       "divisi_val_strips": len(divisi_val)}
+        divisi_info = {"divisi_manifest_sha256": dsha, "divisi_val_strips": len(divisi_val)}
+        if a.holdout_chord_font:
+            held = a.holdout_chord_font.casefold()
+            before = len(dtrain)
+            dtrain = [r for r in dtrain if str(r["font"]).casefold() != held]
+            assert not any(str(r["font"]).casefold() == held for r in dtrain), "held-out chord font in divisi train"
+            divisi_info.update({"holdout_chord_font": a.holdout_chord_font,
+                                "divisi_train_dropped_for_holdout": before - len(dtrain)})
+            print(f"[holdout] {a.holdout_chord_font}: dropped {before - len(dtrain)} of {before} divisi train rows, "
+                  f"{len(dtrain)} remain, 0 of the held-out font", flush=True)
+        divisi_info["divisi_train_strips"] = len(dtrain)
+        if a.divisi_share is not None:
+            divisi_info["divisi_share"] = a.divisi_share
+        if a.divisi_share is None:
+            train_rows = train_rows + dtrain
+            dtrain = []
     if a.control_rows:
         train_rows = train_rows + random.Random(f"control:{a.seed}").sample(train_rows, a.control_rows)
 
@@ -507,17 +544,30 @@ def main() -> int:
         # Keep some divisi rows in the smoke train slice, so the chord path is exercised.
         train_rows = train_rows[:SMOKE_N // 2] + train_rows[-(SMOKE_N // 2):]
         val_rows, divisi_val = val_rows[:SMOKE_N], divisi_val[:SMOKE_N]
+        dtrain = dtrain[:SMOKE_N]
         canary, cpm_train = canary[:SMOKE_N], cpm_train[:SMOKE_N]
         a.max_epochs = 1
     assert not canary_stems & {Path(s[0]).stem for s in cpm_train}, "canary stem leaked into the replay pool"
 
-    n_cpm_epoch = round(len(train_rows) * a.replay_ratio / (1.0 - a.replay_ratio))
-    train_ds = ConcatDataset([StripDataset(synth(train_rows), augment=a.augment_synth),
-                              StripDataset(cpm_train, augment=True, distorted_prob=0.5)])
+    # A6: n_phase1 is the Phase 1 synthetic strips per epoch (not CPM, not divisi), so divisi / (phase1 + divisi) is
+    # exactly the share; CPM replay is then sized on all synthetic strips.
+    n_divisi_epoch = 0
+    if a.divisi_share is not None:
+        n_divisi_epoch = round(a.divisi_share * len(train_rows) / (1.0 - a.divisi_share))
+        if n_divisi_epoch > len(dtrain):
+            raise SystemExit(f"divisi pool {len(dtrain)} < {n_divisi_epoch} strips needed per epoch for share "
+                             f"{a.divisi_share} of {len(train_rows)} Phase 1 strips")
+    n_cpm_epoch = round((len(train_rows) + n_divisi_epoch) * a.replay_ratio / (1.0 - a.replay_ratio))
+    train_parts = [StripDataset(synth(train_rows), augment=a.augment_synth),
+                   StripDataset(cpm_train, augment=True, distorted_prob=0.5)]
+    if a.divisi_share is not None:
+        train_parts.append(StripDataset(synth(dtrain), augment=a.augment_synth))
+    train_ds = ConcatDataset(train_parts)
     gen = torch.Generator()
     gen.manual_seed(a.seed)
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, collate_fn=ctc_collate, num_workers=0,
-                              sampler=ReplaySampler(len(train_rows), len(cpm_train), n_cpm_epoch, gen))
+    sampler = ReplaySampler(len(train_rows), len(cpm_train), n_cpm_epoch, gen,
+                            n_divisi_pool=len(dtrain), n_divisi_per_epoch=n_divisi_epoch)
+    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, collate_fn=ctc_collate, num_workers=0, sampler=sampler)
     eval_kw = {"batch_size": BATCH_SIZE, "shuffle": False, "collate_fn": ctc_collate, "num_workers": 0}
     val_loader = DataLoader(StripDataset(synth(val_rows)), **eval_kw)
     canary_clean = DataLoader(StripDataset(canary), **eval_kw)
@@ -615,14 +665,18 @@ def main() -> int:
             if divisi_val_loader is not None:
                 dpairs = decode_batches(model, divisi_val_loader, device)
                 chord["divisi_val"] = {**chordnote_metrics(dpairs), "ser": mean_ser(dpairs)}
-        rec = {"epoch": epoch, "train_loss": float(np.mean(losses)) if losses else float("nan"), **vm,
+        n_synth_epoch = len(train_rows) + sampler.last_epoch_divisi
+        share_extra = ({"divisi_share_realised": sampler.last_epoch_divisi / n_synth_epoch}
+                       if a.divisi_share is not None else {})
+        rec = {"epoch": epoch, **share_extra, "train_loss": float(np.mean(losses)) if losses else float("nan"), **vm,
                "zeroed_by_zero_infinity": zeroed, **({"chord": chord} if chord else {}),
                "canary_clean_ser": c_clean, "canary_distorted_ser": c_dist,
                "status": "HARD CAP BREACHED" if not hard_ok else ("soft floor breached" if soft_breach else "OK"),
                "seconds": round(time.time() - t0, 1)}
         history.append(rec)
+        share_log = f" | divisi {rec['divisi_share_realised']:.3f}" if a.divisi_share is not None else ""
         (a.out / "metrics.json").write_text(json.dumps(history, indent=1), encoding="utf-8")
-        print(f"Epoch {epoch:02d} | loss {rec['train_loss']:.4f} | val SER {vm['val_ser']:.4f} | canary "
+        print(f"Epoch {epoch:02d} | loss {rec['train_loss']:.4f}{share_log} | val SER {vm['val_ser']:.4f} | canary "
               f"{c_clean:.4f}/{c_dist:.4f} | {rec['status']} | {rec['seconds']}s", flush=True)
         state = {"model_state": model.state_dict(), "optimizer_state": optimizer.state_dict(),
                  "scheduler_state": scheduler.state_dict(), "epoch": epoch, "val_ser": vm["val_ser"],
