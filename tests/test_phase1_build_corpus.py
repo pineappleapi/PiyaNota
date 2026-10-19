@@ -392,3 +392,28 @@ def test_a6_member_overriding_relied_accidental_is_rejected() -> None:
     assert not check([P("F5")], [(8, 2.5)], placed)          # other octave
     assert not check([P("F4")], [(9, 2.5)], placed)          # other bar
     assert not check([P("F4")], [(8, 2.5)], [(8, 3.0, P("F#4"), 1)])   # G major: F# is the key alter
+
+
+def test_bass_divisi_ceiling_f4() -> None:
+    """Choral-conductor ruling 2026-10-19: bass divisi tops at E4, F4 a rare edge, F#4 never (slack is single-note)."""
+    P = music21.pitch.Pitch
+    assert member_ok([P("C4"), P("E4")], 3)
+    assert member_ok([P("C4"), P("F4")], 3)
+    assert not member_ok([P("D4"), P("F#4")], 3)
+
+
+def test_tie_sites_always_taken() -> None:
+    """A6.3: tie sites are supply-limited (~16 in 10 Bach pieces), so every one is chorded before plain sites."""
+    assert build_corpus.P_TIE_CHORD == 1.0
+
+
+def test_ledger2_boost_only_under_target_and_voice() -> None:
+    """A6.3: near-edge sites are boosted only in soprano/alto and only while 2+-ledger members are under target."""
+    boost = build_corpus._ledger2_boost
+    assert boost(voice="Alto", near_edge=True, realised=0, members=100) == 3.0
+    assert boost(voice="Alto", near_edge=True, realised=8, members=100) == 1.0      # at cap
+    assert boost(voice="Bass", near_edge=True, realised=0, members=100) == 3.0     # conductor: E4 tops plausible
+    assert boost(voice="Tenor", near_edge=True, realised=0, members=100) == 1.0    # cannot reach 2 ledgers in range
+    assert boost(voice="Soprano", near_edge=False, realised=0, members=100) == 1.0
+    assert boost(voice="Soprano", near_edge=True, realised=4, members=100) == 3.0   # under target
+    assert boost(voice="Soprano", near_edge=True, realised=5, members=100) == 1.0   # target reached

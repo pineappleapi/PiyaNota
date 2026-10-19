@@ -356,3 +356,31 @@ perfectly, so they say nothing about real photos (synthetic divisi lacks "div." 
   alone does not fix (wrong-position precision, confidence AUROC). Ledger chords 2 lines out (steps -4, -5, 12,
   13) are 1.4% of members, so the ledger bucket will mostly reflect 1-ledger-line chords. Member-level accidental
   share is not measured. Both are reported, not gated.
+
+#### A6.3 Tie and 2-ledger chord coverage (2026-10-19)
+Written before any A6 Kaggle build or training; plan `docs/superpowers/plans/2026-10-19-divisi-real-world.md` Task 1.
+- **Ties:** `P_TIE_CHORD` 0.08 -> 1.0. Tie sites are supply-limited (about 16 Bach tie sites per 10 pieces), so
+  every one is chorded first. Synthetic ties stay deferred (ml-cv-lead 2026-10-19); revisit them if the full build's
+  tied share stays below 2%.
+- **2-ledger members (step <= -4 or >= 12):**
+  - `LEDGER2_MEMBER_TARGET` 0.05, `LEDGER2_SITE_BOOST` 3.0, `LEDGER2_MEMBER_CAP` 0.08.
+  - Sites whose base is near the staff edge (drawn step <= -1 or >= 9) get a 3x weight while the realised share
+    is under target, and no boost at or above the cap.
+  - Boosted voices: Soprano, Alto and Bass. In range plus 2 semitones, only alto low (A3/G3) and bass high
+    (E4/F4) reach 2 ledger lines; tenor never does, so it is not boosted.
+- **Bass divisi ceiling** `BASS_DIVISI_CEILING` = F4 (choral-conductor 2026-10-19): E4 is the practical top, F4 a
+  rare edge, F#4 never. It applies to every bass member, not only boosted ones.
+- **10-piece smoke (Bach, the A6.2 manifest):**
+  - rc 0. Class and duration shares are within ±3 pp of target. Accidental chords 13%, free_new 0, induced
+    accidentals 4 (report only), crossing 8.8%, stemmed 2nds down 43%.
+  - **Below target:** 2+ ledger members 13/586 (2.2%, was 1.4%); tied chords 6/509 (1.2%, was 0.8%), from 2 of
+    10 pieces (bwv10.7 4, bwv101.7 2).
+  - Also tried and reverted: steering free members outward at boosted sites did not move the share (2.2%). Near-edge
+    sites are too rare in Bach for weighting alone to reach 5%.
+- **Verdict rule:** the tie bucket and the 2-ledger slice are expected UNDERPOWERED on the test half. They are
+  reported with n and interval, never PASS. The full build reports realised train counts for both.
+- **Labels:** 10 chords at steps -5/-4/12/13 were checked at 1:1 in Leipzig and Bravura; all 10 match their
+  labels. All 20 smoke renders (10 pieces, 2 fonts) pass the automatic SVG check. Heads are labelled bottom to top,
+  so a low 2-ledger head is the column's `note` token, not a `chordnote`.
+  - G1b's `chord_ledger` cases select any ledger position (1 line or more). They never targeted 2-line chords, so
+    G1b alone does not confirm steps -5/-4/12/13; the eyeball and SVG check above do.

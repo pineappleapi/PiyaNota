@@ -106,11 +106,20 @@ P_CHORD_FREE_STRIP = 0.25            # hallucination canary: a quarter of divisi
 CHORD_DENSITY = (0.20, 0.60)         # chord columns / note columns on a strip that carries chords
 A6_DURATIONS: dict[str, float] = {"whole": .12, "half": .20, "dotted": .15, "quarter": .33, "beamed": .20}
 BEAMED_TYPES: frozenset[str] = frozenset({"eighth", "16th", "32nd", "64th", "128th"})
-P_TIE_CHORD = 0.08
+P_TIE_CHORD = 1.0                    # A6.3: tie sites are supply-limited, so every one is chorded first
 TIES_ENABLED: bool = True            # on: G1b passed the tied-chord case 6/6 (user-scored 2026-10-19)
 MAX_CROSSING = 0.10                  # per piece: chord columns whose member crosses the adjacent voice
 ACCIDENTAL_COL_TARGET = 0.12         # chord columns with a drawn accidental on any head
 ACCIDENTAL_SITE_BOOST = 4.0          # site weight factor for chromatic notes while the piece is under target
+# A6.3 (ml-cv-lead 2026-10-19): members 2+ ledger lines out (step <= -4 or >= 12) were 1.7% of members on the smoke.
+LEDGER2_MEMBER_TARGET = 0.05         # share of members a piece steers toward
+LEDGER2_SITE_BOOST = 3.0             # site weight factor for near-edge heads while under target
+LEDGER2_MEMBER_CAP = 0.08            # never boost at or above this share
+# In range only alto (A3/G3) and bass (E4/F4) reach 2 ledgers; soprano and tenor never do.
+LEDGER2_VOICES: frozenset[str] = frozenset({"Soprano", "Alto", "Bass"})
+BASS_DIVISI_CEILING = "F4"           # choral-conductor 2026-10-19: E4 practical top, F4 rare edge, F#4 never
+LEDGER2_STEPS = (-4, 12)             # a member at or beyond these steps sits on 2+ ledger lines
+NEAR_EDGE_STEPS = (-1, 9)            # a base head here reaches LEDGER2_STEPS with a 2nd-4th member
 MERGE_METERS: frozenset[str] = frozenset({"4/4", "2/2"})
 WHOLE_NOTE_QL = 4.0
 # Merges (ruling 2026-10-18): plain notes in one bar become one longer note on the first pitch, always chorded.
@@ -459,6 +468,8 @@ def member_ok(chord: list[music21.pitch.Pitch], voice_index: int) -> bool:
     low, high = VOICE_RANGES[VOICES[voice_index]]
     lo_ps = music21.pitch.Pitch(low).ps - RANGE_SLACK_SEMITONES
     hi_ps = music21.pitch.Pitch(high).ps + RANGE_SLACK_SEMITONES
+    if VOICES[voice_index] == "Bass":
+        hi_ps = min(hi_ps, music21.pitch.Pitch(BASS_DIVISI_CEILING).ps)
     if len(chord) > MAX_CHORD_NOTES:
         return False
     for p in chord:
@@ -496,6 +507,18 @@ def _key_alter(fifths: int, step: str) -> int:
 def _chromatic(pitch: music21.pitch.Pitch, fifths: int) -> bool:
     """True when the pitch leaves the key signature, so it will most likely be drawn with an accidental."""
     return int(pitch.alter) != _key_alter(fifths, pitch.step)
+
+
+def _ledger2_boost(voice: str, near_edge: bool, realised: int, members: int) -> float:
+    """Site weight factor steering members 2+ ledger lines out toward LEDGER2_MEMBER_TARGET (A6.3)."""
+    share = realised / max(members, 1)
+    if voice not in LEDGER2_VOICES or not near_edge or share >= LEDGER2_MEMBER_CAP:
+        return 1.0
+    return LEDGER2_SITE_BOOST if share < LEDGER2_MEMBER_TARGET else 1.0
+
+
+def _is_ledger2(step: int) -> bool:
+    return step <= LEDGER2_STEPS[0] or step >= LEDGER2_STEPS[1]
 
 
 def _deficit_weights(targets: list[float], realised: list[int], done: int) -> list[float]:
@@ -910,12 +933,13 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                                                    ("class", "duration", "steps", "skipped", "shortfall", "merged")}
     scalars: collections.Counter[str] = collections.Counter({k: 0 for k in (
         "accidental_cols", "ties", "crossing", "free", "copied", "chord_free_strips", "strips",
-        "free_new_accidentals", "induced_accidentals", "chords_total", "merged_whole")})
+        "free_new_accidentals", "induced_accidentals", "chords_total", "merged_whole", "ledger2_members")})
     stems: dict[str, list[str]] = {}
     density_per_strip: list[float] = []
     chord_free_keys: list[str] = []
     density_short_keys: list[str] = []
     est_accidental_cols = 0      # predicted (chromatic head) columns, steers the site bias before makeAccidentals
+    ledger2_members = members_done = 0   # committed members 2+ ledger lines out / all, steer _ledger2_boost (A6.3)
     seconds_done = seconds_down = 0  # committed stemmed 2nds and how many are stems down (STEMS_DOWN_2ND_TARGET)
     free_placed: list[tuple[int, float, music21.pitch.Pitch, int]] = []   # committed free members, for merges
     baseline = [_accidental_display(part, fresh=True) for part in parts]
@@ -1001,8 +1025,14 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                 cls = drng.choices(offered, weights=cls_w)[0]
                 of_cls = [s for s in choose_from if s.cls == cls]
                 of_cls = [s for s in of_cls if s.kind != "merge"] or of_cls     # real notes before merged ones
-                site = drng.choices(of_cls, weights=[ACCIDENTAL_SITE_BOOST if boost and s.chromatic else 1.0
-                                                     for s in of_cls])[0]
+                pending = [p for r in records for p in r["members"]]  # type: ignore[attr-defined]
+                l2_done = ledger2_members + sum(_is_ledger2(_drawn_position(p, vi)) for p in pending)
+                m_done = members_done + len(pending)
+                site = drng.choices(of_cls, weights=[
+                    (ACCIDENTAL_SITE_BOOST if boost and s.chromatic else 1.0)
+                    * _ledger2_boost(voice, not NEAR_EDGE_STEPS[0] < _drawn_position(s.heads[0][1].pitch, vi)
+                                     < NEAR_EDGE_STEPS[1], l2_done, m_done)
+                    for s in of_cls])[0]
                 pool.remove(site)
                 add_cols = len(site.heads) if site.kind == "tie" else 1
                 add_n = 1 - len(site.heads) if site.kind == "merge" else 0
@@ -1121,6 +1151,10 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                 stats["class"][f"{voice}:{r['bucket']}"] += 1
                 stats["duration"][str(r["cls"])] += 1
                 stats["steps"].update(f"{voice}:{_drawn_position(p, vi)}" for p in members_r)
+                l2 = sum(_is_ledger2(_drawn_position(p, vi)) for p in members_r)
+                ledger2_members += l2
+                members_done += len(members_r)
+                scalars["ledger2_members"] += l2
                 scalars.update(sources_r)
                 scalars["crossing"] += int(bool(r["cross"]))
                 scalars["ties"] += int(bool(r["tie"]))
