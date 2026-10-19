@@ -45,7 +45,7 @@ from pathlib import Path
 
 # Filled by the controller after review with the full sha of the reviewed commit; the kernel refuses to run on
 # anything else (a placeholder must fail loudly, never fall back to "whatever is in the bundle").
-COMMIT = "UNSET-FILL-AFTER-REVIEW"
+COMMIT = "31c9d7f5b353930f4046993638c1546f6fcc1b4c"
 BRANCH = "piya106/stroke-calibration"
 COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
 WORKERS = 4
