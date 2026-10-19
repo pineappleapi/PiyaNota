@@ -250,7 +250,7 @@ def test_a6_stats_shape_and_stems_per_chord_column() -> None:
     assert all(d in ("up", "down", build_corpus.STEMLESS) for v in stems.values() for d in v)
     assert sum(v.count(build_corpus.STEMLESS) for v in stems.values()) == stats["duration"].get("whole", 0)
     assert sum(stats["duration"].values()) == stats["chords_total"]
-    assert stats["ties"] == 0                          # TIES_ENABLED is off until G1b passes the tie case
+    assert 0 <= stats["ties"] <= stats["chords_total"]  # tie chords are counted inside chords_total (tie path: test below)
     assert stats["crossing"] <= build_corpus.MAX_CROSSING * stats["chords_total"] + 1e-9
 
 

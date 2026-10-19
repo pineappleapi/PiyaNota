@@ -345,3 +345,14 @@ perfectly, so they say nothing about real photos (synthetic divisi lacks "div." 
        (zero included) and lists them as `underpowered_buckets`; an epoch is ineligible only if every bucket is
        dropped, and `select_epoch` follows that. A clean-subset diagnostic gates only test-half pieces whose group
        shares no tune with a train piece. The bootstrap stays percentile, B = 1000, seed 0, resampling pieces.
+
+#### A6.2 G1b result and ties (2026-10-19)
+- G1b A6 label check (user-scored, 54 cases, 6 per case over 5 fonts): 54/54 correct, 0 systematic errors,
+  `chord_tie` 6/6. Per the A6 bullet above ("ties 8% only after a G1b tie re-check"), `TIES_ENABLED` is now True.
+  `P_TIE_CHORD` = 0.08 is the chance of taking a tie site, not a realised share: the 10-piece smoke made 4 tied
+  chords of 509 (0.8%). Every other share moved by at most 1 pp against round 5 and stays within its gate. Tied
+  divisi will be thin in training; report the tied-chord count in the test plan results.
+- ml-cv-lead coverage review before launch: every train-1 weakness has a corpus mechanism except two that data
+  alone does not fix (wrong-position precision, confidence AUROC). Ledger chords 2 lines out (steps -4, -5, 12,
+  13) are 1.4% of members, so the ledger bucket will mostly reflect 1-ledger-line chords. Member-level accidental
+  share is not measured. Both are reported, not gated.
