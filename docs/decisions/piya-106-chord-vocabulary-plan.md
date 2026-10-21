@@ -1,7 +1,10 @@
 # PIYA-106 (proposed) — Chord Token Vocabulary + Multi-Dataset Retraining Plan
 
-**Status:** PLAN ONLY, 2026-09-25. Nothing implemented, nothing trained, no GPU work (BUG-013 is open).
+**Status:** PLAN ONLY, 2026-09-25; **revised 2026-09-29 (section 10 supersedes where they conflict)**. Nothing
+implemented, nothing trained.
 **Author role:** ml-cv-lead (advisory). **Not reviewed by:** choral-conductor, senior-reviewer (see Open Questions).
+The section 10 ml-cv-lead and choral-conductor views were written without running those agents. Their formal reviews
+are **pending**.
 **Decision context:** user chose option (b): give the CRNN a real chord signal in its token vocabulary and
 retrain, because Camera-PrIMuS (CPM) is monophonic and Stage 3's `chord_id` detection
 (`stage3_transcription.py`, body-stage "consecutive notes sharing the same tick onset") can never fire on a
@@ -385,3 +388,167 @@ GPU is admissible. Preconditions before any Stage B training or evaluation that 
    warm-start value?
 8. Sequencing: should this wait for PIYA-106 Stage A to close, or run in parallel using a separate branch and checkpoint
    namespace? (I recommend waiting on anything that touches VOCAB.)
+
+## 10. Revision 2026-09-29: measured prevalence, metric impact, domain view, TrOMR comparison
+
+This section was written by the main session without running any subagent. The "choral-conductor" and "ml-cv-lead" views
+below are that session's own summaries of how each role would argue. Both agents still need to review the plan formally
+before any step here starts. **Sequencing, unchanged:** chord work starts after the monophonic 95% work
+(accidentals, note reading), and nothing touches `VOCAB` before then.
+
+### 10.1 What changed since 2026-09-25
+
+| Old statement | Now |
+|---|---|
+| Q1 "how common are chords?", and "chords are rare" | Measured on dev GT: **15.6% of note onsets** (10.2). Not rare. |
+| Q4 "cannot locate the CLAUDE.md GT rule" | It exists: hand-authored GT is diagnostic only. `piyanota_dataset` is TEST-only. |
+| 5.5 / "no GPU work (BUG-013)" | Current work runs on CPU. Training still means Kaggle GPU with the deterministic flags. |
+| Option D / transformer "out of scope" | Reconsidered as Option E (TrOMR-style), 10.5. |
+| Accidentals matched by position (2.4) | Partly exists: inline-accidental position anchoring, `unanchored_accidental_dropped` (BUG-024/033). Chord members reuse it. |
+
+### 10.2 Measured prevalence (dev GT, scoping only, not accuracy evidence)
+
+Source: `D:\PiyaNota-training\gt\<piece>\gt_source.txt`. Chords there are `<OOV:chord d P1+P2>` markers, and two-voice
+bars are `<OOV:two-voice ...>`. Out-of-scope pages were removed first: Non Nobis p4 and Handog p3-10 and p12. The
+script, `chord_count2.py` in the job's tmp dir, is a regex count and has no unit tests.
+
+| Piece | Chord onsets | Share of note onsets | Notes |
+|---|---|---|---|
+| Non Nobis Domine | 99 | 32.6% | all 2-note; also 10 two-voice bars and 1 divisi |
+| Gaano | 71 | 8.1% | 68 dyads, 3 triads; also 27 triplets |
+| Honneur | 0 | 0% | |
+| Handog | 266 | 48.9% | 196 in Bass, mostly open fifths (140 with a 7-semitone span) |
+| Don't Stop Me Now | 33 | 4.5% | |
+| **All** | **469** | **15.6%** | **79 of 228 strips contain a chord or a two-voice bar** |
+
+Intervals are mostly 3rds and 4ths (3-5 semitones), then 5ths and octaves. Dyads are 99%+ of chords. Triads are
+rare, and 4-note stacks do not occur.
+
+Caveats:
+- **Non Nobis Domine is the pre-registered eval_fresh gate piece.** Its count is used only to size the work. It must
+  never be used to choose tokens, thresholds or checkpoints.
+- Four pieces are not a sample of deployment scores. The count is enough to say chords matter, not to predict a rate.
+- The main old risk ("low payoff") is gone. The new risk is the opposite: chords are common enough that ignoring them
+  caps real accuracy.
+
+### 10.3 Metric impact (needs a user decision)
+
+`data/eval_fresh/score_eval.py` scores an `<OOV>` GT item as a span with `TOKEN_OOV_SPAN = 2` and `EVENT_OOV_SPAN = 3`.
+Each such item absorbs 0-2 predicted tokens (0-3 events) at no cost. So **chord onsets are currently excluded from
+every pitch and SER number, including progress toward 95%.** A pipeline that turns every chord into a single note
+scores the same as one that reads it perfectly.
+
+Proposal, without changing the SOW metric definitions:
+1. Keep the current numbers as the primary line. They stay comparable with every earlier report and with the
+   pre-registered gate.
+2. Add a separate **chord-inclusive** line: each chord member is a GT note, and a missed member counts as a deletion.
+   Also report chord-member recall and precision separately. Each report states both numbers and which one the 95%
+   target refers to.
+3. The chord-inclusive line on Non Nobis will be much lower than today's line, because a third of its onsets are
+   chords. That is expected and is not a regression.
+
+**Open for the user:** does the Oct 19 95% target mean the current OOV-excluded metric? This plan assumes yes.
+
+### 10.4 Choral-conductor view (formal review pending)
+
+**Three different things arrive as "two notes at once"**, and the plan must keep them apart:
+
+| Phenomenon | Looks like | Musical meaning | Handled by |
+|---|---|---|---|
+| Chord / dyad in one voice | One stem and one rhythm; noteheads stacked | Divisi or a double note in that part; both pitches sound together | **This plan** (Option A dyads, or E) |
+| Two voices in one staff | Stems up and down; the rhythms can differ; rests may sit high or low | Two independent lines (e.g. S1/S2 in one staff) | **Not covered by Option A.** Needs per-stem-direction events or two token streams. Separate item (10.7 Q2). |
+| Divisi on separate staves | Extra staff per system | Two parts | Out of scope (BUG-026, Handog pages) |
+
+Rules a chord implementation must follow:
+- **Unison (shared notehead, or two stems on one note):** one pitch. Do not emit it twice. Stage 5 already collapses an
+  identical (onset, pitch) pair.
+- **Seconds:** the noteheads are drawn side by side on either side of the stem. Horizontally they look like two
+  onsets. The token design must still read them as one onset.
+- **Accidentals apply per member, by staff position.** They carry to the end of the bar for that position only. A
+  chord accidental stack (several accidentals left of the chord, staggered) belongs to the members by position, not
+  by left-to-right order.
+- **Ties are per member.** One chord member can be tied to the next chord while the other is re-struck. Stage 4's tie
+  merge must match by pitch, not by slot.
+- **Rhythm:** a chord is one duration slot. Bar-length checks, pickup scoring and overflow repair (Stage 4) must count
+  it once. Dots belong to the chord (`in_chord` already does this in Stage 3).
+- **Audio:** both notes sound in that voice's track, at equal volume. A singer rehearsing the part sings one of them,
+  so an option later is to split upper/lower divisi into two tracks ("Bass 1 / Bass 2"). That is a product decision
+  and needs frontend-lead too, not part of this plan.
+- **Scope cap:** SATB choral chords are almost always dyads (3rds, 4ths, 5ths, octaves). A cap of 2 members, with 3
+  allowed but not optimised for, matches the music. Handog's open fifths in the Bass are typical choral writing.
+
+### 10.5 ml-cv-lead view: options compared (formal review pending)
+
+| Option | What | For | Against |
+|---|---|---|---|
+| **A. CTC + `chordnote-*` tokens** (section 2) | Append-only VOCAB; base note, then members bottom to top | Keeps the fine-tuned CRNN checkpoint, the CTC decoder, `infer_pitch()` and every existing gate. Smallest code change. | CTC frame budget: T = W/4, so about 2-3 frames per notehead. Dyads fit only just, triads are marginal. `zero_infinity=True` hides infeasible samples, so the feasibility audit (step 5) is mandatory. Cannot represent two-voice staves. |
+| **D. Multi-label per-frame heads** | Per frame, a set of staff positions instead of one token | No frame-budget limit on stacked notes | New decoder and loss; rhythm-to-pitch pairing becomes a post-process; no reference implementation. Highest risk. |
+| **E. TrOMR-style autoregressive transformer** | Image to token sequence with factorized heads | Autoregression removes the CTC frame limit. `\|` joins chord members natively. Trained on printed and photographed scores. | Whole-model swap (drops our checkpoint and its evidence trail). Its absolute pitch bypasses `infer_pitch()`, the clef/key rules and ClefKeyNet. Slower on CPU. Attention decoders can hallucinate or loop. The training code was never released. |
+
+**About Polyphonic-TrOMR** (`D:\PiyaNota_OMR_References\Polyphonic-TrOMR`, NetEase, Apache-2.0; inference code only):
+- **Encoder:** ResNetV2 + ViT (dim 256, depth 4, patch 16, input up to 128×1280 grayscale).
+- **Decoder:** x-transformers (dim 256, depth 4, cross-attention, max length 256).
+- **Output heads:** rhythm (260), pitch (71), lift/accidental (7) and a note flag (2). A consistency loss (gamma 10)
+  ties the note flag to the other heads.
+- **Chord encoding:** `+` separates onsets and `|` joins simultaneous notes, e.g. `note-F4_quarter|note-A4_quarter+...`.
+- **Weights:** `img2score_epoch47.pth` (21.5M params) and its tokenizers are present locally
+  (`docs/decisions/piya-106-reference-repos-preprocessing-training-review.md` §1.3).
+- **Pinned stack:** torch 1.11, timm 0.6.5, transformers 4.20.1, x-transformers 0.29.2. It needs a separate
+  environment.
+- **Decoding:** it samples (top-k 0.9, temperature 0.2), so its output is non-deterministic. Any use must switch to
+  argmax.
+
+Three ideas from TrOMR are worth adopting **even under Option A**:
+1. **Factorized heads:** rhythm, position and accidental as separate targets. This matches our finding that most
+   residual errors are accidentals and pitch position, not rhythm.
+2. **An explicit chord join** (`|` versus `+`), instead of inferring chords from equal onsets. This is what
+   `chordnote-*` already does.
+3. **A consistency loss between heads.** It only applies if we later move to multi-head.
+
+**Recommendation:**
+- **Primary path: dyad-first Option A**, after the 95% monophonic work, gated by the frame-feasibility audit.
+  Fallback if the audit fails: pool stride `(2,1)` along width, at the warm-start cost noted in Q7.
+- **TrOMR:** keep it as the offline comparator already proposed (review doc P8), with argmax decoding, in its own
+  environment, on dev strips that contain chords. It shows the ceiling of a chord-native model on our strips. It is
+  not a pipeline candidate unless it beats Option A by a wide margin **and** ml-cv-lead signs off on a model swap.
+- **Do not** replace `infer_pitch()` with TrOMR's absolute pitch (same reasoning as review doc item 5).
+
+**Data and experiment rules** (in addition to sections 3-5):
+- **Training chords:** DS2 dense (derived chord grouping) plus camera-grandstaff kern re-rendered as single-staff
+  strips through several fonts. Kern gives the chord labels for free. Do not use closed-score images.
+- **Chord test set:** CPDL SATB MusicXML (via the SynthSalience metadata, with a per-piece license check), re-rendered.
+  It must be a different source from training, so the test measures transfer and not memorised pieces.
+- **One variable at a time:** the vocab/chord change is its own run, on top of the frozen font-fine-tuned checkpoint.
+  Do not combine it with further font or augmentation changes.
+- **Reporting:** seeds 1 and 2, reported as a range. Use the deterministic cuDNN flags and a seeded DataLoader
+  `generator`/`worker_init_fn`.
+- **Forgetting gates:** per epoch, clean and distorted CPM canaries plus V-LOO. Monophonic SER must not regress beyond
+  the established noise floor.
+- **Control run:** a chord-stripped control (same data with chord members removed), so the gain can be attributed to
+  the tokens and not to the extra data.
+- **Real-photo evaluation:** once, on `piyanota_dataset`, after all selection is frozen. eval_prelim pieces are dev
+  data for spot checks only.
+
+### 10.6 Pipeline changes when the model emits chords (after the model gates pass)
+- **Stage 3:** `chordnote-*` inherits the base note's duration and onset and does not advance `current_tick`. Set
+  `chord_id` directly and replace the dead "same tick onset" block. Resolve accidentals by member position (reuse the
+  BUG-033 anchoring). Handle an orphan `chordnote` (no base note) by flagging it for review, not dropping it silently.
+- **Stage 4:** one slot per chord in bar arithmetic. Tie matching by pitch per member. `tie_unresolved` per member.
+- **Stage 5:** no change needed. Simultaneous note-ons in one track already work, and the identical-pitch collapse
+  covers unisons.
+- **Scorer:** add a chord-aware alignment for the chord-inclusive line (10.3) as a new function. The existing OOV-span
+  path stays unchanged.
+- **Tests:** synthetic token streams (dyad, triad, unison, second, accidental on the upper member, tie on one member).
+
+### 10.7 Updated open questions
+1. **Metric:** is 95% measured on the current OOV-excluded metric, with chord-inclusive reported as a separate line?
+   (10.3)
+2. **Two voices in one staff** (stems up/down, e.g. Non Nobis' 10 bars): in scope for this plan, a separate later
+   ticket, or out of scope?
+3. **TrOMR comparator:** run it now as a cheap diagnostic (offline, separate environment, dev strips only), or after
+   the 95% work?
+4. **Audio for divisi:** both notes in one track (default), or later split into upper/lower tracks?
+5. **Sequencing:** confirm chords start after the monophonic 95% target, and that Q2, Q6 and Q7 from section 9 still
+   stand (licenses, CPDL fetch, stride fallback). Q1 and Q4 are answered above.
+6. **Reviews:** choral-conductor (10.4 rules) and ml-cv-lead (10.5 recommendation, 10.2 caveats) must review formally
+   before step 1 of section 8.
