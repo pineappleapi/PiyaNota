@@ -500,3 +500,15 @@ Permanently removes a saved score and its associated audio/image assets from a u
 3. Standardization runs before `page_index` tagging, so downstream pipeline stages (Module 1) never need to branch logic based on input source.
 4. A standardized test set — one sample each from camera capture, gallery selection, PDF rasterization — produces output images with matching format and comparable resolution, verified as part of Sprint 8's integration testing.
 5. **Metadata and orientation** (added 2026-10-08, PIYA-206). Standardization decodes ignoring EXIF orientation and re-encodes with no metadata, so no EXIF or GPS reaches storage or the pipeline. Full rule and test in PIYA-101 AC10.
+
+---
+
+### Note — Client background status polling (PIYA-218 AC7/AC13, interim)
+*(Added 2026-10-22, user decision on the Module 2 side; backend-lead note.)*
+
+The app now keeps tracking conversions while it is in the background: it persists in-flight jobs and polls PIYA-102 in the background, then posts a local system notification on `complete`/`failed` (PIYA-218 AC13 in `module2-mobile.md`). This client polling is the **interim** approach. Server push (FCM sender + device-token registration) stays the long-term answer to cut battery use and polling load; it is still not a Module 3 ticket.
+
+What the backend needs for this to hold:
+1. **PIYA-102 reads job state from the durable `jobs` row only** (PIYA-311 AC7), never from the pipeline worker process or GPU host, so polls cost one indexed, account-scoped row read and stay inside PIYA-102 AC6's 500 ms whatever the worker is doing. At single-tenant choir scale (tens of users, a few active jobs each, one poll every 2 s in the foreground and less often in the background) that is a negligible load for the one VPS (PIYA-300). The endpoint can take it, provided this read path holds.
+2. **A per-user read rate limit on PIYA-102** is not defined anywhere yet and should be, to bound a buggy or runaway client. Suggested starting value: 120 status requests per user per minute (set in config), returning 429 `rate_limited` with `Retry-After` and `error.retryAfterSeconds`, the same envelope as PIYA-101 AC9. It must be a separate counter from the PIYA-101/310 submission limit, so polling never uses up a user's submissions.
+3. **Client contract the backend relies on** (already in PIYA-207 AC9 / PIYA-218): polling stops on a terminal status, 404 or 401, and backs off on 429 by honouring `Retry-After`. Logout (PIYA-305) invalidates the token, so any poll after logout gets 401 and stops.
