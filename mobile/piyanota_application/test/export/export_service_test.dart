@@ -383,6 +383,37 @@ void main() {
     expect(other.existsSync(), isTrue);
   });
 
+  test('the click moves into the work folder before the device gets it, '
+      'so the folder clean-ups take it too', () async {
+    final sep = Platform.pathSeparator;
+    final click = File('${work.path}${sep}metronome_click_1.wav')
+      ..writeAsStringSync('RIFF');
+    String? handed;
+    mock((call) {
+      if (call.method == 'run') {
+        final inputs = (call.arguments as Map)['inputs'] as List;
+        handed = (inputs.last as Map)['path'] as String;
+        // Still there while the device renders.
+        expect(File(handed!).existsSync(), isTrue);
+        return {'fileName': 'a.mp3', 'location': 'here'};
+      }
+      return call.method == 'listNames' ? <String>[] : null;
+    });
+    await service().export(
+      ExportJob(
+        inputs: [(track: local, gain: 0.5)],
+        prepare: () async => (track: click.uri, gain: 0.3),
+        speed: 1,
+        fileName: 'a.mp3',
+      ),
+      'content://tree/x',
+    );
+    expect(handed, isNot(click.path));
+    expect(File(handed!).parent.path, startsWith('${work.path}${sep}export_'));
+    expect(click.existsSync(), isFalse);
+    expect(File(handed!).existsSync(), isFalse, reason: 'went with the folder');
+  });
+
   group('cancel and progress', () {
     /// What the native side does: sends `progress` back on the channel.
     Future<void> sendProgress(Object? value) =>

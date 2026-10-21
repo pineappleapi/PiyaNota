@@ -205,6 +205,8 @@ Future<void> _deleteQuietly(Uri file) async {
   if (file.scheme != 'file') return;
   try {
     await File.fromUri(file).delete();
+  } on PathNotFoundException {
+    // Moved into the export's work folder and removed with it.
   } on FileSystemException catch (e) {
     debugPrint('Export: click file not removed: $e');
   }

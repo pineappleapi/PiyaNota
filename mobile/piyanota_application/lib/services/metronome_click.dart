@@ -355,6 +355,30 @@ Uint8List _wavFile(Uint8List pcm, int sampleRate) {
       .takeBytes();
 }
 
+/// Every click track's file name starts with this.
+const String clickTrackPrefix = 'metronome_click_';
+
+/// Deletes click tracks an earlier run left in [dir] when the app was
+/// killed before Playback or an export could delete its own. Called once
+/// as the app starts, before anything can be playing one; an export
+/// moves its click into its work folder before handing it to the device,
+/// so a render still running on its own never reads one of these.
+Future<void> clearStaleClickTracks(Directory dir) async {
+  try {
+    await for (final entry in dir.list(followLinks: false)) {
+      final name = entry.uri.pathSegments.last;
+      if (entry is File &&
+          name.startsWith(clickTrackPrefix) &&
+          name.endsWith('.wav')) {
+        await entry.delete();
+      }
+    }
+  } on FileSystemException catch (e) {
+    // Only reclaims cache space.
+    debugPrint('Click: stale tracks not removed: $e');
+  }
+}
+
 /// Writes [plan] as a WAV under a unique name in the app's temp dir and
 /// returns its URI. Synthesis runs off the UI isolate (a long score is
 /// several MB of PCM). The caller deletes the file when done with it.
@@ -363,7 +387,7 @@ typedef ClickTrackWriter = Future<Uri> Function(ClickPlan plan);
 Future<Uri> writeClickTrack(ClickPlan plan) async {
   final dir = await getTemporaryDirectory();
   final file = File(
-    '${dir.path}/metronome_click_'
+    '${dir.path}/$clickTrackPrefix'
     '${DateTime.now().microsecondsSinceEpoch}.wav',
   );
   await Isolate.run(() => file.writeAsBytesSync(renderClickWav(plan)));

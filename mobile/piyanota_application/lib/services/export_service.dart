@@ -399,7 +399,7 @@ class MethodChannelExportService implements ExportService {
         }
         inputs.add({
           'path': await _localPath(
-            extra.track,
+            await _intoWork(extra.track, work),
             work,
             job.inputs.length,
             downloads,
@@ -469,6 +469,25 @@ class MethodChannelExportService implements ExportService {
         // export over. The device deletes it too once it is done.
         debugPrint('Export: temp files not removed: $e');
       }
+    }
+  }
+
+  /// Moves a file the export made for itself (the click) into its work
+  /// folder, so every clean-up of that folder takes it too: this run's,
+  /// the device's after the render, and [_clearStaleWork] after a killed
+  /// run. A file that cannot be moved is used where it is.
+  static Future<Uri> _intoWork(Uri track, Directory work) async {
+    if (track.scheme != 'file') return track;
+    final file = File.fromUri(track);
+    final name = file.uri.pathSegments.last;
+    try {
+      final moved = await file.rename(
+        '${work.path}${Platform.pathSeparator}$name',
+      );
+      return moved.uri;
+    } on FileSystemException catch (e) {
+      debugPrint('Export: extra track left in place: $e');
+      return track;
     }
   }
 

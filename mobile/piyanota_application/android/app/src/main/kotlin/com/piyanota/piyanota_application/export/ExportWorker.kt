@@ -8,6 +8,7 @@ import android.provider.DocumentsContract
 import android.system.ErrnoException
 import android.system.OsConstants
 import android.util.Log
+import com.piyanota.piyanota_application.AppVisibility
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileInputStream
@@ -246,8 +247,9 @@ internal object ExportWorker {
     ) {
         current.finished = true
         if (job === current) job = null
+        // The progress notification goes whatever happens.
         ExportNotifications.cancelProgress(context)
-        if (!current.forgotten) {
+        if (ExportNotices.postsResult(current.forgotten, listener != null, AppVisibility.visible)) {
             ExportNotices.result(current.notice, outcome, code, fileName, folder)?.let {
                 ExportNotifications.postResult(context, it, tree)
             }

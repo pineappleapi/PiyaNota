@@ -155,6 +155,16 @@ class MainActivity : FlutterActivity() {
 
     override fun shouldDestroyEngineWithHost(): Boolean = !keepEngine
 
+    override fun onResume() {
+        super.onResume()
+        AppVisibility.visible = true
+    }
+
+    override fun onPause() {
+        AppVisibility.visible = false
+        super.onPause()
+    }
+
     override fun onDestroy() {
         pdfExecutor.shutdown()
         exportChannel?.dispose()

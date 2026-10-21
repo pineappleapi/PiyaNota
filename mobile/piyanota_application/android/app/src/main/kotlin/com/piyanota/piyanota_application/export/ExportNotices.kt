@@ -65,6 +65,16 @@ internal data class ResultNotice(
 
 internal object ExportNotices {
     /**
+     * Whether a finished export gets a system notification. While the app
+     * is on screen with a live Dart side, the in-app banner (or the open
+     * Export sheet) already says how it went, so a notification would say
+     * it twice. With the app away, or its engine gone, only the
+     * notification can say it. Logout ([forgotten]) says nothing.
+     */
+    fun postsResult(forgotten: Boolean, dartAttached: Boolean, appVisible: Boolean): Boolean =
+        !forgotten && !(dartAttached && appVisible)
+
+    /**
      * Saved: "Saved <file> to <folder>", opening the folder. Failed: the
      * same failure words the app shows. Cancelled: nothing, the user knows
      * (user decision 2026-10-22).

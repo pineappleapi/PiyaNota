@@ -18,6 +18,19 @@ class ExportNoticesTest {
     )
 
     @Test
+    fun resultNotificationOnlyWhenTheAppCannotSayItItself() {
+        // On screen with Dart alive: the in-app banner says it.
+        assertFalse(ExportNotices.postsResult(forgotten = false, dartAttached = true, appVisible = true))
+        // Away, or the engine gone (a fresh Activity cannot show it).
+        assertTrue(ExportNotices.postsResult(forgotten = false, dartAttached = true, appVisible = false))
+        assertTrue(ExportNotices.postsResult(forgotten = false, dartAttached = false, appVisible = true))
+        assertTrue(ExportNotices.postsResult(forgotten = false, dartAttached = false, appVisible = false))
+        // Logout: never.
+        assertFalse(ExportNotices.postsResult(forgotten = true, dartAttached = false, appVisible = false))
+        assertFalse(ExportNotices.postsResult(forgotten = true, dartAttached = true, appVisible = true))
+    }
+
+    @Test
     fun progressShowsTheWholePercent() {
         assertEquals("Exporting Bituin… 42%", notice.progressText(42))
         assertEquals(0, ExportNotices.percent(-1.0))
