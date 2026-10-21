@@ -1258,9 +1258,13 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
             injected_voices.append(vi)
     for mi, m, chord, members, sources, fx in audit:      # post-hoc: the final score, not the rule that drew them
         in_force = bar_accidentals(mi, float(m.elementOffset(chord)), parts)
+        # A tie continuation carries the tie start's accidental over the barline (choral-conductor 2026-10-22).
+        tied_over = {n.pitch.nameWithOctave for n in chord.notes
+                     if n.tie is not None and n.tie.type in ("stop", "continue")}
         for p, src in zip(members, sources):
             key_alter = _key_alter(fx, p.step)
-            if src == "free" and int(p.alter) not in (key_alter, in_force.get(f"{p.step}{p.octave}", key_alter)):
+            if src == "free" and p.nameWithOctave not in tied_over and int(p.alter) not in (
+                    key_alter, in_force.get(f"{p.step}{p.octave}", key_alter)):
                 scalars["free_new_accidentals"] += 1
     for vi in injected_voices:
         after = _accidental_display(parts[vi], fresh=False)

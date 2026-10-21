@@ -545,3 +545,12 @@ def test_a6_4_synthetic_ties_reach_target(monkeypatch: pytest.MonkeyPatch) -> No
             if last and first and isinstance(last[0], music21.chord.Chord) and last[0].tie is not None \
                     and last[0].tie.type == "start":
                 assert [p.nameWithOctave for p in last[0].pitches] == [p.nameWithOctave for p in first[0].pitches]
+
+
+def test_a6_tie_continuation_member_keeps_its_accidental() -> None:
+    """Full build v2 flagged 15 chords, all tie 'stop' chords at a bar's start: the accidental carries over the tie
+    (choral-conductor 2026-10-22), so the post-hoc audit must not count them. bwv276 bar 20 held one ([G3, F#3])."""
+    path = Path(str(music21.corpus.getWork("bach/bwv276")))
+    with tempfile.TemporaryDirectory() as tmp:
+        _, _, stats = build_divisi(path, "bach", Path(tmp))
+    assert stats["free_new_accidentals"] == 0
