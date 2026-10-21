@@ -12,6 +12,7 @@ import 'screens/library/score_library_screen.dart';
 import 'screens/onboarding/onboarding_flow_screen.dart';
 import 'screens/playback/playback_screen.dart';
 import 'screens/processing/processing_screen.dart';
+import 'screens/scan_status/scan_background_host.dart';
 import 'screens/scan_status/scan_toast_host.dart';
 import 'screens/settings/settings_screen.dart';
 import 'state/onboarding_providers.dart';
@@ -26,8 +27,9 @@ class PiyaNotaApp extends StatefulWidget {
 }
 
 class _PiyaNotaAppState extends State<PiyaNotaApp> {
-  /// Lets the app-wide scan toast (PIYA-218 AC7), which sits above the
-  /// Navigator, open Processing or Playback.
+  /// Lets the app-wide scan toast (PIYA-218 AC7) and a tapped scan
+  /// notification, which sit above the Navigator, open Processing or
+  /// Playback.
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   final ScanRouteStack _routes = ScanRouteStack();
 
@@ -38,10 +40,13 @@ class _PiyaNotaAppState extends State<PiyaNotaApp> {
       theme: AppTheme.light,
       navigatorKey: _navigatorKey,
       navigatorObservers: [_routes],
-      builder: (context, child) => ScanToastHost(
+      builder: (context, child) => ScanBackgroundHost(
         navigatorKey: _navigatorKey,
-        routes: _routes,
-        child: child ?? const SizedBox.shrink(),
+        child: ScanToastHost(
+          navigatorKey: _navigatorKey,
+          routes: _routes,
+          child: child ?? const SizedBox.shrink(),
+        ),
       ),
       home: const _AppEntryPoint(),
       routes: {

@@ -17,14 +17,17 @@ import '../export/export_fakes.dart';
 import '../processing/processing_fakes.dart';
 
 /// H1: logging out, or logging in as someone, stops and forgets the last
-/// account's exports, also on the device (service and notifications).
+/// account's exports, also on the device (service and notifications), and
+/// takes the scans' background service and notifications away (PIYA-218).
 void main() {
   late FakeExportService exports;
+  late FakeScanTrackingService scans;
   late WidgetRef ref;
   late ProviderContainer container;
 
   Future<void> pump(WidgetTester tester) async {
     exports = FakeExportService();
+    scans = FakeScanTrackingService();
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -34,6 +37,7 @@ void main() {
           ),
           scanJobStoreProvider.overrideWithValue(MemoryScanJobStore()),
           processingApiProvider.overrideWithValue(ScriptedProcessingApi([])),
+          scanTrackingServiceProvider.overrideWithValue(scans),
         ],
         child: MaterialApp(
           home: Consumer(
@@ -88,6 +92,8 @@ void main() {
       expect(token!.isCancelled, isTrue);
       expect(container.read(exportJobsProvider), isEmpty);
       expect(exports.stopAllCalls, 1);
+      // PIYA-218: the scans' background service and notifications too.
+      expect(scans.stopAllCalls, 1);
 
       // The cancelled export ending late adds nothing back.
       running.completeError(const Cancelled());

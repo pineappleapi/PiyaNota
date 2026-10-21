@@ -10,6 +10,7 @@ import '../models/processing_status.dart';
 import '../services/fake_processing_api.dart';
 import '../services/fake_score_library_api.dart';
 import '../services/processing_api.dart';
+import '../services/scan_tracking_service.dart';
 import 'auth_providers.dart';
 import 'scan_job_store.dart';
 import 'score_library_providers.dart';
@@ -246,6 +247,12 @@ final processingClockProvider = Provider<DateTime Function()>(
 /// Where the tracker keeps its jobs between app runs (PIYA-218 AC8).
 final scanJobStoreProvider = Provider<ScanJobStore>(
   (ref) => const ScanJobStore(),
+);
+
+/// The device side of following scans in the background (PIYA-218): the
+/// foreground service and the system notifications. Tests override it.
+final scanTrackingServiceProvider = Provider<ScanTrackingService>(
+  (ref) => MethodChannelScanTrackingService(),
 );
 
 /// Emits whether the phone has a network, on every change (PIYA-218

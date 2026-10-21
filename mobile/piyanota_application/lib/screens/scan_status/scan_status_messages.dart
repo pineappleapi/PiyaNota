@@ -67,6 +67,24 @@ class ScanStatusMessages {
   static const String view = 'View';
   static const String dismissToast = 'Dismiss';
 
+  // System notifications while the app is away (user decision
+  // 2026-10-22): the ongoing one, then one per finished scan.
+  static String convertingInBackground(List<String> titles) =>
+      titles.length == 1
+      ? 'Converting ${titles.single}…'
+      : 'Converting ${titles.length} scores…';
+  static const String readyNotificationHint = 'Tap to play it.';
+
+  // Asked once on Android 13+ at "Convert in Background", unless the first
+  // export already asked.
+  static const String notificationsTitle = 'Tell you when it\'s ready?';
+  static const String notificationsBody =
+      'PiyaNota can let you know in your notifications when this score is '
+      'ready, so you can leave the app while it converts. The scan works '
+      'either way.';
+  static const String notificationsLater = 'Not now';
+  static const String notificationsAllow = 'Allow';
+
   // Failure view Delete (AC3).
   static const String deleteScan = 'Delete';
 }

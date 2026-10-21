@@ -8,6 +8,7 @@ import '../../state/export_jobs.dart';
 import '../../state/export_providers.dart';
 import '../../state/playback_providers.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/notification_ask.dart';
 import '../../widgets/primary_pill_button.dart';
 import '../auth/widgets/auth_error_banner.dart';
 import 'export_messages.dart';
@@ -452,30 +453,14 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
   /// Android 13+ only shows the export's notification if allowed: asked
   /// once, before the first folder pick, in plain words (user decision
   /// 2026-10-22). Either answer goes on to the export.
-  Future<void> _askForNotifications() async {
-    final permission = ref.read(notificationPermissionProvider);
-    if (!await permission.shouldAsk() || !mounted) return;
-    await permission.markAsked();
-    if (!mounted) return;
-    final allow = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text(ExportMessages.notificationsTitle),
-        content: const Text(ExportMessages.notificationsBody),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text(ExportMessages.notificationsLater),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text(ExportMessages.notificationsAllow),
-          ),
-        ],
-      ),
-    );
-    if (allow ?? false) await permission.request();
-  }
+  Future<void> _askForNotifications() => askForNotificationsOnce(
+    context,
+    ref.read(notificationPermissionProvider),
+    title: ExportMessages.notificationsTitle,
+    body: ExportMessages.notificationsBody,
+    later: ExportMessages.notificationsLater,
+    allow: ExportMessages.notificationsAllow,
+  );
 
   /// The picker, again and again until the folder is on this phone or the
   /// user backs out (user decision 2026-10-21): a Drive or app folder

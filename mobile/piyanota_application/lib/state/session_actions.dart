@@ -14,13 +14,16 @@ import 'processing_providers.dart';
 /// token, or shown to it. The processing tracker outlives screens, so
 /// clearing it can't be left to whichever screen noticed the 401. The
 /// same goes for exports (H1): a running one is stopped, its foreground
-/// service and notifications removed, and the history forgotten.
+/// service and notifications removed, and the history forgotten; and for
+/// the scans' own background service and notifications (PIYA-218).
 void _forgetAccountWork(WidgetRef ref) {
   ref.read(processingJobsProvider.notifier).forgetAll();
   ref.read(exportJobsProvider.notifier).cancelAndForgetAll();
   // Never awaited and never throws: logging out can't wait on, or fail
   // because of, the native side.
   unawaited(ref.read(exportServiceProvider).stopAll());
+  // PIYA-218: the background service and every conversion notification.
+  unawaited(ref.read(scanTrackingServiceProvider).stopAll());
 }
 
 /// Wipes the local session after the server rejected it, before routing

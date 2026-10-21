@@ -5,9 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/processing_status.dart';
 import '../../routes/app_routes.dart';
+import '../../state/export_providers.dart';
 import '../../state/processing_providers.dart';
 import '../../state/session_actions.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/notification_ask.dart';
 import '../../widgets/primary_pill_button.dart';
 import '../../services/score_library_api.dart';
 import '../../state/score_library_providers.dart';
@@ -215,6 +217,28 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
     _goToLibrary(Navigator.of(context));
   }
 
+  /// "Convert in Background" (PIYA-218): on Android 13+ the "it's ready"
+  /// notification needs the user's yes, asked once here unless an export
+  /// already asked. Leaving is decided before the dialog, so a finish
+  /// while it is open doesn't move this screen under it; the library's
+  /// card and bell show the result.
+  Future<void> _convertInBackground() async {
+    if (_leaving) return;
+    _leaving = true;
+    _completionTimer?.cancel();
+    final navigator = Navigator.of(context);
+    await askForNotificationsOnce(
+      context,
+      ref.read(notificationPermissionProvider),
+      title: ScanStatusMessages.notificationsTitle,
+      body: ScanStatusMessages.notificationsBody,
+      later: ScanStatusMessages.notificationsLater,
+      allow: ScanStatusMessages.notificationsAllow,
+    );
+    if (!mounted) return;
+    _goToLibrary(navigator);
+  }
+
   /// Pops back to the library already under this screen; if there isn't
   /// one (opened some other way), replaces this screen with it.
   static void _goToLibrary(NavigatorState navigator) {
@@ -418,7 +442,7 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
         onCancel: job?.phase == TrackedPhase.complete || _leaving
             ? null
             : _confirmCancel,
-        onBackground: _backToLibrary,
+        onBackground: () => unawaited(_convertInBackground()),
         onRetry: () =>
             ref.read(processingJobsProvider.notifier).retry(widget.jobId),
         headingScale: _maxHeadingScale,

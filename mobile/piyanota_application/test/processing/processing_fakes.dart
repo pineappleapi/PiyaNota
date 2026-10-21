@@ -9,12 +9,15 @@ import 'package:piyanota_application/models/processing_status.dart';
 import 'package:piyanota_application/routes/app_routes.dart';
 import 'package:piyanota_application/screens/processing/processing_screen.dart';
 import 'package:piyanota_application/services/processing_api.dart';
+import 'package:piyanota_application/services/scan_tracking_service.dart';
 import 'package:piyanota_application/services/session_storage.dart';
 import 'package:piyanota_application/state/auth_providers.dart';
+import 'package:piyanota_application/state/export_providers.dart';
 import 'package:piyanota_application/state/processing_providers.dart';
 import 'package:piyanota_application/state/scan_job_store.dart';
 
 import '../auth/auth_test_harness.dart';
+import '../export/export_fakes.dart' show FakeNotificationPermission;
 
 /// [ProcessingApi] that answers polls from a script: each entry is a
 /// [ProcessingStatus] or a [ProcessingException] to throw. Once the script
@@ -190,6 +193,8 @@ class ProcessingHarness {
   final store = MemoryScanJobStore();
   final network = FakeNetwork();
   final secureStorage = FaultySecureStorage({'session_token': 'sess_t'});
+  final scans = FakeScanTrackingService();
+  final notifications = FakeNotificationPermission();
   late WidgetTester _tester;
 
   /// Owned by the ProviderScope, so unmounting the tree disposes it (and
@@ -202,6 +207,8 @@ class ProcessingHarness {
     scanJobStoreProvider.overrideWithValue(store),
     networkAvailabilityProvider.overrideWithValue(network.controller.stream),
     networkCheckProvider.overrideWithValue(network.check),
+    scanTrackingServiceProvider.overrideWithValue(scans),
+    notificationPermissionProvider.overrideWithValue(notifications),
   ];
 
   TrackedJob? get job => container.read(processingJobsProvider)[kJob];
@@ -274,4 +281,40 @@ Future<void> pumpProcessing(
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 400));
   await tester.pump(const Duration(milliseconds: 700));
+}
+
+/// Records what the tracker asked of the device (PIYA-218 background
+/// following); [tap] plays a tapped result notification.
+class FakeScanTrackingService implements ScanTrackingService {
+  final List<String> shown = [];
+  int stops = 0;
+  int stopAllCalls = 0;
+  final List<({String jobId, String title, String text, bool ok})> results = [];
+  final List<String> cleared = [];
+  final StreamController<String> _opened = StreamController.broadcast();
+
+  void tap(String jobId) => _opened.add(jobId);
+
+  @override
+  Stream<String> get opened => _opened.stream;
+
+  @override
+  Future<void> show(String text) async => shown.add(text);
+
+  @override
+  Future<void> stop() async => stops++;
+
+  @override
+  Future<void> notifyResult({
+    required String jobId,
+    required String title,
+    required String text,
+    required bool ok,
+  }) async => results.add((jobId: jobId, title: title, text: text, ok: ok));
+
+  @override
+  Future<void> clearResult(String jobId) async => cleared.add(jobId);
+
+  @override
+  Future<void> stopAll() async => stopAllCalls++;
 }

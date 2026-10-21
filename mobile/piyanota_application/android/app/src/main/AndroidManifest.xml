@@ -15,8 +15,9 @@
          "Exporting <title>… n%" notification. Its type is mediaProcessing
          on Android 15+ (on-device audio decode/stretch/encode is what it is
          for) and dataSync on 10..14, where mediaProcessing does not exist.
-         POST_NOTIFICATIONS is asked at the first export on Android 13+; if
-         refused, the export still runs, just without the notification. -->
+         POST_NOTIFICATIONS is asked once on Android 13+, at the first export
+         or "Convert in Background" (PIYA-218); if refused, the export or
+         the conversion still runs, just without the notification. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
@@ -58,6 +59,14 @@
             android:name=".export.ExportJobService"
             android:exported="false"
             android:foregroundServiceType="dataSync|mediaProcessing"/>
+        <!-- PIYA-218: keeps the app (and its Dart poll) alive while a
+             conversion is followed in the background, with a "Converting
+             <title>..." notification. dataSync: it only follows the job's
+             state on the server. Not exported: only this app starts it. -->
+        <service
+            android:name=".scan.ScanTrackingService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"/>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

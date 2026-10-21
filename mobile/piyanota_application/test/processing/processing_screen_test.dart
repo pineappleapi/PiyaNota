@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:piyanota_application/models/processing_status.dart';
 import 'package:piyanota_application/screens/processing/processing_messages.dart';
 import 'package:piyanota_application/screens/processing/processing_screen.dart';
+import 'package:piyanota_application/screens/scan_status/scan_status_messages.dart';
 import 'package:piyanota_application/services/processing_api.dart';
 import 'package:piyanota_application/state/processing_providers.dart';
 
@@ -316,6 +317,60 @@ void main() {
         expect(h.job!.title, kTitle, reason: 'labels the row later');
       });
     }
+  });
+
+  group('Convert in Background asks for notifications (PIYA-218)', () {
+    testWidgets('once, on Android 13+: Allow shows the system prompt and '
+        'goes on to the library', (tester) async {
+      final h = ProcessingHarness(ScriptedProcessingApi([running(30)]));
+      h.notifications.askFirst = true;
+      await pumpProcessing(tester, h);
+      await tester.tap(find.text(ProcessingMessages.convertInBackground));
+      await _settleNavigation(tester);
+      expect(find.text(ScanStatusMessages.notificationsTitle), findsOneWidget);
+      expect(find.text(kLibrary), findsNothing);
+
+      await tester.tap(find.text(ScanStatusMessages.notificationsAllow));
+      await _settleNavigation(tester);
+      expect(h.notifications.asks, 1);
+      expect(h.notifications.requests, 1);
+      expect(find.text(kLibrary), findsOneWidget);
+      expect(h.job, isNotNull, reason: 'still followed');
+    });
+
+    testWidgets('"Not now" still leaves, without the prompt; a finish while '
+        'the question is open does not move the screen under it', (
+      tester,
+    ) async {
+      final h = ProcessingHarness(ScriptedProcessingApi([running(30)]));
+      h.notifications.askFirst = true;
+      await pumpProcessing(tester, h);
+      await tester.tap(find.text(ProcessingMessages.convertInBackground));
+      await _settleNavigation(tester);
+      h.api.then([done()]);
+      await tester.pump(ProcessingTiming.pollInterval);
+      await _settleNavigation(tester);
+      expect(h.job!.phase, TrackedPhase.complete);
+      expect(find.text(ScanStatusMessages.notificationsTitle), findsOneWidget);
+
+      await tester.tap(find.text(ScanStatusMessages.notificationsLater));
+      await _settleNavigation(tester);
+      expect(h.notifications.requests, 0);
+      expect(find.text(kLibrary), findsOneWidget);
+      expect(find.textContaining('ROUTE:playback'), findsNothing);
+    });
+
+    testWidgets('not asked when already asked: straight to the library', (
+      tester,
+    ) async {
+      final h = ProcessingHarness(ScriptedProcessingApi([running(30)]));
+      await pumpProcessing(tester, h);
+      await tester.tap(find.text(ProcessingMessages.convertInBackground));
+      await _settleNavigation(tester);
+      expect(find.text(ScanStatusMessages.notificationsTitle), findsNothing);
+      expect(h.notifications.asks, 0);
+      expect(find.text(kLibrary), findsOneWidget);
+    });
   });
 
   group('failure views (AC5–AC7)', () {
