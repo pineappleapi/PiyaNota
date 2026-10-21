@@ -139,10 +139,12 @@ ExportJob buildExportJob(
 
 /// One export, start to finish: write the click if it is wanted, build
 /// the job, make and save the file. The click file is this export's own,
-/// so it is deleted here whatever happens.
+/// so it is deleted here whatever happens. [state] and [writeClick] are
+/// captured when the export starts ([PlaybackController.exportClickWriter])
+/// so it can finish after Playback has closed.
 Future<ExportResult> runExport({
   required ExportService service,
-  required PlaybackController controller,
+  required Future<Uri> Function() writeClick,
   required PlaybackState state,
   required ExportSelection selection,
   required String title,
@@ -161,7 +163,7 @@ Future<ExportResult> runExport({
   try {
     if (wantsClick) {
       try {
-        click = await controller.writeExportClick();
+        click = await writeClick();
       } on Object catch (e, stack) {
         debugPrint('Export: click not generated: $e\n$stack');
         // L9: a Cancel while the click was being written is the Cancel.

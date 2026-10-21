@@ -10,6 +10,7 @@ import 'package:piyanota_application/models/voice_part.dart';
 import 'package:piyanota_application/screens/playback/export_messages.dart';
 import 'package:piyanota_application/screens/playback/playback_messages.dart';
 import 'package:piyanota_application/services/export_service.dart';
+import 'package:piyanota_application/state/export_jobs.dart';
 import 'package:piyanota_application/state/export_providers.dart';
 import 'package:piyanota_application/state/playback_providers.dart';
 import 'package:piyanota_application/widgets/primary_pill_button.dart';
@@ -83,6 +84,15 @@ void main() {
 
   bool downloadEnabled(WidgetTester tester) =>
       tester.widget<PrimaryPillButton>(download).onPressed != null;
+
+  List<ExportTask> tasks(WidgetTester tester) =>
+      appContainer(tester).read(exportJobsProvider);
+
+  Future<void> closeSheet(WidgetTester tester) async {
+    await tester.tap(find.byTooltip(PlaybackMessages.close));
+    await settle(tester);
+    expect(sheet, findsNothing);
+  }
 
   group('selection (AC2-AC8)', () {
     testWidgets('opens with the voices Playback plays ticked, and the '
@@ -247,10 +257,12 @@ void main() {
     });
   });
 
-  group('busy (AC12)', () {
-    testWidgets('shows "Preparing audio…" and cannot be closed', (
-      tester,
-    ) async {
+  group('background export (user decision 2026-10-21)', () {
+    final bar = find.byKey(const ValueKey('export-progress'));
+    final cancelButton = find.byKey(const ValueKey('export-cancel'));
+
+    testWidgets('shows "Preparing audio…", a second tap starts nothing, '
+        'and the sheet can be closed without cancelling', (tester) async {
       final service = FakeExportService()..exportGate = Completer<void>();
       await pumpPlayback(tester, harness(service));
       await openExport(tester);
@@ -264,21 +276,144 @@ void main() {
         isEnabled(tester, ExportMessages.voiceBox(VoicePart.alto)),
         isFalse,
       );
-
-      await tester.tap(find.byTooltip(PlaybackMessages.close));
-      await tester.tapAt(const Offset(200, 40));
-      await tester.binding.handlePopRoute();
-      await settle(tester);
-      expect(sheet, findsOneWidget);
-
-      // A second tap while busy starts nothing.
       await tester.tap(download, warnIfMissed: false);
       await tester.pump();
       expect(service.exports, hasLength(1));
 
+      // Dismissible now: back closes it and the export goes on.
+      await tester.binding.handlePopRoute();
+      await settle(tester);
+      expect(sheet, findsNothing);
+      expect(service.lastCancel!.isCancelled, isFalse);
+      expect(tasks(tester).single.isRunning, isTrue);
+
+      service.exportGate!.complete();
+      await settle(tester);
+      final done = tasks(tester).single;
+      expect(done.status, ExportTaskStatus.saved);
+      expect(done.result!.fileName, kSaved.fileName);
+      // Not seen in the sheet, so the bell counts it.
+      expect(done.read, isFalse);
+      // No success dialog over Playback for an export finished unseen.
+      expect(find.text(ExportMessages.successTitle), findsNothing);
+    });
+
+    testWidgets('reopening the sheet while it runs shows the live '
+        'progress and the X, and its result', (tester) async {
+      final service = FakeExportService()..exportGate = Completer<void>();
+      await pumpPlayback(tester, harness(service));
+      await openExport(tester);
+      await tick(tester, ExportMessages.voiceBox(VoicePart.alto));
+      await tester.tap(download);
+      await tester.pump();
+      service.lastOnProgress!(0.3);
+      await tester.pump();
+      await closeSheet(tester);
+
+      service.lastOnProgress!(0.5);
+      await tester.pump();
+      expect(tasks(tester).single.progress, 0.5);
+
+      await openExport(tester, clear: false);
+      expect(tester.widget<LinearProgressIndicator>(bar).value, 0.5);
+      expect(find.text('50%'), findsOneWidget);
+      expect(cancelButton, findsOneWidget);
+      service.lastOnProgress!(0.8);
+      await tester.pump();
+      expect(find.text('80%'), findsOneWidget);
+
       service.exportGate!.complete();
       await settle(tester);
       expect(sheet, findsNothing);
+      expect(find.text(ExportMessages.successTitle), findsOneWidget);
+      // Shown in the sheet it finished in: no badge for it.
+      expect(tasks(tester).single.read, isTrue);
+    });
+
+    testWidgets('the X in a reopened sheet cancels the background export', (
+      tester,
+    ) async {
+      final service = FakeExportService()..exportGate = Completer<void>();
+      await pumpPlayback(tester, harness(service));
+      await openExport(tester);
+      await tick(tester, ExportMessages.voiceBox(VoicePart.tenor));
+      await tester.tap(download);
+      await tester.pump();
+      await closeSheet(tester);
+      await openExport(tester, clear: false);
+
+      await tester.tap(cancelButton);
+      await settle(tester);
+      expect(service.lastCancel!.isCancelled, isTrue);
+      expect(find.text(ExportMessages.cancelled), findsOneWidget);
+      expect(tasks(tester).single.status, ExportTaskStatus.cancelled);
+    });
+
+    testWidgets('one at a time: Download while another score exports says '
+        'so plainly and asks for no folder', (tester) async {
+      final service = FakeExportService();
+      await pumpPlayback(tester, harness(service));
+      final other = Completer<ExportResult>();
+      appContainer(tester)
+          .read(exportJobsProvider.notifier)
+          .start(
+            scoreId: kScoreId + 1,
+            title: 'Ave Maria',
+            treeUri: kTreeUri,
+            run: (_, _) => other.future,
+          );
+      await openExport(tester);
+      await tick(tester, ExportMessages.voiceBox(VoicePart.bass));
+      await tester.tap(download);
+      await settle(tester);
+
+      expect(
+        find.text(ExportMessages.alreadyExporting('Ave Maria')),
+        findsOneWidget,
+      );
+      expect(service.pickCalls, 0);
+      expect(service.exports, isEmpty);
+
+      other.complete(kSaved);
+      await settle(tester);
+      await tester.tap(download);
+      await settle(tester);
+      expect(service.exports, hasLength(1));
+      expect(find.byKey(const ValueKey('export-busy-elsewhere')), findsNothing);
+    });
+
+    testWidgets('leaving Playback mid-export still saves the file, click '
+        'included', (tester) async {
+      final service = FakeExportService();
+      final clickGate = Completer<void>();
+      final h = PlaybackHarness(
+        ScriptedScoreResultApi([testResult()], timing: testTiming()),
+        exportService: service,
+        clickWriter: (plan) async {
+          await clickGate.future;
+          return Uri.parse('test://click.wav');
+        },
+      );
+      await pumpPlayback(tester, h);
+      await openExport(tester);
+      await tick(tester, ExportMessages.voiceBox(VoicePart.soprano));
+      await tick(tester, ExportMessages.clickBox);
+      await tester.tap(download);
+      await tester.pump();
+      await closeSheet(tester);
+      await tester.tap(find.byTooltip(PlaybackMessages.back));
+      await settle(tester);
+      expect(find.text(kLibrary), findsOneWidget);
+
+      // The click is written after Playback (and its controller) is gone.
+      clickGate.complete();
+      await settle(tester);
+      expect(tasks(tester).single.status, ExportTaskStatus.saved);
+      final job = service.exports.single.$1;
+      expect(
+        job.inputs.map((i) => i.track.toString()),
+        contains('test://click.wav'),
+      );
     });
   });
 
@@ -715,11 +850,6 @@ void main() {
         greaterThanOrEqualTo(kMinInteractiveDimension),
       );
 
-      // Still non-dismissible: Cancel is the way out.
-      await tester.binding.handlePopRoute();
-      await tester.pump();
-      expect(sheet, findsOneWidget);
-
       await tester.tap(cancelButton);
       await tester.pump();
       expect(service.lastCancel!.isCancelled, isTrue);
@@ -964,8 +1094,10 @@ void main() {
       expect(service.exports, isEmpty);
     });
 
-    testWidgets('L10: Playback failing during an export that then fails '
-        'closes the sheet once it is no longer busy', (tester) async {
+    testWidgets('L10: Playback failing during an export closes the sheet; '
+        'the export goes on and its failure is kept for the bell', (
+      tester,
+    ) async {
       final service = FakeExportService(failures: const [GenerationFailed()])
         ..exportGate = Completer<void>();
       final h = PlaybackHarness(
@@ -983,16 +1115,20 @@ void main() {
 
       h.engine.fail(VoicePart.bass, fatal: true);
       await settle(tester);
-      // Held open while busy (AC12).
-      expect(sheet, findsOneWidget);
-
-      service.exportGate!.complete();
-      await settle(tester);
+      // No longer held open (AC12 withdrawn, user decision 2026-10-21).
       expect(sheet, findsNothing);
       expect(
         find.text(PlaybackMessages.errorHeading(PlaybackError.audio)),
         findsOneWidget,
       );
+      expect(tasks(tester).single.isRunning, isTrue);
+
+      service.exportGate!.complete();
+      await settle(tester);
+      final task = tasks(tester).single;
+      expect(task.status, ExportTaskStatus.failed);
+      expect(task.failure, isA<GenerationFailed>());
+      expect(task.read, isFalse);
     });
   });
 }

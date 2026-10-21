@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/library_entry.dart';
+import '../../state/export_jobs.dart';
 import '../../state/processing_providers.dart';
 import '../../theme/app_theme.dart';
 import '../playback/sheet_parts.dart';
+import 'export_notice_row.dart';
 import 'scan_navigation.dart';
 import 'scan_status_messages.dart';
 
@@ -16,7 +18,9 @@ import 'scan_status_messages.dart';
 /// runs (AC9), and a red count badge for completed and failed scans not
 /// yet seen. Running scans never add to the badge. Every state is read
 /// from [processingJobsProvider], the same source as the card and
-/// Processing (AC1).
+/// Processing (AC1). Exports report here too (user decision 2026-10-21),
+/// from [exportJobsProvider]: they spin the ring while one runs and add
+/// to the badge when they finish unseen.
 ///
 /// No reference mockup draws the bell, so every colour is an existing
 /// token: white like the header's other glyphs, [AppTheme.errorRed] for
@@ -37,13 +41,25 @@ class ScanBell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final unread = ref.watch(processingJobsProvider.select(unreadScanCount));
-    final active = ref.watch(processingJobsProvider.select(anyScanRunning));
+    final unreadScans = ref.watch(
+      processingJobsProvider.select(unreadScanCount),
+    );
+    final unreadExports = ref.watch(
+      exportJobsProvider.select(unreadExportCount),
+    );
+    final unread = unreadScans + unreadExports;
+    final scanning = ref.watch(processingJobsProvider.select(anyScanRunning));
+    final exporting = ref.watch(exportJobsProvider.select(anyExportRunning));
+    final active = scanning || exporting;
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
 
     return Semantics(
       button: true,
-      label: ScanStatusMessages.bellSemantics(unread: unread, active: active),
+      label: ScanStatusMessages.bellSemantics(
+        unread: unread,
+        active: scanning,
+        exporting: exporting,
+      ),
       excludeSemantics: true,
       onTap: () => showScanPanel(context),
       child: SizedBox.square(
@@ -159,7 +175,9 @@ class _ScanPanelState extends ConsumerState<ScanPanel> {
   Widget build(BuildContext context) {
     final jobs = ref.watch(processingJobsProvider);
     final rows = scanNotifications(jobs);
-    final unread = unreadScanCount(jobs);
+    final tasks = ref.watch(exportJobsProvider);
+    final exports = exportNotifications(tasks);
+    final unread = unreadScanCount(jobs) + unreadExportCount(tasks);
     final now = ref.read(processingClockProvider)();
     final textTheme = Theme.of(context).textTheme;
 
@@ -172,8 +190,10 @@ class _ScanPanelState extends ConsumerState<ScanPanel> {
             alignment: Alignment.centerRight,
             child: TextButton(
               key: const ValueKey('scan-mark-all-read'),
-              onPressed: () =>
-                  ref.read(processingJobsProvider.notifier).markAllRead(),
+              onPressed: () {
+                ref.read(processingJobsProvider.notifier).markAllRead();
+                ref.read(exportJobsProvider.notifier).markAllRead();
+              },
               style: TextButton.styleFrom(
                 foregroundColor: AppTheme.processingSecondary,
                 minimumSize: const Size(48, 48),
@@ -181,7 +201,11 @@ class _ScanPanelState extends ConsumerState<ScanPanel> {
               child: const Text(ScanStatusMessages.markAllRead),
             ),
           ),
-        if (rows.isEmpty)
+        // Exports first: one runs at a time and it is what the user just
+        // did.
+        for (final task in exports)
+          ExportNoticeRow(key: ValueKey('export-row-${task.id}'), task: task),
+        if (rows.isEmpty && exports.isEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(10, 24, 10, 32),
             child: Text(

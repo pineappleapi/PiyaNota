@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:piyanota_application/models/processing_status.dart';
 import 'package:piyanota_application/models/score_summary.dart';
 import 'package:piyanota_application/routes/app_routes.dart';
+import 'package:piyanota_application/screens/playback/export_messages.dart';
 import 'package:piyanota_application/screens/library/library_messages.dart';
 import 'package:piyanota_application/screens/library/score_library_screen.dart';
 import 'package:piyanota_application/screens/library/widgets/score_cards.dart';
@@ -17,12 +18,16 @@ import 'package:piyanota_application/screens/processing/processing_screen.dart';
 import 'package:piyanota_application/screens/scan_status/scan_bell.dart';
 import 'package:piyanota_application/screens/scan_status/scan_status_messages.dart';
 import 'package:piyanota_application/screens/scan_status/scan_toast_host.dart';
+import 'package:piyanota_application/services/export_service.dart';
 import 'package:piyanota_application/services/processing_api.dart';
 import 'package:piyanota_application/services/score_library_api.dart';
+import 'package:piyanota_application/state/export_jobs.dart';
+import 'package:piyanota_application/state/export_providers.dart';
 import 'package:piyanota_application/state/processing_providers.dart';
 import 'package:piyanota_application/state/scan_job_store.dart';
 import 'package:piyanota_application/state/score_library_providers.dart';
 
+import '../export/export_fakes.dart';
 import '../processing/processing_fakes.dart'
     show FakeNetwork, MemoryScanJobStore, done, failed, running;
 
@@ -91,6 +96,7 @@ class _App {
   final libraryApi = _LibraryApi(_scores);
   final store = MemoryScanJobStore();
   final network = FakeNetwork();
+  final exportService = FakeExportService();
   late WidgetTester tester;
 
   ProviderContainer get container => ProviderScope.containerOf(
@@ -109,7 +115,29 @@ class _App {
     scanJobStoreProvider.overrideWithValue(store),
     networkAvailabilityProvider.overrideWithValue(network.controller.stream),
     networkCheckProvider.overrideWithValue(network.check),
+    exportServiceProvider.overrideWithValue(exportService),
   ];
+
+  ExportJobsController get exports =>
+      container.read(exportJobsProvider.notifier);
+
+  /// Starts a tracked export the test finishes through the completer.
+  Completer<ExportResult> startExport({int scoreId = 7}) {
+    final done = Completer<ExportResult>();
+    exports.start(
+      scoreId: scoreId,
+      title: 'Ave Maria',
+      treeUri: kTreeUri,
+      run: (_, onProgress) {
+        _exportProgress = onProgress;
+        return done.future;
+      },
+    );
+    return done;
+  }
+
+  void Function(double)? _exportProgress;
+  void exportProgress(double fraction) => _exportProgress!(fraction);
 
   /// [home] under the app-wide toast host, with animations off so the
   /// bell's spinning ring doesn't keep pumpAndSettle busy.
@@ -933,6 +961,139 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text(ProcessingMessages.failedHeading), findsOneWidget);
       expect(find.byKey(const ValueKey('failure-delete')), findsNothing);
+      await app.end();
+    });
+  });
+
+  group('PIYA-211 exports in the bell and toast', () {
+    Finder exportRow() => find.byWidgetPredicate(
+      (w) =>
+          w.key is ValueKey<String> &&
+          (w.key! as ValueKey<String>).value.startsWith('export-row-'),
+    );
+
+    testWidgets('a running export spins the ring and is announced; its row '
+        'shows the percent', (tester) async {
+      final app = _App();
+      await app.pump(tester, _bellHome);
+      final done = app.startExport();
+      app.exportProgress(0.42);
+      await tester.pump();
+      expect(_ring, findsOneWidget);
+      expect(_badge, findsNothing);
+      expect(
+        find.bySemanticsLabel(
+          ScanStatusMessages.bellSemantics(
+            unread: 0,
+            active: false,
+            exporting: true,
+          ),
+        ),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byType(ScanBell));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(
+        find.text(ExportMessages.exportingRow('Ave Maria', 0.42)),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: exportRow(),
+          matching: find.byType(LinearProgressIndicator),
+        ),
+        findsOneWidget,
+      );
+      done.complete(kSaved);
+      await tester.pump();
+      await tester.pump(ScanToastHost.showFor);
+      await app.end();
+    });
+
+    testWidgets('saved unseen: banner with Open folder, a badge, and a row '
+        'that opens the folder', (tester) async {
+      final app = _App();
+      await app.pump(tester, _bellHome);
+      app.startExport().complete(kSaved);
+      await tester.pump();
+      await tester.pump();
+
+      expect(
+        find.text(ExportMessages.savedToast(kSaved.fileName, kSaved.location)),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const ValueKey('export-toast-open')));
+      await tester.pump();
+      expect(app.exportService.opened, [kTreeUri]);
+      expect(_badge, findsNothing);
+
+      app.startExport().complete(kSaved);
+      await tester.pump();
+      await tester.pump(ScanToastHost.showFor);
+      expect(_badgeText(tester), '1');
+      await _openPanel(tester);
+      expect(
+        find.text(ExportMessages.savedRow(kSaved.fileName, kSaved.location)),
+        findsNWidgets(2),
+      );
+      expect(find.text(ScanStatusMessages.panelSubtitle), findsOneWidget);
+      await tester.tap(exportRow().first);
+      await tester.pump();
+      expect(app.exportService.opened, [kTreeUri, kTreeUri]);
+      expect(unreadExportCount(app.container.read(exportJobsProvider)), 0);
+      await app.end();
+    });
+
+    testWidgets('a failure shows its banner and a row with the reason', (
+      tester,
+    ) async {
+      final app = _App();
+      await app.pump(tester, _bellHome);
+      app.startExport().completeError(const StorageFull());
+      await tester.pump();
+      await tester.pump();
+      expect(
+        find.text(ExportMessages.failedToast('Ave Maria')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('export-toast-open')), findsNothing);
+      await tester.pump(ScanToastHost.showFor);
+
+      await _openPanel(tester);
+      expect(find.text(ExportMessages.failedRow('Ave Maria')), findsOneWidget);
+      expect(
+        find.text(ExportMessages.failureMessage(const StorageFull())),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const ValueKey('scan-mark-all-read')));
+      await tester.pump();
+      expect(unreadExportCount(app.container.read(exportJobsProvider)), 0);
+
+      await tester.drag(exportRow(), const Offset(-500, 0));
+      await tester.pumpAndSettle();
+      expect(exportRow(), findsNothing);
+      expect(find.byKey(const ValueKey('scan-panel-empty')), findsOneWidget);
+      await app.end();
+    });
+
+    testWidgets('no banner for a cancel, or while that score\'s sheet is '
+        'open', (tester) async {
+      final app = _App();
+      await app.pump(tester, _bellHome);
+      app.startExport().completeError(const Cancelled());
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(const ValueKey('export-toast-1')), findsNothing);
+      expect(find.text(ExportMessages.cancelledRow('Ave Maria')), findsNothing);
+
+      app.exports.sheetOpened(7);
+      app.startExport().complete(kSaved);
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(const ValueKey('export-toast-2')), findsNothing);
+      // Seen in the sheet: no badge for it either.
+      expect(_badgeText(tester), '1');
       await app.end();
     });
   });

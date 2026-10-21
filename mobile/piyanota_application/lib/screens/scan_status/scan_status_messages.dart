@@ -19,10 +19,15 @@ class ScanStatusMessages {
 
   // Bell (AC5).
   static const String bellIdle = 'Notifications';
-  static String bellSemantics({required int unread, required bool active}) {
+  static String bellSemantics({
+    required int unread,
+    required bool active,
+    bool exporting = false,
+  }) {
     final parts = <String>['Notifications'];
     if (unread > 0) parts.add('$unread unread');
     if (active) parts.add('a scan is in progress');
+    if (exporting) parts.add('an export is in progress');
     return parts.join(', ');
   }
 
@@ -33,7 +38,7 @@ class ScanStatusMessages {
 
   // Panel (AC6, spec §5.3/§9).
   static const String panelTitle = 'Notifications';
-  static const String panelSubtitle = 'Your recent scans';
+  static const String panelSubtitle = 'Your recent scans and exports';
   static const String markAllRead = 'Mark all as read';
   static const String empty = 'No notifications yet.';
   static const String processingRow =

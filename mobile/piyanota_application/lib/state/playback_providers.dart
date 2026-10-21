@@ -742,15 +742,30 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// time-stretches it on its own, like each voice, as Playback's click
   /// player does). A separate file, so the caller may
   /// delete it without touching the one Playback is playing.
-  Future<Uri> writeExportClick() => ref.read(clickTrackWriterProvider)(
-    planClicks(
-      bars: _bars,
-      events: _eventsOf(state.timeline),
-      tempoBpm: state.tempoBpm,
-      chosenBpm: state.chosenBpm,
-      length: _engine?.duration ?? state.duration,
-    ),
-  );
+  Future<Uri> writeExportClick() => exportClickWriter()();
+
+  /// [writeExportClick], with everything it needs from this controller
+  /// read now. An export runs in the background (user decision
+  /// 2026-10-21) and this controller is disposed when Playback closes, so
+  /// the export must not reach back into it.
+  Future<Uri> Function() exportClickWriter() {
+    final writer = ref.read(clickTrackWriterProvider);
+    final bars = _bars;
+    final events = _eventsOf(state.timeline);
+    final tempoBpm = state.tempoBpm;
+    final chosenBpm = state.chosenBpm;
+    final length = _engine?.duration ?? state.duration;
+    // Planned when called, inside the export's error handling, as before.
+    return () async => writer(
+      planClicks(
+        bars: bars,
+        events: events,
+        tempoBpm: tempoBpm,
+        chosenBpm: chosenBpm,
+        length: length,
+      ),
+    );
+  }
 
   List<TimingEvent> _eventsOf(ScoreTimeline? timeline) =>
       timeline?.events ?? const [];

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/export_selection.dart';
 import '../../models/voice_part.dart';
 import '../../services/export_service.dart';
+import '../../state/export_jobs.dart';
 import '../../state/export_providers.dart';
 import '../../state/playback_providers.dart';
 import '../../theme/app_theme.dart';
@@ -18,9 +19,11 @@ import 'sheet_parts.dart';
 /// to so the success dialog can open it.
 typedef ExportSaved = ({ExportResult result, String treeUri});
 
-/// Opens Export Audio over Playback (PIYA-211) and, after a save, the
-/// success dialog (AC16). Drag-to-close is off: it would pop the sheet
-/// mid-export, past the PopScope that holds it open (AC12).
+/// Opens Export Audio over Playback (PIYA-211) and, after a save seen in
+/// the sheet, the success dialog (AC16). The sheet can be closed at any
+/// time, also mid-export (user decision 2026-10-21, withdrawing AC12's
+/// hold): the export goes on in [exportJobsProvider] and reports in the
+/// bell and a banner instead.
 Future<void> openExportAudio(
   BuildContext context,
   WidgetRef ref, {
@@ -30,7 +33,6 @@ Future<void> openExportAudio(
   final saved = await showPlaybackSheet<ExportSaved>(
     context,
     (_) => ExportAudioSheet(scoreId: scoreId, title: title),
-    enableDrag: false,
   );
   if (saved == null || !context.mounted) return;
   await showDialog<void>(
@@ -67,19 +69,18 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
   late ExportSelection _selection = initialExportSelection(
     ref.read(playbackControllerProvider(widget.scoreId)),
   );
-  bool _busy = false;
+
+  /// Read once: [dispose] can't use ref.
+  late final ExportJobsController _jobs = ref.read(exportJobsProvider.notifier);
+
+  /// The folder picker is open.
+  bool _picking = false;
+
+  /// The export this sheet shows: started here, or already running for
+  /// this score when the sheet was reopened. Its result is shown here when
+  /// it finishes while the sheet is open.
+  int? _taskId;
   ExportFailure? _failure;
-
-  /// Set once a folder is picked: the file is being made, so the bar and
-  /// Cancel show. Null between exports.
-  ExportCancelToken? _cancel;
-
-  /// The whole export's 0..1, download to save (user decision
-  /// 2026-10-21); 0 until the first report.
-  double _progress = 0;
-
-  /// Cancel was pressed and the export is stopping.
-  bool _cancelling = false;
 
   /// The last export was cancelled; says so calmly, nothing to retry.
   bool _cancelled = false;
@@ -90,6 +91,9 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
   /// The last folder picked was not on the phone; shown while the picker
   /// is reopened, and after, if that pick is cancelled too.
   bool _notLocal = false;
+
+  /// Download was tapped while another score's export ran.
+  bool _blockedByOther = false;
 
   /// The last failure was every ticked voice failing before the file was
   /// made, which Retry cannot fix.
@@ -109,9 +113,49 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
   );
 
   @override
+  void initState() {
+    super.initState();
+    _jobs.sheetOpened(widget.scoreId);
+    // Reopened while this score's export runs: show its live progress
+    // and the X.
+    final running = runningExportFor(
+      ref.read(exportJobsProvider),
+      widget.scoreId,
+    );
+    if (running != null) {
+      _taskId = running.id;
+      _treeUri = running.treeUri;
+    }
+  }
+
+  @override
+  void dispose() {
+    _jobs.sheetClosed(widget.scoreId);
+    super.dispose();
+  }
+
+  ExportTask? _task(List<ExportTask> tasks) {
+    final id = _taskId;
+    if (id == null) return null;
+    for (final task in tasks) {
+      if (task.id == id) return task;
+    }
+    return null;
+  }
+
+  @override
   Widget build(BuildContext context) {
     closeSheetWhenNotReady(context, ref, widget.scoreId);
+    ref.listen(exportJobsProvider, _onTasksChanged);
     final state = ref.watch(playbackControllerProvider(widget.scoreId));
+    final tasks = ref.watch(exportJobsProvider);
+    final task = _task(tasks);
+    final exporting = task != null && task.isRunning;
+    final busy = _picking || exporting;
+    final other = _jobs.running;
+    final otherTitle = other != null && other.scoreId != widget.scoreId
+        ? other.title
+        : null;
     // A voice can fail while the sheet is open: follow Playback live so it
     // is unticked and disabled here too. Assigned without setState because
     // this build is already applying it.
@@ -133,7 +177,7 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
           enabled: usable,
           value: ticked,
           semanticsLabel: ExportMessages.voiceBox(voice),
-          onChanged: _busy
+          onChanged: busy
               ? null
               : (_) => _update(_selection.toggleVoice(voice)),
         ),
@@ -154,7 +198,7 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
         enabled: _selection.available.isNotEmpty,
         value: _selection.allVoices,
         semanticsLabel: ExportMessages.allVoicesBox,
-        onChanged: _busy ? null : (_) => _update(_selection.toggleAll()),
+        onChanged: busy ? null : (_) => _update(_selection.toggleAll()),
       ),
     );
     divider();
@@ -172,7 +216,7 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
         enabled: clickUsable,
         value: clickUsable && _selection.withClick,
         semanticsLabel: ExportMessages.clickBox,
-        onChanged: _busy ? null : (_) => _update(_selection.toggleClick()),
+        onChanged: busy ? null : (_) => _update(_selection.toggleClick()),
       ),
     );
     if (!clickUsable) {
@@ -180,65 +224,65 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
     }
 
     final failure = _failure;
-    return PopScope(
-      // AC12: no X, back or scrim tap while the file is being made.
-      canPop: !_busy,
-      child: SheetFrame(
-        key: const ValueKey('export-sheet'),
-        title: ExportMessages.title,
-        canClose: !_busy,
-        children: [
-          ...rows,
-          const SizedBox(height: 24),
-          if (_notLocal)
-            const SheetNote(
-              ExportMessages.notLocalFolder,
-              key: ValueKey('export-not-local'),
-            ),
-          if (_cancelled && !_busy)
-            SheetNote(
-              _partialLeft
-                  ? ExportMessages.cancelledPartial
-                  : ExportMessages.cancelled,
-              key: const ValueKey('export-cancelled'),
-            ),
-          if (failure != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(0, 0, 8, 16),
-              child: AuthErrorBanner(
-                key: const ValueKey('export-error'),
-                message: _nothingLeft
-                    ? ExportMessages.nothingToExport
-                    : _messageFor(failure),
-                // Nothing left to retry once every ticked voice failed.
-                actionLabel: _nothingLeft ? null : ExportMessages.retry,
-                onAction: _busy || !_selection.canDownload ? null : _retry,
-              ),
-            ),
+    return SheetFrame(
+      key: const ValueKey('export-sheet'),
+      title: ExportMessages.title,
+      children: [
+        ...rows,
+        const SizedBox(height: 24),
+        if (_notLocal)
+          const SheetNote(
+            ExportMessages.notLocalFolder,
+            key: ValueKey('export-not-local'),
+          ),
+        if (_blockedByOther && otherTitle != null)
+          SheetNote(
+            ExportMessages.alreadyExporting(otherTitle),
+            key: const ValueKey('export-busy-elsewhere'),
+          ),
+        if (_cancelled && !busy)
+          SheetNote(
+            _partialLeft
+                ? ExportMessages.cancelledPartial
+                : ExportMessages.cancelled,
+            key: const ValueKey('export-cancelled'),
+          ),
+        if (failure != null)
           Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: PrimaryPillButton(
-              key: const ValueKey('export-download'),
-              label: ExportMessages.download,
-              loadingLabel: ExportMessages.preparing,
-              gradient: AppTheme.exportDownloadGradient,
-              labelStyle: _buttonLabel,
-              isLoading: _busy,
-              // AC8: nothing to export until a voice is ticked.
-              onPressed: _selection.canDownload ? _download : null,
+            padding: const EdgeInsets.fromLTRB(0, 0, 8, 16),
+            child: AuthErrorBanner(
+              key: const ValueKey('export-error'),
+              message: _nothingLeft
+                  ? ExportMessages.nothingToExport
+                  : ExportMessages.failureMessage(failure),
+              // Nothing left to retry once every ticked voice failed.
+              actionLabel: _nothingLeft ? null : ExportMessages.retry,
+              onAction: busy || !_selection.canDownload ? null : _retry,
             ),
           ),
-          if (_busy && _cancel != null) ..._progressRows(),
-        ],
-      ),
+        Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: PrimaryPillButton(
+            key: const ValueKey('export-download'),
+            label: ExportMessages.download,
+            loadingLabel: ExportMessages.preparing,
+            gradient: AppTheme.exportDownloadGradient,
+            labelStyle: _buttonLabel,
+            isLoading: busy,
+            // AC8: nothing to export until a voice is ticked.
+            onPressed: _selection.canDownload ? _download : null,
+          ),
+        ),
+        if (exporting) ..._progressRows(task),
+      ],
     );
   }
 
   /// The bar, its percentage and the X, under Download while the file is
   /// made (user decision 2026-10-21: determinate end to end, an X icon for
   /// Cancel).
-  List<Widget> _progressRows() {
-    final percent = ExportMessages.percent(_progress);
+  List<Widget> _progressRows(ExportTask task) {
+    final percent = ExportMessages.percent(task.progress);
     return [
       const SizedBox(height: 8),
       Padding(
@@ -248,7 +292,7 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
             Expanded(
               child: LinearProgressIndicator(
                 key: const ValueKey('export-progress'),
-                value: _progress,
+                value: task.progress,
                 minHeight: _barHeight,
                 color: AppTheme.playbackNavy,
                 backgroundColor: AppTheme.sheetDivider,
@@ -261,7 +305,7 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
             ExcludeSemantics(
               // The bar already speaks the same value.
               child: Text(
-                _cancelling ? ExportMessages.cancelling : percent,
+                task.cancelling ? ExportMessages.cancelling : percent,
                 key: const ValueKey('export-percent'),
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: AppTheme.sheetText,
@@ -271,7 +315,7 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
             ),
             IconButton(
               key: const ValueKey('export-cancel'),
-              onPressed: _cancelling ? null : _cancelExport,
+              onPressed: task.cancelling ? null : _jobs.cancel,
               tooltip: ExportMessages.cancelExport,
               icon: const Icon(Icons.close),
               color: AppTheme.playbackNavy,
@@ -286,11 +330,40 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
     ];
   }
 
-  void _cancelExport() {
-    final token = _cancel;
-    if (token == null || _cancelling) return;
-    setState(() => _cancelling = true);
-    token.cancel();
+  /// This sheet's export finished while it is open: show the result here
+  /// (the tracker has already marked it read, so the bell has no badge
+  /// for it and no banner shows).
+  void _onTasksChanged(List<ExportTask>? previous, List<ExportTask> next) {
+    final before = previous == null ? null : _task(previous);
+    final task = _task(next);
+    if (task == null || !task.isFinished) return;
+    if (before != null && before.isFinished) return;
+    _taskId = null;
+    switch (task.status) {
+      case ExportTaskStatus.saved:
+        // Let the sheet close before the dialog opens (AC16).
+        Navigator.of(context)
+            .pop<ExportSaved>((result: task.result!, treeUri: task.treeUri));
+      case ExportTaskStatus.cancelled:
+        final cancel = task.failure;
+        setState(() {
+          _cancelled = true;
+          _partialLeft = cancel is Cancelled && cancel.partialFileLeft;
+        });
+      case ExportTaskStatus.failed:
+        final failure = task.failure ?? const GenerationFailed();
+        setState(() {
+          _failure = failure;
+          _nothingLeft =
+              failure is GenerationFailed &&
+              !exportableSelection(
+                ref.read(playbackControllerProvider(widget.scoreId)),
+                _selection,
+              ).canDownload;
+        });
+      case ExportTaskStatus.running:
+        break;
+    }
   }
 
   void _update(ExportSelection next) => setState(() {
@@ -311,72 +384,65 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
   }
 
   Future<void> _download() async {
-    if (_busy || !_selection.canDownload) return;
+    if (_picking || _taskId != null || !_selection.canDownload) return;
+    // One export at a time per app: say so before asking for a folder.
+    if (_jobs.running != null) {
+      setState(() => _blockedByOther = true);
+      return;
+    }
     final service = ref.read(exportServiceProvider);
     final provider = playbackControllerProvider(widget.scoreId);
     setState(() {
-      _busy = true;
+      _picking = true;
       _failure = null;
       _nothingLeft = false;
       _cancelled = false;
       _partialLeft = false;
+      _blockedByOther = false;
     });
-    final selection = _selection;
-    var saved = false;
+    String? treeUri;
     try {
-      final treeUri = _treeUri ?? await _pickLocalFolder(service);
-      // AC11: picker cancelled, back to the sheet with the ticks kept.
-      if (treeUri == null) return;
-      _treeUri = treeUri;
-      final token = ExportCancelToken();
-      if (mounted) {
-        setState(() {
-          _cancel = token;
-          _progress = 0;
-          _cancelling = false;
-          _notLocal = false;
-        });
-      }
-      final result = await runExport(
-        service: service,
-        controller: ref.read(provider.notifier),
-        state: ref.read(provider),
-        selection: selection,
-        title: widget.title,
-        treeUri: treeUri,
-        cancel: token,
-        onProgress: (fraction) {
-          if (mounted) setState(() => _progress = fraction);
-        },
-      );
-      if (!mounted) return;
-      // Let the sheet close before the dialog opens (AC16).
-      setState(() => _busy = false);
-      saved = true;
-      Navigator.of(context)
-          .pop<ExportSaved>((result: result, treeUri: treeUri));
-    } on Cancelled catch (cancel) {
-      // Not a failure: the ticks stay, nothing was saved, no Retry.
-      if (mounted) {
-        setState(() {
-          _cancelled = true;
-          _partialLeft = cancel.partialFileLeft;
-        });
-      }
+      treeUri = _treeUri ?? await _pickLocalFolder(service);
     } on ExportFailure catch (failure) {
-      if (mounted) {
-        setState(() {
-          _failure = failure;
-          _nothingLeft =
-              failure is GenerationFailed &&
-              !exportableSelection(ref.read(provider), selection).canDownload;
-        });
-      }
+      if (mounted) setState(() => _failure = failure);
     } finally {
-      _cancel = null;
-      _cancelling = false;
-      if (mounted && _busy) setState(() => _busy = false);
-      if (mounted && !saved) _closeIfPlaybackGone();
+      if (mounted) setState(() => _picking = false);
+    }
+    // AC11: picker cancelled, back to the sheet with the ticks kept. A
+    // sheet closed while the picker was open starts nothing.
+    if (treeUri == null || !mounted) return;
+    _treeUri = treeUri;
+    // Everything the export needs from Playback is read now: it goes on
+    // after the sheet and Playback close (user decision 2026-10-21).
+    final controller = ref.read(provider.notifier);
+    final state = ref.read(provider);
+    final writeClick = controller.exportClickWriter();
+    final selection = _selection;
+    final title = widget.title;
+    final folder = treeUri;
+    try {
+      final started = _jobs.start(
+        scoreId: widget.scoreId,
+        title: title,
+        treeUri: folder,
+        run: (cancel, onProgress) => runExport(
+          service: service,
+          writeClick: writeClick,
+          state: state,
+          selection: selection,
+          title: title,
+          treeUri: folder,
+          cancel: cancel,
+          onProgress: onProgress,
+        ),
+      );
+      setState(() {
+        _taskId = started.task.id;
+        _notLocal = false;
+      });
+    } on ExportAlreadyRunning {
+      // Started elsewhere while the picker was open.
+      setState(() => _blockedByOther = true);
     }
   }
 
@@ -393,29 +459,6 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
       }
     }
   }
-
-  /// [closeSheetWhenNotReady] fires once, when Playback leaves ready; if
-  /// that happened mid-export, the PopScope (AC12) held the sheet open, so
-  /// it is closed here instead, onto Playback's error view.
-  void _closeIfPlaybackGone() {
-    final phase = ref.read(playbackControllerProvider(widget.scoreId)).phase;
-    if (phase == PlaybackPhase.ready) return;
-    // Navigator.pop, not maybePop: the PopScope's canPop is only rebuilt
-    // on the next frame, and the sheet must go now.
-    Navigator.of(context).pop();
-  }
-
-  static String _messageFor(ExportFailure failure) => switch (failure) {
-    StorageFull() => ExportMessages.storageFull,
-    PermissionDenied() => ExportMessages.permissionDenied,
-    GenerationFailed() => ExportMessages.generationFailed,
-    Interrupted() => ExportMessages.interrupted,
-    NoFolderPicker() => ExportMessages.noFolderPicker,
-    // Handled by reopening the picker; only reached if that is bypassed.
-    NotLocalFolder() => ExportMessages.notLocalFolder,
-    // Shown by its own calm note, never as an error banner.
-    Cancelled() => ExportMessages.cancelled,
-  };
 }
 
 /// A row of the mockup: the label on the left, the grey checkbox on the

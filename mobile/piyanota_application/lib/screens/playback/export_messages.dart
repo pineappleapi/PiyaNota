@@ -1,4 +1,5 @@
 import '../../models/voice_part.dart';
+import '../../services/export_service.dart';
 
 /// Every user-facing string on the Export Audio modal (PIYA-211), in
 /// plain words for choir members (NFR-3). No error codes.
@@ -74,4 +75,37 @@ class ExportMessages {
   static String savedIn(String location) => 'in $location';
   static const String openFolder = 'Open folder';
   static const String ok = 'OK';
+
+  // Background export (user decision 2026-10-21): the sheet can be closed
+  // while the file is made; the bell and a banner say how it went.
+
+  /// Download tapped while another score's export runs: one at a time.
+  static String alreadyExporting(String title) =>
+      '“$title” is still being exported. You can export this one when it '
+      'has finished.';
+  static String exportingRow(String title, double fraction) =>
+      'Exporting $title… ${percent(fraction)}';
+  static String savedRow(String fileName, String location) =>
+      'Saved $fileName to $location';
+  static String savedToast(String fileName, String location) =>
+      '${savedRow(fileName, location)}.';
+  static String failedRow(String title) => '$title wasn’t exported';
+  static String cancelledRow(String title) => 'Export of $title cancelled';
+  static const String failedToastHint = 'Open Export Audio to try again.';
+  static const String unread = 'unread';
+  static String failedToast(String title) =>
+      '${failedRow(title)}. $failedToastHint';
+
+  /// What went wrong, in the same words the sheet uses.
+  static String failureMessage(ExportFailure failure) => switch (failure) {
+    StorageFull() => storageFull,
+    PermissionDenied() => permissionDenied,
+    GenerationFailed() => generationFailed,
+    Interrupted() => interrupted,
+    NoFolderPicker() => noFolderPicker,
+    // Handled by reopening the picker; only reached if that is bypassed.
+    NotLocalFolder() => notLocalFolder,
+    Cancelled(:final partialFileLeft) =>
+      partialFileLeft ? cancelledPartial : cancelled,
+  };
 }

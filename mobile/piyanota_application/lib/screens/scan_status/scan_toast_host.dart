@@ -5,9 +5,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/library_entry.dart';
 import '../../routes/app_routes.dart';
+import '../../state/export_jobs.dart';
+import '../../state/export_providers.dart';
 import '../../state/processing_providers.dart';
 import '../../theme/app_theme.dart';
 import '../library/library_messages.dart';
+import '../playback/export_messages.dart';
 import 'scan_navigation.dart';
 import 'scan_status_messages.dart';
 
@@ -19,6 +22,11 @@ import 'scan_status_messages.dart';
 /// Sits above the Navigator (MaterialApp.builder), so it covers every
 /// screen without each one listening. Drawn at the top so it never hides
 /// the library's bottom nav or a screen's own snackbars.
+///
+/// Exports use the same banner (user decision 2026-10-21): "Saved [file]
+/// to [folder]. Open folder" or that it failed, unless that score's
+/// Export sheet is open and showing the result itself. A cancel is not
+/// announced: only the sheet's X cancels.
 ///
 /// Background push (the app closed or in the background) is not built
 /// here: it needs an OS notification plugin and a server-side sender
@@ -48,6 +56,9 @@ class ScanToastHost extends ConsumerStatefulWidget {
 
 class _ScanToastHostState extends ConsumerState<ScanToastHost> {
   TrackedJob? _shown;
+
+  /// An export's banner; only one banner shows at a time.
+  ExportTask? _shownExport;
   Timer? _hideTimer;
 
   static const double _margin = 16;
@@ -95,13 +106,43 @@ class _ScanToastHostState extends ConsumerState<ScanToastHost> {
   void _show(TrackedJob job) {
     _hideTimer?.cancel();
     _hideTimer = Timer(ScanToastHost.showFor, _hide);
-    setState(() => _shown = job);
+    setState(() {
+      _shown = job;
+      _shownExport = null;
+    });
+  }
+
+  void _onExportsChanged(List<ExportTask>? previous, List<ExportTask> next) {
+    final jobs = ref.read(exportJobsProvider.notifier);
+    for (final task in next) {
+      final before = previous?.where((t) => t.id == task.id).firstOrNull;
+      if (before == null || before.isFinished || !task.isFinished) continue;
+      if (task.status == ExportTaskStatus.cancelled) continue;
+      if (!_inForeground() || jobs.isSheetOpen(task.scoreId)) continue;
+      _hideTimer?.cancel();
+      _hideTimer = Timer(ScanToastHost.showFor, _hide);
+      setState(() {
+        _shownExport = task;
+        _shown = null;
+      });
+    }
   }
 
   void _hide() {
     _hideTimer?.cancel();
     _hideTimer = null;
-    if (mounted) setState(() => _shown = null);
+    if (mounted) {
+      setState(() {
+        _shown = null;
+        _shownExport = null;
+      });
+    }
+  }
+
+  void _openExportFolder(ExportTask task) {
+    _hide();
+    ref.read(exportJobsProvider.notifier).markRead(task.id);
+    unawaited(ref.read(exportServiceProvider).openFolder(task.treeUri));
   }
 
   void _open(TrackedJob job) {
@@ -116,7 +157,9 @@ class _ScanToastHostState extends ConsumerState<ScanToastHost> {
   @override
   Widget build(BuildContext context) {
     ref.listen(processingJobsProvider, _onJobsChanged);
+    ref.listen(exportJobsProvider, _onExportsChanged);
     final job = _shown;
+    final export = _shownExport;
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     return Stack(
       children: [
@@ -127,9 +170,11 @@ class _ScanToastHostState extends ConsumerState<ScanToastHost> {
           right: _margin,
           child: AnimatedSwitcher(
             duration: reduceMotion ? Duration.zero : _fade,
-            child: job == null
-                ? const SizedBox.shrink()
-                : _banner(context, job),
+            child: job != null
+                ? _banner(context, job)
+                : export != null
+                ? _exportBanner(context, export)
+                : const SizedBox.shrink(),
           ),
         ),
       ],
@@ -137,7 +182,6 @@ class _ScanToastHostState extends ConsumerState<ScanToastHost> {
   }
 
   Widget _banner(BuildContext context, TrackedJob job) {
-    final textTheme = Theme.of(context).textTheme;
     final title = job.title ?? untitledScoreLabel;
     final ready = job.phase == TrackedPhase.complete;
     final message = ready
@@ -147,8 +191,57 @@ class _ScanToastHostState extends ConsumerState<ScanToastHost> {
         : job.retakeOfScoreId != null
         ? LibraryMessages.retakeFailed(title)
         : ScanStatusMessages.failedToast(title);
-    return Semantics(
+    return _bannerFrame(
+      context,
       key: ValueKey('scan-toast-${job.jobId}'),
+      ok: ready,
+      message: message,
+      action: TextButton(
+        key: const ValueKey('scan-toast-open'),
+        onPressed: () => _open(job),
+        style: _actionStyle,
+        child: Text(ready ? ScanStatusMessages.open : ScanStatusMessages.view),
+      ),
+    );
+  }
+
+  Widget _exportBanner(BuildContext context, ExportTask task) {
+    final result = task.result;
+    final saved = task.status == ExportTaskStatus.saved && result != null;
+    return _bannerFrame(
+      context,
+      key: ValueKey('export-toast-${task.id}'),
+      ok: saved,
+      message: saved
+          ? ExportMessages.savedToast(result.fileName, result.location)
+          : ExportMessages.failedToast(task.title),
+      action: saved
+          ? TextButton(
+              key: const ValueKey('export-toast-open'),
+              onPressed: () => _openExportFolder(task),
+              style: _actionStyle,
+              child: const Text(ExportMessages.openFolder),
+            )
+          : null,
+    );
+  }
+
+  static final ButtonStyle _actionStyle = TextButton.styleFrom(
+    foregroundColor: Colors.white,
+    minimumSize: const Size(48, 48),
+    textStyle: const TextStyle(fontWeight: FontWeight.w700),
+  );
+
+  Widget _bannerFrame(
+    BuildContext context, {
+    required Key key,
+    required bool ok,
+    required String message,
+    required Widget? action,
+  }) {
+    final textTheme = Theme.of(context).textTheme;
+    return Semantics(
+      key: key,
       container: true,
       liveRegion: true,
       child: Material(
@@ -160,7 +253,7 @@ class _ScanToastHostState extends ConsumerState<ScanToastHost> {
           child: Row(
             children: [
               Icon(
-                ready ? Icons.check_circle_rounded : Icons.error_rounded,
+                ok ? Icons.check_circle_rounded : Icons.error_rounded,
                 color: Colors.white,
                 size: 20,
               ),
@@ -173,18 +266,7 @@ class _ScanToastHostState extends ConsumerState<ScanToastHost> {
                   style: textTheme.bodyMedium?.copyWith(color: Colors.white),
                 ),
               ),
-              TextButton(
-                key: const ValueKey('scan-toast-open'),
-                onPressed: () => _open(job),
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  minimumSize: const Size(48, 48),
-                  textStyle: const TextStyle(fontWeight: FontWeight.w700),
-                ),
-                child: Text(
-                  ready ? ScanStatusMessages.open : ScanStatusMessages.view,
-                ),
-              ),
+              ?action,
               Semantics(
                 button: true,
                 label: ScanStatusMessages.dismissToast,
