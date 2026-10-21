@@ -75,6 +75,26 @@ Outputs are in `D:/PiyaNota-training/data/phase1_strips/`.
   D:/PiyaNota-training/data/phase1_strips/bach_smoke100c --prefix bach_ --smoke 120 --stats` (skips finished
   pages).
 
+- **recal2 (2026-10-01/02, user-approved):** sub-pixel FWHM + x-anchored fill framing copied into the
+  stroke-calibration worktree (`cut_corpus.py` 1e6d95fe..., `camera_page_stats.py` fff77f75...); camera stats
+  recomputed (`camera_page_stats.json` 413fb86b..., old kept as `camera_page_stats_v3_integer_fwhm.json`; only
+  line_fwhm_il changed). All 25 camera-stat photos are dev-split. ml-cv-lead code review: GO with caveats; framing
+  re-checked on BASE_SEED 20261003 (7/7 gates pass); cache spacing source verified; `spy.args` per-page reset is
+  staged only in the scratch copy `C:/Users/paul_/AppData/Local/Temp/recal2_work/training/phase1/cut_corpus.py`.
+- **bach_smoke100d** (120 pages, seed 20261002, 1 worker; one CUDA illegal-memory-access crash at page 73,
+  resumed with finished pages skipped): **26/29 checks pass**. Now passing: at_p50 line depth 0.39 / line-head
+  0.37 / head 0.47, noise tail 0.074, FWHM above p95 0.072, paper grey p50 221. RSS ~1.3 GB, peak 1.9 GB,
+  28 s/page. Fails: (1) noise p50 0.0264 vs camera IQR 0.0268-0.0306 (34% of pages below camera p5);
+  (2) paper area share <0.80 = 0.20 (max 0.15): not framing (geometric coverage p5 1.0) but synthetic lighting:
+  `ILLUM_LOW = (0.35, 0.72)` was taken from Honneur p3's frame illum (0.39), whose paper-only illum is 0.79, and
+  no camera page has paper illum < 0.78; (3) drop_by_param worst 2.45x on 3-4 drops per bin (mostly noise;
+  real signal: faint line_ink strips drop dot/tie registration 13 vs ~6 expected).
+- **ml-cv-lead recal3 proposal (awaiting user):** ILLUM_LOW_P 0.20 -> 0.05, ILLUM_LOW -> (0.70, 0.76),
+  ILLUM_HIGH -> (0.76, 0.84), SHADOW_P 0.15 -> 0.08, shadow |offset| in [0.30, 0.45] (margin shadows, check sign),
+  NOISE_SIGMA -> (0.019, 0.021); do not touch SHARPEN_*. Optional written pre-registration amendment before
+  recal3: drop_by_param counts augmentation-induced page drops only. Then a full 120-page smoke on a NEW seed
+  (20261004), reporting shadow/no-shadow strata and bias_dotted/bias_tied by line_ink tercile.
+
 ### C. Other open user decisions
 
 - **Dev/test split: written 2026-10-01** to `data/piyanota_dataset/dataset_manifest.csv` (`split` column, gitignored;
