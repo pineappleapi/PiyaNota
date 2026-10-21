@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -61,6 +62,12 @@ final class Interrupted extends ExportFailure {
   const Interrupted();
 }
 
+/// The user pressed Cancel. Not an error: nothing was saved, and the
+/// partial file and temp files are gone.
+final class Cancelled extends ExportFailure {
+  const Cancelled();
+}
+
 /// The phone has no app for choosing a folder (some stripped-down ROMs
 /// ship without one). Kept apart from [PermissionDenied]: "choose another
 /// folder" is advice the user cannot follow here.
@@ -68,12 +75,40 @@ final class NoFolderPicker extends ExportFailure {
   const NoFolderPicker();
 }
 
+/// One export's Cancel button. Single use: a new export gets a new one,
+/// so a late tap on an old sheet can never stop the next export.
+class ExportCancelToken {
+  final Completer<void> _cancelled = Completer<void>();
+
+  bool get isCancelled => _cancelled.isCompleted;
+
+  /// Completes when [cancel] is called; never errors.
+  Future<void> get whenCancelled => _cancelled.future;
+
+  void cancel() {
+    if (!_cancelled.isCompleted) _cancelled.complete();
+  }
+
+  /// Between steps, so a cancel during one step stops the next.
+  void throwIfCancelled() {
+    if (isCancelled) throw const Cancelled();
+  }
+}
+
 abstract interface class ExportService {
   /// The folder the user picked (AC10), or null if they cancelled (AC11).
   Future<String?> pickFolder();
 
-  /// Makes the MP3 and saves it in [treeUri]. Throws [ExportFailure].
-  Future<ExportResult> export(ExportJob job, String treeUri);
+  /// Makes the MP3 and saves it in [treeUri]. Throws [ExportFailure];
+  /// [Cancelled] once [cancel] is cancelled, unless the file was already
+  /// saved by then (it is then reported as saved, because it is).
+  /// [onProgress] gets the render's 0..1, never going back.
+  Future<ExportResult> export(
+    ExportJob job,
+    String treeUri, {
+    ExportCancelToken? cancel,
+    ValueChanged<double>? onProgress,
+  });
 
   /// Opens [treeUri] in a file manager; false when none can (AC16).
   Future<bool> openFolder(String treeUri);
@@ -87,6 +122,9 @@ class MethodChannelExportService implements ExportService {
 
   final Dio _dio;
   final Future<Directory> Function() _workDir;
+
+  /// Called by the native side during render (ExportChannel.kt).
+  static const String _progressMethod = 'progress';
 
   /// errno for "No space left on device" on Linux/Android.
   static const int _enospc = 28;
@@ -116,7 +154,27 @@ class MethodChannelExportService implements ExportService {
   }
 
   @override
-  Future<ExportResult> export(ExportJob job, String treeUri) async {
+  Future<ExportResult> export(
+    ExportJob job,
+    String treeUri, {
+    ExportCancelToken? cancel,
+    ValueChanged<double>? onProgress,
+  }) async {
+    final token = cancel ?? ExportCancelToken();
+    token.throwIfCancelled();
+    final downloads = CancelToken();
+    var finished = false;
+    unawaited(
+      token.whenCancelled.then((_) async {
+        if (finished) return;
+        downloads.cancel();
+        await _sendCancel();
+      }),
+    );
+    final progress = ExportProgress(onProgress);
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == _progressMethod) progress.report(call.arguments);
+    });
     final base = await _workDir();
     await _clearStaleWork(base);
     final dir = await base.createTemp(_workPrefix);
@@ -124,11 +182,14 @@ class MethodChannelExportService implements ExportService {
       final inputs = <Map<String, Object>>[];
       for (final (index, input) in job.inputs.indexed) {
         inputs.add({
-          'path': await _localPath(input.track, dir, index),
+          'path': await _localPath(input.track, dir, index, downloads, token),
           'gain': input.gain,
         });
       }
       final out = '${dir.path}${Platform.pathSeparator}export.mp3';
+      // Checked here, not left to the native flag: render resets that
+      // flag when it starts, so a cancel from before it would be lost.
+      token.throwIfCancelled();
       await _call(
         () => _channel.invokeMethod<void>('render', {
           'inputs': inputs,
@@ -136,11 +197,13 @@ class MethodChannelExportService implements ExportService {
           'outPath': out,
         }),
       );
+      token.throwIfCancelled();
       final names = await _call(
         () => _channel.invokeListMethod<String>('listNames', {
           'treeUri': treeUri,
         }),
       );
+      token.throwIfCancelled();
       final saved = await _call(
         () => _channel.invokeMapMethod<String, String>('save', {
           'treeUri': treeUri,
@@ -155,6 +218,8 @@ class MethodChannelExportService implements ExportService {
       }
       return ExportResult(fileName: fileName, location: location);
     } finally {
+      finished = true;
+      _channel.setMethodCallHandler(null);
       try {
         await dir.delete(recursive: true);
       } on FileSystemException catch (e) {
@@ -185,9 +250,27 @@ class MethodChannelExportService implements ExportService {
     }
   }
 
+  /// Tells the native side to stop the render or save under way; the
+  /// reply to that call then fails with `cancelled`.
+  static Future<void> _sendCancel() async {
+    try {
+      await _channel.invokeMethod<void>('cancel');
+    } on PlatformException catch (e) {
+      debugPrint('Export: cancel not delivered: ${e.code} ${e.message}');
+    } on MissingPluginException catch (e) {
+      debugPrint('Export: cancel unavailable: $e');
+    }
+  }
+
   /// The track as a local file: a `file:` Uri as it is, an http(s) one
   /// downloaded into [dir] first (the native side reads files only).
-  Future<String> _localPath(Uri track, Directory dir, int index) async {
+  Future<String> _localPath(
+    Uri track,
+    Directory dir,
+    int index,
+    CancelToken downloads,
+    ExportCancelToken token,
+  ) async {
     if (track.scheme == 'file') return track.toFilePath();
     if (track.scheme != 'https' && track.scheme != 'http') {
       debugPrint('Export: unsupported track scheme ${track.scheme}');
@@ -195,9 +278,10 @@ class MethodChannelExportService implements ExportService {
     }
     final path = '${dir.path}${Platform.pathSeparator}track_$index';
     try {
-      await _dio.downloadUri(track, path);
+      await _dio.downloadUri(track, path, cancelToken: downloads);
       return path;
     } on DioException catch (e) {
+      if (token.isCancelled) throw const Cancelled();
       debugPrint('Export: track download failed: ${e.type} ${e.message}');
       throw switch (e.type) {
         // The connection dropped or never came (AC18 "Download
@@ -234,6 +318,7 @@ class MethodChannelExportService implements ExportService {
         'storage_full' => const StorageFull(),
         'permission_denied' => const PermissionDenied(),
         'interrupted' => const Interrupted(),
+        'cancelled' => const Cancelled(),
         'no_folder_picker' => const NoFolderPicker(),
         _ => const GenerationFailed(),
       };
@@ -241,5 +326,29 @@ class MethodChannelExportService implements ExportService {
       debugPrint('Export: channel unavailable: $e');
       throw const GenerationFailed();
     }
+  }
+}
+
+/// The render's progress as the sheet shows it: clamped to 0..1, and
+/// never moving back, whatever order or values the channel delivers.
+class ExportProgress {
+  ExportProgress(this._onProgress);
+
+  final ValueChanged<double>? _onProgress;
+  double _last = 0;
+  bool _started = false;
+
+  double get value => _last;
+
+  void report(Object? raw) {
+    if (raw is! num || raw.isNaN) {
+      debugPrint('Export: ignored progress value $raw');
+      return;
+    }
+    final next = raw.toDouble().clamp(0.0, 1.0);
+    if (_started && next <= _last) return;
+    _started = true;
+    _last = next;
+    _onProgress?.call(next);
   }
 }

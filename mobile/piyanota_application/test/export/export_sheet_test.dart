@@ -43,19 +43,10 @@ void main() {
   PlaybackState playback(WidgetTester tester) =>
       appContainer(tester).read(playbackControllerProvider(kScoreId));
 
-  Future<void> openExport(WidgetTester tester) async {
-    await tester.tap(find.byTooltip(PlaybackMessages.download));
-    await settle(tester);
-    expect(sheet, findsOneWidget);
-  }
-
   Future<void> tick(WidgetTester tester, String label) async {
     await tester.tap(box(label));
     await tester.pump();
   }
-
-  bool downloadEnabled(WidgetTester tester) =>
-      tester.widget<PrimaryPillButton>(download).onPressed != null;
 
   SemanticsData semanticsOf(WidgetTester tester, String label) =>
       tester.getSemantics(box(label)).getSemanticsData();
@@ -66,19 +57,59 @@ void main() {
   bool isEnabled(WidgetTester tester, String label) =>
       semanticsOf(tester, label).flagsCollection.isEnabled == Tristate.isTrue;
 
+  /// Opens the sheet; with [clear], unticks what it opened with so a test
+  /// starts from nothing ticked.
+  Future<void> openExport(WidgetTester tester, {bool clear = true}) async {
+    await tester.tap(find.byTooltip(PlaybackMessages.download));
+    await settle(tester);
+    expect(sheet, findsOneWidget);
+    if (!clear) return;
+    for (final label in [
+      for (final voice in VoicePart.values) ExportMessages.voiceBox(voice),
+      ExportMessages.clickBox,
+    ]) {
+      if (isChecked(tester, label)) await tick(tester, label);
+    }
+  }
+
+  Set<VoicePart> tickedVoices(WidgetTester tester) => {
+    for (final voice in VoicePart.values)
+      if (isChecked(tester, ExportMessages.voiceBox(voice))) voice,
+  };
+
+  Map<String, double> gains(ExportJob job) => {
+    for (final input in job.inputs) input.track.pathSegments.last: input.gain,
+  };
+
+  bool downloadEnabled(WidgetTester tester) =>
+      tester.widget<PrimaryPillButton>(download).onPressed != null;
+
   group('selection (AC2-AC8)', () {
-    testWidgets('opens empty with Download disabled', (tester) async {
+    testWidgets('opens with the voices Playback plays ticked, and the '
+        'click unticked while the metronome is off', (tester) async {
       final service = FakeExportService();
       await pumpPlayback(tester, harness(service));
-      await openExport(tester);
+      expect(playback(tester).selected, VoicePart.values.toSet());
+      expect(playback(tester).metronomeOn, isFalse);
+      await openExport(tester, clear: false);
 
       expect(find.text(ExportMessages.title), findsOneWidget);
       for (final voice in VoicePart.values) {
         expect(row(voice.name), findsOneWidget);
-        expect(isChecked(tester, ExportMessages.voiceBox(voice)), isFalse);
       }
+      expect(tickedVoices(tester), VoicePart.values.toSet());
+      expect(isChecked(tester, ExportMessages.allVoicesBox), isTrue);
       expect(find.text(ExportMessages.allVoices), findsOneWidget);
       expect(find.text(ExportMessages.withClick), findsOneWidget);
+      expect(isChecked(tester, ExportMessages.clickBox), isFalse);
+      expect(downloadEnabled(tester), isTrue);
+    });
+
+    testWidgets('with nothing ticked Download is disabled', (tester) async {
+      final service = FakeExportService();
+      await pumpPlayback(tester, harness(service));
+      await openExport(tester);
+      expect(tickedVoices(tester), isEmpty);
       expect(downloadEnabled(tester), isFalse);
     });
 
@@ -351,18 +382,6 @@ void main() {
   });
 
   group('mix copies Playback (AC7, AC23)', () {
-    testWidgets('a ticked voice muted in the Mixer says so and still '
-        'exports at gain 0 (Review Focus 1)', (tester) async {
-      final service = FakeExportService();
-      await pumpPlayback(tester, harness(service));
-      controller(tester).setVoiceMuted(VoicePart.alto, muted: true);
-      await openExport(tester);
-
-      await tick(tester, ExportMessages.voiceBox(VoicePart.alto));
-      expect(find.byKey(const ValueKey('export-muted-alto')), findsOneWidget);
-      expect(downloadEnabled(tester), isTrue);
-    });
-
     testWidgets('speed is chosen / score tempo: 60 of 80 is 0.75 (Review '
         'Focus 2)', (tester) async {
       final service = FakeExportService();
@@ -378,33 +397,84 @@ void main() {
       expect(job.speed, 0.75);
     });
 
-    testWidgets('gains follow the Mixer: volume, mute, and solo leaving '
-        'the others out', (tester) async {
+    testWidgets('gains: a voice the Mixer lets be heard keeps its level; '
+        'a muted, soloed-out or zeroed one gets the default level', (
+      tester,
+    ) async {
       final service = FakeExportService();
       await pumpPlayback(tester, harness(service));
       controller(tester)
         ..setVoiceVolume(VoicePart.soprano, 0.5)
+        ..setVoiceVolume(VoicePart.alto, 0)
+        ..setVoiceVolume(VoicePart.bass, 0.3)
         ..setVoiceMuted(VoicePart.bass, muted: true);
       final all = ExportSelection.empty(playback(tester).available).toggleAll();
 
-      Map<String, double> gains(ExportJob job) => {
-        for (final input in job.inputs)
-          input.track.pathSegments.last: input.gain,
-      };
       expect(gains(buildExportJob(playback(tester), all, kTitle)), {
         'soprano.mp3': 0.5,
-        'alto.mp3': 1.0,
+        'alto.mp3': exportDefaultLevel,
         'tenor.mp3': 1.0,
-        'bass.mp3': 0.0,
+        'bass.mp3': exportDefaultLevel,
       });
 
-      controller(tester).setVoiceSoloed(VoicePart.tenor, soloed: true);
+      controller(tester)
+        ..setVoiceVolume(VoicePart.tenor, 0.7)
+        ..setVoiceSoloed(VoicePart.tenor, soloed: true);
       expect(gains(buildExportJob(playback(tester), all, kTitle)), {
-        'soprano.mp3': 0.0,
-        'alto.mp3': 0.0,
-        'tenor.mp3': 1.0,
-        'bass.mp3': 0.0,
+        'soprano.mp3': exportDefaultLevel,
+        'alto.mp3': exportDefaultLevel,
+        'tenor.mp3': 0.7,
+        'bass.mp3': exportDefaultLevel,
       });
+      expect(exportDefaultLevel, PlaybackController.fullVolume);
+    });
+
+    testWidgets('a voice ticked with its chip off keeps its Mixer level', (
+      tester,
+    ) async {
+      final service = FakeExportService();
+      await pumpPlayback(tester, harness(service));
+      controller(tester)
+        ..setVoiceVolume(VoicePart.alto, 0.4)
+        ..toggleVoice(VoicePart.alto);
+      expect(playback(tester).selected.contains(VoicePart.alto), isFalse);
+      final alto = ExportSelection.empty(playback(tester).available)
+          .toggleVoice(VoicePart.alto);
+      expect(gains(buildExportJob(playback(tester), alto, kTitle)), {
+        'alto.mp3': 0.4,
+      });
+    });
+
+    testWidgets('click gain: its Mixer level, or the default click level '
+        'when muted or soloed out by a voice', (tester) async {
+      final service = FakeExportService();
+      await pumpPlayback(tester, harness(service));
+      final click = Uri.parse('test://export-click.wav');
+      final voices = ExportSelection.empty(playback(tester).available)
+          .toggleVoice(VoicePart.soprano)
+          .toggleClick();
+      double clickGain() => buildExportJob(
+        playback(tester),
+        voices,
+        kTitle,
+        clickTrack: click,
+      ).inputs.last.gain;
+
+      controller(tester)
+        ..setMetronomeOn(on: true)
+        ..setClickVolume(0.25);
+      expect(clickGain(), 0.25);
+
+      controller(tester).setClickMuted(muted: true);
+      expect(clickGain(), exportDefaultClickLevel);
+
+      controller(tester)
+        ..setClickMuted(muted: false)
+        ..setVoiceSoloed(VoicePart.soprano, soloed: true);
+      expect(clickGain(), exportDefaultClickLevel);
+
+      controller(tester).setClickSoloed(soloed: true);
+      expect(clickGain(), 0.25);
     });
 
     testWidgets('voices unticked here are left out even if Playback plays '
@@ -466,6 +536,217 @@ void main() {
       expect(h.clickPlans.length, plansBefore.single + 1);
       final (job, _) = service.exports.single;
       expect(job.inputs.last.track, Uri.parse('test://click.wav'));
+    });
+  });
+
+  group('pre-selection follows Playback (user decision 2026-10-21)', () {
+    testWidgets('a voice with its chip off starts unticked', (tester) async {
+      final service = FakeExportService();
+      await pumpPlayback(tester, harness(service));
+      controller(tester).toggleVoice(VoicePart.tenor);
+      await openExport(tester, clear: false);
+      expect(tickedVoices(tester), {
+        VoicePart.soprano,
+        VoicePart.alto,
+        VoicePart.bass,
+      });
+      expect(isChecked(tester, ExportMessages.allVoicesBox), isFalse);
+    });
+
+    testWidgets('muted and volume-0 voices start unticked; ticked, they '
+        'export at the default level, with no muted note', (tester) async {
+      final service = FakeExportService();
+      await pumpPlayback(tester, harness(service));
+      controller(tester)
+        ..setVoiceMuted(VoicePart.alto, muted: true)
+        ..setVoiceVolume(VoicePart.bass, 0);
+      await openExport(tester, clear: false);
+      expect(tickedVoices(tester), {VoicePart.soprano, VoicePart.tenor});
+
+      await tick(tester, ExportMessages.allVoicesBox);
+      expect(tickedVoices(tester), VoicePart.values.toSet());
+      expect(find.text('Muted in Voice Mixer'), findsNothing);
+      await tester.tap(download);
+      await settle(tester);
+      expect(gains(service.exports.single.$1), {
+        'soprano.mp3': 1.0,
+        'alto.mp3': exportDefaultLevel,
+        'tenor.mp3': 1.0,
+        'bass.mp3': exportDefaultLevel,
+      });
+    });
+
+    testWidgets('a solo ticks only the soloed voices; the click is soloed '
+        'out too', (tester) async {
+      final service = FakeExportService();
+      await pumpPlayback(tester, harness(service));
+      controller(tester)
+        ..setMetronomeOn(on: true)
+        ..setVoiceSoloed(VoicePart.alto, soloed: true);
+      await openExport(tester, clear: false);
+      expect(tickedVoices(tester), {VoicePart.alto});
+      expect(isChecked(tester, ExportMessages.clickBox), isFalse);
+    });
+
+    testWidgets('metronome on: the click starts ticked', (tester) async {
+      final service = FakeExportService();
+      await pumpPlayback(tester, harness(service));
+      controller(tester).setMetronomeOn(on: true);
+      await openExport(tester, clear: false);
+      expect(isChecked(tester, ExportMessages.clickBox), isTrue);
+    });
+
+    testWidgets('metronome on but muted in the Mixer: the click starts '
+        'unticked', (tester) async {
+      final service = FakeExportService();
+      await pumpPlayback(tester, harness(service));
+      controller(tester)
+        ..setMetronomeOn(on: true)
+        ..setClickMuted(muted: true);
+      await openExport(tester, clear: false);
+      expect(isChecked(tester, ExportMessages.clickBox), isFalse);
+    });
+
+    testWidgets('a soloed click leaves the voices unticked, so Download '
+        'waits for a voice; one ticked exports at the default level', (
+      tester,
+    ) async {
+      final service = FakeExportService();
+      await pumpPlayback(tester, harness(service));
+      controller(tester)
+        ..setMetronomeOn(on: true)
+        ..setVoiceVolume(VoicePart.soprano, 0.6)
+        ..setClickSoloed(soloed: true);
+      await openExport(tester, clear: false);
+      expect(tickedVoices(tester), isEmpty);
+      expect(isChecked(tester, ExportMessages.clickBox), isTrue);
+      expect(downloadEnabled(tester), isFalse);
+
+      await tick(tester, ExportMessages.voiceBox(VoicePart.soprano));
+      await tester.tap(download);
+      await settle(tester);
+      final (job, _) = service.exports.single;
+      expect(job.inputs.first.gain, exportDefaultLevel);
+      expect(job.inputs.length, 2);
+    });
+
+    testWidgets('ticks in the sheet never change the Mixer, the Speed '
+        'toggle or the chips', (tester) async {
+      final service = FakeExportService();
+      await pumpPlayback(tester, harness(service));
+      controller(tester)
+        ..toggleVoice(VoicePart.tenor)
+        ..setVoiceMuted(VoicePart.alto, muted: true);
+      final before = playback(tester);
+      await openExport(tester, clear: false);
+      await tick(tester, ExportMessages.voiceBox(VoicePart.tenor));
+      await tick(tester, ExportMessages.voiceBox(VoicePart.alto));
+      await tick(tester, ExportMessages.voiceBox(VoicePart.soprano));
+      await tick(tester, ExportMessages.clickBox);
+      await tick(tester, ExportMessages.allVoicesBox);
+      final after = playback(tester);
+      expect(after.selected, before.selected);
+      expect(after.muted, before.muted);
+      expect(after.soloed, before.soloed);
+      expect(after.volumes, before.volumes);
+      expect(after.metronomeOn, before.metronomeOn);
+      expect(after.clickMuted, before.clickMuted);
+      expect(after.clickSoloed, before.clickSoloed);
+    });
+
+    testWidgets('the Speed toggle and the Mixer metronome row are one '
+        'state, and the sheet starts from it', (tester) async {
+      final service = FakeExportService();
+      await pumpPlayback(tester, harness(service));
+      final mixerOffNote = find.byKey(const ValueKey('mixer-metronome-off'));
+
+      await tester.tap(find.bySemanticsLabel(PlaybackMessages.voiceMixer));
+      await settle(tester);
+      expect(mixerOffNote, findsOneWidget);
+      await tester.tap(find.byTooltip(PlaybackMessages.close));
+      await settle(tester);
+
+      await tester.tap(find.bySemanticsLabel(PlaybackMessages.speed));
+      await settle(tester);
+      await tester.tap(find.byKey(const ValueKey('metronome-toggle')));
+      await settle(tester);
+      await tester.tap(find.byTooltip(PlaybackMessages.close));
+      await settle(tester);
+      expect(playback(tester).metronomeOn, isTrue);
+
+      await tester.tap(find.bySemanticsLabel(PlaybackMessages.voiceMixer));
+      await settle(tester);
+      expect(mixerOffNote, findsNothing);
+      await tester.tap(find.byTooltip(PlaybackMessages.close));
+      await settle(tester);
+
+      await openExport(tester, clear: false);
+      expect(isChecked(tester, ExportMessages.clickBox), isTrue);
+    });
+  });
+
+  group('cancel and progress', () {
+    final cancelButton = find.byKey(const ValueKey('export-cancel'));
+    final bar = find.byKey(const ValueKey('export-progress'));
+
+    testWidgets('the bar follows the render, Cancel stops it, nothing is '
+        'saved and the sheet says so calmly', (tester) async {
+      final service = FakeExportService()..exportGate = Completer<void>();
+      await pumpPlayback(tester, harness(service));
+      await openExport(tester);
+      await tick(tester, ExportMessages.voiceBox(VoicePart.soprano));
+      expect(cancelButton, findsNothing);
+
+      await tester.tap(download);
+      await tester.pump();
+      expect(bar, findsOneWidget);
+      expect(tester.widget<LinearProgressIndicator>(bar).value, isNull);
+      service.lastOnProgress!(0.4);
+      await tester.pump();
+      expect(tester.widget<LinearProgressIndicator>(bar).value, 0.4);
+
+      // Still non-dismissible: Cancel is the way out.
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      expect(sheet, findsOneWidget);
+
+      await tester.tap(cancelButton);
+      await tester.pump();
+      expect(service.lastCancel!.isCancelled, isTrue);
+      await settle(tester);
+
+      expect(sheet, findsOneWidget);
+      expect(find.text(ExportMessages.cancelled), findsOneWidget);
+      expect(find.byKey(const ValueKey('export-error')), findsNothing);
+      expect(find.text(ExportMessages.successTitle), findsNothing);
+      expect(bar, findsNothing);
+      expect(cancelButton, findsNothing);
+      expect(
+        isChecked(tester, ExportMessages.voiceBox(VoicePart.soprano)),
+        isTrue,
+      );
+      expect(downloadEnabled(tester), isTrue);
+    });
+
+    testWidgets('after a cancel, the next Download is a fresh export with '
+        'its own Cancel', (tester) async {
+      final service = FakeExportService()..exportGate = Completer<void>();
+      await pumpPlayback(tester, harness(service));
+      await openExport(tester);
+      await tick(tester, ExportMessages.voiceBox(VoicePart.alto));
+      await tester.tap(download);
+      await tester.pump();
+      await tester.tap(cancelButton);
+      await settle(tester);
+      final first = service.lastCancel!;
+
+      service.exportGate = null;
+      await tester.tap(download);
+      await settle(tester);
+      expect(service.exports, hasLength(2));
+      expect(service.lastCancel, isNot(same(first)));
+      expect(service.lastCancel!.isCancelled, isFalse);
+      expect(find.text(ExportMessages.successTitle), findsOneWidget);
     });
   });
 
@@ -545,6 +826,15 @@ void main() {
       expect(find.text(ExportMessages.generationFailed), findsNothing);
       expect(find.text(ExportMessages.retry), findsNothing);
       expect(find.text(ExportMessages.successTitle), findsNothing);
+
+      // L-c: a new tick makes "nothing to export" stale, so it goes.
+      if (find.text(PlaybackMessages.ok).evaluate().isNotEmpty) {
+        await tester.tap(find.text(PlaybackMessages.ok));
+        await tester.pumpAndSettle();
+      }
+      await tick(tester, ExportMessages.voiceBox(VoicePart.soprano));
+      expect(find.text(ExportMessages.nothingToExport), findsNothing);
+      expect(find.byKey(const ValueKey('export-error')), findsNothing);
     });
 
     testWidgets('M1: buildExportJob leaves out a ticked voice that has '

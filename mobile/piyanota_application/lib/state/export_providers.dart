@@ -18,18 +18,79 @@ final exportServiceProvider = Provider<ExportService>(
   ),
 );
 
-/// Playback as the export would hear it: the ticked voices stand in for
-/// the Playback chips, and the click counts as on and loaded when ticked.
-/// Mute, Solo and levels are Playback's own (PIYA-211 AC23).
-///
-/// Built on [PlaybackState.voiceGain] and [PlaybackState.clickGain] so the
-/// export can never disagree with what the engine plays.
-PlaybackState exportView(PlaybackState state, ExportSelection selection) =>
-    state.copyWith(
-      selected: selection.voices,
-      metronomeOn: selection.withClick && !state.clickNeedsTempo,
-      clickStatus: ClickStatus.ready,
-    );
+/// The level a ticked track gets when the Voice Mixer does not let it be
+/// heard (muted, soloed out, or its slider at 0): the Mixer's reset level
+/// (PIYA-209 AC5), so ticking it in the sheet always puts it in the file
+/// at a level the user can hear (user decision 2026-10-21).
+const double exportDefaultLevel = PlaybackController.fullVolume;
+
+/// The click's level in that case. The Metronome row resets to the same
+/// level as the voices, so it is one constant under a name of its own.
+const double exportDefaultClickLevel = PlaybackController.fullVolume;
+
+// The Export sheet only reads Playback (user decision 2026-10-21): it
+// starts from what the Mixer, the Speed sheet and the chips let be heard,
+// and nothing ticked here is ever written back to them.
+
+/// [voice] can be heard in Playback right now: it can play, its chip is
+/// on (PIYA-208), it is not muted, not soloed out, and its slider is
+/// above 0. Same rule as [PlaybackState.voiceGain], which the engine uses.
+bool voiceAudibleForExport(PlaybackState state, VoicePart voice) =>
+    state.voiceGain(voice) > 0;
+
+/// The click is switched on and the Mixer lets it be heard. Unlike
+/// [PlaybackState.clickGain] it does not wait for the playback click to
+/// load: the export writes a click of its own.
+bool clickAudibleForExport(PlaybackState state) =>
+    state.metronomeOn &&
+    state.clickStatus != ClickStatus.unavailable &&
+    !state.clickNeedsTempo &&
+    !_clickSilencedInMixer(state);
+
+bool _clickSilencedInMixer(PlaybackState state) =>
+    state.clickMuted ||
+    (state.anySoloed && !state.clickSoloed) ||
+    state.clickVolume <= 0;
+
+bool _voiceSilencedInMixer(PlaybackState state, VoicePart voice) =>
+    state.muted.contains(voice) ||
+    (state.anySoloed && !state.soloed.contains(voice)) ||
+    (state.volumes[voice] ?? PlaybackController.fullVolume) <= 0;
+
+/// What the sheet starts with: the voices that can be heard, and the click
+/// if it can be heard. A voice whose chip is off starts unticked.
+ExportSelection initialExportSelection(PlaybackState state) {
+  final selection = ExportSelection.preTicked(
+    available: state.available,
+    voices: {
+      for (final voice in VoicePart.values)
+        if (voiceAudibleForExport(state, voice)) voice,
+    },
+    withClick: clickAudibleForExport(state),
+  );
+  return exportableSelection(state, selection);
+}
+
+/// A ticked voice's level in the file: its Mixer level, or
+/// [exportDefaultLevel] when the Mixer silences it. A voice ticked with
+/// its chip off but not silenced in the Mixer keeps its Mixer level: the
+/// chip is an on/off, not a level.
+double exportVoiceGain(PlaybackState state, VoicePart voice) =>
+    _voiceSilencedInMixer(state, voice)
+    ? exportDefaultLevel
+    : state.volumes[voice] ?? PlaybackController.fullVolume;
+
+/// The ticked click's level: the Metronome row's, or
+/// [exportDefaultClickLevel] when the Mixer silences it (muted, soloed
+/// out by a soloed voice, or slider at 0).
+double exportClickGain(PlaybackState state) =>
+    _clickSilencedInMixer(state) ? exportDefaultClickLevel : state.clickVolume;
+
+/// The click is written into the file: ticked, and the score has a tempo
+/// to click at. Playback's own click failing to load does not matter: the
+/// export writes its own, and says so if that fails too.
+bool exportWantsClick(PlaybackState state, ExportSelection selection) =>
+    selection.withClick && !state.clickNeedsTempo;
 
 /// [selection] narrowed to the voices that can still be exported: a voice
 /// that failed after it was ticked, or has no track, is dropped here so
@@ -45,9 +106,9 @@ ExportSelection exportableSelection(
   });
 }
 
-/// The ticked voices (and the click) with their effective gains, at the
-/// Playback speed. A ticked voice the Mixer silences stays in at gain 0,
-/// so the file still runs the length of the piece.
+/// Only the ticked voices (and the click, if ticked) at their export
+/// levels, at the Playback speed. Unticked voices are not sent at all, so
+/// the file runs as long as the longest ticked track.
 ///
 /// Throws [GenerationFailed] when no ticked voice is left: a file with no
 /// ticked voice must never be saved and reported as a success.
@@ -59,14 +120,13 @@ ExportJob buildExportJob(
 }) {
   final exported = exportableSelection(state, selection);
   if (!exported.canDownload) throw const GenerationFailed();
-  final view = exportView(state, exported);
   final tracks = state.result?.audioTracks ?? const <VoicePart, Uri>{};
   final inputs = <ExportInput>[
     for (final voice in VoicePart.values)
       if (exported.voices.contains(voice))
-        (track: tracks[voice]!, gain: view.voiceGain(voice)),
-    if (view.metronomeOn && clickTrack != null)
-      (track: clickTrack, gain: view.clickGain),
+        (track: tracks[voice]!, gain: exportVoiceGain(state, voice)),
+    if (exportWantsClick(state, exported) && clickTrack != null)
+      (track: clickTrack, gain: exportClickGain(state)),
   ];
   return ExportJob(
     inputs: inputs,
@@ -85,6 +145,8 @@ Future<ExportResult> runExport({
   required ExportSelection selection,
   required String title,
   required String treeUri,
+  ExportCancelToken? cancel,
+  ValueChanged<double>? onProgress,
 }) async {
   // Checked before the click is written, so a voice that failed while the
   // folder picker was open costs nothing.
@@ -92,7 +154,7 @@ Future<ExportResult> runExport({
     debugPrint('Export: no ticked voice can be played any more');
     throw const GenerationFailed();
   }
-  final wantsClick = exportView(state, selection).metronomeOn;
+  final wantsClick = exportWantsClick(state, selection);
   Uri? click;
   try {
     if (wantsClick) {
@@ -103,8 +165,14 @@ Future<ExportResult> runExport({
         throw const GenerationFailed();
       }
     }
+    cancel?.throwIfCancelled();
     final job = buildExportJob(state, selection, title, clickTrack: click);
-    return await service.export(job, treeUri);
+    return await service.export(
+      job,
+      treeUri,
+      cancel: cancel,
+      onProgress: onProgress,
+    );
   } on ExportFailure {
     rethrow;
   } on Object catch (e, stack) {

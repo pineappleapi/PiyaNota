@@ -22,6 +22,19 @@ class ExportSelection {
     withClick: false,
   );
 
+  /// The sheet as it opens: [voices] (narrowed to [available]) and the
+  /// click ticked as given. The caller decides what starts ticked; see
+  /// `initialExportSelection`.
+  factory ExportSelection.preTicked({
+    required Set<VoicePart> available,
+    required Set<VoicePart> voices,
+    required bool withClick,
+  }) => ExportSelection._(
+    available: Set.unmodifiable(available),
+    voices: Set.unmodifiable(voices.intersection(available)),
+    withClick: withClick,
+  );
+
   final Set<VoicePart> available;
   final Set<VoicePart> voices;
   final bool withClick;

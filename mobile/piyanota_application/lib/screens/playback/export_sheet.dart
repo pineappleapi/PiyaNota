@@ -62,12 +62,27 @@ class ExportAudioSheet extends ConsumerStatefulWidget {
 }
 
 class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
-  // Nothing ticked when the sheet opens (AC2).
-  late ExportSelection _selection = ExportSelection.empty(
-    ref.read(playbackControllerProvider(widget.scoreId)).available,
+  // Opens on what Playback lets be heard (user decision 2026-10-21); the
+  // ticks here are never written back to the Mixer or the chips.
+  late ExportSelection _selection = initialExportSelection(
+    ref.read(playbackControllerProvider(widget.scoreId)),
   );
   bool _busy = false;
   ExportFailure? _failure;
+
+  /// Set once a folder is picked: the file is being made, so the bar and
+  /// Cancel show. Null between exports.
+  ExportCancelToken? _cancel;
+
+  /// The render's 0..1; null until the first report (the bar then runs
+  /// without a value while the tracks are fetched).
+  double? _progress;
+
+  /// Cancel was pressed and the export is stopping.
+  bool _cancelling = false;
+
+  /// The last export was cancelled; says so calmly, nothing to retry.
+  bool _cancelled = false;
 
   /// The last failure was every ticked voice failing before the file was
   /// made, which Retry cannot fix.
@@ -78,6 +93,8 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
   String? _treeUri;
 
   static const double _pillDisabledOpacity = 0.38;
+  static const double _barHeight = 6;
+  static const double _percent = 100;
   static const TextStyle _buttonLabel = TextStyle(
     // Large text: the sampled gradient only clears the 3:1 floor (see
     // AppTheme.exportDownloadGradient).
@@ -93,7 +110,6 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
     // is unticked and disabled here too. Assigned without setState because
     // this build is already applying it.
     _selection = exportableSelection(state, _selection);
-    final view = exportView(state, _selection);
     final rows = <Widget>[];
     void divider() =>
         rows.add(const Divider(height: 1, color: AppTheme.sheetDivider));
@@ -118,14 +134,6 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
       );
       if (!usable) {
         rows.add(SheetNote(ExportMessages.voiceUnavailable(voice)));
-      } else if (ticked && view.voiceGain(voice) == 0) {
-        // Review Focus 1: still exported, but silent; say why.
-        rows.add(
-          SheetNote(
-            ExportMessages.mutedInMixer,
-            key: ValueKey('export-muted-${voice.name}'),
-          ),
-        );
       }
       divider();
     }
@@ -163,13 +171,6 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
     );
     if (!clickUsable) {
       rows.add(const SheetNote(PlaybackMessages.metronomeNeedsTempo));
-    } else if (view.metronomeOn && view.clickGain == 0) {
-      rows.add(
-        const SheetNote(
-          ExportMessages.mutedInMixer,
-          key: ValueKey('export-muted-click'),
-        ),
-      );
     }
 
     final failure = _failure;
@@ -183,6 +184,11 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
         children: [
           ...rows,
           const SizedBox(height: 24),
+          if (_cancelled && !_busy)
+            const SheetNote(
+              ExportMessages.cancelled,
+              key: ValueKey('export-cancelled'),
+            ),
           if (failure != null)
             Padding(
               padding: const EdgeInsets.fromLTRB(0, 0, 8, 16),
@@ -209,12 +215,63 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
               onPressed: _selection.canDownload ? _download : null,
             ),
           ),
+          if (_busy && _cancel != null) ..._progressRows(),
         ],
       ),
     );
   }
 
-  void _update(ExportSelection next) => setState(() => _selection = next);
+  /// The bar and Cancel, under Download while the file is made. Cancel is
+  /// the only way out then: the sheet cannot be closed (AC12).
+  List<Widget> _progressRows() => [
+    const SizedBox(height: 16),
+    Padding(
+      padding: const EdgeInsets.fromLTRB(10, 0, 8, 0),
+      child: LinearProgressIndicator(
+        key: const ValueKey('export-progress'),
+        value: _progress,
+        minHeight: _barHeight,
+        color: AppTheme.playbackNavy,
+        backgroundColor: AppTheme.sheetDivider,
+        borderRadius: BorderRadius.circular(_barHeight / 2),
+        semanticsLabel: ExportMessages.progressLabel,
+        semanticsValue: _progress == null
+            ? null
+            : '${(_progress! * _percent).round()}%',
+      ),
+    ),
+    const SizedBox(height: 8),
+    Center(
+      child: TextButton(
+        key: const ValueKey('export-cancel'),
+        onPressed: _cancelling ? null : _cancelExport,
+        style: TextButton.styleFrom(
+          foregroundColor: AppTheme.playbackNavy,
+          minimumSize: const Size(64, kMinInteractiveDimension),
+        ),
+        child: Text(
+          _cancelling ? ExportMessages.cancelling : ExportMessages.cancel,
+        ),
+      ),
+    ),
+  ];
+
+  void _cancelExport() {
+    final token = _cancel;
+    if (token == null || _cancelling) return;
+    setState(() => _cancelling = true);
+    token.cancel();
+  }
+
+  void _update(ExportSelection next) => setState(() {
+    _selection = next;
+    // L-c: "nothing to export" was about the old ticks; a new tick makes
+    // it, and its banner, stale.
+    if (_nothingLeft) {
+      _nothingLeft = false;
+      _failure = null;
+    }
+  });
 
   /// Permission errors mean that folder is the problem, so Retry asks for
   /// a folder again; anything else retries the same one.
@@ -231,6 +288,7 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
       _busy = true;
       _failure = null;
       _nothingLeft = false;
+      _cancelled = false;
     });
     final selection = _selection;
     var saved = false;
@@ -239,6 +297,14 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
       // AC11: picker cancelled, back to the sheet with the ticks kept.
       if (treeUri == null) return;
       _treeUri = treeUri;
+      final token = ExportCancelToken();
+      if (mounted) {
+        setState(() {
+          _cancel = token;
+          _progress = null;
+          _cancelling = false;
+        });
+      }
       final result = await runExport(
         service: service,
         controller: ref.read(provider.notifier),
@@ -246,6 +312,10 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
         selection: selection,
         title: widget.title,
         treeUri: treeUri,
+        cancel: token,
+        onProgress: (fraction) {
+          if (mounted) setState(() => _progress = fraction);
+        },
       );
       if (!mounted) return;
       // Let the sheet close before the dialog opens (AC16).
@@ -253,15 +323,21 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
       saved = true;
       Navigator.of(context)
           .pop<ExportSaved>((result: result, treeUri: treeUri));
+    } on Cancelled {
+      // Not a failure: the ticks stay, nothing was saved, no Retry.
+      if (mounted) setState(() => _cancelled = true);
     } on ExportFailure catch (failure) {
       if (mounted) {
         setState(() {
           _failure = failure;
-          _nothingLeft = failure is GenerationFailed &&
+          _nothingLeft =
+              failure is GenerationFailed &&
               !exportableSelection(ref.read(provider), selection).canDownload;
         });
       }
     } finally {
+      _cancel = null;
+      _cancelling = false;
       if (mounted && _busy) setState(() => _busy = false);
       if (mounted && !saved) _closeIfPlaybackGone();
     }
@@ -284,6 +360,8 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
     GenerationFailed() => ExportMessages.generationFailed,
     Interrupted() => ExportMessages.interrupted,
     NoFolderPicker() => ExportMessages.noFolderPicker,
+    // Shown by its own calm note, never as an error banner.
+    Cancelled() => ExportMessages.cancelled,
   };
 }
 

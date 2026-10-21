@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:piyanota_application/services/export_service.dart';
 
 const String kTreeUri = 'content://tree/primary%3AMusic';
@@ -42,10 +44,25 @@ class FakeExportService implements ExportService {
     return folder;
   }
 
+  /// The last export's Cancel and progress, for tests to drive.
+  ExportCancelToken? lastCancel;
+  ValueChanged<double>? lastOnProgress;
+
   @override
-  Future<ExportResult> export(ExportJob job, String treeUri) async {
+  Future<ExportResult> export(
+    ExportJob job,
+    String treeUri, {
+    ExportCancelToken? cancel,
+    ValueChanged<double>? onProgress,
+  }) async {
     exports.add((job, treeUri));
-    if (exportGate case final gate?) await gate.future;
+    lastCancel = cancel;
+    lastOnProgress = onProgress;
+    if (exportGate case final gate?) {
+      // A held export stops on Cancel the way the real one does.
+      await Future.any([gate.future, ?cancel?.whenCancelled]);
+    }
+    cancel?.throwIfCancelled();
     if (_failures.isNotEmpty) throw _failures.removeAt(0);
     return kSaved;
   }

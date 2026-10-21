@@ -36,18 +36,34 @@ import java.util.concurrent.atomic.AtomicBoolean
  *    (pitch kept, as Playback does per player) in memory, mixes with the
  *    gains and encodes one MP3 (AC13, AC23). Temp space is the decoded
  *    files plus the MP3, whatever the speed: no stretched copy is kept.
+ *    Dart sends only the ticked tracks (user decision 2026-10-21), so
+ *    nothing unticked is decoded or stretched. While it runs, this side
+ *    calls Dart's "progress" with the render's 0..1 ([RenderProgress]).
+ *  - cancel() -> null. Stops the running render or save; its reply
+ *    becomes `cancelled` and the partial MP3 (or saved file) is deleted.
  *  - save({treeUri, fileName, srcPath}) -> {fileName, location} (AC16).
  *  - openFolder({treeUri}) -> whether a file manager could be opened.
  *
  * Error codes match the Dart ExportFailure types (AC18): storage_full,
- * permission_denied, generation_failed, interrupted, no_folder_picker,
- * plus bad_args.
+ * permission_denied, generation_failed, interrupted, cancelled,
+ * no_folder_picker, plus bad_args.
  */
 internal class ExportChannel(private val activity: Activity, messenger: BinaryMessenger) {
     private val channel = MethodChannel(messenger, CHANNEL)
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    /**
+     * The user's Cancel. Reset when a render starts, on the main thread
+     * before the work is queued: channel calls arrive in order, so a
+     * cancel sent after that render is never wiped, and one left over
+     * from an earlier export never stops this one.
+     */
     private val cancelled = AtomicBoolean(false)
+
+    /** The activity is going away; never reset. */
+    private val disposed = AtomicBoolean(false)
+    private val stopRequested: () -> Boolean = { cancelled.get() || disposed.get() }
     private var pendingPick: MethodChannel.Result? = null
 
     init {
@@ -75,10 +91,15 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
                 if (inputs.isNullOrEmpty() || speed == null || speed <= 0 || outPath == null) {
                     return badArgs(result, "non-empty inputs, speed > 0 and outPath")
                 }
+                cancelled.set(false)
                 runOffMain(result) {
                     render(inputs, speed, File(outPath))
                     null
                 }
+            }
+            "cancel" -> {
+                cancelled.set(true)
+                result.success(null)
             }
             "save" -> {
                 val tree = call.argument<String>("treeUri")
@@ -187,26 +208,39 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
         Mp3Encoder.ensureLoaded()
         val decoded = mutableListOf<File>()
         var complete = false
+        val progress = RenderProgress(::sendProgress)
         try {
-            val mixInputs = inputs.map { spec ->
+            val specs = inputs.map { spec ->
                 val path = spec["path"] as? String ?: throw IllegalArgumentException("input path")
                 val gain = (spec["gain"] as? Number)?.toFloat() ?: throw IllegalArgumentException("input gain")
+                File(path) to gain
+            }
+            progress.begin(RenderProgress.DECODE, specs.sumOf { (src, _) -> PcmDecoder.estimateFrames(src) })
+            val mixInputs = specs.map { (src, gain) ->
                 val pcm = File.createTempFile("export_pcm", ".raw", out.parentFile)
                 decoded += pcm
-                PcmDecoder.decode(File(path), pcm) { cancelled.get() }
+                PcmDecoder.decode(src, pcm, progress::advance, stopRequested)
                 MixInput(pcm, gain)
             }
             BufferedOutputStream(FileOutputStream(out)).use { stream ->
                 Mp3Encoder(PcmDecoder.OUT_RATE, PcmDecoder.OUT_CHANNELS, stream).use { encoder ->
-                    Mixer.mix(mixInputs, speed, encoder::encode) { cancelled.get() }
+                    Mixer.mix(mixInputs, speed, encoder::encode, progress, stopRequested)
                     encoder.finish()
                 }
             }
+            progress.finish()
             complete = true
         } finally {
             decoded.forEach { it.delete() }
             // A half-written MP3 must never be mistaken for a result.
             if (!complete) out.delete()
+        }
+    }
+
+    /** Called on the export thread; the channel must be used on main. */
+    private fun sendProgress(fraction: Double) {
+        mainHandler.post {
+            if (!disposed.get()) channel.invokeMethod(PROGRESS, fraction)
         }
     }
 
@@ -223,7 +257,7 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
                 FileInputStream(src).use { i ->
                     val buf = ByteArray(COPY_BUFFER_BYTES)
                     while (true) {
-                        if (cancelled.get()) throw ExportCancelled()
+                        if (stopRequested()) throw ExportCancelled()
                         val n = i.read(buf)
                         if (n < 0) break
                         o.write(buf, 0, n)
@@ -315,6 +349,9 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
     }
 
     private fun errorCode(e: Throwable): String = when {
+        // Read when the error is reported: a dispose during a user's
+        // cancel is still an interruption, not something they chose.
+        e is ExportCancelled && !disposed.get() && cancelled.get() -> CANCELLED
         e is ExportCancelled || e is InterruptedException -> INTERRUPTED
         isOutOfSpace(e) -> STORAGE_FULL
         e is SecurityException || e is FolderGone -> PERMISSION_DENIED
@@ -340,7 +377,7 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
 
     /** Stops any running export; its reply becomes `interrupted` (AC18). */
     fun dispose() {
-        cancelled.set(true)
+        disposed.set(true)
         channel.setMethodCallHandler(null)
         executor.shutdown()
         pendingPick?.success(null)
@@ -362,6 +399,8 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
         const val PERMISSION_DENIED = "permission_denied"
         const val GENERATION_FAILED = "generation_failed"
         const val INTERRUPTED = "interrupted"
+        const val CANCELLED = "cancelled"
+        private const val PROGRESS = "progress"
         const val NO_FOLDER_PICKER = "no_folder_picker"
     }
 

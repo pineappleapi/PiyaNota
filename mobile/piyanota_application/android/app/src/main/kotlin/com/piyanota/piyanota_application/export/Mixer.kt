@@ -49,7 +49,7 @@ internal object Mixer {
     /** Frames per mixed chunk, and per read from each decoded file. */
     internal const val CHUNK_FRAMES = 4096
     private const val FULL_SCALE = 32768f
-    private const val UNITY_SPEED = 1.0
+    private const val UNITY_SPEED = 1f
     private const val BYTES_PER_SAMPLE = 2
 
     /**
@@ -63,23 +63,34 @@ internal object Mixer {
     /**
      * Sonic reports itself inactive (and then drops input) within this
      * distance of 1.0, so such a speed is treated as unity and Sonic is
-     * skipped for every track.
+     * skipped for every track. Compared on the Float Sonic is given, so a
+     * Double that only rounds to 1f is unity too.
      */
-    private const val SONIC_CLOSENESS = 1e-4
+    private const val SONIC_CLOSENESS = 1e-4f
 
+    /**
+     * [progress], when given, gets one stage per pass, counted in decoded
+     * frames read (see [RenderProgress]).
+     */
     fun mix(
         inputs: List<MixInput>,
         speed: Double,
         sink: (ShortArray, Int) -> Unit,
+        progress: RenderProgress? = null,
         cancelled: () -> Boolean,
     ) {
-        val stretch = if (abs(speed - UNITY_SPEED) < SONIC_CLOSENESS) null else speed.toFloat()
-        val peak = scan(inputs, stretch, cancelled) { _, _ -> }
+        val asFloat = speed.toFloat()
+        val stretch = if (abs(asFloat - UNITY_SPEED) < SONIC_CLOSENESS) null else asFloat
+        val decodedFrames = inputs.sumOf { it.pcm.length() / PcmDecoder.BYTES_PER_FRAME }
+        val onRead: (Long) -> Unit = { progress?.advance(it) }
+        progress?.begin(RenderProgress.PEAK_PASS, decodedFrames)
+        val peak = scan(inputs, stretch, cancelled, onRead) { _, _ -> }
         val scale = PEAK_CEILING / maxOf(PEAK_CEILING, peak)
         // The sink (Mp3Encoder.encode) consumes the frames before
         // returning, so one buffer serves every chunk.
         val out = ShortArray(CHUNK_FRAMES * PcmDecoder.OUT_CHANNELS)
-        scan(inputs, stretch, cancelled) { mixed, frames ->
+        progress?.begin(RenderProgress.ENCODE_PASS, decodedFrames)
+        scan(inputs, stretch, cancelled, onRead) { mixed, frames ->
             for (i in 0 until frames * PcmDecoder.OUT_CHANNELS) {
                 out[i] = (mixed[i] * scale * Short.MAX_VALUE).roundToInt()
                     .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
@@ -98,11 +109,12 @@ internal object Mixer {
         inputs: List<MixInput>,
         speed: Float?,
         cancelled: () -> Boolean,
+        onRead: (Long) -> Unit,
         onChunk: (FloatArray, Int) -> Unit,
     ): Float {
         val lanes = mutableListOf<Lane>()
         try {
-            inputs.forEach { lanes += Lane(it, speed) }
+            inputs.forEach { lanes += Lane(it, speed, onRead) }
             val mixed = FloatArray(CHUNK_FRAMES * PcmDecoder.OUT_CHANNELS)
             var peak = 0f
             while (true) {
@@ -146,7 +158,11 @@ internal object Mixer {
      * for the last chunk read, and its buffers are reused.
      */
     @OptIn(UnstableApi::class)
-    private class Lane(private val input: MixInput, speed: Float?) {
+    private class Lane(
+        private val input: MixInput,
+        speed: Float?,
+        private val onRead: (Long) -> Unit,
+    ) {
         private val sonic: SonicAudioProcessor? = speed?.let { s ->
             SonicAudioProcessor().apply {
                 setSpeed(s)
@@ -188,6 +204,7 @@ internal object Mixer {
             // writes one.
             val whole = n - n % PcmDecoder.BYTES_PER_FRAME
             val atEnd = n < bytes.size
+            if (whole > 0) onRead((whole / PcmDecoder.BYTES_PER_FRAME).toLong())
             if (sonic == null) {
                 if (whole > 0) {
                     val shorts = ByteBuffer.wrap(bytes, 0, whole).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()

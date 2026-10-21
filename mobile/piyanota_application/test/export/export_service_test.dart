@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -75,6 +76,7 @@ void main() {
     ('storage_full', StorageFull),
     ('permission_denied', PermissionDenied),
     ('interrupted', Interrupted),
+    ('cancelled', Cancelled),
     ('generation_failed', GenerationFailed),
     ('bad_args', GenerationFailed),
   ]) {
@@ -127,6 +129,122 @@ void main() {
     await service().export(job(), 'content://tree/x');
     expect(stale.existsSync(), isFalse);
     expect(other.existsSync(), isTrue);
+  });
+
+  group('cancel and progress', () {
+    /// What the native side does: sends `progress` back on the channel.
+    Future<void> sendProgress(Object? value) =>
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .handlePlatformMessage(
+              channel.name,
+              channel.codec.encodeMethodCall(MethodCall('progress', value)),
+              (_) {},
+            );
+
+    test('progress from the render reaches onProgress, clamped and never '
+        'going back', () async {
+      final seen = <double>[];
+      mock((call) async {
+        switch (call.method) {
+          case 'render':
+            for (final v in [0.1, 0.5, 0.4, 'x', 2.0, 0.9]) {
+              await sendProgress(v);
+            }
+            return null;
+          case 'listNames':
+            return <String>[];
+          case 'save':
+            return {'fileName': 'a.mp3', 'location': 'here'};
+        }
+        throw MissingPluginException();
+      });
+      await service().export(job(), 'content://tree/x', onProgress: seen.add);
+      expect(seen, [0.1, 0.5, 1.0]);
+    });
+
+    test('Cancel during the render tells the native side, ends in '
+        'Cancelled, saves nothing and removes the temp files', () async {
+      final token = ExportCancelToken();
+      final stopped = Completer<void>();
+      mock((call) async {
+        switch (call.method) {
+          case 'render':
+            token.cancel();
+            await stopped.future;
+            throw PlatformException(code: 'cancelled');
+          case 'cancel':
+            stopped.complete();
+            return null;
+        }
+        throw MissingPluginException();
+      });
+      await expectLater(
+        service().export(job(), 'content://tree/x', cancel: token),
+        throwsA(isA<Cancelled>()),
+      );
+      expect(calls.map((c) => c.method), ['render', 'cancel']);
+      expect(work.listSync(), isEmpty);
+    });
+
+    test('a token cancelled before the export starts nothing', () async {
+      mock((_) => null);
+      final token = ExportCancelToken()..cancel();
+      await expectLater(
+        service().export(job(), 'content://tree/x', cancel: token),
+        throwsA(isA<Cancelled>()),
+      );
+      expect(calls.where((c) => c.method == 'render'), isEmpty);
+      expect(work.listSync(), isEmpty);
+    });
+
+    test('Cancel after the render, before the save, saves nothing', () async {
+      final token = ExportCancelToken();
+      mock((call) {
+        if (call.method == 'render') token.cancel();
+        return null;
+      });
+      await expectLater(
+        service().export(job(), 'content://tree/x', cancel: token),
+        throwsA(isA<Cancelled>()),
+      );
+      expect(calls.map((c) => c.method), isNot(contains('save')));
+      expect(work.listSync(), isEmpty);
+    });
+
+    test('a Cancel after the file is saved changes nothing', () async {
+      final token = ExportCancelToken();
+      mock(
+        (call) => switch (call.method) {
+          'render' => null,
+          'listNames' => <String>[],
+          'save' => {'fileName': 'a.mp3', 'location': 'here'},
+          _ => null,
+        },
+      );
+      final result = await service().export(
+        job(),
+        'content://tree/x',
+        cancel: token,
+      );
+      token.cancel();
+      await Future<void>.delayed(Duration.zero);
+      expect(result.fileName, 'a.mp3');
+      expect(calls.map((c) => c.method), isNot(contains('cancel')));
+    });
+
+    test('ExportProgress ignores bad and backward values', () {
+      final seen = <double>[];
+      final progress = ExportProgress(seen.add)
+        ..report(-1)
+        ..report(double.nan)
+        ..report(null)
+        ..report(0.3)
+        ..report(0.3)
+        ..report(0.2)
+        ..report(7);
+      expect(seen, [0.0, 0.3, 1.0]);
+      expect(progress.value, 1.0);
+    });
   });
 
   test('openFolder: false on an error instead of throwing', () async {

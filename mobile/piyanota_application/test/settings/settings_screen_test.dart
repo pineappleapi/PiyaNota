@@ -466,6 +466,30 @@ void main() {
       expect(await SettingsPrefsService().getDefaultTempo(), 91);
     });
 
+    testWidgets('L-d: an older save that lands after a newer one failed '
+        'and rolled back is what the field shows', (tester) async {
+      final harness = _Harness(session: _liveSession());
+      await harness.pump(tester);
+      await _scrollTo(tester, _tempoValue);
+      harness.tempoPrefs.hold = true;
+      await tester.tap(find.byIcon(Icons.add_rounded));
+      await tester.pump();
+      await tester.tap(find.byIcon(Icons.add_rounded));
+      await tester.pump();
+      expect(harness.tempoPrefs.saves, [91, 92]);
+
+      // The newer save fails first and rolls back to 90...
+      harness.tempoPrefs.held[1].complete(false);
+      await tester.pumpAndSettle();
+      expect(find.text(SettingsMessages.tempoValue(90)), findsOneWidget);
+
+      // ...then the older one lands: 91 is on disk, so 91 is shown.
+      harness.tempoPrefs.held[0].complete(true);
+      await tester.pumpAndSettle();
+      expect(find.text(SettingsMessages.tempoValue(91)), findsOneWidget);
+      expect(await SettingsPrefsService().getDefaultTempo(), 91);
+    });
+
     testWidgets('cannot go below 30', (tester) async {
       await _Harness(
         session: _liveSession(),

@@ -98,6 +98,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   /// The attempt [_savedTempo] came from, so an older save finishing late
   /// cannot overwrite a newer one that already succeeded.
   int _savedTempoSeq = 0;
+
+  /// The gesture whose failure last rolled the field back, so an older
+  /// save that lands after that rollback can still correct the field.
+  int _rolledBackSeq = 0;
   bool _prefsLoaded = false;
 
   @override
@@ -158,12 +162,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       if (attempt > _savedTempoSeq) {
         _savedTempoSeq = attempt;
         _savedTempo = bpm;
+        // L-d: the latest gesture failed first and rolled back to an older
+        // value; this older save has now landed, so the field must show
+        // what is actually on disk.
+        if (mounted && _rolledBackSeq == _tempoSaveSeq) {
+          setState(() => _tempo = bpm);
+        }
       }
     } catch (e, stack) {
       debugPrint('Default tempo not saved: $e\n$stack');
       // Only the latest gesture may roll back; an older failure must not
       // undo a newer value the user is now looking at.
       if (!mounted || attempt != _tempoSaveSeq) return;
+      _rolledBackSeq = attempt;
       setState(() => _tempo = _savedTempo);
       _showSnackBar(SettingsMessages.saveFailed);
     }

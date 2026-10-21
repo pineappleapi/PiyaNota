@@ -35,7 +35,7 @@ How PiyaNota meets the LGPL:
 - Used by: Playback speed (PIYA-210) through ExoPlayer, and Export Audio
   (PIYA-211) through `androidx.media3.common.audio.SonicAudioProcessor`,
   which keeps the pitch while changing speed (FR-9).
-- Not vendored: it ships inside `androidx.media3:media3-common:1.4.1`,
+- Not vendored: it ships inside `androidx.media3:media3-common:1.9.0`,
   which the app already depends on through `just_audio`.
 - Licence: Apache License 2.0. Sonic is copyright (c) 2010 Bill Cox; the
   Media3 port is copyright The Android Open Source Project.

@@ -7,7 +7,28 @@ const Set<VoicePart> _all = {...VoicePart.values};
 
 void main() {
   group('ExportSelection (PIYA-211)', () {
-    test('AC2: nothing is ticked when the modal opens', () {
+    test('preTicked keeps only available voices, and the click as given', () {
+      final s = ExportSelection.preTicked(
+        available: {VoicePart.soprano, VoicePart.alto},
+        voices: {VoicePart.alto, VoicePart.tenor},
+        withClick: true,
+      );
+      expect(s.voices, {VoicePart.alto});
+      expect(s.withClick, isTrue);
+      expect(s.allVoices, isFalse);
+      expect(s.toggleVoice(VoicePart.soprano).allVoices, isTrue);
+    });
+
+    test('preTicked with only the click cannot download', () {
+      final s = ExportSelection.preTicked(
+        available: _all,
+        voices: const {},
+        withClick: true,
+      );
+      expect(s.canDownload, isFalse);
+    });
+
+    test('empty: nothing ticked', () {
       final s = ExportSelection.empty(_all);
       expect(s.voices, isEmpty);
       expect(s.withClick, isFalse);

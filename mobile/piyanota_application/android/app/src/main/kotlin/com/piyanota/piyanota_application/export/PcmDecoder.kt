@@ -4,6 +4,7 @@ import android.media.AudioFormat
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import android.util.Log
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -30,11 +31,21 @@ internal object PcmDecoder {
     private const val PCM_16_BITS = 16
     private const val FMT_CHUNK_BYTES = 16
     private const val IO_CHUNK_BYTES = 64 * 1024
+    private const val MICROS_PER_SECOND = 1_000_000L
+    private const val TAG = "PiyaNotaExport"
 
-    /** Returns the number of stereo frames written to [out]. */
-    fun decode(src: File, out: File, cancelled: () -> Boolean): Long {
+    /**
+     * Returns the number of stereo frames written to [out]; [onFrames]
+     * gets each batch as it is written, for the progress bar.
+     */
+    fun decode(
+        src: File,
+        out: File,
+        onFrames: (Long) -> Unit = {},
+        cancelled: () -> Boolean,
+    ): Long {
         BufferedOutputStream(FileOutputStream(out), IO_CHUNK_BYTES).use { sink ->
-            val writer = FrameWriter(sink)
+            val writer = FrameWriter(sink, onFrames)
             // The click track and the demo voices are plain PCM WAV. Reading
             // them directly avoids depending on the platform's audio/raw
             // decoder, which is not on every device.
@@ -46,6 +57,38 @@ internal object PcmDecoder {
             }
             writer.finish()
             return writer.frames
+        }
+    }
+
+    /**
+     * About how many frames [decode] will write for [src], from its header
+     * alone, so the progress bar can count decoding before it is done. 0
+     * when the header does not say; decoding reports the real error.
+     */
+    fun estimateFrames(src: File): Long {
+        readWavHeader(src)?.let { wav ->
+            val frames = wav.dataBytes / (wav.channels * 2)
+            return frames * OUT_RATE / wav.rate
+        }
+        val extractor = MediaExtractor()
+        return try {
+            extractor.setDataSource(src.path)
+            val format = (0 until extractor.trackCount).map(extractor::getTrackFormat).firstOrNull {
+                it.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
+            }
+            if (format == null || !format.containsKey(MediaFormat.KEY_DURATION)) {
+                0L
+            } else {
+                format.getLong(MediaFormat.KEY_DURATION) * OUT_RATE / MICROS_PER_SECOND
+            }
+        } catch (e: IOException) {
+            Log.w(TAG, "no duration for ${src.name}", e)
+            0L
+        } catch (e: IllegalArgumentException) {
+            Log.w(TAG, "no duration for ${src.name}", e)
+            0L
+        } finally {
+            extractor.release()
         }
     }
 
@@ -209,7 +252,10 @@ internal object PcmDecoder {
     }
 
     /** Buffers stereo frames and writes them little-endian. */
-    private class FrameWriter(private val sink: BufferedOutputStream) {
+    private class FrameWriter(
+        private val sink: BufferedOutputStream,
+        private val onFrames: (Long) -> Unit,
+    ) {
         private val buf = ByteBuffer.allocate(IO_CHUNK_BYTES).order(ByteOrder.LITTLE_ENDIAN)
         var frames = 0L
             private set
@@ -224,8 +270,10 @@ internal object PcmDecoder {
         fun finish() = flush()
 
         private fun flush() {
-            sink.write(buf.array(), 0, buf.position())
+            val count = buf.position()
+            sink.write(buf.array(), 0, count)
             buf.clear()
+            if (count > 0) onFrames((count / BYTES_PER_FRAME).toLong())
         }
     }
 
@@ -302,5 +350,8 @@ internal object PcmDecoder {
     }
 }
 
-/** The export was stopped (activity destroyed); reported as `interrupted`. */
+/**
+ * The export was stopped: by the user's Cancel (reported as `cancelled`)
+ * or because the activity is going away (`interrupted`).
+ */
 internal class ExportCancelled : RuntimeException("export cancelled")

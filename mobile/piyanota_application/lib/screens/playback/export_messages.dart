@@ -22,8 +22,11 @@ class ExportMessages {
   static String voiceUnavailable(VoicePart voice) =>
       '${voice.label} can’t be played, so it can’t be exported.';
 
-  /// Under a ticked row the Voice Mixer silences (Review Focus 1, AC23).
-  static const String mutedInMixer = 'Muted in Voice Mixer';
+  // While the file is made, and after Cancel.
+  static const String progressLabel = 'Making the audio file';
+  static const String cancel = 'Cancel';
+  static const String cancelling = 'Cancelling…';
+  static const String cancelled = 'Export cancelled. Nothing was saved.';
 
   // Failures (AC18, AC20); each one says what to do next.
   static const String storageFull =
@@ -38,6 +41,7 @@ class ExportMessages {
       'saved.';
   static const String generationFailed =
       'The audio file couldn’t be made. Try again.';
+
   /// Every ticked voice failed while the folder picker was open, so there
   /// is nothing to retry: no Retry, and no "try again".
   static const String nothingToExport =

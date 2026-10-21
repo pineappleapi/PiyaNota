@@ -131,10 +131,92 @@ class MixerTest {
         }
     }
 
+    @Test
+    fun leftAndRightStayOnTheirOwnSides() {
+        // Different content per side, so a swapped or duplicated channel
+        // cannot match the reference.
+        val inputs = listOf(
+            MixInput(tone("lr1.raw", 220.0, frames = rate * 2 + 77, rightHz = 550.0), 0.7f),
+            MixInput(tone("lr2.raw", 330.0, frames = rate + 999, rightHz = 0.0), 0.6f),
+        )
+        for (speed in listOf(1.0, 0.5, 1.4)) {
+            // Sonic is inactive at 1.0, so unity's reference is unstretched.
+            val stretched = inputs.map {
+                val decoded = readShorts(it.pcm)
+                if (speed == 1.0) decoded else stretchWhole(decoded, speed.toFloat())
+            }
+            assertArrayEquals("speed $speed", sumAndScale(stretched, inputs.map { it.gain }), mixToArray(inputs, speed))
+        }
+        // The second track's right side is silent: at unity, the mix's
+        // right side is the first track's right side alone.
+        val out = mixToArray(inputs, 1.0)
+        val firstRight = readShorts(inputs[0].pcm).filterIndexed { i, _ -> i % 2 == 1 }
+        val outRight = out.filterIndexed { i, _ -> i % 2 == 1 }
+        val expected = sumAndScale(listOf(readShorts(inputs[0].pcm)), listOf(0.7f)).filterIndexed { i, _ -> i % 2 == 1 }
+        assertEquals(expected.take(firstRight.size), outRight.take(firstRight.size))
+    }
+
+    @Test
+    fun anInputThatIsAnExactChunkMultipleIsMixedWhole() {
+        val inputs = listOf(
+            MixInput(tone("c1.raw", 220.0, frames = Mixer.CHUNK_FRAMES * 5), 0.8f),
+            MixInput(tone("c2.raw", 440.0, frames = Mixer.CHUNK_FRAMES * 3), 0.5f),
+        )
+        val decoded = inputs.map { readShorts(it.pcm) }
+        assertArrayEquals(sumAndScale(decoded, inputs.map { it.gain }), mixToArray(inputs, 1.0))
+        val sizes = mutableListOf<Int>()
+        Mixer.mix(inputs, 1.0, { _, frames -> sizes += frames }) { false }
+        assertEquals(List(5) { Mixer.CHUNK_FRAMES }, sizes)
+        assertMatchesReference(0.33, inputs)
+    }
+
+    @Test
+    fun anEmptyTrackAddsNothing() {
+        val empty = MixInput(tone("empty.raw", 220.0, frames = 0), 1f)
+        assertEquals(0, mixToArray(listOf(empty), 1.0).size)
+        assertEquals(0, mixToArray(listOf(empty), 0.5).size)
+        val other = MixInput(tone("o.raw", 330.0, frames = rate), 0.5f)
+        assertArrayEquals(mixToArray(listOf(other), 0.5), mixToArray(listOf(empty, other), 0.5))
+    }
+
+    @Test
+    fun progressCountsEveryDecodedFrameOncePerPassAndEndsTheEncodePass() {
+        val inputs = tracks()
+        val decodedFrames = inputs.sumOf { it.pcm.length() / PcmDecoder.BYTES_PER_FRAME }
+        val reports = mutableListOf<Double>()
+        val progress = RenderProgress { reports += it }
+        progress.begin(RenderProgress.DECODE, decodedFrames)
+        progress.advance(decodedFrames)
+        Mixer.mix(inputs, 0.33, { _, _ -> }, progress) { false }
+        assertEquals(1.0, progress.fraction, 1e-9)
+        // Decoding was reported in one go (0 to a third); both passes then
+        // move one whole percent at a time, with none skipped.
+        val third = RenderProgress.STEPS / RenderProgress.STAGES
+        val expected = listOf(0.0) + (third..RenderProgress.STEPS).map { it.toDouble() / RenderProgress.STEPS }
+        assertEquals(expected, reports)
+    }
+
+    @Test
+    fun cancellingStopsProgressWhereItWas() {
+        val reports = mutableListOf<Double>()
+        val progress = RenderProgress { reports += it }
+        progress.begin(RenderProgress.DECODE, 1)
+        progress.advance(1)
+        var chunks = 0
+        try {
+            Mixer.mix(tracks(), 0.33, { _, _ -> chunks++ }, progress) { chunks > 0 }
+            fail("expected ExportCancelled")
+        } catch (_: ExportCancelled) {
+            // Cancelled one chunk into the encode pass: past the peak
+            // pass's two thirds, well short of the end.
+            assertTrue(reports.last() >= 2.0 / 3 - 0.01)
+            assertTrue(reports.last() < 1.0)
+        }
+    }
+
     // ---- helpers --------------------------------------------------------
 
-    private fun assertMatchesReference(speed: Double) {
-        val inputs = tracks()
+    private fun assertMatchesReference(speed: Double, inputs: List<MixInput> = tracks()) {
         val stretched = inputs.map { stretchWhole(readShorts(it.pcm), speed.toFloat()) }
         val expected = sumAndScale(stretched, inputs.map { it.gain })
         val actual = mixToArray(inputs, speed)
@@ -195,12 +277,20 @@ class MixerTest {
         return out.toShortArray()
     }
 
-    private fun tone(name: String, hz: Double, frames: Int, amplitude: Double = 0.6): File {
+    /** Left at [hz]; right at [rightHz] (0 is silence), else the same. */
+    private fun tone(
+        name: String,
+        hz: Double,
+        frames: Int,
+        amplitude: Double = 0.6,
+        rightHz: Double = hz,
+    ): File {
         val file = tmp.newFile(name)
         val bb = ByteBuffer.allocate(frames * PcmDecoder.BYTES_PER_FRAME).order(ByteOrder.LITTLE_ENDIAN)
+        fun sample(f: Int, freq: Double) =
+            (sin(2 * PI * freq * f / rate) * amplitude * Short.MAX_VALUE).roundToInt().toShort()
         for (f in 0 until frames) {
-            val v = (sin(2 * PI * hz * f / rate) * amplitude * Short.MAX_VALUE).roundToInt().toShort()
-            bb.putShort(v).putShort(v)
+            bb.putShort(sample(f, hz)).putShort(sample(f, rightHz))
         }
         file.writeBytes(bb.array())
         return file
