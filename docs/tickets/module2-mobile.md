@@ -218,7 +218,7 @@ _Phone test results (2026-10-17, fake backend): 75 pass, 0 fail, 12 untested. Pe
 1. Displays individual volume slider for each of the four SATB voices, plus Metronome Click.
 2. Displays a Mute toggle per voice/metronome, independent of slider position.
 3. Adjusting a slider updates that voice's playback volume in real time, audible within 100ms.
-4. Muting a voice sets audible volume to zero without resetting slider position, so unmuting restores prior volume level.
+4. Muting a voice sets audible volume to zero without resetting slider position, so unmuting restores prior volume level. Exception: unmuting a row whose slider is at 0, including one auto-muted by dragging it to 0 (AC8), sets it to the default level of 80%. *(Exception added 2026-10-21, user decision. AC5's first-open level is unchanged.)*
 5. All voices default to unmuted at full volume the first time a score is opened.
 6. Mixer settings persist for the duration of the playback session but reset to default when reopened later, unless otherwise specified.
 7. Modal dismissible via close (X) button, returns to Playback without interrupting active playback.
@@ -293,18 +293,18 @@ _Phone test results (2026-10-17, fake backend): 75 pass, 0 fail, 12 untested. Pe
 6. Manually selecting all four individual voices automatically selects "All Voices."
 7. When "Include metronome/click" is ticked, the metronome click is mixed into the exported file, lined up with the bars (the same per-measure click Playback uses, PIYA-210 "Metronome click layout"). When it is not ticked, the file has no click. A ticked click that is muted, left out by a Solo, or at volume 0 in the Mixer is exported at the default export level, 80% (AC25); otherwise it uses the Metronome Click row's level. *(Decided 2026-10-21, user decisions: the click is treated exactly like a voice; the default export level is 80%.)* The checkbox is disabled, with the Speed modal's note, when the score has no known tempo (`tempoKnown == false`). *(Decided 2026-10-17, user decision: click mixed in, not a separate file.)*
 8. The **Download Audio** button is disabled until at least one voice option is selected. There is no click-only export: voices are what gets exported, and the click is only ever mixed in with them. *(Reconfirmed 2026-10-21, user decision.)*
-9. The user can dismiss the modal (close button, tap outside, or back gesture) without downloading. No files are created and the selections are discarded.
+9. Before an export starts, the user can dismiss the modal (close button, tap outside, or back gesture) without downloading. No files are created and the selections are discarded. Dismissing the modal while an export is running does not cancel it (AC26).
 
 *Download flow*
-10. Tapping **Download Audio** prompts the user to choose a download location and confirm. Exports are saved only to local phone storage: no Google Drive or other cloud provider, no other app (such as Messenger, Instagram or email), and no share sheet. The folder picker accepts only on-device storage. If the user picks anything else, the pick is rejected with a message asking for a folder on the phone. *(Decided 2026-10-21, user decision.)*
+10. Tapping **Download Audio** prompts the user to choose a download location and confirm. Exports are saved only to local phone storage: no Google Drive or other cloud provider, no other app (such as Messenger, Instagram or email), and no share sheet. The folder picker accepts only on-device storage. If the user picks anything else, the pick is rejected with a message asking for a folder on the phone, and the folder picker opens again. Once a valid folder is picked, the export and save start, and the progress bar shows in the export sheet (AC12). *(Decided 2026-10-21, user decisions.)*
 11. Cancelling the location prompt returns the user to the modal with selections intact.
-12. While the file is being prepared and saved, the sheet shows a determinate progress bar with a percentage, end to end: downloading the tracks, processing (decode, stretch, mix, encode) and saving to the chosen folder all report a percentage. There is no indeterminate phase. The sheet also shows a **Cancel** button, and **Download Audio** is disabled to prevent duplicate downloads. The sheet cannot be dismissed while the export runs (close button, tap outside and back gesture do nothing); Cancel is the only way out. Cancel stops the export, deletes the partial output file and all temporary files, and saves no file. *(Decided 2026-10-21, user decisions. Replaces the indeterminate-spinner-only state.)*
+12. While the file is being prepared and saved, the sheet shows a determinate progress bar with a percentage, end to end: downloading the tracks, processing (decode, stretch, mix, encode) and saving to the chosen folder all report a percentage. There is no indeterminate phase. Next to the progress bar is an **X** icon button that cancels the export, and **Download Audio** is disabled to prevent duplicate downloads. The X stops the export, deletes the partial output file and all temporary files, and saves no file. *(Decided 2026-10-21, user decisions. Replaces the indeterminate-spinner-only state. Cancel is the X icon, not a text button. The earlier 2026-10-21 rule that the sheet cannot be dismissed while exporting is withdrawn; see AC26.)*
 13. The export is **one file**: the ticked voices mixed together. "All Voices" ticks every available voice, so it gives one file of the full choir. A voice that can't play (failed or unreadable) can't be ticked. *(Decided 2026-10-17, user decision: one mixed file, not one file per voice.)*
 14. The file is saved as MP3 and named `[ScoreName]_[Voices][_Click].mp3`. Voices is `AllVoices` when every voice is ticked, else the ticked voice names joined by `-` in SATB order. `_Click` is added when the click is included. Example: `ClairDeLune_Soprano-Alto_Click.mp3`. Characters not allowed in file names (`/ \ : * ? " < > |`) become `_`, and an empty title becomes `Score`. *(Decided 2026-10-17, user decision.)*
 15. If a file with the same name already exists in the chosen location, the new file gets a number suffix, ` (1)`, ` (2)` and so on (`X (1).mp3`), and nothing is overwritten. *(Decided 2026-10-17, user decision.)*
 
 *Success*
-16. On success, the system displays a confirmation with the saved file name(s) and location, and an option to open the location.
+16. On success, the system displays a confirmation with the saved file name(s) and location, and an option to open the location. If the sheet was closed during the export, completion is shown in the app's notifications (AC26).
 17. Downloaded files remain accessible and playable without an internet connection, per NFR-4.
 
 *Errors*
@@ -332,6 +332,15 @@ _Phone test results (2026-10-17, fake backend): 75 pass, 0 fail, 12 untested. Pe
     - If a Solo is active, voices that are not soloed are exported at the default export level. Soloed voices keep their Mixer volume.
     - The **default export level is 80%**. It applies to any ticked voice or click (AC7) that is muted, soloed out or at 0. It is export-only: the Mixer's own default/reset level (PIYA-209 AC5, full volume) is unchanged. *(Decided 2026-10-21, user decision; replaces the earlier "default = the Mixer's reset level".)*
     - The same rule applies when the user ticks a muted or soloed-out voice individually rather than through "All Voices": it is exported at the default export level. *(Confirmed 2026-10-21, user decision.)*
+
+*Background export*
+
+26. Closing the export sheet does not cancel the export: it keeps running in the background. *(Decided 2026-10-21, user decision; replaces the withdrawn non-dismissible-sheet rule.)*
+    - Progress and completion show in the app's notifications, the in-app bell and list, the same way Processing does (PIYA-207, PIYA-218).
+    - Reopening the export sheet while an export runs shows its live progress and the X (AC12).
+    - Only one export runs at a time.
+    - The export must survive closing the sheet and navigating away within the app. It does not have to survive the app being killed.
+    - *Open question (2026-10-21, waiting on the user):* should an Android system notification or foreground service also be added, so the export survives while the app is in the background?
 
 **Merge hold:** the PIYA-211 branch is held from merge until the LAME sources are added to the build and the export passes the on-device (phone) test. *(Decided 2026-10-18, user decision.)*
 
