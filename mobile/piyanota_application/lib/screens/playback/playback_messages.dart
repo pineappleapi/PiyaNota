@@ -105,16 +105,21 @@ class PlaybackMessages {
   static String volumeValue(double level) => '${(level * 100).round()}%';
   static String rowUnavailable(String row) => '$row audio unavailable';
 
-  /// Under the Mixer's metronome row while the Speed toggle is off: the
-  /// row stays editable, but nothing sounds until it is turned on there.
   /// Both sheets, instead of [metronomeUnavailable], when the result came
   /// without a tempo (ScoreResult.tempoKnown).
   static const String metronomeNeedsTempo =
       'Metronome needs the score tempo, which this score doesn’t have. '
       'The voices still play.';
 
+  /// Under the Mixer's metronome row while it is off: level, Mute and
+  /// Solo wait until it is switched on, here or in Speed (same toggle).
   static const String metronomeOff =
-      'Off. Turn on Metronome Click in Speed to hear it.';
+      'Off. Switch it on to hear it and change its level.';
+
+  /// The Mixer metronome row's on/off switch (user decision 2026-10-21).
+  static const String metronomeSwitchLabel = 'Metronome Click on';
+  static const String on = 'On';
+  static const String off = 'Off';
 
   /// Shown on both sheets when the click track couldn't be made or played.
   static const String metronomeUnavailable =

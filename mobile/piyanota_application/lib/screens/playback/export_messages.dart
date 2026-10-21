@@ -8,7 +8,7 @@ class ExportMessages {
   // Wording from references/PIYA211_ExportAudioModal_UI_1.png.
   static const String title = 'Export Audio';
   static const String allVoices = 'All Voices';
-  static const String withClick = 'With Metronome Click';
+  static const String withClick = 'Include metronome/click';
   static const String download = 'Download Audio';
   static const String preparing = 'Preparing audio…';
 
@@ -24,9 +24,26 @@ class ExportMessages {
 
   // While the file is made, and after Cancel.
   static const String progressLabel = 'Making the audio file';
-  static const String cancel = 'Cancel';
+
+  /// The X beside the bar (user decision 2026-10-21): tooltip and spoken
+  /// label.
+  static const String cancelExport = 'Cancel export';
   static const String cancelling = 'Cancelling…';
   static const String cancelled = 'Export cancelled. Nothing was saved.';
+
+  /// The save was stopped part-way and the unfinished file could not be
+  /// removed (L8), so "Nothing was saved" would be untrue.
+  static const String cancelledPartial =
+      'Export cancelled. Part of the file may still be in the folder you '
+      'picked; you can delete it there.';
+
+  /// The same whole number the bar's screen-reader value says.
+  static String percent(double fraction) => '${(fraction * 100).floor()}%';
+
+  /// The picked folder is on Drive, another app or the cloud; exports are
+  /// saved only on the phone (user decision 2026-10-21). The picker
+  /// opens again straight away.
+  static const String notLocalFolder = 'Pick a folder on this phone.';
 
   // Failures (AC18, AC20); each one says what to do next.
   static const String storageFull =

@@ -18,15 +18,14 @@ final exportServiceProvider = Provider<ExportService>(
   ),
 );
 
-/// The level a ticked track gets when the Voice Mixer does not let it be
-/// heard (muted, soloed out, or its slider at 0): the Mixer's reset level
-/// (PIYA-209 AC5), so ticking it in the sheet always puts it in the file
-/// at a level the user can hear (user decision 2026-10-21).
-const double exportDefaultLevel = PlaybackController.fullVolume;
-
-/// The click's level in that case. The Metronome row resets to the same
-/// level as the voices, so it is one constant under a name of its own.
-const double exportDefaultClickLevel = PlaybackController.fullVolume;
+/// The level a ticked voice or click gets when the Voice Mixer does not
+/// let it be heard (muted, soloed out, or its slider at 0): 80%, not full
+/// (user decision 2026-10-21). The same level a Mixer row comes back at
+/// when it is unmuted from 0 ([PlaybackController.unmuteFromZeroLevel]),
+/// so a silenced track sounds the same in the file as it would once
+/// unmuted. Not the Mixer's reset level, which stays at
+/// [PlaybackController.fullVolume] (PIYA-209 AC5).
+const double exportDefaultLevel = PlaybackController.unmuteFromZeroLevel;
 
 // The Export sheet only reads Playback (user decision 2026-10-21): it
 // starts from what the Mixer, the Speed sheet and the chips let be heard,
@@ -38,7 +37,10 @@ const double exportDefaultClickLevel = PlaybackController.fullVolume;
 bool voiceAudibleForExport(PlaybackState state, VoicePart voice) =>
     state.voiceGain(voice) > 0;
 
-/// The click is switched on and the Mixer lets it be heard. Unlike
+/// The click is switched on and the Mixer lets it be heard. The click is
+/// treated exactly like a voice (user decision 2026-10-21): pre-ticked
+/// only when it is on and audible, and a ticked click that the Mixer
+/// silences goes in at [exportDefaultLevel]. Unlike
 /// [PlaybackState.clickGain] it does not wait for the playback click to
 /// load: the export writes a click of its own.
 bool clickAudibleForExport(PlaybackState state) =>
@@ -80,11 +82,11 @@ double exportVoiceGain(PlaybackState state, VoicePart voice) =>
     ? exportDefaultLevel
     : state.volumes[voice] ?? PlaybackController.fullVolume;
 
-/// The ticked click's level: the Metronome row's, or
-/// [exportDefaultClickLevel] when the Mixer silences it (muted, soloed
-/// out by a soloed voice, or slider at 0).
+/// The ticked click's level: the Metronome row's, or [exportDefaultLevel]
+/// when the Mixer silences it (muted, soloed out by a soloed voice, or
+/// slider at 0), exactly as for a voice (user decision 2026-10-21).
 double exportClickGain(PlaybackState state) =>
-    _clickSilencedInMixer(state) ? exportDefaultClickLevel : state.clickVolume;
+    _clickSilencedInMixer(state) ? exportDefaultLevel : state.clickVolume;
 
 /// The click is written into the file: ticked, and the score has a tempo
 /// to click at. Playback's own click failing to load does not matter: the
@@ -162,6 +164,8 @@ Future<ExportResult> runExport({
         click = await controller.writeExportClick();
       } on Object catch (e, stack) {
         debugPrint('Export: click not generated: $e\n$stack');
+        // L9: a Cancel while the click was being written is the Cancel.
+        cancel?.throwIfCancelled();
         throw const GenerationFailed();
       }
     }
@@ -179,6 +183,7 @@ Future<ExportResult> runExport({
     // A bug or a plugin throwing something unexpected: the sheet still
     // shows a message and Retry rather than going quiet.
     debugPrint('Export: unexpected error: $e\n$stack');
+    cancel?.throwIfCancelled();
     throw const GenerationFailed();
   } finally {
     if (click != null) await _deleteQuietly(click);

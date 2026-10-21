@@ -77,6 +77,8 @@ void main() {
     ('permission_denied', PermissionDenied),
     ('interrupted', Interrupted),
     ('cancelled', Cancelled),
+    ('cancelled_partial', Cancelled),
+    ('not_local_folder', NotLocalFolder),
     ('generation_failed', GenerationFailed),
     ('bad_args', GenerationFailed),
   ]) {
@@ -105,6 +107,71 @@ void main() {
     mock((_) => throw PlatformException(code: 'permission_denied'));
     await expectLater(service().pickFolder(), throwsA(isA<PermissionDenied>()));
   });
+
+  group('local-only folders (user decision 2026-10-21)', () {
+    for (final tree in [
+      'content://com.android.externalstorage.documents/tree/primary%3AMusic',
+      'content://com.android.externalstorage.documents/tree/1A2B-3C4D%3A',
+      'content://com.android.providers.downloads.documents/tree/downloads',
+    ]) {
+      test('accepts $tree', () async {
+        mock((_) => tree);
+        expect(await service().pickFolder(), tree);
+      });
+    }
+
+    for (final tree in [
+      'content://com.google.android.apps.docs.storage/tree/acc%3D1',
+      'content://com.android.providers.media.documents/tree/audio',
+      'file:///sdcard/Music',
+    ]) {
+      test('refuses $tree as NotLocalFolder', () async {
+        mock((_) => tree);
+        await expectLater(
+          service().pickFolder(),
+          throwsA(isA<NotLocalFolder>()),
+        );
+      });
+    }
+
+    test('the native refusal is NotLocalFolder too', () async {
+      mock((_) => throw PlatformException(code: 'not_local_folder'));
+      await expectLater(service().pickFolder(), throwsA(isA<NotLocalFolder>()));
+    });
+  });
+
+  test('a cancelled save that left part of the file says so (L8)', () async {
+    mock((call) => throw PlatformException(code: 'cancelled_partial'));
+    await expectLater(
+      service().export(job(), 'content://tree/x'),
+      throwsA(
+        isA<Cancelled>().having((c) => c.partialFileLeft, 'partial', isTrue),
+      ),
+    );
+  });
+
+  test(
+    'L7: a failing work folder still removes the progress handler',
+    () async {
+      var handled = 0;
+      final failing = MethodChannelExportService(
+        dio: Dio(),
+        workDir: () async => throw const FileSystemException('no cache'),
+      );
+      await expectLater(
+        failing.export(job(), 'content://tree/x', onProgress: (_) => handled++),
+        throwsA(isA<FileSystemException>()),
+      );
+      final before = handled;
+      await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .handlePlatformMessage(
+            channel.name,
+            channel.codec.encodeMethodCall(const MethodCall('progress', 0.5)),
+            (_) {},
+          );
+      expect(handled, before, reason: 'handler removed in finally');
+    },
+  );
 
   test('pickFolder: no picker app on the phone is NoFolderPicker', () async {
     mock((_) => throw PlatformException(code: 'no_folder_picker'));
@@ -141,25 +208,99 @@ void main() {
               (_) {},
             );
 
-    test('progress from the render reaches onProgress, clamped and never '
-        'going back', () async {
+    Future<void> sendSaveProgress(Object? value) =>
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .handlePlatformMessage(
+              channel.name,
+              channel.codec.encodeMethodCall(MethodCall('saveProgress', value)),
+              (_) {},
+            );
+
+    test('render and save progress fill one bar, clamped, never going '
+        'back, ending at exactly 1.0', () async {
       final seen = <double>[];
       mock((call) async {
         switch (call.method) {
           case 'render':
-            for (final v in [0.1, 0.5, 0.4, 'x', 2.0, 0.9]) {
+            for (final v in [0.5, 0.4, 'x', 2.0]) {
               await sendProgress(v);
             }
             return null;
           case 'listNames':
             return <String>[];
           case 'save':
+            for (final v in [0.0, 0.5, 1.0]) {
+              await sendSaveProgress(v);
+            }
             return {'fileName': 'a.mp3', 'location': 'here'};
         }
         throw MissingPluginException();
       });
       await service().export(job(), 'content://tree/x', onProgress: seen.add);
-      expect(seen, [0.1, 0.5, 1.0]);
+      // Local tracks only: no download share, so render is 0.7 of 0.8 of
+      // the bar and save the rest.
+      const render = ExportProgress.renderShare;
+      const total = render + ExportProgress.saveShare;
+      expect(seen.first, 0.0);
+      expect(seen[1], closeTo(0.5 * render / total, 1e-9));
+      expect(seen[2], closeTo(render / total, 1e-9));
+      expect(
+        seen[3],
+        closeTo((render + 0.5 * ExportProgress.saveShare) / total, 1e-9),
+      );
+      expect(seen.last, 1.0);
+      for (var i = 1; i < seen.length; i++) {
+        expect(seen[i], greaterThan(seen[i - 1]));
+      }
+    });
+
+    test(
+      'downloads count too: received bytes, summed over the tracks',
+      () async {
+        final seen = <double>[];
+        mock(
+          (call) => switch (call.method) {
+            'render' => null,
+            'listNames' => <String>[],
+            'save' => {'fileName': 'a.mp3', 'location': 'here'},
+            _ => null,
+          },
+        );
+        final dio = Dio()
+          ..httpClientAdapter = _StatusAdapter(200, body: 'x' * 100);
+        await service(dio: dio).export(
+          job(
+            inputs: [
+              (track: Uri.parse('https://cdn.test/s.mp3'), gain: 1.0),
+              (track: Uri.parse('https://cdn.test/a.mp3'), gain: 1.0),
+            ],
+          ),
+          'content://tree/x',
+          onProgress: seen.add,
+        );
+        // After the first of two tracks: half the download share.
+        expect(seen, contains(closeTo(ExportProgress.downloadShare / 2, 1e-9)));
+        expect(seen, contains(closeTo(ExportProgress.downloadShare, 1e-9)));
+        expect(seen.last, 1.0);
+        for (var i = 1; i < seen.length; i++) {
+          expect(seen[i], greaterThan(seen[i - 1]));
+        }
+      },
+    );
+
+    test('L9: a non-cancel error after Cancel is still Cancelled', () async {
+      final token = ExportCancelToken();
+      mock((call) {
+        if (call.method == 'render') {
+          token.cancel();
+          throw PlatformException(code: 'generation_failed');
+        }
+        return null;
+      });
+      await expectLater(
+        service().export(job(), 'content://tree/x', cancel: token),
+        throwsA(isA<Cancelled>()),
+      );
     });
 
     test('Cancel during the render tells the native side, ends in '
@@ -234,16 +375,40 @@ void main() {
 
     test('ExportProgress ignores bad and backward values', () {
       final seen = <double>[];
-      final progress = ExportProgress(seen.add)
-        ..report(-1)
-        ..report(double.nan)
-        ..report(null)
-        ..report(0.3)
-        ..report(0.3)
-        ..report(0.2)
-        ..report(7);
-      expect(seen, [0.0, 0.3, 1.0]);
+      const render = ExportPhase.render;
+      final progress = ExportProgress(seen.add, downloads: false)
+        ..report(render, -1)
+        ..report(render, double.nan)
+        ..report(render, null)
+        ..report(render, 0.3)
+        ..report(render, 0.3)
+        ..report(render, 0.2)
+        ..report(ExportPhase.download, 1)
+        ..report(render, 7);
+      const share =
+          ExportProgress.renderShare /
+          (ExportProgress.renderShare + ExportProgress.saveShare);
+      expect(seen, [0.0, closeTo(0.3 * share, 1e-9), closeTo(share, 1e-9)]);
+      progress.finish();
       expect(progress.value, 1.0);
+    });
+
+    test('ExportProgress phases run download, render, save', () {
+      final seen = <double>[];
+      ExportProgress(seen.add)
+        ..report(ExportPhase.download, 1)
+        ..report(ExportPhase.render, 1)
+        ..report(ExportPhase.save, 0.5)
+        ..finish();
+      expect(seen, [
+        closeTo(ExportProgress.downloadShare, 1e-9),
+        closeTo(
+          ExportProgress.downloadShare + ExportProgress.renderShare,
+          1e-9,
+        ),
+        closeTo(1 - ExportProgress.saveShare / 2, 1e-9),
+        1.0,
+      ]);
     });
   });
 
@@ -330,16 +495,23 @@ void main() {
 /// Answers every request with [status] and an empty body, as a server
 /// would; Dio turns a 4xx into a badResponse itself.
 class _StatusAdapter implements HttpClientAdapter {
-  _StatusAdapter(this.status);
+  _StatusAdapter(this.status, {this.body = ''});
 
   final int status;
+  final String body;
 
   @override
   Future<ResponseBody> fetch(
     RequestOptions options,
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
-  ) async => ResponseBody.fromString('', status);
+  ) async => ResponseBody.fromString(
+    body,
+    status,
+    headers: {
+      Headers.contentLengthHeader: ['${body.length}'],
+    },
+  );
 
   @override
   void close({bool force = false}) {}

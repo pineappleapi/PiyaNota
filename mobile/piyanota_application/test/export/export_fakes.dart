@@ -32,6 +32,9 @@ class FakeExportService implements ExportService {
   /// happen to Playback while the user is choosing a folder.
   Future<void> Function()? onPick;
 
+  /// Thrown by the next picks, in order, before [pickFailure] applies.
+  final List<ExportFailure> pickQueue = [];
+
   int pickCalls = 0;
   final List<(ExportJob, String)> exports = [];
   final List<String> opened = [];
@@ -39,6 +42,7 @@ class FakeExportService implements ExportService {
   @override
   Future<String?> pickFolder() async {
     pickCalls++;
+    if (pickQueue.isNotEmpty) throw pickQueue.removeAt(0);
     if (pickFailure case final failure?) throw failure;
     if (onPick case final hook?) await hook();
     return folder;

@@ -275,6 +275,12 @@ class PlaybackController extends Notifier<PlaybackState> {
   static const Duration skipStep = Duration(seconds: 5);
   static const double fullVolume = 1;
 
+  /// The level a row comes back at when it is unmuted with its slider at
+  /// 0, including a row muted by dragging to 0 (user decision 2026-10-21):
+  /// 80%, the same as the export's default level. A fixed level rather
+  /// than "the last level before 0", so unmuting always sounds the same.
+  static const double unmuteFromZeroLevel = 0.8;
+
   PlaybackEngine? _engine;
   StreamSubscription<bool>? _playingSub;
   StreamSubscription<PlaybackFailure>? _failureSub;
@@ -773,19 +779,35 @@ class PlaybackController extends Notifier<PlaybackState> {
 
   /// PIYA-209 AC3: sent to the engine at once, on every slider change (not
   /// at the end of a drag), so it is heard within the 100 ms budget.
+  /// A slider at 0 is a muted row (user decision 2026-10-21); lifting it
+  /// off 0 unmutes it again. A row muted with its slider above 0 stays
+  /// muted while the slider moves (PIYA-209 AC4).
   void setVoiceVolume(VoicePart voice, double volume) {
     if (!state.available.contains(voice)) return;
+    final level = volume.clamp(0.0, fullVolume).toDouble();
+    final was = state.volumes[voice] ?? fullVolume;
+    final muted = level <= 0
+        ? {...state.muted, voice}
+        : was <= 0
+        ? state.muted.difference({voice})
+        : state.muted;
     state = state.copyWith(
-      volumes: {...state.volumes, voice: volume.clamp(0.0, fullVolume)},
+      volumes: {...state.volumes, voice: level},
+      muted: muted,
     );
     _applyGains();
   }
 
-  /// PIYA-209 AC2/AC4: the slider keeps its place while muted.
+  /// PIYA-209 AC2/AC4: the slider keeps its place while muted. Unmuting a
+  /// row whose slider is at 0 brings it back at [unmuteFromZeroLevel].
   void setVoiceMuted(VoicePart voice, {required bool muted}) {
     if (!state.available.contains(voice)) return;
+    final atZero = (state.volumes[voice] ?? fullVolume) <= 0;
     state = state.copyWith(
       muted: muted ? {...state.muted, voice} : state.muted.difference({voice}),
+      volumes: !muted && atZero
+          ? {...state.volumes, voice: unmuteFromZeroLevel}
+          : null,
     );
     _applyGains();
   }
@@ -800,15 +822,29 @@ class PlaybackController extends Notifier<PlaybackState> {
     _applyGains();
   }
 
+  /// The click row follows the voices' rule: 0 mutes, off 0 unmutes.
   void setClickVolume(double volume) {
     if (state.clickStatus == ClickStatus.unavailable) return;
-    state = state.copyWith(clickVolume: volume.clamp(0.0, fullVolume));
+    final level = volume.clamp(0.0, fullVolume).toDouble();
+    state = state.copyWith(
+      clickVolume: level,
+      clickMuted: level <= 0
+          ? true
+          : state.clickVolume <= 0
+          ? false
+          : state.clickMuted,
+    );
     _applyGains();
   }
 
   void setClickMuted({required bool muted}) {
     if (state.clickStatus == ClickStatus.unavailable) return;
-    state = state.copyWith(clickMuted: muted);
+    state = state.copyWith(
+      clickMuted: muted,
+      clickVolume: !muted && state.clickVolume <= 0
+          ? unmuteFromZeroLevel
+          : null,
+    );
     _applyGains();
   }
 

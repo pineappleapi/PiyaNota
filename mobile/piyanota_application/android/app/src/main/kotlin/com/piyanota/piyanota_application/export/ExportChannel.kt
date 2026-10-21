@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.DocumentsContract
@@ -29,7 +30,11 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * Methods:
  *  - pickFolder() -> tree Uri string, or null when cancelled (AC10, AC11).
- *    The permission is persisted so Open folder works afterwards.
+ *    The permission is persisted so Open folder works afterwards. Only a
+ *    folder on this phone is accepted (user decision 2026-10-21: exports
+ *    never go to Drive, another app or the cloud); anything else fails
+ *    with `not_local_folder` and nothing is persisted. There is no share
+ *    action anywhere in the export flow.
  *  - listNames({treeUri}) -> display names already in that folder (AC15).
  *  - render({inputs: [{path, gain}], speed, outPath}) -> null. Decodes
  *    each input to a temp PCM file, time-stretches each one separately
@@ -42,11 +47,13 @@ import java.util.concurrent.atomic.AtomicBoolean
  *  - cancel() -> null. Stops the running render or save; its reply
  *    becomes `cancelled` and the partial MP3 (or saved file) is deleted.
  *  - save({treeUri, fileName, srcPath}) -> {fileName, location} (AC16).
+ *    Calls Dart's "saveProgress" with the copy's 0..1 as it goes.
  *  - openFolder({treeUri}) -> whether a file manager could be opened.
  *
  * Error codes match the Dart ExportFailure types (AC18): storage_full,
  * permission_denied, generation_failed, interrupted, cancelled,
- * no_folder_picker, plus bad_args.
+ * no_folder_picker, not_local_folder, cancelled_partial (a cancelled
+ * save whose partial file could not be removed), plus bad_args.
  */
 internal class ExportChannel(private val activity: Activity, messenger: BinaryMessenger) {
     private val channel = MethodChannel(messenger, CHANNEL)
@@ -58,6 +65,15 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
      * before the work is queued: channel calls arrive in order, so a
      * cancel sent after that render is never wiped, and one left over
      * from an earlier export never stops this one.
+     *
+     * Invariant (latched cancel): only "render" clears the flag, so a
+     * cancel stays set from the moment it arrives until the next export's
+     * render. No native call that runs before render in an export
+     * (pickFolder, listNames, anything added later) may check
+     * [stopRequested]: it could see the last export's cancel and stop an
+     * export the user never cancelled. Dart checks its own token between
+     * steps instead. save() runs after render, so it sees only this
+     * export's cancel.
      */
     private val cancelled = AtomicBoolean(false)
 
@@ -123,11 +139,23 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
             result.error("bad_args", "a folder pick is already open", null)
             return
         }
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(
-            Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
-                Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
-        )
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+            .addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
+            )
+            // Asks the picker to hide cloud and app providers. Pickers may
+            // ignore it, so the answer is still checked in onActivityResult.
+            .putExtra(Intent.EXTRA_LOCAL_ONLY, true)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // Opens on the phone's own storage rather than wherever the
+            // picker was last used, which may have been Drive.
+            intent.putExtra(
+                DocumentsContract.EXTRA_INITIAL_URI,
+                DocumentsContract.buildRootUri(EXTERNAL_STORAGE_AUTHORITY, PRIMARY_VOLUME),
+            )
+        }
         try {
             pendingPick = result
             activity.startActivityForResult(intent, PICK_FOLDER_REQUEST)
@@ -147,6 +175,12 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
         val tree = data?.data
         if (resultCode != Activity.RESULT_OK || tree == null) {
             result.success(null)
+            return true
+        }
+        if (!LocalFolders.isLocal(tree.authority)) {
+            // Before persisting, so a refused folder leaves no grant behind.
+            Log.i(TAG, "refused a folder from ${tree.authority}")
+            result.error(NOT_LOCAL_FOLDER, "pick a folder on this phone", null)
             return true
         }
         try {
@@ -238,9 +272,13 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
     }
 
     /** Called on the export thread; the channel must be used on main. */
-    private fun sendProgress(fraction: Double) {
+    private fun sendProgress(fraction: Double) = post(PROGRESS, fraction)
+
+    private fun sendSaveProgress(fraction: Double) = post(SAVE_PROGRESS, fraction)
+
+    private fun post(method: String, fraction: Double) {
         mainHandler.post {
-            if (!disposed.get()) channel.invokeMethod(PROGRESS, fraction)
+            if (!disposed.get()) channel.invokeMethod(method, fraction)
         }
     }
 
@@ -249,10 +287,10 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
         val parent = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
         val doc = folderStep { DocumentsContract.createDocument(resolver, parent, MP3_MIME, fileName) }
             ?: throw SecurityException("the folder refused a new file")
-        var complete = false
         try {
             val stream = folderStep { resolver.openOutputStream(doc, "w") }
                 ?: throw SecurityException("the folder refused writing")
+            val progress = CopyProgress(src.length(), ::sendSaveProgress)
             stream.use { o ->
                 FileInputStream(src).use { i ->
                     val buf = ByteArray(COPY_BUFFER_BYTES)
@@ -261,16 +299,20 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
                         val n = i.read(buf)
                         if (n < 0) break
                         o.write(buf, 0, n)
+                        progress.advance(n.toLong())
                     }
                 }
             }
-            complete = true
-        } finally {
-            if (!complete) {
-                // Leave no partial file in the user's folder (AC18).
-                runCatching { DocumentsContract.deleteDocument(resolver, doc) }
-                    .onFailure { Log.w(TAG, "could not remove partial export", it) }
-            }
+            progress.finish()
+        } catch (e: Throwable) {
+            // Leave no partial file in the user's folder (AC18).
+            val removed = runCatching { DocumentsContract.deleteDocument(resolver, doc) }
+                .onFailure { Log.w(TAG, "could not remove partial export", it) }
+                .getOrDefault(false)
+            // A cancel normally reads "Nothing was saved"; that must not be
+            // said while part of the file is still in the folder.
+            if (!removed && e is ExportCancelled) throw PartialFileLeft(e)
+            throw e
         }
         // A provider may rename on its own; report the name it really used.
         // The file is already saved, so a failing lookup must not turn
@@ -297,9 +339,9 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
 
     /**
      * A readable folder path for the success dialog. External storage tree
-     * ids look like "primary:Music/PiyaNota" or "1A2B-3C4D:Songs"; other
-     * providers (Drive, Downloads) have opaque ids, so those fall back to
-     * the folder's display name.
+     * ids look like "primary:Music/PiyaNota" or "1A2B-3C4D:Songs". The
+     * Downloads provider, the only other one [LocalFolders] accepts, has
+     * opaque ids, so it falls back to the folder's display name.
      */
     private fun describeLocation(tree: Uri): String {
         val id = DocumentsContract.getTreeDocumentId(tree)
@@ -351,7 +393,9 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
     private fun errorCode(e: Throwable): String = when {
         // Read when the error is reported: a dispose during a user's
         // cancel is still an interruption, not something they chose.
+        e is PartialFileLeft && !disposed.get() && cancelled.get() -> CANCELLED_PARTIAL
         e is ExportCancelled && !disposed.get() && cancelled.get() -> CANCELLED
+        e is PartialFileLeft -> INTERRUPTED
         e is ExportCancelled || e is InterruptedException -> INTERRUPTED
         isOutOfSpace(e) -> STORAGE_FULL
         e is SecurityException || e is FolderGone -> PERMISSION_DENIED
@@ -390,7 +434,7 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
         private const val PICK_FOLDER_REQUEST = 0x5049 // "PI"
         private const val MP3_MIME = "audio/mpeg"
         private const val COPY_BUFFER_BYTES = 64 * 1024
-        private const val EXTERNAL_STORAGE_AUTHORITY = "com.android.externalstorage.documents"
+        private const val EXTERNAL_STORAGE_AUTHORITY = LocalFolders.EXTERNAL_STORAGE
         private const val PRIMARY_VOLUME = "primary"
         private const val INTERNAL_STORAGE_LABEL = "Internal storage"
         private const val SD_CARD_LABEL = "SD card"
@@ -400,10 +444,16 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
         const val GENERATION_FAILED = "generation_failed"
         const val INTERRUPTED = "interrupted"
         const val CANCELLED = "cancelled"
+        const val CANCELLED_PARTIAL = "cancelled_partial"
         private const val PROGRESS = "progress"
+        private const val SAVE_PROGRESS = "saveProgress"
         const val NO_FOLDER_PICKER = "no_folder_picker"
+        const val NOT_LOCAL_FOLDER = "not_local_folder"
     }
 
     /** See [folderStep]. */
     private class FolderGone(cause: FileNotFoundException) : IOException(cause.message, cause)
+
+    /** A cancelled save whose partial file could not be deleted (L8). */
+    private class PartialFileLeft(cause: ExportCancelled) : IOException(cause.message, cause)
 }

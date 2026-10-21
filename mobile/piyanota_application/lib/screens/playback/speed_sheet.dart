@@ -66,7 +66,8 @@ class PlaybackSpeedSheet extends ConsumerWidget {
           key: const ValueKey('metronome-toggle'),
           value: state.metronomeOn,
           label: PlaybackMessages.metronomeClick,
-          // Independent of the mixer's metronome Mute (210 AC3).
+          // The same state as the Mixer row's on/off switch (user decision
+          // 2026-10-21); independent of that row's Mute (210 AC3).
           onChanged: clickUsable
               ? (on) => controller.setMetronomeOn(on: on)
               : null,

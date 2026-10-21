@@ -63,9 +63,21 @@ final class Interrupted extends ExportFailure {
 }
 
 /// The user pressed Cancel. Not an error: nothing was saved, and the
-/// partial file and temp files are gone.
+/// partial file and temp files are gone, unless [partialFileLeft].
 final class Cancelled extends ExportFailure {
-  const Cancelled();
+  const Cancelled({this.partialFileLeft = false});
+
+  /// The save was stopped part-way and the phone would not let the
+  /// unfinished file be removed, so it may still be in the folder. The
+  /// sheet must not say "Nothing was saved" then.
+  final bool partialFileLeft;
+}
+
+/// The picked folder is not on this phone (Drive, another app's storage,
+/// the cloud). Exports are saved only to the phone's own storage (user
+/// decision 2026-10-21), so the user is asked to pick again.
+final class NotLocalFolder extends ExportFailure {
+  const NotLocalFolder();
 }
 
 /// The phone has no app for choosing a folder (some stripped-down ROMs
@@ -95,14 +107,35 @@ class ExportCancelToken {
   }
 }
 
+/// Folder providers that keep files on this phone (user decision
+/// 2026-10-21). Mirrors `LocalFolders.kt`, which refuses the rest before
+/// any permission is kept; checked here too in case a picker ignores
+/// EXTRA_LOCAL_ONLY and the native check is ever bypassed.
+///  - externalstorage: internal storage and SD cards.
+///  - downloads: only the phone's own Download folder, no cloud backing.
+const Set<String> localFolderAuthorities = {
+  'com.android.externalstorage.documents',
+  'com.android.providers.downloads.documents',
+};
+
+/// [treeUri] is a folder on this phone.
+bool isLocalFolder(String treeUri) {
+  final uri = Uri.tryParse(treeUri);
+  return uri != null &&
+      uri.scheme == 'content' &&
+      localFolderAuthorities.contains(uri.host);
+}
+
 abstract interface class ExportService {
   /// The folder the user picked (AC10), or null if they cancelled (AC11).
+  /// Throws [NotLocalFolder] for a folder that is not on this phone.
   Future<String?> pickFolder();
 
   /// Makes the MP3 and saves it in [treeUri]. Throws [ExportFailure];
   /// [Cancelled] once [cancel] is cancelled, unless the file was already
   /// saved by then (it is then reported as saved, because it is).
-  /// [onProgress] gets the render's 0..1, never going back.
+  /// [onProgress] gets the whole export's 0..1 (download, render, save;
+  /// see [ExportProgress]), never going back, ending at 1.0 on success.
   Future<ExportResult> export(
     ExportJob job,
     String treeUri, {
@@ -123,8 +156,9 @@ class MethodChannelExportService implements ExportService {
   final Dio _dio;
   final Future<Directory> Function() _workDir;
 
-  /// Called by the native side during render (ExportChannel.kt).
-  static const String _progressMethod = 'progress';
+  /// Called by the native side during render and save (ExportChannel.kt).
+  static const String _renderProgressMethod = 'progress';
+  static const String _saveProgressMethod = 'saveProgress';
 
   /// errno for "No space left on device" on Linux/Android.
   static const int _enospc = 28;
@@ -133,8 +167,14 @@ class MethodChannelExportService implements ExportService {
   static const String _workPrefix = 'export_';
 
   @override
-  Future<String?> pickFolder() =>
-      _call(() => _channel.invokeMethod<String>('pickFolder'));
+  Future<String?> pickFolder() async {
+    final tree = await _call(() => _channel.invokeMethod<String>('pickFolder'));
+    if (tree != null && !isLocalFolder(tree)) {
+      debugPrint('Export: refused a folder that is not on this phone');
+      throw const NotLocalFolder();
+    }
+    return tree;
+  }
 
   @override
   Future<bool> openFolder(String treeUri) async {
@@ -163,30 +203,61 @@ class MethodChannelExportService implements ExportService {
     final token = cancel ?? ExportCancelToken();
     token.throwIfCancelled();
     final downloads = CancelToken();
+    final remote = job.inputs.where((i) => _isRemote(i.track)).length;
+    final progress = ExportProgress(onProgress, downloads: remote > 0);
     var finished = false;
-    unawaited(
-      token.whenCancelled.then((_) async {
-        if (finished) return;
-        downloads.cancel();
-        await _sendCancel();
-      }),
-    );
-    final progress = ExportProgress(onProgress);
-    _channel.setMethodCallHandler((call) async {
-      if (call.method == _progressMethod) progress.report(call.arguments);
-    });
-    final base = await _workDir();
-    await _clearStaleWork(base);
-    final dir = await base.createTemp(_workPrefix);
+    Directory? dir;
+    // Everything from here is inside the try (L7), so the finally always
+    // removes the handler and whatever work folder was made.
     try {
+      unawaited(
+        token.whenCancelled.then((_) async {
+          if (finished) return;
+          downloads.cancel();
+          await _sendCancel();
+        }),
+      );
+      _channel.setMethodCallHandler((call) async {
+        switch (call.method) {
+          case _renderProgressMethod:
+            progress.report(ExportPhase.render, call.arguments);
+          case _saveProgressMethod:
+            progress.report(ExportPhase.save, call.arguments);
+        }
+      });
+      progress.report(ExportPhase.download, 0);
+      final base = await _workDir();
+      await _clearStaleWork(base);
+      final work = dir = await base.createTemp(_workPrefix);
       final inputs = <Map<String, Object>>[];
+      var downloaded = 0;
       for (final (index, input) in job.inputs.indexed) {
+        final before = downloaded;
         inputs.add({
-          'path': await _localPath(input.track, dir, index, downloads, token),
+          'path': await _localPath(
+            input.track,
+            work,
+            index,
+            downloads,
+            token,
+            // Each remote track is an equal share of the download phase;
+            // a server that sends no length moves it only per track.
+            onReceive: (received, total) {
+              if (total <= 0) return;
+              progress.report(
+                ExportPhase.download,
+                (before + received / total) / remote,
+              );
+            },
+          ),
           'gain': input.gain,
         });
+        if (_isRemote(input.track)) {
+          downloaded++;
+          progress.report(ExportPhase.download, downloaded / remote);
+        }
       }
-      final out = '${dir.path}${Platform.pathSeparator}export.mp3';
+      final out = '${work.path}${Platform.pathSeparator}export.mp3';
       // Checked here, not left to the native flag: render resets that
       // flag when it starts, so a cancel from before it would be lost.
       token.throwIfCancelled();
@@ -216,12 +287,19 @@ class MethodChannelExportService implements ExportService {
       if (fileName == null || location == null) {
         throw const GenerationFailed();
       }
+      progress.finish();
       return ExportResult(fileName: fileName, location: location);
+    } on ExportFailure catch (e) {
+      // L9: once the user has cancelled, whatever a stopped step fails
+      // with (a closed stream, a dropped download) is their Cancel, not
+      // an error to retry.
+      if (token.isCancelled && e is! Cancelled) throw const Cancelled();
+      rethrow;
     } finally {
       finished = true;
       _channel.setMethodCallHandler(null);
       try {
-        await dir.delete(recursive: true);
+        await dir?.delete(recursive: true);
       } on FileSystemException catch (e) {
         // The OS clears the cache eventually; not worth failing a saved
         // export over.
@@ -229,6 +307,9 @@ class MethodChannelExportService implements ExportService {
       }
     }
   }
+
+  static bool _isRemote(Uri track) =>
+      track.scheme == 'https' || track.scheme == 'http';
 
   /// Removes work folders an earlier export left when the app was killed
   /// mid-render (the finally below never ran). Only one export runs at a
@@ -269,16 +350,22 @@ class MethodChannelExportService implements ExportService {
     Directory dir,
     int index,
     CancelToken downloads,
-    ExportCancelToken token,
-  ) async {
+    ExportCancelToken token, {
+    required ProgressCallback onReceive,
+  }) async {
     if (track.scheme == 'file') return track.toFilePath();
-    if (track.scheme != 'https' && track.scheme != 'http') {
+    if (!_isRemote(track)) {
       debugPrint('Export: unsupported track scheme ${track.scheme}');
       throw const GenerationFailed();
     }
     final path = '${dir.path}${Platform.pathSeparator}track_$index';
     try {
-      await _dio.downloadUri(track, path, cancelToken: downloads);
+      await _dio.downloadUri(
+        track,
+        path,
+        cancelToken: downloads,
+        onReceiveProgress: onReceive,
+      );
       return path;
     } on DioException catch (e) {
       if (token.isCancelled) throw const Cancelled();
@@ -319,7 +406,9 @@ class MethodChannelExportService implements ExportService {
         'permission_denied' => const PermissionDenied(),
         'interrupted' => const Interrupted(),
         'cancelled' => const Cancelled(),
+        'cancelled_partial' => const Cancelled(partialFileLeft: true),
         'no_folder_picker' => const NoFolderPicker(),
+        'not_local_folder' => const NotLocalFolder(),
         _ => const GenerationFailed(),
       };
     } on MissingPluginException catch (e) {
@@ -329,23 +418,56 @@ class MethodChannelExportService implements ExportService {
   }
 }
 
-/// The render's progress as the sheet shows it: clamped to 0..1, and
-/// never moving back, whatever order or values the channel delivers.
+/// The parts of an export, in the order they run.
+enum ExportPhase { download, render, save }
+
+/// The whole export's progress as the sheet shows it (user decision
+/// 2026-10-21: determinate from download to save). Each phase reports its
+/// own 0..1, which lands in that phase's share of the bar. The result is
+/// clamped to 0..1 and never moves back, whatever order or values the
+/// channel delivers; [finish] makes it exactly 1.0.
 class ExportProgress {
-  ExportProgress(this._onProgress);
+  /// [downloads] false when every track is already on the phone: the
+  /// download phase then takes no share of the bar.
+  ExportProgress(this._onProgress, {bool downloads = true})
+    : _weights = {
+        ExportPhase.download: downloads ? downloadShare : 0,
+        ExportPhase.render: renderShare,
+        ExportPhase.save: saveShare,
+      };
+
+  // Rough shares of a typical export's time on a mid-range phone: the
+  // render (decode, two mixer passes, encode) is most of it.
+  static const double downloadShare = 0.2;
+  static const double renderShare = 0.7;
+  static const double saveShare = 0.1;
 
   final ValueChanged<double>? _onProgress;
+  final Map<ExportPhase, double> _weights;
   double _last = 0;
   bool _started = false;
 
   double get value => _last;
 
-  void report(Object? raw) {
+  void report(ExportPhase phase, Object? raw) {
     if (raw is! num || raw.isNaN) {
       debugPrint('Export: ignored progress value $raw');
       return;
     }
-    final next = raw.toDouble().clamp(0.0, 1.0);
+    final total = _weights.values.fold(0.0, (a, b) => a + b);
+    var start = 0.0;
+    for (final earlier in ExportPhase.values.takeWhile((p) => p != phase)) {
+      start += _weights[earlier]!;
+    }
+    final within = raw.toDouble().clamp(0.0, 1.0);
+    _emit((start + _weights[phase]! * within) / total);
+  }
+
+  /// The file is saved.
+  void finish() => _emit(1);
+
+  void _emit(double raw) {
+    final next = raw.clamp(0.0, 1.0);
     if (_started && next <= _last) return;
     _started = true;
     _last = next;

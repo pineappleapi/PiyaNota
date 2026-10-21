@@ -40,8 +40,9 @@ class VoiceMixerSheet extends ConsumerWidget {
     final state = ref.watch(provider);
     final controller = ref.read(provider.notifier);
     final clickUsable = state.clickStatus != ClickStatus.unavailable;
-    // Toggle off: the row still takes level, Mute and Solo (they apply
-    // once it is on), but looks inactive and says where to turn it on.
+    // Off: the row's own on/off switch still works (it is the Speed
+    // sheet's toggle, user decision 2026-10-21); level, Mute and Solo are
+    // locked until it is on.
     final clickOff = clickUsable && !state.metronomeOn;
     final unavailableNote = state.clickNeedsTempo
         ? PlaybackMessages.metronomeNeedsTempo
@@ -82,14 +83,27 @@ class VoiceMixerSheet extends ConsumerWidget {
       _MixerRow(
         key: const ValueKey('mixer-row-metronome'),
         name: PlaybackMessages.metronomeClick,
-        label: Text(
-          PlaybackMessages.metronomeClick,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-            color: clickOff ? AppTheme.sheetSubtle : AppTheme.sheetText,
-          ),
+        label: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              PlaybackMessages.metronomeClick,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: clickOff ? AppTheme.sheetSubtle : AppTheme.sheetText,
+              ),
+            ),
+            _MetronomeSwitch(
+              on: state.metronomeOn,
+              onChanged: clickUsable
+                  ? (on) => controller.setMetronomeOn(on: on)
+                  : null,
+            ),
+          ],
         ),
         enabled: clickUsable,
         inactive: clickOff,
+        locked: clickOff,
         disabledNote: unavailableNote,
         soloed: state.clickSoloed,
         muted: state.clickMuted,
@@ -169,6 +183,7 @@ class _MixerRow extends StatelessWidget {
     required this.onMute,
     required this.onVolume,
     this.inactive = false,
+    this.locked = false,
     this.onDisabledTap,
   });
 
@@ -191,15 +206,20 @@ class _MixerRow extends StatelessWidget {
   /// off): the slider is drawn faded. Text keeps AA contrast.
   final bool inactive;
 
+  /// Solo, slider and Mute are disabled but the row (its label, which may
+  /// hold a control of its own) is not faded or blocked.
+  final bool locked;
+
   /// Fixed so every row's slider starts at the same x, as in the mockup.
   static const double labelWidth = 112;
 
   @override
   Widget build(BuildContext context) {
+    final usable = enabled && !locked;
     final solo = SheetCheckbox(
       value: soloed,
       label: PlaybackMessages.soloLabel(name),
-      onChanged: enabled ? onSolo : null,
+      onChanged: usable ? onSolo : null,
     );
     final slider = Opacity(
       key: const ValueKey('mixer-slider-fade'),
@@ -218,7 +238,7 @@ class _MixerRow extends StatelessWidget {
                     value: volume,
                     semanticFormatterCallback: PlaybackMessages.volumeValue,
                     // On every change, not on change-end: AC3's 100 ms.
-                    onChanged: enabled ? onVolume : null,
+                    onChanged: usable ? onVolume : null,
                   ),
                 ),
               ),
@@ -231,7 +251,7 @@ class _MixerRow extends StatelessWidget {
     final mute = _MutePill(
       muted: muted,
       label: PlaybackMessages.muteLabel(name),
-      onChanged: enabled ? onMute : null,
+      onChanged: usable ? onMute : null,
     );
     final row = LayoutBuilder(
       builder: (context, constraints) {
@@ -281,6 +301,52 @@ class _MixerRow extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       onTap: onDisabledTap,
       child: faded,
+    );
+  }
+}
+
+/// The Metronome Click row's on/off: the same state as the Speed sheet's
+/// toggle (`PlaybackState.metronomeOn`, user decision 2026-10-21). A
+/// switch with an "On"/"Off" word, not a box, so it never reads as the
+/// row's Solo checkbox, which sits at the start of the row.
+class _MetronomeSwitch extends StatelessWidget {
+  const _MetronomeSwitch({required this.on, required this.onChanged});
+
+  final bool on;
+
+  /// Null disables it (the click can't play).
+  final ValueChanged<bool>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return MergeSemantics(
+      child: Semantics(
+        label: PlaybackMessages.metronomeSwitchLabel,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Switch(
+              key: const ValueKey('mixer-metronome-switch'),
+              value: on,
+              onChanged: onChanged,
+              activeThumbColor: Colors.white,
+              activeTrackColor: AppTheme.sheetCheckOn,
+              inactiveThumbColor: Colors.white,
+              inactiveTrackColor: AppTheme.sheetCheckBorder,
+              trackOutlineColor: const WidgetStatePropertyAll(
+                Colors.transparent,
+              ),
+            ),
+            ExcludeSemantics(
+              child: Text(
+                on ? PlaybackMessages.on : PlaybackMessages.off,
+                style: Theme.of(context).textTheme.bodySmall
+                    ?.copyWith(color: AppTheme.sheetSubtle),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

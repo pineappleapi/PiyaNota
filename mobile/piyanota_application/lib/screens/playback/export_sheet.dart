@@ -74,15 +74,22 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
   /// Cancel show. Null between exports.
   ExportCancelToken? _cancel;
 
-  /// The render's 0..1; null until the first report (the bar then runs
-  /// without a value while the tracks are fetched).
-  double? _progress;
+  /// The whole export's 0..1, download to save (user decision
+  /// 2026-10-21); 0 until the first report.
+  double _progress = 0;
 
   /// Cancel was pressed and the export is stopping.
   bool _cancelling = false;
 
   /// The last export was cancelled; says so calmly, nothing to retry.
   bool _cancelled = false;
+
+  /// That cancel left part of the file in the folder (L8).
+  bool _partialLeft = false;
+
+  /// The last folder picked was not on the phone; shown while the picker
+  /// is reopened, and after, if that pick is cancelled too.
+  bool _notLocal = false;
 
   /// The last failure was every ticked voice failing before the file was
   /// made, which Retry cannot fix.
@@ -94,7 +101,6 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
 
   static const double _pillDisabledOpacity = 0.38;
   static const double _barHeight = 6;
-  static const double _percent = 100;
   static const TextStyle _buttonLabel = TextStyle(
     // Large text: the sampled gradient only clears the 3:1 floor (see
     // AppTheme.exportDownloadGradient).
@@ -184,10 +190,17 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
         children: [
           ...rows,
           const SizedBox(height: 24),
-          if (_cancelled && !_busy)
+          if (_notLocal)
             const SheetNote(
-              ExportMessages.cancelled,
-              key: ValueKey('export-cancelled'),
+              ExportMessages.notLocalFolder,
+              key: ValueKey('export-not-local'),
+            ),
+          if (_cancelled && !_busy)
+            SheetNote(
+              _partialLeft
+                  ? ExportMessages.cancelledPartial
+                  : ExportMessages.cancelled,
+              key: const ValueKey('export-cancelled'),
             ),
           if (failure != null)
             Padding(
@@ -221,40 +234,57 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
     );
   }
 
-  /// The bar and Cancel, under Download while the file is made. Cancel is
-  /// the only way out then: the sheet cannot be closed (AC12).
-  List<Widget> _progressRows() => [
-    const SizedBox(height: 16),
-    Padding(
-      padding: const EdgeInsets.fromLTRB(10, 0, 8, 0),
-      child: LinearProgressIndicator(
-        key: const ValueKey('export-progress'),
-        value: _progress,
-        minHeight: _barHeight,
-        color: AppTheme.playbackNavy,
-        backgroundColor: AppTheme.sheetDivider,
-        borderRadius: BorderRadius.circular(_barHeight / 2),
-        semanticsLabel: ExportMessages.progressLabel,
-        semanticsValue: _progress == null
-            ? null
-            : '${(_progress! * _percent).round()}%',
-      ),
-    ),
-    const SizedBox(height: 8),
-    Center(
-      child: TextButton(
-        key: const ValueKey('export-cancel'),
-        onPressed: _cancelling ? null : _cancelExport,
-        style: TextButton.styleFrom(
-          foregroundColor: AppTheme.playbackNavy,
-          minimumSize: const Size(64, kMinInteractiveDimension),
+  /// The bar, its percentage and the X, under Download while the file is
+  /// made (user decision 2026-10-21: determinate end to end, an X icon for
+  /// Cancel).
+  List<Widget> _progressRows() {
+    final percent = ExportMessages.percent(_progress);
+    return [
+      const SizedBox(height: 8),
+      Padding(
+        padding: const EdgeInsets.only(left: 10),
+        child: Row(
+          children: [
+            Expanded(
+              child: LinearProgressIndicator(
+                key: const ValueKey('export-progress'),
+                value: _progress,
+                minHeight: _barHeight,
+                color: AppTheme.playbackNavy,
+                backgroundColor: AppTheme.sheetDivider,
+                borderRadius: BorderRadius.circular(_barHeight / 2),
+                semanticsLabel: ExportMessages.progressLabel,
+                semanticsValue: percent,
+              ),
+            ),
+            const SizedBox(width: 8),
+            ExcludeSemantics(
+              // The bar already speaks the same value.
+              child: Text(
+                _cancelling ? ExportMessages.cancelling : percent,
+                key: const ValueKey('export-percent'),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: AppTheme.sheetText,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ),
+            IconButton(
+              key: const ValueKey('export-cancel'),
+              onPressed: _cancelling ? null : _cancelExport,
+              tooltip: ExportMessages.cancelExport,
+              icon: const Icon(Icons.close),
+              color: AppTheme.playbackNavy,
+              constraints: const BoxConstraints(
+                minWidth: kMinInteractiveDimension,
+                minHeight: kMinInteractiveDimension,
+              ),
+            ),
+          ],
         ),
-        child: Text(
-          _cancelling ? ExportMessages.cancelling : ExportMessages.cancel,
-        ),
       ),
-    ),
-  ];
+    ];
+  }
 
   void _cancelExport() {
     final token = _cancel;
@@ -289,11 +319,12 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
       _failure = null;
       _nothingLeft = false;
       _cancelled = false;
+      _partialLeft = false;
     });
     final selection = _selection;
     var saved = false;
     try {
-      final treeUri = _treeUri ?? await service.pickFolder();
+      final treeUri = _treeUri ?? await _pickLocalFolder(service);
       // AC11: picker cancelled, back to the sheet with the ticks kept.
       if (treeUri == null) return;
       _treeUri = treeUri;
@@ -301,8 +332,9 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
       if (mounted) {
         setState(() {
           _cancel = token;
-          _progress = null;
+          _progress = 0;
           _cancelling = false;
+          _notLocal = false;
         });
       }
       final result = await runExport(
@@ -323,9 +355,14 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
       saved = true;
       Navigator.of(context)
           .pop<ExportSaved>((result: result, treeUri: treeUri));
-    } on Cancelled {
+    } on Cancelled catch (cancel) {
       // Not a failure: the ticks stay, nothing was saved, no Retry.
-      if (mounted) setState(() => _cancelled = true);
+      if (mounted) {
+        setState(() {
+          _cancelled = true;
+          _partialLeft = cancel.partialFileLeft;
+        });
+      }
     } on ExportFailure catch (failure) {
       if (mounted) {
         setState(() {
@@ -340,6 +377,20 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
       _cancelling = false;
       if (mounted && _busy) setState(() => _busy = false);
       if (mounted && !saved) _closeIfPlaybackGone();
+    }
+  }
+
+  /// The picker, again and again until the folder is on this phone or the
+  /// user backs out (user decision 2026-10-21): a Drive or app folder
+  /// shows "Pick a folder on this phone." and reopens it straight away.
+  Future<String?> _pickLocalFolder(ExportService service) async {
+    while (true) {
+      try {
+        return await service.pickFolder();
+      } on NotLocalFolder {
+        if (!mounted) return null;
+        setState(() => _notLocal = true);
+      }
     }
   }
 
@@ -360,6 +411,8 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
     GenerationFailed() => ExportMessages.generationFailed,
     Interrupted() => ExportMessages.interrupted,
     NoFolderPicker() => ExportMessages.noFolderPicker,
+    // Handled by reopening the picker; only reached if that is bypassed.
+    NotLocalFolder() => ExportMessages.notLocalFolder,
     // Shown by its own calm note, never as an error banner.
     Cancelled() => ExportMessages.cancelled,
   };

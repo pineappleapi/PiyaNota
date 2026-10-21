@@ -67,3 +67,35 @@ internal class RenderProgress(private val report: (Double) -> Unit) {
         private const val NOT_STARTED = -1
     }
 }
+
+/**
+ * The save's copy into the picked folder as 0..1, by bytes (PIYA-211).
+ * Same whole-percent, never-backwards steps as [RenderProgress].
+ */
+internal class CopyProgress(totalBytes: Long, private val report: (Double) -> Unit) {
+    // An empty or unreadable source still finishes instead of dividing by 0.
+    private val total = maxOf(1L, totalBytes)
+    private var done = 0L
+    private var lastStep = -1
+
+    init {
+        emit()
+    }
+
+    fun advance(bytes: Long) {
+        done += bytes
+        emit()
+    }
+
+    fun finish() {
+        done = total
+        emit()
+    }
+
+    private fun emit() {
+        val step = floor(minOf(1.0, done.toDouble() / total) * RenderProgress.STEPS).toInt()
+        if (step <= lastStep) return
+        lastStep = step
+        report(step.toDouble() / RenderProgress.STEPS)
+    }
+}

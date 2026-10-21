@@ -426,7 +426,9 @@ void main() {
         'tenor.mp3': 0.7,
         'bass.mp3': exportDefaultLevel,
       });
-      expect(exportDefaultLevel, PlaybackController.fullVolume);
+      // User decision 2026-10-21: 80%, kept apart from the Mixer's reset.
+      expect(exportDefaultLevel, 0.8);
+      expect(exportDefaultLevel, isNot(PlaybackController.fullVolume));
     });
 
     testWidgets('a voice ticked with its chip off keeps its Mixer level', (
@@ -466,12 +468,12 @@ void main() {
       expect(clickGain(), 0.25);
 
       controller(tester).setClickMuted(muted: true);
-      expect(clickGain(), exportDefaultClickLevel);
+      expect(clickGain(), exportDefaultLevel);
 
       controller(tester)
         ..setClickMuted(muted: false)
         ..setVoiceSoloed(VoicePart.soprano, soloed: true);
-      expect(clickGain(), exportDefaultClickLevel);
+      expect(clickGain(), exportDefaultLevel);
 
       controller(tester).setClickSoloed(soloed: true);
       expect(clickGain(), 0.25);
@@ -700,10 +702,18 @@ void main() {
       await tester.tap(download);
       await tester.pump();
       expect(bar, findsOneWidget);
-      expect(tester.widget<LinearProgressIndicator>(bar).value, isNull);
+      // Determinate from the start (user decision 2026-10-21).
+      expect(tester.widget<LinearProgressIndicator>(bar).value, 0);
+      expect(find.text('0%'), findsOneWidget);
       service.lastOnProgress!(0.4);
       await tester.pump();
       expect(tester.widget<LinearProgressIndicator>(bar).value, 0.4);
+      expect(find.text('40%'), findsOneWidget);
+      expect(find.byTooltip(ExportMessages.cancelExport), findsOneWidget);
+      expect(
+        tester.getSize(cancelButton).shortestSide,
+        greaterThanOrEqualTo(kMinInteractiveDimension),
+      );
 
       // Still non-dismissible: Cancel is the way out.
       await tester.binding.handlePopRoute();
@@ -748,6 +758,59 @@ void main() {
       expect(service.lastCancel!.isCancelled, isFalse);
       expect(find.text(ExportMessages.successTitle), findsOneWidget);
     });
+  });
+
+  group('local-only folders (user decision 2026-10-21)', () {
+    testWidgets('a folder not on the phone says so and reopens the picker '
+        'straight away; a phone folder then exports', (tester) async {
+      final service = FakeExportService()
+        ..pickQueue.addAll(const [NotLocalFolder(), NotLocalFolder()]);
+      await pumpPlayback(tester, harness(service));
+      await openExport(tester);
+      await tick(tester, ExportMessages.voiceBox(VoicePart.soprano));
+      await tester.tap(download);
+      await settle(tester);
+      expect(service.pickCalls, 3);
+      expect(service.exports, hasLength(1));
+      expect(find.text(ExportMessages.successTitle), findsOneWidget);
+    });
+
+    testWidgets('backing out of the reopened picker keeps the message and '
+        'saves nothing', (tester) async {
+      final service = FakeExportService(folder: null)
+        ..pickQueue.add(const NotLocalFolder());
+      await pumpPlayback(tester, harness(service));
+      await openExport(tester);
+      await tick(tester, ExportMessages.voiceBox(VoicePart.soprano));
+      await tester.tap(download);
+      await settle(tester);
+      expect(service.pickCalls, 2);
+      expect(service.exports, isEmpty);
+      expect(find.text(ExportMessages.notLocalFolder), findsOneWidget);
+      expect(find.byKey(const ValueKey('export-error')), findsNothing);
+    });
+  });
+
+  testWidgets('L8: a cancel that left part of the file does not say '
+      '"Nothing was saved"', (tester) async {
+    final service = FakeExportService(
+      failures: const [Cancelled(partialFileLeft: true)],
+    );
+    await pumpPlayback(tester, harness(service));
+    await openExport(tester);
+    await tick(tester, ExportMessages.voiceBox(VoicePart.soprano));
+    await tester.tap(download);
+    await settle(tester);
+    expect(find.text(ExportMessages.cancelledPartial), findsOneWidget);
+    expect(find.text(ExportMessages.cancelled), findsNothing);
+  });
+
+  testWidgets('M1: the click row reads "Include metronome/click"', (
+    tester,
+  ) async {
+    await pumpPlayback(tester, harness(FakeExportService()));
+    await openExport(tester);
+    expect(find.text('Include metronome/click'), findsOneWidget);
   });
 
   group('review findings', () {

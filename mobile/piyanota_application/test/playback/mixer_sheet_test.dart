@@ -181,6 +181,49 @@ void main() {
         reason: 'mute state independent of slider position',
       );
     });
+
+    testWidgets('a slider dragged to 0 mutes the row; lifting it off 0 '
+        'unmutes it (user decision 2026-10-21)', (tester) async {
+      final harness = ready();
+      await pumpPlayback(tester, harness);
+      await openMixer(tester);
+      final alto = voiceRow(VoicePart.alto);
+      await setSlider(tester, alto, 0);
+      expect(controller(tester).state.muted, contains(VoicePart.alto));
+      expect(harness.engine.volumes[VoicePart.alto], 0);
+      await setSlider(tester, alto, 0.5);
+      expect(controller(tester).state.muted, isNot(contains(VoicePart.alto)));
+      expect(harness.engine.volumes[VoicePart.alto], closeTo(0.5, 0.05));
+    });
+
+    testWidgets('unmuting a row at 0 brings it back at 80%, voice and click '
+        '(user decision 2026-10-21)', (tester) async {
+      final harness = ready();
+      await pumpPlayback(tester, harness);
+      await openMixer(tester);
+      final tenor = voiceRow(VoicePart.tenor);
+      await setSlider(tester, tenor, 0);
+      await tapIn(tester, muteIn(tenor));
+      expect(controller(tester).state.muted, isNot(contains(VoicePart.tenor)));
+      expect(
+        controller(tester).state.volumes[VoicePart.tenor],
+        PlaybackController.unmuteFromZeroLevel,
+      );
+      expect(PlaybackController.unmuteFromZeroLevel, 0.8);
+      expect(harness.engine.volumes[VoicePart.tenor], 0.8);
+
+      final c = controller(tester)
+        ..setMetronomeOn(on: true)
+        ..setClickVolume(0);
+      expect(c.state.clickMuted, isTrue);
+      c.setClickMuted(muted: false);
+      expect(c.state.clickMuted, isFalse);
+      expect(c.state.clickVolume, PlaybackController.unmuteFromZeroLevel);
+      c.setClickVolume(0.3);
+      c.setClickMuted(muted: true);
+      c.setClickMuted(muted: false);
+      expect(c.state.clickVolume, 0.3, reason: 'only a 0 slider is reset');
+    });
   });
 
   group('solo', () {
@@ -269,13 +312,15 @@ void main() {
       expect(engine.clickVolume, 0);
     });
 
-    testWidgets('toggle off: the row looks inactive with a hint, stays '
-        'editable, and its Solo does not silence the voices', (tester) async {
+    testWidgets('off: the row looks inactive with a hint, its level, Mute '
+        'and Solo are locked, and its own switch turns it on (user decision '
+        '2026-10-21)', (tester) async {
       final harness = ready();
       await pumpPlayback(tester, harness);
       await openMixer(tester);
       final engine = harness.engine;
       final hint = find.byKey(const ValueKey('mixer-metronome-off'));
+      final toggle = find.byKey(const ValueKey('mixer-metronome-switch'));
       double fade() => tester
           .widget<Opacity>(
             find.descendant(
@@ -288,49 +333,85 @@ void main() {
       expect(hint, findsOneWidget);
       expect(find.text(PlaybackMessages.metronomeOff), findsOneWidget);
       expect(fade(), lessThan(1));
+      expect(tester.widget<Switch>(toggle).value, isFalse);
+      expect(tester.widget<Switch>(toggle).onChanged, isNotNull);
+      expect(tester.widget<Slider>(sliderIn(metronomeRow)).onChanged, isNull);
       expect(
-        tester
-            .widget<Opacity>(
-              find.descendant(
-                of: voiceRow(VoicePart.alto),
-                matching: find.byKey(const ValueKey('mixer-slider-fade')),
-              ),
-            )
-            .opacity,
-        1,
+        tester.widget<SheetCheckbox>(soloIn(metronomeRow)).onChanged,
+        isNull,
       );
+      await tapIn(tester, muteIn(metronomeRow));
+      expect(controller(tester).state.clickMuted, isFalse);
 
-      // Still editable.
+      // The switch is not the Solo box: it turns the click on, not solo.
+      await tester.tap(toggle);
+      await tester.pump();
+      expect(controller(tester).state.metronomeOn, isTrue);
+      expect(controller(tester).state.clickSoloed, isFalse);
+      expect(hint, findsNothing);
+      expect(fade(), 1);
       expect(
         tester.widget<Slider>(sliderIn(metronomeRow)).onChanged,
         isNotNull,
       );
-      await setSlider(tester, metronomeRow, 0.5);
-      final level = sliderValue(tester, metronomeRow);
-      expect(level, closeTo(0.5, 0.05));
-      await tapIn(tester, muteIn(metronomeRow));
-      expect(controller(tester).state.clickMuted, isTrue);
-      await tapIn(tester, muteIn(metronomeRow));
-
-      // Soloed while off: the voices keep sounding, the click stays silent.
       await tapIn(tester, soloIn(metronomeRow));
-      expect(tester.widget<SheetCheckbox>(soloIn(metronomeRow)).value, isTrue);
-      expect(engine.volumes.values.every((v) => v == 1), isTrue);
-      expect(engine.clickVolume, 0);
-
-      // Turned on in Speed: the hint goes, and the solo now applies.
-      controller(tester).setMetronomeOn(on: true);
-      await tester.pump();
-      expect(hint, findsNothing);
-      expect(fade(), 1);
-      expect(engine.clickVolume, level);
       expect(engine.volumes.values.every((v) => v == 0), isTrue);
 
-      // Off again: voices back, click silent.
-      controller(tester).setMetronomeOn(on: false);
+      // Off again from the switch: voices back, click silent.
+      await tester.tap(toggle);
       await tester.pump();
+      expect(controller(tester).state.metronomeOn, isFalse);
       expect(engine.volumes.values.every((v) => v == 1), isTrue);
       expect(engine.clickVolume, 0);
+    });
+
+    testWidgets('the Mixer switch and the Speed checkbox are one state, '
+        'both ways (user decision 2026-10-21)', (tester) async {
+      await pumpPlayback(tester, ready());
+      final mixerSwitch = find.byKey(const ValueKey('mixer-metronome-switch'));
+      final speedBox = find.byKey(const ValueKey('metronome-toggle'));
+      Future<void> close() async {
+        await tester.tap(find.byTooltip(PlaybackMessages.close));
+        await tester.pumpAndSettle();
+      }
+
+      Future<void> openSpeed() async {
+        await tester.tap(find.bySemanticsLabel(PlaybackMessages.speed));
+        await tester.pumpAndSettle();
+      }
+
+      // Mixer on -> Speed shows on.
+      await openMixer(tester);
+      await tester.tap(mixerSwitch);
+      await tester.pump();
+      await close();
+      await openSpeed();
+      expect(tester.widget<SheetCheckbox>(speedBox).value, isTrue);
+
+      // Speed off -> Mixer shows off.
+      await tester.tap(speedBox);
+      await tester.pump();
+      expect(tester.widget<SheetCheckbox>(speedBox).value, isFalse);
+      await close();
+      await openMixer(tester);
+      expect(tester.widget<Switch>(mixerSwitch).value, isFalse);
+      expect(controller(tester).state.metronomeOn, isFalse);
+    });
+
+    testWidgets('the switch reads as an on/off, not as Solo', (tester) async {
+      await pumpPlayback(tester, ready());
+      await openMixer(tester);
+      expect(
+        find.bySemanticsLabel(PlaybackMessages.metronomeSwitchLabel),
+        findsOneWidget,
+      );
+      expect(
+        find.bySemanticsLabel(
+          PlaybackMessages.soloLabel(PlaybackMessages.metronomeClick),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text(PlaybackMessages.off), findsOneWidget);
     });
 
     testWidgets('a soloed click still preparing does not silence the '

@@ -36,6 +36,8 @@ How PiyaNota meets the LGPL:
   (PIYA-211) through `androidx.media3.common.audio.SonicAudioProcessor`,
   which keeps the pitch while changing speed (FR-9).
 - Not vendored: it ships inside `androidx.media3:media3-common:1.9.0`,
-  which the app already depends on through `just_audio`.
+  which the app declares directly in `android/app/build.gradle.kts`
+  (`implementation("androidx.media3:media3-common:1.9.0")`), so Export
+  does not rely on `just_audio` pulling it in.
 - Licence: Apache License 2.0. Sonic is copyright (c) 2010 Bill Cox; the
   Media3 port is copyright The Android Open Source Project.
