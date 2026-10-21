@@ -7,7 +7,9 @@ import 'package:path_provider/path_provider.dart';
 import '../models/export_selection.dart';
 import '../models/voice_part.dart';
 import '../services/export_service.dart';
+import '../services/notification_permission.dart';
 import 'auth_providers.dart';
+import 'capture_providers.dart';
 import 'playback_providers.dart';
 
 /// Tests override it with a fake.
@@ -18,14 +20,18 @@ final exportServiceProvider = Provider<ExportService>(
   ),
 );
 
+/// Android 13+'s notification permission, asked before the first export
+/// (user decision 2026-10-22). Tests override it with a fake.
+final notificationPermissionProvider = Provider<NotificationPermission>(
+  (ref) => PluginNotificationPermission(ref.watch(deviceChannelProvider)),
+);
+
 /// The level a ticked voice or click gets when the Voice Mixer does not
 /// let it be heard (muted, soloed out, or its slider at 0): 80%, not full
-/// (user decision 2026-10-21). The same level a Mixer row comes back at
-/// when it is unmuted from 0 ([PlaybackController.unmuteFromZeroLevel]),
-/// so a silenced track sounds the same in the file as it would once
-/// unmuted. Not the Mixer's reset level, which stays at
+/// (user decision 2026-10-21, kept 2026-10-22 when unmute stopped
+/// resetting the level). Not the Mixer's reset level, which stays at
 /// [PlaybackController.fullVolume] (PIYA-209 AC5).
-const double exportDefaultLevel = PlaybackController.unmuteFromZeroLevel;
+const double exportDefaultLevel = 0.8;
 
 // The Export sheet only reads Playback (user decision 2026-10-21): it
 // starts from what the Mixer, the Speed sheet and the chips let be heard,
@@ -110,7 +116,9 @@ ExportSelection exportableSelection(
 
 /// Only the ticked voices (and the click, if ticked) at their export
 /// levels, at the Playback speed. Unticked voices are not sent at all, so
-/// the file runs as long as the longest ticked track.
+/// the file runs as long as the longest ticked track. The click is
+/// written by [writeClick] inside the export (L4), so its time is on the
+/// bar and under Cancel; with no [writeClick] there is no click.
 ///
 /// Throws [GenerationFailed] when no ticked voice is left: a file with no
 /// ticked voice must never be saved and reported as a success.
@@ -118,7 +126,8 @@ ExportJob buildExportJob(
   PlaybackState state,
   ExportSelection selection,
   String title, {
-  Uri? clickTrack,
+  Future<Uri> Function()? writeClick,
+  ExportNoticeText notice = ExportNoticeText.plain,
 }) {
   final exported = exportableSelection(state, selection);
   if (!exported.canDownload) throw const GenerationFailed();
@@ -127,21 +136,25 @@ ExportJob buildExportJob(
     for (final voice in VoicePart.values)
       if (exported.voices.contains(voice))
         (track: tracks[voice]!, gain: exportVoiceGain(state, voice)),
-    if (exportWantsClick(state, exported) && clickTrack != null)
-      (track: clickTrack, gain: exportClickGain(state)),
   ];
+  final clickGain = exportClickGain(state);
   return ExportJob(
     inputs: inputs,
+    prepare: exportWantsClick(state, exported) && writeClick != null
+        ? () async => (track: await writeClick(), gain: clickGain)
+        : null,
     speed: state.speed,
     fileName: exportFileName(title: title, selection: exported),
+    notice: notice,
   );
 }
 
-/// One export, start to finish: write the click if it is wanted, build
-/// the job, make and save the file. The click file is this export's own,
-/// so it is deleted here whatever happens. [state] and [writeClick] are
-/// captured when the export starts ([PlaybackController.exportClickWriter])
-/// so it can finish after Playback has closed.
+/// One export, start to finish: build the job, make and save the file,
+/// writing the click on the way if it is wanted. The click file is this
+/// export's own, so it is deleted here whatever happens. [state] and
+/// [writeClick] are captured when the export starts
+/// ([PlaybackController.exportClickWriter]) so it can finish after
+/// Playback has closed.
 Future<ExportResult> runExport({
   required ExportService service,
   required Future<Uri> Function() writeClick,
@@ -149,30 +162,25 @@ Future<ExportResult> runExport({
   required ExportSelection selection,
   required String title,
   required String treeUri,
+  ExportNoticeText notice = ExportNoticeText.plain,
   ExportCancelToken? cancel,
   ValueChanged<double>? onProgress,
 }) async {
-  // Checked before the click is written, so a voice that failed while the
-  // folder picker was open costs nothing.
+  // Checked first, so a voice that failed while the folder picker was
+  // open costs nothing.
   if (!exportableSelection(state, selection).canDownload) {
     debugPrint('Export: no ticked voice can be played any more');
     throw const GenerationFailed();
   }
-  final wantsClick = exportWantsClick(state, selection);
   Uri? click;
   try {
-    if (wantsClick) {
-      try {
-        click = await writeClick();
-      } on Object catch (e, stack) {
-        debugPrint('Export: click not generated: $e\n$stack');
-        // L9: a Cancel while the click was being written is the Cancel.
-        cancel?.throwIfCancelled();
-        throw const GenerationFailed();
-      }
-    }
-    cancel?.throwIfCancelled();
-    final job = buildExportJob(state, selection, title, clickTrack: click);
+    final job = buildExportJob(
+      state,
+      selection,
+      title,
+      writeClick: () async => click = await writeClick(),
+      notice: notice,
+    );
     return await service.export(
       job,
       treeUri,
@@ -188,7 +196,7 @@ Future<ExportResult> runExport({
     cancel?.throwIfCancelled();
     throw const GenerationFailed();
   } finally {
-    if (click != null) await _deleteQuietly(click);
+    if (click case final file?) await _deleteQuietly(file);
   }
 }
 

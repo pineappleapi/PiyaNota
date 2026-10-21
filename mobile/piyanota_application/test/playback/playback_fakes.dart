@@ -26,6 +26,7 @@ import 'package:piyanota_application/state/export_providers.dart';
 import 'package:piyanota_application/state/playback_providers.dart';
 import 'package:piyanota_application/state/processing_providers.dart';
 
+import '../export/export_fakes.dart' show FakeNotificationPermission;
 import '../auth/auth_test_harness.dart';
 import '../processing/processing_fakes.dart' show ScriptedProcessingApi;
 
@@ -448,6 +449,7 @@ class PlaybackHarness {
 
   /// Click plans the writer was asked for.
   final List<ClickPlan> clickPlans = [];
+  final notifications = FakeNotificationPermission();
   final List<FakePlaybackEngine> engines = [];
   final secureStorage = FaultySecureStorage({'session_token': 'sess_t'});
 
@@ -456,6 +458,7 @@ class PlaybackHarness {
   List<Override> get overrides => [
     if (exportService case final service?)
       exportServiceProvider.overrideWithValue(service),
+    notificationPermissionProvider.overrideWithValue(notifications),
     scoreResultApiProvider.overrideWithValue(api),
     playbackEngineFactoryProvider.overrideWithValue(() {
       if (engineCreateError case final error?) throw error;

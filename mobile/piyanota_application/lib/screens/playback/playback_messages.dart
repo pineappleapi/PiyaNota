@@ -117,7 +117,9 @@ class PlaybackMessages {
       'Off. Switch it on to hear it and change its level.';
 
   /// The Mixer metronome row's on/off switch (user decision 2026-10-21).
-  static const String metronomeSwitchLabel = 'Metronome Click on';
+  /// Just the name: the switch itself says on or off (2026-10-22), so it
+  /// never reads as "Metronome Click on, off".
+  static const String metronomeSwitchLabel = 'Metronome Click';
   static const String on = 'On';
   static const String off = 'Off';
 

@@ -402,6 +402,8 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
     });
     String? treeUri;
     try {
+      if (_treeUri == null) await _askForNotifications();
+      if (!mounted) return;
       treeUri = _treeUri ?? await _pickLocalFolder(service);
     } on ExportFailure catch (failure) {
       if (mounted) setState(() => _failure = failure);
@@ -432,6 +434,7 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
           selection: selection,
           title: title,
           treeUri: folder,
+          notice: ExportMessages.notice(title),
           cancel: cancel,
           onProgress: onProgress,
         ),
@@ -446,13 +449,47 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
     }
   }
 
+  /// Android 13+ only shows the export's notification if allowed: asked
+  /// once, before the first folder pick, in plain words (user decision
+  /// 2026-10-22). Either answer goes on to the export.
+  Future<void> _askForNotifications() async {
+    final permission = ref.read(notificationPermissionProvider);
+    if (!await permission.shouldAsk() || !mounted) return;
+    await permission.markAsked();
+    if (!mounted) return;
+    final allow = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text(ExportMessages.notificationsTitle),
+        content: const Text(ExportMessages.notificationsBody),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text(ExportMessages.notificationsLater),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text(ExportMessages.notificationsAllow),
+          ),
+        ],
+      ),
+    );
+    if (allow ?? false) await permission.request();
+  }
+
   /// The picker, again and again until the folder is on this phone or the
   /// user backs out (user decision 2026-10-21): a Drive or app folder
   /// shows "Pick a folder on this phone." and reopens it straight away.
   Future<String?> _pickLocalFolder(ExportService service) async {
     while (true) {
+      // Folders an export row or a Retry may still use keep their
+      // permission; any other kept from earlier picks is given back.
+      final keep = {
+        for (final task in ref.read(exportJobsProvider)) task.treeUri,
+        ?_treeUri,
+      };
       try {
-        return await service.pickFolder();
+        return await service.pickFolder(keep: keep);
       } on NotLocalFolder {
         if (!mounted) return null;
         setState(() => _notLocal = true);

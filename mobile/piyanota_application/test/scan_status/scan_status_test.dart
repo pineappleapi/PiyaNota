@@ -116,6 +116,9 @@ class _App {
     networkAvailabilityProvider.overrideWithValue(network.controller.stream),
     networkCheckProvider.overrideWithValue(network.check),
     exportServiceProvider.overrideWithValue(exportService),
+    notificationPermissionProvider.overrideWithValue(
+      FakeNotificationPermission(),
+    ),
   ];
 
   ExportJobsController get exports =>
@@ -1092,8 +1095,9 @@ void main() {
       await tester.pump();
       await tester.pump();
       expect(find.byKey(const ValueKey('export-toast-2')), findsNothing);
-      // Seen in the sheet: no badge for it either.
-      expect(_badgeText(tester), '1');
+      // Seen in the sheet: no badge for it either, nor for the user's own
+      // cancel (L2).
+      expect(_badge, findsNothing);
       await app.end();
     });
   });

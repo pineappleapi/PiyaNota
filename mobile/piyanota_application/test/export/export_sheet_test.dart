@@ -349,6 +349,108 @@ void main() {
       expect(tasks(tester).single.status, ExportTaskStatus.cancelled);
     });
 
+    testWidgets('ruling 2026-10-22: an export that fails after the sheet '
+        'closed leaves the reopened sheet fresh, with no Retry', (
+      tester,
+    ) async {
+      final service = FakeExportService(failures: [const Interrupted()])
+        ..exportGate = Completer<void>();
+      await pumpPlayback(tester, harness(service));
+      await openExport(tester);
+      await tick(tester, ExportMessages.voiceBox(VoicePart.tenor));
+      await tester.tap(download);
+      await tester.pump();
+      // Closing neither fails nor cancels it.
+      await closeSheet(tester);
+      expect(service.lastCancel!.isCancelled, isFalse);
+      expect(tasks(tester).single.isRunning, isTrue);
+
+      service.exportGate!.complete();
+      await settle(tester);
+      expect(tasks(tester).single.status, ExportTaskStatus.failed);
+
+      await openExport(tester, clear: false);
+      expect(find.text(ExportMessages.interrupted), findsNothing);
+      expect(find.text(ExportMessages.retry), findsNothing);
+      // The ticks are Playback's again, not the failed export's.
+      expect(tickedVoices(tester), VoicePart.values.toSet());
+      expect(downloadEnabled(tester), isTrue);
+      // A fresh export asks for a folder again.
+      await tester.tap(download);
+      await settle(tester);
+      expect(service.pickCalls, 2);
+      expect(service.exports, hasLength(2));
+    });
+
+    testWidgets('Android 13+: the first Download explains and asks for '
+        'notifications once; Allow shows the system prompt', (tester) async {
+      final service = FakeExportService();
+      final h = harness(service);
+      h.notifications.askFirst = true;
+      await pumpPlayback(tester, h);
+      await openExport(tester);
+      await tick(tester, ExportMessages.voiceBox(VoicePart.alto));
+      await tester.tap(download);
+      await settle(tester);
+
+      expect(find.text(ExportMessages.notificationsTitle), findsOneWidget);
+      expect(find.text(ExportMessages.notificationsBody), findsOneWidget);
+      expect(service.pickCalls, 0);
+      await tester.tap(find.text(ExportMessages.notificationsAllow));
+      await settle(tester);
+      expect(h.notifications.requests, 1);
+      expect(h.notifications.asks, 1);
+      expect(service.exports, hasLength(1));
+
+      await tester.tap(find.text(ExportMessages.ok));
+      await settle(tester);
+      await openExport(tester);
+      await tick(tester, ExportMessages.voiceBox(VoicePart.bass));
+      await tester.tap(download);
+      await settle(tester);
+      expect(find.text(ExportMessages.notificationsTitle), findsNothing);
+      expect(service.exports, hasLength(2));
+    });
+
+    testWidgets('"Not now" still exports, without the system prompt', (
+      tester,
+    ) async {
+      final service = FakeExportService();
+      final h = harness(service);
+      h.notifications.askFirst = true;
+      await pumpPlayback(tester, h);
+      await openExport(tester);
+      await tick(tester, ExportMessages.voiceBox(VoicePart.soprano));
+      await tester.tap(download);
+      await settle(tester);
+      await tester.tap(find.text(ExportMessages.notificationsLater));
+      await settle(tester);
+      expect(h.notifications.requests, 0);
+      expect(h.notifications.asks, 1);
+      expect(service.exports, hasLength(1));
+      expect(find.text(ExportMessages.successTitle), findsOneWidget);
+    });
+
+    testWidgets('the picker keeps the permission of folders the exports '
+        'still use', (tester) async {
+      final service = FakeExportService();
+      await pumpPlayback(tester, harness(service));
+      await openExport(tester);
+      await tick(tester, ExportMessages.voiceBox(VoicePart.soprano));
+      await tester.tap(download);
+      await settle(tester);
+      expect(service.keeps.single, isEmpty);
+      await tester.tap(find.text(ExportMessages.ok));
+      await settle(tester);
+
+      await openExport(tester);
+      await tick(tester, ExportMessages.voiceBox(VoicePart.alto));
+      await tester.tap(download);
+      await settle(tester);
+      // The first export's row in the bell still opens its folder.
+      expect(service.keeps.last, {kTreeUri});
+    });
+
     testWidgets('one at a time: Download while another score exports says '
         'so plainly and asks for no folder', (tester) async {
       final service = FakeExportService();
@@ -409,11 +511,7 @@ void main() {
       clickGate.complete();
       await settle(tester);
       expect(tasks(tester).single.status, ExportTaskStatus.saved);
-      final job = service.exports.single.$1;
-      expect(
-        job.inputs.map((i) => i.track.toString()),
-        contains('test://click.wav'),
-      );
+      expect(service.prepared.single.track.toString(), 'test://click.wav');
     });
   });
 
@@ -512,7 +610,8 @@ void main() {
       await settle(tester);
 
       expect(find.text(ExportMessages.generationFailed), findsOneWidget);
-      expect(service.exports, isEmpty);
+      // Written inside the export now (L4); nothing is saved.
+      expect(service.prepared, isEmpty);
     });
   });
 
@@ -590,28 +689,28 @@ void main() {
       final voices = ExportSelection.empty(playback(tester).available)
           .toggleVoice(VoicePart.soprano)
           .toggleClick();
-      double clickGain() => buildExportJob(
+      Future<double> clickGain() async => (await buildExportJob(
         playback(tester),
         voices,
         kTitle,
-        clickTrack: click,
-      ).inputs.last.gain;
+        writeClick: () async => click,
+      ).prepare!()).gain;
 
       controller(tester)
         ..setMetronomeOn(on: true)
         ..setClickVolume(0.25);
-      expect(clickGain(), 0.25);
+      expect(await clickGain(), 0.25);
 
       controller(tester).setClickMuted(muted: true);
-      expect(clickGain(), exportDefaultLevel);
+      expect(await clickGain(), exportDefaultLevel);
 
       controller(tester)
         ..setClickMuted(muted: false)
         ..setVoiceSoloed(VoicePart.soprano, soloed: true);
-      expect(clickGain(), exportDefaultLevel);
+      expect(await clickGain(), exportDefaultLevel);
 
       controller(tester).setClickSoloed(soloed: true);
-      expect(clickGain(), 0.25);
+      expect(await clickGain(), 0.25);
     });
 
     testWidgets('voices unticked here are left out even if Playback plays '
@@ -643,17 +742,20 @@ void main() {
         playback(tester),
         voices,
         kTitle,
-        clickTrack: click,
+        writeClick: () async => click,
       );
+      expect(without.prepare, isNull);
       expect(without.inputs.map((i) => i.track), isNot(contains(click)));
 
       final withClick = buildExportJob(
         playback(tester),
         voices.toggleClick(),
         kTitle,
-        clickTrack: click,
+        writeClick: () async => click,
       );
-      expect(withClick.inputs.last, (track: click, gain: 0.25));
+      // L4: written inside the export, as its own step on the bar.
+      expect(withClick.inputs.map((i) => i.track), isNot(contains(click)));
+      expect(await withClick.prepare!(), (track: click, gain: 0.25));
       expect(withClick.fileName, 'Bituin Walang Ningning_Soprano_Click.mp3');
     });
 
@@ -672,7 +774,8 @@ void main() {
 
       expect(h.clickPlans.length, plansBefore.single + 1);
       final (job, _) = service.exports.single;
-      expect(job.inputs.last.track, Uri.parse('test://click.wav'));
+      expect(job.prepare, isNotNull);
+      expect(service.prepared.single.track, Uri.parse('test://click.wav'));
     });
   });
 
@@ -763,8 +866,8 @@ void main() {
       await tester.tap(download);
       await settle(tester);
       final (job, _) = service.exports.single;
-      expect(job.inputs.first.gain, exportDefaultLevel);
-      expect(job.inputs.length, 2);
+      expect(job.inputs.single.gain, exportDefaultLevel);
+      expect(job.prepare, isNotNull);
     });
 
     testWidgets('ticks in the sheet never change the Mixer, the Speed '
@@ -1064,7 +1167,7 @@ void main() {
           playback(tester),
           stale,
           kTitle,
-          clickTrack: Uri.parse('test://click.wav'),
+          writeClick: () async => Uri.parse('test://click.wav'),
         ),
         throwsA(isA<GenerationFailed>()),
       );

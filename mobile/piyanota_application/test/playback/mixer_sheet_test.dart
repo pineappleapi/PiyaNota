@@ -182,47 +182,64 @@ void main() {
       );
     });
 
-    testWidgets('a slider dragged to 0 mutes the row; lifting it off 0 '
-        'unmutes it (user decision 2026-10-21)', (tester) async {
+    testWidgets('a slider at 0 is not a mute, and lifting it off 0 does '
+        'not unmute (user decision 2026-10-22)', (tester) async {
       final harness = ready();
       await pumpPlayback(tester, harness);
       await openMixer(tester);
       final alto = voiceRow(VoicePart.alto);
       await setSlider(tester, alto, 0);
-      expect(controller(tester).state.muted, contains(VoicePart.alto));
+      expect(controller(tester).state.muted, isNot(contains(VoicePart.alto)));
       expect(harness.engine.volumes[VoicePart.alto], 0);
       await setSlider(tester, alto, 0.5);
-      expect(controller(tester).state.muted, isNot(contains(VoicePart.alto)));
       expect(harness.engine.volumes[VoicePart.alto], closeTo(0.5, 0.05));
+
+      await tapIn(tester, muteIn(alto));
+      await setSlider(tester, alto, 0);
+      await setSlider(tester, alto, 0.6);
+      expect(controller(tester).state.muted, contains(VoicePart.alto));
+      expect(harness.engine.volumes[VoicePart.alto], 0);
     });
 
-    testWidgets('unmuting a row at 0 brings it back at 80%, voice and click '
-        '(user decision 2026-10-21)', (tester) async {
+    testWidgets('muting keeps the level and unmuting plays at it, 0% '
+        'included, voice and click (user decision 2026-10-22)', (
+      tester,
+    ) async {
       final harness = ready();
       await pumpPlayback(tester, harness);
       await openMixer(tester);
       final tenor = voiceRow(VoicePart.tenor);
+      await setSlider(tester, tenor, 0.4);
+      final level = controller(tester).state.volumes[VoicePart.tenor]!;
+      await tapIn(tester, muteIn(tenor));
+      expect(controller(tester).state.volumes[VoicePart.tenor], level);
+      expect(harness.engine.volumes[VoicePart.tenor], 0);
+      await tapIn(tester, muteIn(tenor));
+      expect(controller(tester).state.volumes[VoicePart.tenor], level);
+      expect(harness.engine.volumes[VoicePart.tenor], closeTo(level, 1e-9));
+
       await setSlider(tester, tenor, 0);
       await tapIn(tester, muteIn(tenor));
+      await tapIn(tester, muteIn(tenor));
       expect(controller(tester).state.muted, isNot(contains(VoicePart.tenor)));
-      expect(
-        controller(tester).state.volumes[VoicePart.tenor],
-        PlaybackController.unmuteFromZeroLevel,
-      );
-      expect(PlaybackController.unmuteFromZeroLevel, 0.8);
-      expect(harness.engine.volumes[VoicePart.tenor], 0.8);
+      expect(controller(tester).state.volumes[VoicePart.tenor], 0);
+      expect(harness.engine.volumes[VoicePart.tenor], 0);
 
       final c = controller(tester)
         ..setMetronomeOn(on: true)
         ..setClickVolume(0);
-      expect(c.state.clickMuted, isTrue);
-      c.setClickMuted(muted: false);
       expect(c.state.clickMuted, isFalse);
-      expect(c.state.clickVolume, PlaybackController.unmuteFromZeroLevel);
       c.setClickVolume(0.3);
       c.setClickMuted(muted: true);
+      expect(c.state.clickVolume, 0.3);
       c.setClickMuted(muted: false);
-      expect(c.state.clickVolume, 0.3, reason: 'only a 0 slider is reset');
+      expect(c.state.clickVolume, 0.3);
+      c
+        ..setClickVolume(0)
+        ..setClickMuted(muted: true)
+        ..setClickMuted(muted: false);
+      expect(c.state.clickVolume, 0);
+      expect(c.state.clickMuted, isFalse);
     });
   });
 
@@ -401,10 +418,13 @@ void main() {
     testWidgets('the switch reads as an on/off, not as Solo', (tester) async {
       await pumpPlayback(tester, ready());
       await openMixer(tester);
-      expect(
-        find.bySemanticsLabel(PlaybackMessages.metronomeSwitchLabel),
-        findsOneWidget,
-      );
+      // Just the name; the switch's own state says on or off
+      // (user decision 2026-10-22).
+      final data = tester
+          .getSemantics(find.byKey(const ValueKey('mixer-metronome-switch')))
+          .getSemanticsData();
+      expect(data.label, 'Metronome Click');
+      expect(data.label, isNot(contains(PlaybackMessages.on)));
       expect(
         find.bySemanticsLabel(
           PlaybackMessages.soloLabel(PlaybackMessages.metronomeClick),

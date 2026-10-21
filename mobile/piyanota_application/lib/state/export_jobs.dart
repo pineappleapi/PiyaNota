@@ -121,6 +121,10 @@ class ExportJobsController extends Notifier<List<ExportTask>> {
   int _nextId = 1;
   final Set<int> _sheetsOpen = {};
 
+  /// Bumped by [cancelAndForgetAll], so an export from the session that
+  /// ended can never put its task back when it finishes.
+  int _generation = 0;
+
   @override
   List<ExportTask> build() {
     ref.onDispose(() => _cancel?.cancel());
@@ -163,23 +167,33 @@ class ExportJobsController extends Notifier<List<ExportTask>> {
     ExportCancelToken token,
     ExportRun run,
   ) async {
+    final generation = _generation;
+    // Read before the run: after [cancelAndForgetAll] the task is gone
+    // from the state, but `done` must still complete with something.
+    final started = _find(id)!;
+    ExportTask current() => _find(id) ?? started;
     ExportTask finished;
     try {
       final result = await run(token, (fraction) {
+        if (generation != _generation) return;
         final task = _find(id);
         if (task == null || !task.isRunning) return;
         _put(task.copyWith(progress: fraction));
       });
-      finished = _find(
-        id,
-      )!.copyWith(status: ExportTaskStatus.saved, progress: 1, result: result);
+      finished = current().copyWith(
+        status: ExportTaskStatus.saved,
+        progress: 1,
+        result: result,
+      );
     } on Cancelled catch (cancel) {
-      finished = _find(id)!
-          .copyWith(status: ExportTaskStatus.cancelled, failure: cancel);
+      finished = current().copyWith(
+        status: ExportTaskStatus.cancelled,
+        failure: cancel,
+      );
     } on ExportFailure catch (failure) {
       // runExport already maps errors after a Cancel to Cancelled (L9);
       // checked again so the task can't say "failed" after the X.
-      finished = _find(id)!.copyWith(
+      finished = current().copyWith(
         status: token.isCancelled
             ? ExportTaskStatus.cancelled
             : ExportTaskStatus.failed,
@@ -190,7 +204,7 @@ class ExportJobsController extends Notifier<List<ExportTask>> {
       // a task can never be left "running" forever.
       debugPrint('Export: unexpected error in background export: $e');
       debugPrint('$stack');
-      finished = _find(id)!.copyWith(
+      finished = current().copyWith(
         status: token.isCancelled
             ? ExportTaskStatus.cancelled
             : ExportTaskStatus.failed,
@@ -201,13 +215,28 @@ class ExportJobsController extends Notifier<List<ExportTask>> {
     } finally {
       if (identical(_cancel, token)) _cancel = null;
     }
+    // The session it belonged to has ended: not shown to the next one.
+    if (generation != _generation) return finished;
     // Shown where it happened: no badge for what the open sheet showed.
-    if (_sheetsOpen.contains(finished.scoreId)) {
+    // The user's own Cancel is never news either (L2).
+    if (_sheetsOpen.contains(finished.scoreId) ||
+        finished.status == ExportTaskStatus.cancelled) {
       finished = finished.copyWith(read: true);
     }
     _put(finished);
     _prune();
     return finished;
+  }
+
+  /// Logout or a new login (H1): stops the running export and forgets
+  /// every task, so nothing of one account's exports reaches the next.
+  /// The caller also stops the native side ([ExportService.stopAll]).
+  void cancelAndForgetAll() {
+    _generation++;
+    _cancel?.cancel();
+    _cancel = null;
+    _sheetsOpen.clear();
+    state = const [];
   }
 
   /// The X, in the sheet (or, later, a notification action).

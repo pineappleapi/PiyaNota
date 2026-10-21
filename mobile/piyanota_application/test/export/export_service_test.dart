@@ -34,6 +34,15 @@ void main() {
             return handler(call);
           });
 
+  /// The channel calls that only tell the device something.
+  const quiet = {'begin', 'notifyProgress', 'end', 'cancel'};
+
+  /// Calls other than [quiet] ones, in order.
+  List<String> steps() => [
+    for (final c in calls)
+      if (!quiet.contains(c.method)) c.method,
+  ];
+
   MethodChannelExportService service({Dio? dio}) =>
       MethodChannelExportService(dio: dio ?? Dio(), workDir: () async => work);
 
@@ -44,12 +53,12 @@ void main() {
     fileName: 'Song_Soprano.mp3',
   );
 
-  test('render, list, save in order with a clash-free name', () async {
+  test('begin, list, then run on the device with a clash-free name', () async {
     mock(
       (call) => switch (call.method) {
-        'render' => null,
+        'begin' || 'notifyProgress' => null,
         'listNames' => ['song_soprano.mp3', 'Other.mp3'],
-        'save' => {
+        'run' => {
           'fileName': (call.arguments as Map)['fileName'],
           'location': 'Internal storage/Music',
         },
@@ -57,19 +66,195 @@ void main() {
       },
     );
 
-    final result = await service().export(job(), 'content://tree/x');
+    final result = await service().export(
+      ExportJob(
+        inputs: [(track: local, gain: 0.5)],
+        speed: 0.75,
+        fileName: 'Song_Soprano.mp3',
+        notice: const ExportNoticeText(
+          exporting: 'Exporting Song…',
+          cancel: 'Cancel',
+          saved: 'Saved {file} to {folder}',
+          failedTitle: 'Song was not exported',
+          failures: {'interrupted': 'Try again.'},
+          fallbackFailure: 'Try again.',
+        ),
+      ),
+      'content://tree/x',
+    );
 
-    expect(calls.map((c) => c.method), ['render', 'listNames', 'save']);
-    final render = calls[0].arguments as Map;
-    expect(render['speed'], 0.75);
-    expect(render['inputs'], [
+    expect(calls.first.method, 'begin');
+    expect((calls.first.arguments as Map)['notice'], {
+      'exporting': 'Exporting Song…',
+      'cancel': 'Cancel',
+      'saved': 'Saved {file} to {folder}',
+      'failedTitle': 'Song was not exported',
+      'failures': {'interrupted': 'Try again.'},
+      'fallbackFailure': 'Try again.',
+    });
+    expect(steps(), ['listNames', 'run']);
+    final run = calls.last.arguments as Map;
+    expect(run['speed'], 0.75);
+    expect(run['inputs'], [
       {'path': local.toFilePath(), 'gain': 0.5},
     ]);
+    expect(run['fileName'], 'Song_Soprano (1).mp3');
+    expect(run['treeUri'], 'content://tree/x');
+    // Local tracks only: the render starts the bar.
+    expect(run['from'], 0.0);
+    expect(
+      (run['renderShare'] as double) + (run['saveShare'] as double),
+      closeTo(1.0, 1e-9),
+    );
     expect(result.fileName, 'Song_Soprano (1).mp3');
     expect(result.location, 'Internal storage/Music');
-    expect((calls[2].arguments as Map)['srcPath'], render['outPath']);
+    // Handed over: the device ends the notification, not Dart.
+    expect(calls.map((c) => c.method), isNot(contains('end')));
     // The work folder is cleaned up.
     expect(work.listSync(), isEmpty);
+  });
+
+  test('busy: an earlier export still on the device is StillExporting, '
+      'and its work folder is left alone', () async {
+    final sep = Platform.pathSeparator;
+    final running = Directory('${work.path}${sep}export_bg')..createSync();
+    mock((call) => throw PlatformException(code: 'busy'));
+    await expectLater(
+      service().export(job(), 'content://tree/x'),
+      throwsA(isA<StillExporting>()),
+    );
+    expect(running.existsSync(), isTrue);
+    expect(calls.map((c) => c.method), ['begin']);
+  });
+
+  test('a failure before the hand-over ends the notification with its '
+      'code; a cancel ends it as cancelled', () async {
+    mock(
+      (call) => switch (call.method) {
+        'listNames' => throw PlatformException(code: 'permission_denied'),
+        _ => null,
+      },
+    );
+    await expectLater(
+      service().export(job(), 'content://tree/x'),
+      throwsA(isA<PermissionDenied>()),
+    );
+    expect(calls.last.method, 'end');
+    expect(calls.last.arguments, {
+      'outcome': 'failed',
+      'code': 'permission_denied',
+    });
+
+    calls.clear();
+    final token = ExportCancelToken();
+    mock((call) {
+      if (call.method == 'listNames') {
+        token.cancel();
+        return <String>[];
+      }
+      return null;
+    });
+    await expectLater(
+      service().export(job(), 'content://tree/x', cancel: token),
+      throwsA(isA<Cancelled>()),
+    );
+    expect(calls.last.method, 'end');
+    expect(calls.last.arguments, {'outcome': 'cancelled'});
+    expect(calls.map((c) => c.method), isNot(contains('run')));
+  });
+
+  test('the Cancel in the notification cancels the export', () async {
+    final token = ExportCancelToken();
+    mock((call) async {
+      if (call.method == 'listNames') {
+        await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .handlePlatformMessage(
+              channel.name,
+              channel.codec.encodeMethodCall(
+                const MethodCall('cancelRequested'),
+              ),
+              (_) {},
+            );
+        return <String>[];
+      }
+      return null;
+    });
+    await expectLater(
+      service().export(job(), 'content://tree/x', cancel: token),
+      throwsA(isA<Cancelled>()),
+    );
+    expect(token.isCancelled, isTrue);
+  });
+
+  test('L4: the prepare step (the click) is on the bar before the render '
+      'and its input goes last', () async {
+    final seen = <double>[];
+    mock(
+      (call) => switch (call.method) {
+        'listNames' => <String>[],
+        'run' => {'fileName': 'a.mp3', 'location': 'here'},
+        _ => null,
+      },
+    );
+    final click = Uri.file('/data/click.wav');
+    await service().export(
+      ExportJob(
+        inputs: [(track: local, gain: 0.5)],
+        prepare: () async => (track: click, gain: 0.3),
+        speed: 1,
+        fileName: 'a.mp3',
+      ),
+      'content://tree/x',
+      onProgress: seen.add,
+    );
+    const total =
+        ExportProgress.prepareShare +
+        ExportProgress.renderShare +
+        ExportProgress.saveShare;
+    expect(seen.first, 0.0);
+    expect(seen, contains(closeTo(ExportProgress.prepareShare / total, 1e-9)));
+    final run = calls.lastWhere((c) => c.method == 'run').arguments as Map;
+    expect(run['from'], closeTo(ExportProgress.prepareShare / total, 1e-9));
+    expect((run['inputs'] as List).last, {
+      'path': click.toFilePath(),
+      'gain': 0.3,
+    });
+    // The notification was fed while Dart wrote the click.
+    expect(calls.map((c) => c.method), contains('notifyProgress'));
+  });
+
+  test('a prepare step that throws is GenerationFailed, or Cancelled '
+      'after a Cancel', () async {
+    mock((_) => null);
+    await expectLater(
+      service().export(
+        ExportJob(
+          inputs: [(track: local, gain: 0.5)],
+          prepare: () async => throw const FileSystemException('x'),
+          speed: 1,
+          fileName: 'a.mp3',
+        ),
+        'content://tree/x',
+      ),
+      throwsA(isA<GenerationFailed>()),
+    );
+    final token = ExportCancelToken();
+    await expectLater(
+      service().export(
+        ExportJob(
+          inputs: [(track: local, gain: 0.5)],
+          prepare: () async {
+            token.cancel();
+            throw const FileSystemException('x');
+          },
+          speed: 1,
+          fileName: 'a.mp3',
+        ),
+        'content://tree/x',
+        cancel: token,
+      ),
+      throwsA(isA<Cancelled>()),
+    );
   });
 
   for (final (code, type) in [
@@ -154,6 +339,7 @@ void main() {
     'L7: a failing work folder still removes the progress handler',
     () async {
       var handled = 0;
+      mock((_) => null);
       final failing = MethodChannelExportService(
         dio: Dio(),
         workDir: () async => throw const FileSystemException('no cache'),
@@ -186,10 +372,9 @@ void main() {
     final other = Directory('${work.path}${sep}playback_demo')..createSync();
     mock(
       (call) => switch (call.method) {
-        'render' => null,
         'listNames' => <String>[],
-        'save' => {'fileName': 'a.mp3', 'location': 'here'},
-        _ => throw MissingPluginException(),
+        'run' => {'fileName': 'a.mp3', 'location': 'here'},
+        _ => null,
       },
     );
 
@@ -221,20 +406,18 @@ void main() {
       final seen = <double>[];
       mock((call) async {
         switch (call.method) {
-          case 'render':
+          case 'listNames':
+            return <String>[];
+          case 'run':
             for (final v in [0.5, 0.4, 'x', 2.0]) {
               await sendProgress(v);
             }
-            return null;
-          case 'listNames':
-            return <String>[];
-          case 'save':
             for (final v in [0.0, 0.5, 1.0]) {
               await sendSaveProgress(v);
             }
             return {'fileName': 'a.mp3', 'location': 'here'};
         }
-        throw MissingPluginException();
+        return null;
       });
       await service().export(job(), 'content://tree/x', onProgress: seen.add);
       // Local tracks only: no download share, so render is 0.7 of 0.8 of
@@ -260,9 +443,8 @@ void main() {
         final seen = <double>[];
         mock(
           (call) => switch (call.method) {
-            'render' => null,
             'listNames' => <String>[],
-            'save' => {'fileName': 'a.mp3', 'location': 'here'},
+            'run' => {'fileName': 'a.mp3', 'location': 'here'},
             _ => null,
           },
         );
@@ -291,11 +473,11 @@ void main() {
     test('L9: a non-cancel error after Cancel is still Cancelled', () async {
       final token = ExportCancelToken();
       mock((call) {
-        if (call.method == 'render') {
+        if (call.method == 'run') {
           token.cancel();
           throw PlatformException(code: 'generation_failed');
         }
-        return null;
+        return call.method == 'listNames' ? <String>[] : null;
       });
       await expectLater(
         service().export(job(), 'content://tree/x', cancel: token),
@@ -309,7 +491,9 @@ void main() {
       final stopped = Completer<void>();
       mock((call) async {
         switch (call.method) {
-          case 'render':
+          case 'listNames':
+            return <String>[];
+          case 'run':
             token.cancel();
             await stopped.future;
             throw PlatformException(code: 'cancelled');
@@ -317,13 +501,16 @@ void main() {
             stopped.complete();
             return null;
         }
-        throw MissingPluginException();
+        return null;
       });
       await expectLater(
         service().export(job(), 'content://tree/x', cancel: token),
         throwsA(isA<Cancelled>()),
       );
-      expect(calls.map((c) => c.method), ['render', 'cancel']);
+      expect(steps(), ['listNames', 'run']);
+      expect(calls.map((c) => c.method), contains('cancel'));
+      // Handed over: the device ends its own notification.
+      expect(calls.map((c) => c.method), isNot(contains('end')));
       expect(work.listSync(), isEmpty);
     });
 
@@ -334,21 +521,24 @@ void main() {
         service().export(job(), 'content://tree/x', cancel: token),
         throwsA(isA<Cancelled>()),
       );
-      expect(calls.where((c) => c.method == 'render'), isEmpty);
+      expect(calls, isEmpty);
       expect(work.listSync(), isEmpty);
     });
 
-    test('Cancel after the render, before the save, saves nothing', () async {
+    test('Cancel before the hand-over never starts the render', () async {
       final token = ExportCancelToken();
       mock((call) {
-        if (call.method == 'render') token.cancel();
+        if (call.method == 'listNames') {
+          token.cancel();
+          return <String>[];
+        }
         return null;
       });
       await expectLater(
         service().export(job(), 'content://tree/x', cancel: token),
         throwsA(isA<Cancelled>()),
       );
-      expect(calls.map((c) => c.method), isNot(contains('save')));
+      expect(calls.map((c) => c.method), isNot(contains('run')));
       expect(work.listSync(), isEmpty);
     });
 
@@ -356,9 +546,8 @@ void main() {
       final token = ExportCancelToken();
       mock(
         (call) => switch (call.method) {
-          'render' => null,
           'listNames' => <String>[],
-          'save' => {'fileName': 'a.mp3', 'location': 'here'},
+          'run' => {'fileName': 'a.mp3', 'location': 'here'},
           _ => null,
         },
       );
@@ -412,6 +601,50 @@ void main() {
     });
   });
 
+  group('isLocalFolder matches the authority exactly, as Android does', () {
+    for (final tree in [
+      'content://COM.ANDROID.EXTERNALSTORAGE.DOCUMENTS/tree/primary%3AMusic',
+      'content://user@com.android.externalstorage.documents/tree/x',
+      'content://com.android.externalstorage.documents:80/tree/x',
+      'CONTENT://com.android.externalstorage.documents/tree/x',
+      'content://com.android.externalstorage.documents.evil/tree/x',
+      'content://',
+    ]) {
+      test('refuses $tree', () => expect(isLocalFolder(tree), isFalse));
+    }
+    test('accepts the bare authority and one with a query', () {
+      expect(
+        isLocalFolder('content://com.android.externalstorage.documents'),
+        isTrue,
+      );
+      expect(
+        isLocalFolder('content://com.android.providers.downloads.documents?x'),
+        isTrue,
+      );
+    });
+  });
+
+  test('pickFolder sends the folders to keep, and gives back a refused '
+      'one', () async {
+    const drive = 'content://com.google.android.apps.docs.storage/tree/a';
+    mock((call) => call.method == 'pickFolder' ? drive : null);
+    await expectLater(
+      service().pickFolder(keep: {'content://keep/1'}),
+      throwsA(isA<NotLocalFolder>()),
+    );
+    expect(calls.first.arguments, {
+      'keep': ['content://keep/1'],
+    });
+    expect(calls.last.method, 'releaseFolder');
+    expect(calls.last.arguments, {'treeUri': drive});
+  });
+
+  test('stopAll never throws', () async {
+    mock((_) => throw PlatformException(code: 'x'));
+    await service().stopAll();
+    expect(calls.single.method, 'stopAll');
+  });
+
   test('openFolder: false on an error instead of throwing', () async {
     mock((_) => true);
     expect(await service().openFolder('content://tree/x'), isTrue);
@@ -438,7 +671,7 @@ void main() {
       (DioExceptionType.connectionError, Interrupted),
       (DioExceptionType.receiveTimeout, Interrupted),
     ]) {
-      test('a $type download is $failure, before any native call', () async {
+      test('a $type download is $failure, before the device renders', () async {
         mock((_) => null);
         await expectLater(
           service(dio: failingDio(type))
@@ -447,7 +680,8 @@ void main() {
             isA<ExportFailure>().having((e) => e.runtimeType, 'type', failure),
           ),
         );
-        expect(calls, isEmpty);
+        expect(steps(), isEmpty);
+        expect(calls.last.method, 'end');
       });
     }
 
@@ -460,7 +694,7 @@ void main() {
           service(dio: dio).export(job(inputs: remote), 'content://tree/x'),
           throwsA(isA<GenerationFailed>()),
         );
-        expect(calls, isEmpty);
+        expect(steps(), isEmpty);
       },
     );
 
@@ -487,7 +721,7 @@ void main() {
         ),
         throwsA(isA<GenerationFailed>()),
       );
-      expect(calls, isEmpty);
+      expect(steps(), isEmpty);
     });
   });
 }

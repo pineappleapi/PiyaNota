@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'package:piyanota_application/services/export_service.dart';
+import 'package:piyanota_application/services/notification_permission.dart';
 
 const String kTreeUri = 'content://tree/primary%3AMusic';
 const ExportResult kSaved = ExportResult(
@@ -39,9 +40,14 @@ class FakeExportService implements ExportService {
   final List<(ExportJob, String)> exports = [];
   final List<String> opened = [];
 
+  /// The `keep` each pick was given.
+  final List<Set<String>> keeps = [];
+  int stopAllCalls = 0;
+
   @override
-  Future<String?> pickFolder() async {
+  Future<String?> pickFolder({Set<String> keep = const {}}) async {
     pickCalls++;
+    keeps.add(keep);
     if (pickQueue.isNotEmpty) throw pickQueue.removeAt(0);
     if (pickFailure case final failure?) throw failure;
     if (onPick case final hook?) await hook();
@@ -67,13 +73,42 @@ class FakeExportService implements ExportService {
       await Future.any([gate.future, ?cancel?.whenCancelled]);
     }
     cancel?.throwIfCancelled();
+    // The real service writes the click inside the export (L4).
+    if (job.prepare case final prepare?) prepared.add(await prepare());
     if (_failures.isNotEmpty) throw _failures.removeAt(0);
     return kSaved;
   }
+
+  /// What each export's prepare step made.
+  final List<ExportInput> prepared = [];
+
+  @override
+  Future<void> stopAll() async => stopAllCalls++;
 
   @override
   Future<bool> openFolder(String treeUri) async {
     opened.add(treeUri);
     return canOpen;
   }
+}
+
+/// [NotificationPermission] for tests: says "ask" once if [askFirst].
+class FakeNotificationPermission implements NotificationPermission {
+  FakeNotificationPermission({this.askFirst = false});
+
+  bool askFirst;
+  int asks = 0;
+  int requests = 0;
+
+  @override
+  Future<bool> shouldAsk() async => askFirst;
+
+  @override
+  Future<void> markAsked() async {
+    asks++;
+    askFirst = false;
+  }
+
+  @override
+  Future<void> request() async => requests++;
 }

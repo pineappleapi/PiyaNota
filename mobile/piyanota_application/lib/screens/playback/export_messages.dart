@@ -69,6 +69,11 @@ class ExportMessages {
       'The download stopped before it finished. Try again.';
   static const String retry = 'Retry';
 
+  /// An export started before the app was last closed is still being
+  /// finished on the phone.
+  static const String stillExporting =
+      'An earlier export is still being finished. Try again when it’s done.';
+
   // Success dialog (AC16), wording from _UI_2.png.
   static const String successTitle = 'Download Successful!';
   static String savedAs(String fileName) => 'Saved as $fileName';
@@ -96,6 +101,31 @@ class ExportMessages {
   static String failedToast(String title) =>
       '${failedRow(title)}. $failedToastHint';
 
+  /// The system notifications' words for [title] (user decision
+  /// 2026-10-22), the same as the bell's rows and the banner's.
+  static ExportNoticeText notice(String title) => ExportNoticeText(
+    exporting: 'Exporting $title…',
+    cancel: 'Cancel',
+    saved: savedRow(ExportNoticeText.fileSlot, ExportNoticeText.folderSlot),
+    failedTitle: failedRow(title),
+    failures: {
+      'storage_full': storageFull,
+      'permission_denied': permissionDenied,
+      'generation_failed': generationFailed,
+      'interrupted': interrupted,
+    },
+    fallbackFailure: failedToastHint,
+  );
+
+  // Asked once, before the first export's folder pick, on Android 13+.
+  static const String notificationsTitle = 'Show export progress?';
+  static const String notificationsBody =
+      'PiyaNota can show how an export is going in your notifications, so '
+      'you can leave the app while it finishes. The export works either '
+      'way.';
+  static const String notificationsLater = 'Not now';
+  static const String notificationsAllow = 'Allow';
+
   /// What went wrong, in the same words the sheet uses.
   static String failureMessage(ExportFailure failure) => switch (failure) {
     StorageFull() => storageFull,
@@ -105,6 +135,7 @@ class ExportMessages {
     NoFolderPicker() => noFolderPicker,
     // Handled by reopening the picker; only reached if that is bypassed.
     NotLocalFolder() => notLocalFolder,
+    StillExporting() => stillExporting,
     Cancelled(:final partialFileLeft) =>
       partialFileLeft ? cancelledPartial : cancelled,
   };
