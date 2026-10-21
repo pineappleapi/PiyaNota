@@ -413,17 +413,26 @@ Written before any A6 Kaggle build or training. No test photo or `piyanota_datas
   - Cross-system ties stay uncovered (known gap).
 - **2-ledger member range (choral-conductor 2026-10-21):** the added divisi member, never the base head, may reach:
   - Soprano up to C6.
-  - Alto down to E3 (F3 is occasional, E3 is the hard floor).
-  - Bass up to G4 (shape training only; replaces the A6.3 F4 ceiling) and down to C2.
+  - Alto down to G3 (step -5). The conductor's hard floor is E3 (step -7), but E3 has no chordnote token. F3 (step
+    -6) is always the chord's lowest head, so it labels as a `note.*-L-2` token. The old VOCAB has that token only
+    for the eighth (Amendment A1), and smoke r12 had every such strip quarantined. So G3 is the floor here (ruling
+    2026-10-21). Going lower needs a vocabulary change, which is not done.
+  - Bass up to G4 (shape training only; replaces the A6.3 F4 ceiling) and down to C2. F#4/G4 are drawn like any
+    in-range member, not down-weighted; revisit if the full build shows them above ~1% of bass members.
   - Tenor unchanged. Its written 2-ledger notes would be unsingable.
-  - `MAX_MEMBER_STEPS` widens to (-7, 14) so these heads can be drawn. The A6.3 boost, target (5%) and cap (8%) are
-    unchanged.
+  - The limits live in `build_corpus.DIVISI_MEMBER_LIMITS`. `MAX_MEMBER_STEPS` becomes (-5, 14): the top widens
+    from 13 so these heads can be drawn, and the floor stays -5. Edge members can still draw an OOV accidental or
+    whole note (sharp is the only accidental at -5, no accidental at -4 or 14). The render guard quarantines that
+    strip; on smoke r11, 1 of 10 pieces had one such strip. The A6.3 boost, target (5%) and cap (8%) are unchanged.
 - **Not done (ml-cv-lead NO-GO):** 3x training oversampling of these strips (it changes optimisation, a second
   variable; fallback only, and must be pre-registered first) and raising the 2nd weight (11.8% is on target).
 - **Reporting (report-only, no new gate thresholds):**
-  - `eval_divisi_a6.py` adds member buckets `tie_native`, `tie_synth` (`tie` when the build has no tie source) and
-    `ledger2` (step <= -4 or >= 12), each with n and Wilson interval.
-  - It adds `tie_fp`: predicted ties on GT same-position note pairs across a barline that are not tied.
+  - `eval_divisi_a6.py` adds member buckets `tie_native` and `tie_synth` (from the summary's `tie_sources`, one
+    entry per chord column; no tie bucket for a build without it) and `ledger2` (step <= -4 or >= 12), as [hit, n].
+  - It adds the counter `tie_fp` [predicted ties, n]: GT columns whose next column, across a barline, repeats the
+    same heads untied (chord or plain), and how many of them the model ties.
+  - The build summary reports `synth_ties` (tied chord columns from synthetic ties), `synth_tie_pairs` and
+    `untied_repeat_pairs` (kept chord strips only).
   - A synthetic-bucket result shows in-distribution learning only. Real-world tie and 2-ledger claims need the real
     camera divisi set, which is never used for this tuning.
 - **Checks before the build:** a 1:1 eyeball of about 10 synthetic-tie and new-step renders in Leipzig and Bravura,

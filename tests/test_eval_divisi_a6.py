@@ -170,3 +170,31 @@ def test_dedup_columns_counts_a_repeated_head_once():
     row2 = {**row, "font": "Gootville"}
     c = head_scores(toks, toks)
     assert ev.dedup_columns(c, row2, seen) == 0 and c["bucket"]
+
+
+def test_ledger2_bucket_a6_4():
+    gt = ["note.half-L5", "chordnote-L7", "note.half-L-2", "chordnote-L-1"]   # L7 = step 12, L-1 = step -4
+    s = head_scores(list(gt), gt)
+    assert s["bucket"]["ledger2"] == [2, 2] and s["bucket"]["ledger"] == [2, 2]
+
+
+def test_tie_source_buckets_and_tie_fp():
+    gt = ["note.half-L2", "chordnote-L3", "slur.start-L2", "slur.start-L3", "barline-L1",
+          "slur.end-L2", "slur.end-L3", "note.half-L2", "chordnote-L3",
+          "note.half-L4", "barline-L1", "note.half-L4"]            # an untied same-step repeat across the barline
+    pred = list(gt[:10]) + ["slur.start-L4"] + gt[10:]              # model ties the repeat
+    s = head_scores(pred, gt, ties=["synth", "synth"])
+    assert s["bucket"]["tie_synth"] == [2, 2] and "tie_native" not in s["bucket"]
+    assert s["tie_fp"] == [1, 1]
+    assert "tie_synth" not in head_scores(pred, gt)["bucket"]       # no sources: no tie bucket
+    assert head_scores(list(gt), gt)["tie_fp"] == [0, 1]
+
+
+def test_evaluate_passes_tie_sources(monkeypatch):
+    import eval_divisi_a6 as ev
+    gt = ["note.quarter-L2", "chordnote-L3"]
+    monkeypatch.setattr(ev, "decode_strip", lambda m, p: (list(gt), [.9, .9]))
+    row = {"piece": "p", "voice": "Alto", "system": 0, "path": "x.png", "font": "Bravura", "tokens": gt,
+           "_ties": {"p|Alto|0": ["native"]}}
+    out = ev.evaluate(None, Path("."), [row], {"p|Alto|0": ["up"]})
+    assert out["total"]["bucket"]["tie_native"] == [1, 1]

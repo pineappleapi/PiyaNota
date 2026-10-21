@@ -25,7 +25,7 @@ from typing import Iterable, Mapping, Sequence
 SHARE_TOL = 0.03                          # +-3 pp on every section 4 share
 CHORD_FREE_TARGET = 0.25
 DENSITY_RANGE = (0.20, 0.60)
-MEMBER_STEPS = (-5, 13)                   # inclusive, L1 = 0
+MEMBER_STEPS = (-5, 14)                  # inclusive, L1 = 0; = build_corpus.MAX_MEMBER_STEPS (A6.4)
 STEMS_DOWN_MIN = 0.30                     # of stemmed 2nds
 FREE_MEMBER_TARGET = 0.60
 ACCIDENTAL_COL_MIN = 0.12

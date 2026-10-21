@@ -44,6 +44,7 @@ STRIP_HEIGHT = 64                 # CRNN input height (stage3 default)
 UNDERPOWERED_N = 300              # design section 4: fewer test heads than this is reported, not passed
 SELECT_FLOOR_N = 100              # tuning-half selection: a bucket with fewer heads is dropped from the min (A6.1)
 BOOT_SEED = 0
+LEDGER2_STEPS = (-4, 12)          # = build_corpus.LEDGER2_STEPS: a member here is on 2+ ledger lines (A6.4, report-only)
 FALLBACK_SECOND_RECALL = 0.50     # design section 9: 2nd fallback fires below this in both seeds at epoch 4
 SELECT_MIN_PRECISION = 0.95
 HELD_OUT_FONT = "Gootville"
@@ -125,11 +126,26 @@ def _member_bucket_names(note: str, ext: Sequence[str], stem: str, member: str) 
     s = step_of(member)
     if s <= LEDGER_LOW or s >= LEDGER_HIGH:
         out.append("ledger")
+    if s <= LEDGER2_STEPS[0] or s >= LEDGER2_STEPS[1]:
+        out.append("ledger2")
+    return out
+
+
+def _tie_negatives(tokens: Sequence[str], cols: Sequence[tuple[int, str, list[str], set[int]]]) -> list[int]:
+    """Columns whose next column, across a barline, repeats the same heads without a tie (A6.4 tie negatives)."""
+    out = []
+    for k in range(len(cols) - 1):
+        (i, note, ext, _a), (j, nnote, next_ext, _b) = cols[k], cols[k + 1]
+        between = tokens[i + 1:j]
+        same = {step_of(note)} | {step_of(t) for t in ext} == {step_of(nnote)} | {step_of(t) for t in next_ext}
+        if same and any(t.startswith("barline") for t in between) \
+                and not any(t.startswith("slur.start") for t in between):
+            out.append(k)
     return out
 
 
 def head_scores(pred: Sequence[str], gt: Sequence[str], stems: Sequence[str] | None = None,
-                conf: Sequence[float] | None = None) -> dict[str, Any]:
+                conf: Sequence[float] | None = None, ties: Sequence[str] | None = None) -> dict[str, Any]:
     """Head-level scores of one strip.
 
     Args:
@@ -139,13 +155,16 @@ def head_scores(pred: Sequence[str], gt: Sequence[str], stems: Sequence[str] | N
             summary is missing: every 2nd is counted as 2nd_up (the caller warns). A list of the wrong length is
             ignored the same way as an unknown stem ("2nd_unknown").
         conf: confidence per pred token (frame-mean softmax); enables `head_conf`.
+        ties: divisi_summary `tie_sources` per GT chord column ("native", "synth" or ""); a tied column's members
+            also count in `tie_<source>` (A6.4, report-only). None or a wrong length: no tie buckets.
 
     Returns:
         Counters that add across strips (see `merge_scores`): `bucket` {name: [hit, n]} per GT member head,
         `tp`/`gt_heads`/`fp_chord`/`fp_plain` (all heads incl. the main one, as in the session diagnostic),
         `plain_cols`/`plain_extra` (extra heads on aligned GT columns without a chord), `untrained_step`
         (predicted chordnote outside MEMBER_STEPS), `triad_exact`, `acc_member`, `chord_cols`/`unaligned`,
-        `pred_chordnotes`, `gt_notes`, `head_conf` [(confidence, is_hit)] per predicted chordnote and `cols`
+        `pred_chordnotes`, `gt_notes`, `tie_fp` [predicted ties, n] over untied same-head repeats across a
+        barline (`_tie_negatives`), `head_conf` [(confidence, is_hit)] per predicted chordnote and `cols`
         [(column index, note token, chordnote tokens, [(bucket, hit)])] per GT chord column (the dedup input).
     """
     gcols, pcols = columns(gt), columns(pred)
@@ -158,11 +177,12 @@ def head_scores(pred: Sequence[str], gt: Sequence[str], stems: Sequence[str] | N
             stem_by_col[k] = FALLBACK_BUCKET
         else:
             stem_by_col[k] = stems[n] if len(stems) == len(chord_gi) else ""
+    tie_by_col = dict(zip(chord_gi, ties)) if ties is not None and len(ties) == len(chord_gi) else {}
     out: dict[str, Any] = {"bucket": collections.defaultdict(lambda: [0, 0]), "tp": 0, "gt_heads": 0,
                            "fp_chord": 0, "fp_plain": 0, "plain_cols": 0, "plain_extra": 0, "untrained_step": 0,
                            "triad_exact": [0, 0], "acc_member": [0, 0], "chord_cols": len(chord_gi),
                            "unaligned": 0, "stem_mismatch": stem_mismatch, "pred_chordnotes": sum(t.startswith("chordnote-") for t in pred),
-                           "gt_notes": len(gcols), "head_conf": [], "cols": []}
+                           "gt_notes": len(gcols), "tie_fp": [0, 0], "head_conf": [], "cols": []}
     for _i, _note, ext, _acc in pcols:
         out["untrained_step"] += sum(1 for t in ext
                                      if not MEMBER_STEPS[0] <= step_of(t) <= MEMBER_STEPS[1])
@@ -192,7 +212,8 @@ def head_scores(pred: Sequence[str], gt: Sequence[str], stems: Sequence[str] | N
         col_hits: list[tuple[str, bool]] = []
         for member in ext:
             ok = ps is not None and step_of(member) in ps
-            for name in _member_bucket_names(note, ext, stem_by_col[gi], member):
+            tie = [f"tie_{tie_by_col[gi]}"] if tie_by_col.get(gi) else []
+            for name in _member_bucket_names(note, ext, stem_by_col[gi], member) + tie:
                 out["bucket"][name][0] += int(ok)
                 out["bucket"][name][1] += 1
                 col_hits.append((name, ok))
@@ -200,6 +221,11 @@ def head_scores(pred: Sequence[str], gt: Sequence[str], stems: Sequence[str] | N
                 out["acc_member"][1] += 1
                 out["acc_member"][0] += int(ok)
         out["cols"].append((gi, note, list(ext), col_hits))
+    for k in _tie_negatives(gt, gcols):
+        out["tie_fp"][1] += 1
+        pi = aligned.get(k)
+        if pi is not None and pi + 1 < len(pcols):
+            out["tie_fp"][0] += int(any(t.startswith("slur.start") for t in pred[pcols[pi][0] + 1:pcols[pi + 1][0]]))
     if conf is not None:
         for pi, (ti, _note, ext, _acc) in enumerate(pcols):
             truth = hit_pred_cols.get(pi, set())
@@ -452,7 +478,7 @@ def evaluate(model: Any, build: Path, rows: Sequence[Mapping[str, Any]],
         if row_stems is not None and strip_stems is None and n_chord:
             missing_keys.append(key)
             strip_stems = [""] * n_chord      # unknown stem: 2nd_unknown, outside the 2nd gates
-        sc = head_scores(pred, r["tokens"], strip_stems, conf)
+        sc = head_scores(pred, r["tokens"], strip_stems, conf, (r.get("_ties") or {}).get(key))
         columns += len(sc["cols"])
         duplicates += dedup_columns(sc, r, seen)
         all_parts.append(sc)
@@ -564,7 +590,9 @@ def load_builds(builds: Sequence[Path], split: str, half: str, chord_only: bool,
         stems = load_stems(b)
         all_stems &= stems is not None
         phase = phase_of(b)
-        rows += [{**r, "_build": b, "_stems": stems, "_phase": phase}
+        summary = b / "divisi_summary.json"
+        ties = json.loads(summary.read_text(encoding="utf-8")).get("tie_sources") if summary.exists() else None
+        rows += [{**r, "_build": b, "_stems": stems, "_ties": ties, "_phase": phase}
                  for r in load_rows(b, split, half, chord_only, 0, seed, groups)]
     if limit and len(rows) > limit:
         rows = random.Random(seed).sample(rows, limit)

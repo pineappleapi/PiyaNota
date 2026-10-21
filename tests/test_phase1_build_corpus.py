@@ -127,7 +127,8 @@ def test_member_ok_rejects_forbidden_intervals(pitches: list[str]) -> None:
 
 def test_member_ok_range_and_steps() -> None:
     assert member_ok([music21.pitch.Pitch("E4"), music21.pitch.Pitch("G4")], 0)
-    assert not member_ok([music21.pitch.Pitch("A5"), music21.pitch.Pitch("C6")], 0)   # above A5 + 2 st
+    assert member_ok([music21.pitch.Pitch("A5"), music21.pitch.Pitch("C6")], 0)       # A6.4: soprano reaches C6
+    assert not member_ok([music21.pitch.Pitch("A5"), music21.pitch.Pitch("D6")], 0)   # above C6
     assert not member_ok([music21.pitch.Pitch(p) for p in ("C4", "E4", "G4", "B4")], 0)   # 4 notes
 
 
@@ -394,12 +395,19 @@ def test_a6_member_overriding_relied_accidental_is_rejected() -> None:
     assert not check([P("F4")], [(8, 2.5)], [(8, 3.0, P("F#4"), 1)])   # G major: F# is the key alter
 
 
-def test_bass_divisi_ceiling_f4() -> None:
-    """Choral-conductor ruling 2026-10-19: bass divisi tops at E4, F4 a rare edge, F#4 never (slack is single-note)."""
+def test_divisi_member_limits_a6_4() -> None:
+    """Choral-conductor 2026-10-21 (A6.4): soprano up to C6, alto down to G3 (an F3 head is always the lowest, so it is a
+    `note.*-L-2` token the old VOCAB lacks), bass C2-G4, tenor unchanged (B-flat2-B4 sounding)."""
     P = music21.pitch.Pitch
-    assert member_ok([P("C4"), P("E4")], 3)
-    assert member_ok([P("C4"), P("F4")], 3)
-    assert not member_ok([P("D4"), P("F#4")], 3)
+    assert member_ok([P("C4"), P("G4")], 3)
+    assert not member_ok([P("D4"), P("A4")], 3)
+    assert member_ok([P("C2"), P("E2")], 3)
+    assert not member_ok([P("B1"), P("D2")], 3)
+    assert member_ok([P("G3"), P("B3")], 1)
+    assert not member_ok([P("F3"), P("A3")], 1)
+    assert member_ok([P("B-2"), P("D3")], 2)
+    assert not member_ok([P("A2"), P("C3")], 2)
+    assert not member_ok([P("A4"), P("C5")], 2)
 
 
 def test_tie_sites_always_taken() -> None:
@@ -471,3 +479,69 @@ def test_ledger2_boost_only_under_target_and_voice() -> None:
     assert boost(voice="Soprano", near_edge=False, realised=0, members=100) == 1.0
     assert boost(voice="Soprano", near_edge=True, realised=4, members=100) == 3.0   # under target
     assert boost(voice="Soprano", near_edge=True, realised=5, members=100) == 1.0   # target reached
+
+
+def _tie_candidate_part() -> tuple[list[music21.stream.Measure], list[int]]:
+    """Bars 1-6 of one voice, 4/4 C major; bar 6 is in G major. Each comment names the barline pair after the bar."""
+    def bar(i: int, items: list[tuple[str, float]]) -> music21.stream.Measure:
+        m = music21.stream.Measure(number=i)
+        off = 0.0
+        for pitch, ql in items:
+            n = music21.note.Rest(quarterLength=ql) if pitch == "r" else music21.note.Note(pitch, quarterLength=ql)
+            m.insert(off, n)
+            off += ql
+        return m
+    ms = [bar(1, [("C4", 2), ("F4", 2)]),             # F4 -> G4: a candidate
+          bar(2, [("G4", 2), ("r", 2)]),              # rest -> E4: never from a rest
+          bar(3, [("E4", 2), ("A4", 2)]),             # A4 (fermata) -> B4: never from a fermata
+          bar(4, [("B4", 2), ("C5", 2)]),             # C5 -> C5 untied: a negative, not a candidate
+          bar(5, [("C5", 2), ("D5", 2)]),             # key change into bar 6: skipped
+          bar(6, [("E5", 4)])]
+    ms[2].notes[-1].expressions.append(music21.expressions.Fermata())
+    return ms, [0, 0, 0, 0, 0, 1]
+
+
+def test_barline_tie_candidates_follow_conductor_rules() -> None:
+    ms, fifths = _tie_candidate_part()
+    cands, repeats = build_corpus._barline_tie_candidates(ms, fifths, [0, 1, 2, 3, 4, 5])
+    assert [(a.nameWithOctave, b.nameWithOctave) for a, b in ((p.pitch, n.pitch) for p, n in cands)] == [("F4", "G4")]
+    assert repeats == 1
+    cands, _ = build_corpus._barline_tie_candidates(ms, fifths, [1, 2])   # no pair crosses a system edge
+    assert cands == []
+
+
+def test_barline_tie_apply_and_undo() -> None:
+    ms, fifths = _tie_candidate_part()
+    (prev, nxt), = build_corpus._barline_tie_candidates(ms, fifths, [0, 1])[0]
+    undo = build_corpus._apply_barline_tie(prev, nxt)
+    assert nxt.pitch.nameWithOctave == "F4" and prev.tie.type == "start" and nxt.tie.type == "stop"
+    undo()
+    assert nxt.pitch.nameWithOctave == "G4" and prev.tie is None and nxt.tie is None
+
+
+def test_a6_4_synthetic_ties_reach_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A6.4: synthetic barline ties raise tied chord columns toward TIE_CHORD_TARGET; sources align with stems."""
+    monkeypatch.setattr(build_corpus, "P_CHORD_FREE_STRIP", 0.0)
+    monkeypatch.setattr(build_corpus, "TIE_CHORD_TARGET", 0.15)   # one piece: a high target keeps the count stable
+    monkeypatch.setattr(build_corpus, "TIE_CHORD_CAP", 0.25)
+    parts = _parts_of("bwv66.6")
+    for part in parts:                                  # bwv66.6's native ties alone are over 5%: drop them
+        for nt in part.recurse().notes:
+            nt.tie = None
+    n = len(parts[0].getElementsByClass(music21.stream.Measure))
+    stats = inject_divisi(parts, [list(range(i, min(i + 4, n))) for i in range(0, n, 4)], random.Random("divisi"))
+    json.dumps(stats)
+    assert stats["synth_ties"] > 0 and stats["synth_ties"] == stats["ties"] and stats["untied_repeat_pairs"] > 0
+    assert 0.05 <= stats["ties"] / stats["chords_total"] <= 0.25
+    sources = stats["tie_sources"]
+    assert sources.keys() == stats["stems"].keys()
+    assert all(len(sources[k]) == len(stats["stems"][k]) for k in sources)
+    flat = [s for v in sources.values() for s in v]
+    assert flat.count("synth") == stats["synth_ties"] and flat.count("native") == stats["ties"] - stats["synth_ties"]
+    for part in parts:
+        ms = list(part.getElementsByClass(music21.stream.Measure))
+        for a, b in zip(ms, ms[1:]):
+            last, first = list(a.notes)[-1:], list(b.notes)[:1]
+            if last and first and isinstance(last[0], music21.chord.Chord) and last[0].tie is not None \
+                    and last[0].tie.type == "start":
+                assert [p.nameWithOctave for p in last[0].pitches] == [p.nameWithOctave for p in first[0].pitches]

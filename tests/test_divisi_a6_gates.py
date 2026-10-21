@@ -48,7 +48,7 @@ def test_mix_report_stems_and_gootville():
 
 
 def test_out_of_range_member():
-    rep = g.mix_report([row("Bravura", ["note.quarter-L1", "chordnote-L8"])])   # step 14
+    rep = g.mix_report([row("Bravura", ["note.quarter-L1", "chordnote-S8"])])   # step 15 (14 is in range since A6.4)
     assert rep["member_steps_out_of_range"] == 1
 
 
@@ -72,7 +72,7 @@ def test_summary_gates_pass_and_fail():
     assert all(x["status"] in (g.PASS, g.INFO) for x in g.summary_gates(s)), g.format_table(g.summary_gates(s))
     s["realised"]["class"]["Alto:3rd"] = 22
     s["realised"]["free_new_accidentals"] = 1
-    s["realised"]["steps"]["Alto:14"] = 1
+    s["realised"]["steps"]["Alto:15"] = 1
     bad = {n for n, x in by_name(g.summary_gates(s)).items() if x["status"] != g.PASS}
     assert {"interval.3rd", "free_new_accidentals", "member_steps_summary"} <= bad
 

@@ -89,11 +89,16 @@ P_STEMS_DOWN_2ND = 0.30
 # .217 on the 10-piece smoke (round 3), under the frozen >= 30%, so a 2nd is forced down while the running share is
 # below this.
 STEMS_DOWN_2ND_TARGET = 0.33
-MAX_MEMBER_STEPS = (-5, 13)          # inclusive, L1 = 0
-RANGE_SLACK_SEMITONES = 2
-# Sounding pitches: Tenor is written in treble-8vb, so its sounding range is C3-A4.
-VOICE_RANGES: dict[str, tuple[str, str]] = {
-    "Soprano": ("C4", "A5"), "Alto": ("G3", "D5"), "Tenor": ("C3", "A4"), "Bass": ("E2", "E4")}
+# Inclusive, L1 = 0. A6.4: top widened from 13 for the 2-ledger members. The floor stays -5: a -6 head is always the
+# chord's lowest, so it labels as `note.*-L-2`, which the old VOCAB has only for the eighth (Amendment A1), and the
+# render guard quarantined every such strip on smoke r12.
+MAX_MEMBER_STEPS = (-5, 14)
+# Hard limits of any chord head, sounding pitch (Tenor is written treble-8vb). Choral-conductor 2026-10-21 (A6.4):
+# soprano up to C6, alto down to E3 (G3 here, see MAX_MEMBER_STEPS), bass C2-G4; tenor keeps the A6.3 range.
+# shortcut: bass F#4/G4 are drawn like any in-range member although the conductor wants them rare (shape training
+# only); add a per-pitch weight if the full build shows them above ~1% of bass members.
+DIVISI_MEMBER_LIMITS: dict[str, tuple[str, str]] = {
+    "Soprano": ("B-3", "C6"), "Alto": ("G3", "E5"), "Tenor": ("B-2", "B4"), "Bass": ("C2", "G4")}
 MAX_REDRAWS = 8
 MAX_CHORD_NOTES = 3
 MAX_CHORD_SEMITONES = 12
@@ -115,11 +120,14 @@ ACCIDENTAL_SITE_BOOST = 4.0          # site weight factor for chromatic notes wh
 LEDGER2_MEMBER_TARGET = 0.05         # share of members a piece steers toward
 LEDGER2_SITE_BOOST = 3.0             # site weight factor for near-edge heads while under target
 LEDGER2_MEMBER_CAP = 0.08            # never boost at or above this share
-# In range only alto (A3/G3) and bass (E4/F4) reach 2 ledgers; soprano and tenor never do.
+# Soprano (C6), alto (A3-G3) and bass (C2, E4-G4) reach 2 ledgers within DIVISI_MEMBER_LIMITS; tenor never does.
 LEDGER2_VOICES: frozenset[str] = frozenset({"Soprano", "Alto", "Bass"})
-BASS_DIVISI_CEILING = "F4"           # choral-conductor 2026-10-19: E4 practical top, F4 rare edge, F#4 never
 LEDGER2_STEPS = (-4, 12)             # a member at or beyond these steps sits on 2+ ledger lines
 NEAR_EDGE_STEPS = (-1, 9)            # a base head here reaches LEDGER2_STEPS with a 2nd-4th member
+# A6.4 (ml-cv-lead + choral-conductor 2026-10-21): Bach's native ties gave 1.6% tied chord columns on the smoke, so
+# barline pairs inside a system are tied synthetically toward this share of chord columns (native included).
+TIE_CHORD_TARGET = 0.05
+TIE_CHORD_CAP = 0.08
 MERGE_METERS: frozenset[str] = frozenset({"4/4", "2/2"})
 WHOLE_NOTE_QL = 4.0
 # Merges (ruling 2026-10-18): plain notes in one bar become one longer note on the first pitch, always chorded.
@@ -461,15 +469,11 @@ def free_member(base: music21.pitch.Pitch, generic: int, direction: int, in_forc
 def member_ok(chord: list[music21.pitch.Pitch], voice_index: int) -> bool:
     """True when `chord` (all notes on one stem) is singable and drawable for the voice.
 
-    Why each check: range+slack and steps -5..13 keep every head readable on the voice's staff; span and note
+    Why each check: DIVISI_MEMBER_LIMITS and MAX_MEMBER_STEPS keep every head singable and tokenisable; span and note
     count keep the stem a normal choral divisi; the interval ban is the conductor rule (no aug/dim leaps, no
     chromatic second or unison) and a generic unison would overprint two heads.
     """
-    low, high = VOICE_RANGES[VOICES[voice_index]]
-    lo_ps = music21.pitch.Pitch(low).ps - RANGE_SLACK_SEMITONES
-    hi_ps = music21.pitch.Pitch(high).ps + RANGE_SLACK_SEMITONES
-    if VOICES[voice_index] == "Bass":
-        hi_ps = min(hi_ps, music21.pitch.Pitch(BASS_DIVISI_CEILING).ps)
+    lo_ps, hi_ps = (music21.pitch.Pitch(p).ps for p in DIVISI_MEMBER_LIMITS[VOICES[voice_index]])
     if len(chord) > MAX_CHORD_NOTES:
         return False
     for p in chord:
@@ -897,6 +901,46 @@ def _accidental_display(part: music21.stream.Part, fresh: bool) -> dict[tuple[in
     return out
 
 
+def _barline_tie_candidates(measures: list[music21.stream.Measure], fifths: list[int], system: list[int]
+                            ) -> tuple[list[tuple[music21.note.Note, music21.note.Note]], int]:
+    """Barline note pairs inside one system that a synthetic tie may join (A6.4), and the untied same-pitch pairs.
+
+    Conductor rules: never from a rest or a fermata note, never into a key change, plain notes only (no tie, tuplet,
+    grace, articulation), the continuation on beat 1. Untied same-pitch pairs are left alone as negatives for the
+    tie false-positive metric, so they are counted, not offered."""
+    out: list[tuple[music21.note.Note, music21.note.Note]] = []
+    repeats = 0
+    for mi, nmi in zip(system, system[1:]):
+        last = list(measures[mi].getElementsByClass((music21.note.Note, music21.note.Rest, music21.chord.Chord)))
+        first = list(measures[nmi].getElementsByClass((music21.note.Note, music21.note.Rest, music21.chord.Chord)))
+        if not last or not first:
+            continue
+        prev, nxt = last[-1], first[0]
+        if not (isinstance(prev, music21.note.Note) and isinstance(nxt, music21.note.Note)):
+            continue
+        if prev.pitch.ps == nxt.pitch.ps:
+            if not (prev.tie is not None and prev.tie.type != "stop" and nxt.tie is not None):
+                repeats += 1
+            continue
+        if (_plain(prev) and _plain(nxt) and float(measures[nmi].elementOffset(nxt)) == 0.0
+                and fifths[mi] == fifths[nmi] and _duration_class(prev.duration) in A6_DURATIONS
+                and _duration_class(nxt.duration) in A6_DURATIONS):
+            out.append((prev, nxt))
+    return out, repeats
+
+
+def _apply_barline_tie(prev: music21.note.Note, nxt: music21.note.Note) -> Callable[[], None]:
+    """Ties `nxt` to `prev` at prev's pitch (accidental display is redone by makeAccidentals); returns the undo."""
+    old = nxt.pitch
+    nxt.pitch = copy.deepcopy(prev.pitch)
+    prev.tie, nxt.tie = music21.tie.Tie("start"), music21.tie.Tie("stop")
+
+    def undo() -> None:
+        nxt.pitch = old
+        prev.tie = nxt.tie = None
+    return undo
+
+
 def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], drng: random.Random) -> dict[
         str, object]:
     """A6 injection: same-stem chords across whole strips at the frozen mix (design section 4); returns the stats.
@@ -927,14 +971,23 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
       (`skipped["merge_accidental_relied_on"]`), and so is a chord whose member would change that accidental
       (`skipped["member_overrides_relied_accidental"]`), so the post-hoc audit stays 0.
     * Whole-note chords have no stem; their entry in `stems` is STEMLESS so the list stays one entry per chord.
+    * A6.4: before sites are listed, a chord strip gets synthetic barline ties (`_barline_tie_candidates`) for its
+      share of the running TIE_CHORD_TARGET deficit, never past TIE_CHORD_CAP; a strip restored to plain loses them.
+      `tie_sources` is one entry per chord column like `stems` ("native", "synth" or "").
     shortcut: tied notes are chorded only when TIES_ENABLED (both sides, same members); off until G1b passes ties.
     """
     stats: dict[str, collections.Counter[str]] = {k: collections.Counter() for k in
                                                    ("class", "duration", "steps", "skipped", "shortfall", "merged")}
     scalars: collections.Counter[str] = collections.Counter({k: 0 for k in (
         "accidental_cols", "ties", "crossing", "free", "copied", "chord_free_strips", "strips",
-        "free_new_accidentals", "induced_accidentals", "chords_total", "merged_whole", "ledger2_members")})
+        "free_new_accidentals", "induced_accidentals", "chords_total", "merged_whole", "ledger2_members",
+        "synth_ties", "synth_tie_pairs", "untied_repeat_pairs")})
     stems: dict[str, list[str]] = {}
+    tie_sources: dict[str, list[str]] = {}
+    synth_ids: set[int] = set()                  # ids of the start notes of synthetic ties
+    synth_undo: dict[tuple[int, int], list[Callable[[], None]]] = {}
+    repeats_of: dict[tuple[int, int], int] = {}
+    tie_cols = expected_cols = 0.0               # piece running totals for the synthetic tie budget
     density_per_strip: list[float] = []
     chord_free_keys: list[str] = []
     density_short_keys: list[str] = []
@@ -972,6 +1025,31 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
         for si, system in enumerate(systems):
             skipped: collections.Counter[str] = collections.Counter()
             sites, columns = _strip_sites(measures, meters, fifths, system, skipped)
+            density_d = decisions[(vi, si)]
+            if density_d is not None and TIES_ENABLED and columns:
+                native = sum(len(s.heads) for s in sites if s.kind == "tie")
+                expected_cols += density_d * columns
+                budget = TIE_CHORD_TARGET * expected_cols - tie_cols - native
+                room = TIE_CHORD_CAP * expected_cols - tie_cols - native
+                want = min(int(budget / 2 + drng.random()) if budget > 0 else 0, max(0, int(room // 2)))
+                cands, _ = _barline_tie_candidates(measures, fifths, system)
+                drng.shuffle(cands)
+                taken: set[int] = set()
+                undos: list[Callable[[], None]] = []
+                for prev, nxt in cands:
+                    if len(undos) >= want:
+                        break
+                    if id(prev) in taken or id(nxt) in taken:    # a note joins one synthetic tie at most
+                        continue
+                    taken.update((id(prev), id(nxt)))
+                    undos.append(_apply_barline_tie(prev, nxt))
+                    synth_ids.add(id(prev))
+                synth_undo[(vi, si)] = undos
+                tie_cols += native + 2 * len(undos)
+                if undos:
+                    skipped = collections.Counter()
+                    sites, columns = _strip_sites(measures, meters, fifths, system, skipped)
+                repeats_of[(vi, si)] = _barline_tie_candidates(measures, fifths, system)[1]
             strips.append((sites, columns))
             if decisions[(vi, si)] is not None:
                 stats["skipped"].update(skipped)
@@ -1089,6 +1167,7 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                     "bucket": f"2nd_{stem}" if bucket == "2nd" else bucket, "stem": stem, "members": members,
                     "sources": sources, "cross": cross, "fifths": fifths[mi],
                     "est_acc": any(_chromatic(p, fifths[mi]) for p in pitches), "tie": site.kind == "tie",
+                    "synth_tie": site.kind == "tie" and id(base_note) in synth_ids,
                     # Dyads only: the gate's 2nd_up/2nd_down buckets; a triad holding a 2nd is a "triad" (A6.3 review).
                     "second": stem != STEMLESS and len(pitches) == 2 and _has_second(pitches, vi)}
                 if site.kind == "merge":
@@ -1136,7 +1215,7 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                 cols += add_cols
                 n_cols += add_n
             if cols / n_cols < CHORD_DENSITY[0]:
-                for fn in reversed(undo):
+                for fn in reversed(undo + synth_undo.get((vi, si), [])):
                     fn()
                 stats["skipped"]["density_short"] += 1
                 scalars["chord_free_strips"] += 1
@@ -1146,6 +1225,9 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
             density_per_strip.append(cols / n_cols)
             records.sort(key=lambda r: float(r["t"]))  # type: ignore[arg-type]
             stems[strip_key] = [str(r["stem"]) for r in records]
+            tie_sources[strip_key] = ["synth" if r["synth_tie"] else "native" if r["tie"] else "" for r in records]
+            scalars["synth_tie_pairs"] += len(synth_undo.get((vi, si), []))
+            scalars["untied_repeat_pairs"] += repeats_of.get((vi, si), 0)
             seconds_done += sum(1 for r in records if r["second"])
             seconds_down += sum(1 for r in records if r["second"] and r["stem"] == "down")
             for r in records:
@@ -1159,6 +1241,7 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                 scalars.update(sources_r)
                 scalars["crossing"] += int(bool(r["cross"]))
                 scalars["ties"] += int(bool(r["tie"]))
+                scalars["synth_ties"] += int(bool(r["synth_tie"]))
                 if r["merge"]:
                     stats["merged"][str(r["merge"])] += 1
                     scalars["merged_whole"] += int(r["merge"] == "whole")
@@ -1185,7 +1268,8 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                                               if k in baseline[vi] and baseline[vi][k] != shown)
     out: dict[str, object] = {k: dict(v) for k, v in stats.items()}
     out.update(scalars)
-    out.update(stems=stems, density_per_strip=density_per_strip, chord_free_keys=sorted(chord_free_keys),
+    out.update(stems=stems, tie_sources=tie_sources, density_per_strip=density_per_strip,
+               chord_free_keys=sorted(chord_free_keys),
                density_short_keys=sorted(density_short_keys))
     return out
 
@@ -1345,6 +1429,8 @@ def build_divisi(path: Path, composer: str, work_dir: Path, inject_seed: str = "
     plan.piece_id = piece_id + DIVISI_SUFFIX
     stems: dict[str, list[str]] = stats["stems"]  # type: ignore[assignment]
     stats["stems"] = {f"{plan.piece_id}|{k}": v for k, v in stems.items()}
+    sources: dict[str, list[str]] = stats["tie_sources"]  # type: ignore[assignment]
+    stats["tie_sources"] = {f"{plan.piece_id}|{k}": v for k, v in sources.items()}
     stats["chord_free_keys"] = [f"{plan.piece_id}|{k}" for k in stats["chord_free_keys"]]  # type: ignore[attr-defined]
     stats["density_short_keys"] = [f"{plan.piece_id}|{k}"  # type: ignore[attr-defined]
                                    for k in stats["density_short_keys"]]
@@ -1404,6 +1490,7 @@ def main() -> None:
     scalar_totals: collections.Counter[str] = collections.Counter()
     list_totals: dict[str, list[object]] = collections.defaultdict(list)
     stems_all: dict[str, list[str]] = {}
+    tie_sources_all: dict[str, list[str]] = {}
     log: list[dict[str, object]] = []
     t0 = time.time()
     for composer in args.composers.split(","):
@@ -1432,6 +1519,8 @@ def main() -> None:
                     for k, v in stats.items():
                         if k == "stems":
                             stems_all.update(v)  # type: ignore[arg-type]
+                        elif k == "tie_sources":
+                            tie_sources_all.update(v)  # type: ignore[arg-type]
                         elif isinstance(v, dict):
                             totals[k].update(v)
                         elif isinstance(v, list):
@@ -1462,7 +1551,7 @@ def main() -> None:
         realised: dict[str, object] = {k: dict(v) for k, v in totals.items()}
         realised.update(scalar_totals)
         summary = {"pieces_missing_from_build": missing, "skipped_pieces": skipped, "seed": args.divisi_seed,
-                   "realised": realised, **list_totals, "stems": stems_all}
+                   "realised": realised, **list_totals, "stems": stems_all, "tie_sources": tie_sources_all}
         (args.out / "divisi_summary.json").write_text(json.dumps(summary, indent=1), encoding="utf-8")
         print(json.dumps(realised, indent=1))
 
