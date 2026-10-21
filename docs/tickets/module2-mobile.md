@@ -339,7 +339,7 @@ _Phone test results (2026-10-17, fake backend): 75 pass, 0 fail, 12 untested. Pe
     - Progress and completion show in the app's notifications, the in-app bell and list, the same way Processing does (PIYA-207, PIYA-218).
     - Reopening the export sheet while an export runs shows its live progress and the X (AC12).
     - Only one export runs at a time.
-    - The export must survive closing the sheet and navigating away within the app. It does not have to survive the app being killed.
+    - The export must survive closing the sheet and navigating away within the app. It does not have to survive the app being killed. Thanks to the foreground service (below), an export usually survives the app being swiped from recents, but this is not guaranteed if the OS kills the process. *(Note added 2026-10-22.)*
     - **Leaving the app** *(decided 2026-10-22, user decision; resolves the 2026-10-21 open question)*: the export keeps running when the user leaves the app, in an Android foreground service with an ongoing progress notification that has a cancel action. That cancel does the same as the X (AC12).
     - When the export completes or fails, a system notification is posted. A cancel (from the X or the notification) posts nothing.
     - The app asks for `POST_NOTIFICATIONS` on Android 13+ (shared with PIYA-218 AC11).
