@@ -15,7 +15,9 @@ Non Nobis Domine has no divisi, and Phase 4 is firewalled for the whole-pipeline
   local Filipino choral editions). Each piece needs at least 1 page with same-stem divisi. Split-stem pages are
   welcome too, tagged as such.
 - **Exclusions:** no Bach chorales, no piece in the Phase 2 training manifest, no Phase 4 piece and no
-  `piyanota_dataset` piece. `training/divisi_real_register.py` refuses training-manifest pieces automatically; the
+  `piyanota_dataset` piece. `training/divisi_real_register.py` refuses training-manifest pieces automatically,
+  matching on the BWV work number (so "BWV 66.6 Christ lag..." and "BWV 66" are both refused). A piece without a
+  BWV number matches only on its exact id, so name pieces by their BWV number where they have one. The
   Phase 4 and `piyanota_dataset` exclusions are the user's check, because the agent never reads those sets.
 - **Capture:** phone photos taken the way choir members take them: hand-held, room light, no scanner. Use the same
   capture conditions as Phase 4.

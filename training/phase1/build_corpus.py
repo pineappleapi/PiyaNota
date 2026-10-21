@@ -939,7 +939,6 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
     chord_free_keys: list[str] = []
     density_short_keys: list[str] = []
     est_accidental_cols = 0      # predicted (chromatic head) columns, steers the site bias before makeAccidentals
-    ledger2_members = members_done = 0   # committed members 2+ ledger lines out / all, steer _ledger2_boost (A6.3)
     seconds_done = seconds_down = 0  # committed stemmed 2nds and how many are stems down (STEMS_DOWN_2ND_TARGET)
     free_placed: list[tuple[int, float, music21.pitch.Pitch, int]] = []   # committed free members, for merges
     baseline = [_accidental_display(part, fresh=True) for part in parts]
@@ -1014,8 +1013,10 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                 choose_from = ties if use_ties else plain
                 dur_done = collections.Counter(str(r["cls"]) for r in records) + stats["duration"]
                 available = [c for c in dur_names if any(s.cls == c for s in choose_from)]
-                offered = [c for c in available
-                           if not (done and dur_done[c] / done > A6_DURATIONS[c] + DURATION_OVER_TARGET)]
+                # Ties skip the duration cap: they are supply-limited (~1% of chords), and capping them ended the
+                # strip before any plain site was tried (A6.3 review).
+                offered = available if use_ties else [
+                    c for c in available if not (done and dur_done[c] / done > A6_DURATIONS[c] + DURATION_OVER_TARGET)]
                 if not offered:
                     if not available or cols / n_cols >= CHORD_DENSITY[0]:
                         break                  # floor reached: stop rather than overfill an over-target class
@@ -1026,8 +1027,8 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                 of_cls = [s for s in choose_from if s.cls == cls]
                 of_cls = [s for s in of_cls if s.kind != "merge"] or of_cls     # real notes before merged ones
                 pending = [p for r in records for p in r["members"]]  # type: ignore[attr-defined]
-                l2_done = ledger2_members + sum(_is_ledger2(_drawn_position(p, vi)) for p in pending)
-                m_done = members_done + len(pending)
+                l2_done = scalars["ledger2_members"] + sum(_is_ledger2(_drawn_position(p, vi)) for p in pending)
+                m_done = scalars["free"] + scalars["copied"] + len(pending)   # committed + this strip's, once
                 site = drng.choices(of_cls, weights=[
                     (ACCIDENTAL_SITE_BOOST if boost and s.chromatic else 1.0)
                     * _ledger2_boost(voice, not NEAR_EDGE_STEPS[0] < _drawn_position(s.heads[0][1].pitch, vi)
@@ -1081,13 +1082,15 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                 seconds_n = seconds_done + len(strip_2nds)
                 down_n = seconds_down + strip_2nds.count("down")
                 # The first 2nd of a piece uses the plain draw: forcing it down biased by voice/position (round 5).
-                force_down = seconds_n > 0 and down_n / seconds_n < STEMS_DOWN_2ND_TARGET
+                # Counted as if this 2nd went up, so the piece share never ends under target (A6.3 review).
+                force_down = seconds_n > 0 and down_n / (seconds_n + 1) < STEMS_DOWN_2ND_TARGET
                 stem = STEMLESS if site.cls == "whole" else _stem_direction(pitches, vi, drng, force_down)
                 common: dict[str, object] = {
                     "bucket": f"2nd_{stem}" if bucket == "2nd" else bucket, "stem": stem, "members": members,
                     "sources": sources, "cross": cross, "fifths": fifths[mi],
                     "est_acc": any(_chromatic(p, fifths[mi]) for p in pitches), "tie": site.kind == "tie",
-                    "second": stem != STEMLESS and _has_second(pitches, vi)}
+                    # Dyads only: the gate's 2nd_up/2nd_down buckets; a triad holding a 2nd is a "triad" (A6.3 review).
+                    "second": stem != STEMLESS and len(pitches) == 2 and _has_second(pitches, vi)}
                 if site.kind == "merge":
                     old = [(float(m.elementOffset(n)), n) for _, n in site.heads]
                     chord = _make_chord(pitches, base_note, stem, merged_ql=t_end - t)
@@ -1152,8 +1155,6 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                 stats["duration"][str(r["cls"])] += 1
                 stats["steps"].update(f"{voice}:{_drawn_position(p, vi)}" for p in members_r)
                 l2 = sum(_is_ledger2(_drawn_position(p, vi)) for p in members_r)
-                ledger2_members += l2
-                members_done += len(members_r)
                 scalars["ledger2_members"] += l2
                 scalars.update(sources_r)
                 scalars["crossing"] += int(bool(r["cross"]))

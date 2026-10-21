@@ -28,6 +28,14 @@ def test_registration_rejects_training_piece(tmp_path: Path) -> None:
         register(photos, meta, TRAINING, tmp_path / "registry.json")
 
 
+@pytest.mark.parametrize("name", ["BWV 66.6 Christ lag in Todesbanden", "Bach - bwv66", "J.S. Bach BWV 10.7"])
+def test_registration_rejects_training_piece_spelled_differently(tmp_path: Path, name: str) -> None:
+    """Review: a training chorale under a publisher's title must still be refused (match on the BWV number)."""
+    photos, meta = _setup(tmp_path, [f"{name},Breitkopf,p1.jpg,same_stem"])
+    with pytest.raises(ValueError, match="training"):
+        register(photos, meta, TRAINING, tmp_path / "registry.json")
+
+
 def test_gt_kind_required(tmp_path: Path) -> None:
     photos, meta = _setup(tmp_path, ["ave_verum,Novello,p1.jpg,"])
     with pytest.raises(ValueError, match="gt_kind"):

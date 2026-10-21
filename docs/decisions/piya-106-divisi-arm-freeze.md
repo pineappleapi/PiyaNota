@@ -377,6 +377,16 @@ Written before any A6 Kaggle build or training; plan `docs/superpowers/plans/202
     10 pieces (bwv10.7 4, bwv101.7 2).
   - Also tried and reverted: steering free members outward at boosted sites did not move the share (2.2%). Near-edge
     sites are too rare in Bach for weighting alone to reach 5%.
+  - **After the final-review fixes (2026-10-21), same manifest:** rc 0, class and duration shares still within
+    ±3 pp. Tied chords 8/510 (1.6%) from bwv10.7 4, bwv101.7 2 and bwv11.6 2; 2+ ledger members 9/586 (1.5%);
+    accidental chords 14%; free_new 0; stemmed dyad 2nds down 49%. The fixes are below.
+    - Tie sites skip the duration over-target cap. Before, an over-target tie class ended the strip before any plain
+      site was tried.
+    - The 2-ledger boost counts committed members plus the open strip's members once. Before, the open strip's
+      members were counted twice.
+    - Stems-down steering counts dyad 2nds only (the gate's 2nd_up/2nd_down population, not triads holding a 2nd),
+      and counts the 2nd being placed as if it went up. The piece share then cannot end under target once it has two
+      dyad 2nds.
 - **Verdict rule:** the tie bucket and the 2-ledger slice are expected UNDERPOWERED on the test half. They are
   reported with n and interval, never PASS. The full build reports realised train counts for both.
 - **Labels:** 10 chords at steps -5/-4/12/13 were checked at 1:1 in Leipzig and Bravura; all 10 match their

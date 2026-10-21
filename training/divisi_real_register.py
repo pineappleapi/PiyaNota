@@ -6,6 +6,7 @@ cannot be retaken, swapped or dropped after a result is seen. A piece that is in
 refused, because scoring a model on pieces it trained on says nothing about real-world divisi.
 
 meta CSV columns: piece,publisher,page,gt_kinds  (one row per photo; gt_kinds `;`-separated, from GT_KINDS)
+A piece with a BWV number is refused when any training chorale has the same work number (BWV 66 covers 66.6).
 
 Usage: python training/divisi_real_register.py --photos <dir> --meta <csv> --manifest <phase2_manifest.jsonl>
        --out data/eval_divisi_real/registry.json [--freeze]
@@ -25,7 +26,10 @@ DIVISI_SUFFIX = "__divisi"
 
 
 def _norm(piece: str) -> str:
-    return re.sub(r"[^a-z0-9.]", "", piece.lower())
+    """Comparison key: the BWV work number when there is one, so a publisher's title still matches the chorale."""
+    flat = re.sub(r"[^a-z0-9.]", "", piece.lower())
+    bwv = re.search(r"bwv(\d+)", flat)
+    return f"bwv{bwv.group(1)}" if bwv else flat
 
 
 def load_training_pieces(manifest: Path) -> set[str]:

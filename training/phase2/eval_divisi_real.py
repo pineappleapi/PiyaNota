@@ -34,13 +34,16 @@ def second_as_sequence(pred: Sequence[str], gt: Sequence[str]) -> int:
     """GT 2nd dyads read as two successive notes at the same two positions (A3 metric, counted as a miss too)."""
     gcols, pcols = columns(gt), columns(pred)
     aligned = dict(lcs_pairs([shape(c[1]) for c in gcols], [shape(c[1]) for c in pcols]))
-    used = set(aligned.values())
+    gt_of = {pi: gi for gi, pi in aligned.items()}
     count = 0
     for gi, (_ti, note, ext, _acc) in enumerate(gcols):
         pi = aligned.get(gi)
-        if len(ext) != 1 or pi is None or pcols[pi][2] or pi + 1 >= len(pcols) or pi + 1 in used:
+        if len(ext) != 1 or pi is None or pcols[pi][2] or pi + 1 >= len(pcols):
             continue
         lo, hi = step_of(note), step_of(ext[0])
+        nxt = gt_of.get(pi + 1)
+        if nxt is not None and step_of(gcols[nxt][1]) == hi:
+            continue                  # the next read note is a real GT note at that position: a plain miss
         if hi - lo == SECOND_STEPS and step_of(pcols[pi][1]) == lo and step_of(pcols[pi + 1][1]) == hi:
             count += 1
     return count

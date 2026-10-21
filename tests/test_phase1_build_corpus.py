@@ -407,6 +407,60 @@ def test_tie_sites_always_taken() -> None:
     assert build_corpus.P_TIE_CHORD == 1.0
 
 
+def test_ledger2_boost_sees_committed_plus_pending_members(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A6.3 review: the boost's counts are committed members plus the open strip's, each counted once."""
+    seen: list[tuple[int, int, int, int]] = []
+    real = build_corpus._ledger2_boost
+
+    def spy(voice: str, near_edge: bool, realised: int, members: int) -> float:
+        loc = sys._getframe(1).f_locals          # inject_divisi's state at the call: the independent truth
+        pending = [p for r in loc["records"] for p in r["members"]]
+        seen.append((realised, members, loc["scalars"]["ledger2_members"] + sum(
+            build_corpus._is_ledger2(build_corpus._drawn_position(p, loc["vi"])) for p in pending),
+            loc["scalars"]["free"] + loc["scalars"]["copied"] + len(pending)))
+        return real(voice, near_edge, realised, members)
+
+    monkeypatch.setattr(build_corpus, "_ledger2_boost", spy)
+    run_inject("bwv66.6", "ledger2-count")
+    assert seen
+    assert all((r, m) == (r_true, m_true) for r, m, r_true, m_true in seen)
+
+
+TINY_TARGET = 0.01                # a class over target after its first chord
+TIE_SITES = 16                    # fixture: 4 two-bar systems x 4 voices, one tied pair each
+
+
+def test_over_target_tie_class_still_tied_then_plain(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A6.3 review: ties are supply-limited, so an over-target tie class is still taken, and the strip goes on to
+    plain sites afterwards instead of ending."""
+    monkeypatch.setattr(build_corpus, "TIES_ENABLED", True)
+    monkeypatch.setattr(build_corpus, "P_CHORD_FREE_STRIP", 0.0)
+    durations = dict(build_corpus.A6_DURATIONS)
+    durations["quarter"] += durations["half"] - TINY_TARGET
+    monkeypatch.setattr(build_corpus, "A6_DURATIONS", {**durations, "half": TINY_TARGET})
+    score = music21.stream.Score()
+    for name, pitch in (("Soprano", "C5"), ("Alto", "E4"), ("Tenor", "G3"), ("Bass", "C3")):
+        part = music21.stream.Part()
+        part.partName = name
+        for i in range(8):
+            m = music21.stream.Measure(number=i + 1)
+            if i == 0:
+                m.insert(0, music21.meter.TimeSignature("4/4"))
+            if i % 2 == 0:                           # bar 1 of each 2-bar system: one tied half pair
+                a, b = music21.note.Note(pitch, quarterLength=2), music21.note.Note(pitch, quarterLength=2)
+                a.tie, b.tie = music21.tie.Tie("start"), music21.tie.Tie("stop")
+                m.insert(0, a)
+                m.insert(2, b)
+            else:
+                for off in range(4):
+                    m.insert(off, music21.note.Note(pitch, quarterLength=1))
+            part.append(m)
+        score.insert(0, part)
+    stats = run_inject(score, seed="divisi")
+    assert stats["ties"] >= TIE_SITES // 2
+    assert stats["duration"].get("quarter", 0) > 0
+
+
 def test_ledger2_boost_only_under_target_and_voice() -> None:
     """A6.3: near-edge sites are boosted only in soprano/alto and only while 2+-ledger members are under target."""
     boost = build_corpus._ledger2_boost

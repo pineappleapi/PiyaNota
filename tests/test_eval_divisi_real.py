@@ -34,6 +34,12 @@ def test_sequence_read_is_miss() -> None:
     gt = ["note.quarter-L2", "chordnote-S2"]
     assert second_as_sequence(["note.quarter-L2", "note.quarter-S2"], gt) == 1
     assert second_as_sequence(["note.quarter-L2", "chordnote-S2"], gt) == 0
+    # Review: a same-duration note after the chord must not hide the sequence read (LCS pairs it with S2).
+    run = ["note.quarter-L2", "chordnote-S2", "note.quarter-L4"]
+    assert second_as_sequence(["note.quarter-L2", "note.quarter-S2", "note.quarter-L4"], run) == 1
+    # A missed member followed by a real note at the member's position is not a sequence read.
+    same = ["note.quarter-L2", "chordnote-S2", "note.quarter-S2"]
+    assert second_as_sequence(["note.quarter-L2", "note.quarter-S2"], same) == 0
 
 
 def test_sequence_read_scored_as_miss(tmp_path: Path) -> None:
