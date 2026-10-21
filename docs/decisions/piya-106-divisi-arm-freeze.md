@@ -394,3 +394,37 @@ Written before any A6 Kaggle build or training; plan `docs/superpowers/plans/202
   so a low 2-ledger head is the column's `note` token, not a `chordnote`.
   - G1b's `chord_ledger` cases select any ledger position (1 line or more). They never targeted 2-line chords, so
     G1b alone does not confirm steps -5/-4/12/13; the eyeball and SVG check above do.
+
+#### A6.4 Synthetic barline ties and wider 2-ledger member range (2026-10-21)
+Written before any A6 Kaggle build or training. No test photo or `piyanota_dataset` page informed these values.
+- **Trigger:** the 10-piece smoke (r11), not the full build, showed tied chords at 1.6%, under the A6.3 revisit
+  trigger of 2%. Members on 2+ ledgers were 1.5%, against a 5% target. The user asked for both to be synthesised
+  (2026-10-21).
+- **Synthetic ties (ml-cv-lead GO, choral-conductor approve; 2026-10-21):**
+  - Only across a barline inside one system. The bar's last note keeps its pitch. The next bar's first note in the
+    same voice takes that pitch, and the two are tied. Ties inside a bar are not synthesised.
+  - Never from a rest, a fermata note, a grace or tuplet note, or a note already tied. The continuation must be a
+    plain note at offset 0. Both durations must be A6 duration classes. A tie spans 2 notes at most.
+  - Pairs that already share a pitch and are not tied stay untied. They are kept as negatives, and their count is
+    reported (`untied_repeat_pairs`).
+  - Only strips drawn to carry chords are edited. A strip restored to plain is restored with its ties.
+  - **Target and cap:** `TIE_CHORD_TARGET` = 0.05 and `TIE_CHORD_CAP` = 0.08 of chord columns, native and synthetic
+    together. Each strip adds pairs for its share of the running deficit.
+  - Cross-system ties stay uncovered (known gap).
+- **2-ledger member range (choral-conductor 2026-10-21):** the added divisi member, never the base head, may reach:
+  - Soprano up to C6.
+  - Alto down to E3 (F3 is occasional, E3 is the hard floor).
+  - Bass up to G4 (shape training only; replaces the A6.3 F4 ceiling) and down to C2.
+  - Tenor unchanged. Its written 2-ledger notes would be unsingable.
+  - `MAX_MEMBER_STEPS` widens to (-7, 14) so these heads can be drawn. The A6.3 boost, target (5%) and cap (8%) are
+    unchanged.
+- **Not done (ml-cv-lead NO-GO):** 3x training oversampling of these strips (it changes optimisation, a second
+  variable; fallback only, and must be pre-registered first) and raising the 2nd weight (11.8% is on target).
+- **Reporting (report-only, no new gate thresholds):**
+  - `eval_divisi_a6.py` adds member buckets `tie_native`, `tie_synth` (`tie` when the build has no tie source) and
+    `ledger2` (step <= -4 or >= 12), each with n and Wilson interval.
+  - It adds `tie_fp`: predicted ties on GT same-position note pairs across a barline that are not tied.
+  - A synthetic-bucket result shows in-distribution learning only. Real-world tie and 2-ledger claims need the real
+    camera divisi set, which is never used for this tuning.
+- **Checks before the build:** a 1:1 eyeball of about 10 synthetic-tie and new-step renders in Leipzig and Bravura,
+  plus the automatic SVG check on the smoke.
