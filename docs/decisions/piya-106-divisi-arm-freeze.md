@@ -437,3 +437,48 @@ Written before any A6 Kaggle build or training. No test photo or `piyanota_datas
     camera divisi set, which is never used for this tuning.
 - **Checks before the build:** a 1:1 eyeball of about 10 synthetic-tie and new-step renders in Leipzig and Bravura,
   plus the automatic SVG check on the smoke.
+
+#### A6.5 Build v2 result and the free_new_accidentals audit correction (2026-10-22)
+Build kernel `piamac/piyanota-divisi-a6-build` v2 (COMMIT 392b25b). v1 aborted before building: the bundle's branch sat
+at the later pin commit. No test photo, test render or `piyanota_dataset` page was opened.
+- **Divisi manifest:** 11163 rows, sha256 `deb09dcf6422950b3fecfd374aca2d883c6cbc3d45e5e9236e25bed8b809c1b3`; 0 pieces
+  or tunes in both splits.
+  - Train: 9471 strips (7239 with chords), 0 Gootville.
+  - Val: 1692 strips (341 Gootville).
+- **Realised mix (all gates within target):**
+  - Intervals: 2nd .120, 3rd .163, 4th .119, 5th .122, 6th .120, 7th .052, 8ve .156, triad .149.
+  - Durations: whole .102, half .200, dotted .148, quarter .342, beamed .210.
+  - Chord shape and accidentals: free members .619, stems-down share of stemmed 2nds .488, accidental columns .128,
+    crossing .089, chord-free strips .248.
+  - Ties: 1528 of 18895 chord columns (8.1%: 824 native, 704 synthetic), at the A6.4 cap.
+  - 2+ ledger members: 975 of 21792 (4.5%).
+  - Stem alignment: 0 of 8572 chord strips off.
+  - Induced accidentals: 170 (report only).
+- **Test renders (unique heads; minimum is the 600/300 rule):**
+  - In-font (paired), lowest: 2nd_down 609, 2nd_up 629, 7th 634; 2nd_none 180 (stemless 2nds, no floor).
+  - Gootville, lowest: 7th 303, 2nd_down 311, 2nd_up 312; 2nd_none 85.
+  - Duplicate rate .091.
+- **free_new_accidentals = 15, gate FAIL: an audit false positive, corpus unchanged.**
+  - Each of 15 Bach pieces had exactly one hit: bwv102.7, 117.4, 176.6, 276, 277, 295, 309, 344, 346, 374, 377, 402,
+    403, 407, 437.
+  - Every hit is a chord at offset 0 of a bar whose notes all end a tie (native or synthetic). The accidental carries
+    over the tie (choral-conductor ruling 2026-10-22), so no new accidental is drawn.
+  - The post-hoc audit in `inject_divisi` now skips tie-continuation members. Commit 169d4f0; test
+    `test_a6_tie_continuation_member_keeps_its_accidental`. A local rebuild of the 15 pieces gives 0.
+  - The audit only counts, so the v2 corpus is used as built; it is not rebuilt.
+  - Residual, not checked: a tie continuation whose alter differs from its tie start would be a real defect. The tie
+    code copies the start pitch, so none is expected.
+- **Training (Task 9):** kernel `piamac/piyanota-divisi-a6-train`, COMMIT 169d4f0, both seeds in one session.
+  - Train-1's arm took about 29 min an epoch on 54.6k strips. The A6 epoch is 55.9k strips: 30311 Phase 1, 7578
+    divisi (share 0.20) and 17980 CPM (replay capped at the pool).
+  - So 2 seeds x 8 epochs is about 8 h of the 11 h budget.
+- **Pre-launch review (ml-cv-lead GO, 2026-10-22).** Conditions, fixed before any A6 result:
+  - **Replay:** 0.5 nominal, about 0.32 realised (CPM pool cap), the same as train-1. A6 runs 8 epochs, against
+    train-1's 3, so the canary is checked on every epoch, not only on the selected one.
+  - **A short seed:** if a seed stops on `timeout_budget` before epoch 8, it is not the pre-registered run. It stays
+    out of the two-seed range and is rerun in a second session.
+  - **Selection:** offline epoch selection on the tuning half excludes Gootville strips, so the held-out chord font
+    is never seen by selection.
+  - **Split check:** confirm that `run_info.divisi_val_strips_test_half_excluded` is about half of 1692.
+  - **Tie residual:** before the eval, check that every tie continuation's alter equals its tie start's, and turn
+    "none expected" into a count.
