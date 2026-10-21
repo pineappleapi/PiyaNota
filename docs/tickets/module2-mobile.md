@@ -282,7 +282,7 @@ _Phone test results (2026-10-17, fake backend): 75 pass, 0 fail, 12 untested. Pe
 
 *Modal and selection*
 1. The Export Audio modal displays a selectable checklist: Soprano, Alto, Tenor, Bass, All Voices, and a "With Metronome Click" toggle.
-2. All checkboxes and the metronome toggle are unselected by default each time the modal opens.
+2. Each time the modal opens, the voice checkboxes are pre-ticked from the Voice Mixer state. A voice is pre-ticked when it is audible in the Mixer, meaning it is not muted and not left out by a Solo. If all four end up pre-ticked, "All Voices" is ticked too (AC6). The metronome toggle is unticked by default (AC7). The settings flow one way only: changing ticks in the export sheet never changes the Mixer. *(Decided 2026-10-21, user decision: "The Mixer settings feed the Export, one way only." Replaces the old "all unselected by default" rule.)*
 3. Selecting "All Voices" automatically selects all four individual voices.
 4. Deselecting "All Voices" deselects all four individual voices.
 5. Deselecting any individual voice automatically deselects "All Voices."
@@ -294,7 +294,7 @@ _Phone test results (2026-10-17, fake backend): 75 pass, 0 fail, 12 untested. Pe
 *Download flow*
 10. Tapping **Download Audio** prompts the user to choose a download location and confirm.
 11. Cancelling the location prompt returns the user to the modal with selections intact.
-12. While files are being prepared and saved, a progress indicator is shown and **Download Audio** is disabled to prevent duplicate downloads.
+12. While the file is being prepared and saved, the sheet shows a determinate progress bar and a **Cancel** button, and **Download Audio** is disabled to prevent duplicate downloads. The sheet cannot be dismissed while the export runs (close button, tap outside and back gesture do nothing); Cancel is the only way out. Cancel stops the export, deletes the partial output file and all temporary files, and saves no file. *(Decided 2026-10-21, user decision. Replaces the indeterminate-spinner-only state.)*
 13. The export is **one file**: the ticked voices mixed together. "All Voices" ticks every available voice, so it gives one file of the full choir. A voice that can't play (failed or unreadable) can't be ticked. *(Decided 2026-10-17, user decision: one mixed file, not one file per voice.)*
 14. The file is saved as MP3 and named `[ScoreName]_[Voices][_Click].mp3`. Voices is `AllVoices` when every voice is ticked, else the ticked voice names joined by `-` in SATB order. `_Click` is added when the click is included. Example: `ClairDeLune_Soprano-Alto_Click.mp3`. Characters not allowed in file names (`/ \ : * ? " < > |`) become `_`, and an empty title becomes `Score`. *(Decided 2026-10-17, user decision.)*
 15. If a file with the same name already exists in the chosen location, the new file gets a number suffix, ` (1)`, ` (2)` and so on (`X (1).mp3`), and nothing is overwritten. *(Decided 2026-10-17, user decision.)*
@@ -318,10 +318,17 @@ _Phone test results (2026-10-17, fake backend): 75 pass, 0 fail, 12 untested. Pe
 
 *Playback settings*
 
-23. The export uses the current Playback speed (the Speed modal's BPM, as rate = chosen BPM ÷ `tempoBpm`, pitch kept per FR-9) and the Voice Mixer levels, Mute and Solo, including the Metronome Click row's level. A ticked voice that the Mixer mutes, or leaves out with a Solo, is noted under its row ("Muted in Voice Mixer"); the export is still allowed. *(Added 2026-10-17, user decision.)*
+23. The export uses the current Playback speed (the Speed modal's BPM, as rate = chosen BPM ÷ `tempoBpm`, pitch kept per FR-9). Each exported voice's volume comes from the Voice Mixer, as set out in AC24 and AC25, and the click uses the Metronome Click row's level. The Mixer feeds the export one way only (AC2). *(Added 2026-10-17, user decision; volume and Mute/Solo handling replaced 2026-10-21 by AC24/AC25, user decision. The old rule that muted or soloed-out lanes stay in the mix is withdrawn.)*
     - Speed is applied per track, as Playback does: each ticked voice and the click is time-stretched separately (its own Sonic instance, same speed, pitch kept) and only then mixed with its gain and peak-limited, rather than stretching the finished mix. All stretched tracks start at the same instant, so the click stays on the bars, and the file runs to the end of the longest track. At unity speed nothing is stretched. *(Decided 2026-10-18, user decision: export must match Playback.)*
     - Temp storage does not scale with speed: the tracks are stretched in memory, in lockstep, in two passes (peak, then encode), and no stretched copy is written, so the export's temp space is the decoded tracks plus the MP3 at any speed. The second Sonic pass costs time, not space. *(Decided 2026-10-18, user decision, option (a).)*
-    - If the Metronome Click row is soloed in the Voice Mixer, the voices are left out and the export holds only the click. This is accepted behaviour, not a bug. *(Decided 2026-10-18, user decision.)*
+    - If the Metronome Click row is soloed in the Voice Mixer, the voices are left out and the export holds only the click. This is accepted behaviour, not a bug. *(Decided 2026-10-18, user decision; reconfirmed unchanged 2026-10-21.)*
+    - *Open question (2026-10-21):* with the click soloed, no voice is pre-ticked (AC2) and AC8 keeps **Download Audio** disabled until a voice is ticked, and a voice the user ticks is exported at the default volume (AC25, pending confirmation). It is not yet settled how a click-only export is reached under these rules.
+24. Only the ticked voices are processed. A voice that is unticked is skipped entirely: it is not decoded and not time-stretched. The file runs to the end of the longest ticked track. *(Decided 2026-10-21, user decision: "Only the ticked voices are processed. Unticked, muted or soloed-out voices are skipped entirely: no decode and no time-stretch. The file length is the longest ticked track.")*
+25. "All Voices" exports all four voices, even if some are muted or soloed out in the Mixer. *(Decided 2026-10-21, user decision.)*
+    - A voice that is muted in the Mixer is exported at the default volume. Voices that are not muted keep their Mixer volume.
+    - If a Solo is active, voices that are not soloed are exported at the default volume. Soloed voices keep their Mixer volume.
+    - "Default volume" means the Mixer's default/reset level (PIYA-209 AC5: full volume).
+    - *Pending user confirmation (our extension, not yet a user decision):* the same rule applies when the user ticks a muted or soloed-out voice individually rather than through "All Voices".
 
 **Merge hold:** the PIYA-211 branch is held from merge until the LAME sources are added to the build and the export passes the on-device (phone) test. *(Decided 2026-10-18, user decision.)*
 
