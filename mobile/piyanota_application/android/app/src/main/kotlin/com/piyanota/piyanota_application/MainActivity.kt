@@ -65,7 +65,8 @@ class MainActivity : FlutterActivity() {
         // Plugins register themselves (the constructor's default), as
         // FlutterActivity would for an engine it built.
         val engine = FlutterEngine(applicationContext, flutterShellArgs.toArray())
-        val export = ExportChannel(applicationContext, engine.dartExecutor.binaryMessenger)
+        val messenger = engine.dartExecutor.binaryMessenger
+        val export = ExportChannel(applicationContext, messenger)
         engineExport?.dispose()
         engineExport = export
         engine.addEngineLifecycleListener(
@@ -75,6 +76,12 @@ class MainActivity : FlutterActivity() {
                 override fun onEngineWillDestroy() {
                     export.dispose()
                     if (engineExport === export) engineExport = null
+                    // This engine's scans channel, whichever Activity made it.
+                    val scans = engineScan
+                    if (scans != null && scans.messenger === messenger) {
+                        scans.dispose()
+                        engineScan = null
+                    }
                 }
             },
         )
@@ -100,7 +107,9 @@ class MainActivity : FlutterActivity() {
         engineExport?.attach(this)
         ExportWorker.onIdle = { releaseEngineWhenIdle() }
         attached = true
-        scanChannel = ScanChannel(this, flutterEngine.dartExecutor.binaryMessenger, { releaseEngineWhenIdle() })
+        val scans = ScanChannel(this, flutterEngine.dartExecutor.binaryMessenger, { releaseEngineWhenIdle() })
+        scanChannel = scans
+        engineScan = scans
         val device = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
         deviceChannel = device
         device.setMethodCallHandler { call, result ->
@@ -210,6 +219,9 @@ class MainActivity : FlutterActivity() {
 
         /** The engine's export channel; one engine exists at a time. */
         var engineExport: ExportChannel? = null
+
+        /** The newest scans channel, cleared with its engine. */
+        var engineScan: ScanChannel? = null
 
         /**
          * Nothing is followed and no export runs any more. An engine kept alive past its

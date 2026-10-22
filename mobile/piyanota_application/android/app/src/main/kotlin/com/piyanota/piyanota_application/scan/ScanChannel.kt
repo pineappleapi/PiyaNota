@@ -26,16 +26,19 @@ import io.flutter.plugin.common.MethodChannel
  */
 internal class ScanChannel(
     context: Context,
-    messenger: BinaryMessenger,
+    /** The engine this channel talks to, so its destruction can find it. */
+    val messenger: BinaryMessenger,
     /** Called once nothing is followed (stop, stopAll). */
     private val onIdle: () -> Unit,
 ) {
     private val app = context.applicationContext
     private val channel = MethodChannel(messenger, CHANNEL)
 
+    private val stoppedCallback: () -> Unit = { channel.invokeMethod("stopped", null) }
+
     init {
         // The newest channel (this Activity's) answers; the engine is the same.
-        ScanTrackingService.onStoppedByItself = { channel.invokeMethod("stopped", null) }
+        ScanTrackingService.onStoppedByItself = stoppedCallback
         channel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "show" -> {
@@ -81,6 +84,16 @@ internal class ScanChannel(
                 }
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    /**
+     * The engine is being destroyed: a later service stop must not call
+     * into its dead channel (review L3). A newer channel's callback stays.
+     */
+    fun dispose() {
+        if (ScanTrackingService.onStoppedByItself === stoppedCallback) {
+            ScanTrackingService.onStoppedByItself = null
         }
     }
 

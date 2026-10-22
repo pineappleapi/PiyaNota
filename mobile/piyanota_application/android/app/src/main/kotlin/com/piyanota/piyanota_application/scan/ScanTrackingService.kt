@@ -74,7 +74,10 @@ class ScanTrackingService : Service() {
         // Android 15+'s 6 h daily dataSync limit: leave the foreground.
         // Dart keeps polling while the process lives, but MainActivity no
         // longer keeps the engine for it (stopNow clears [wanted]).
+        // Silent on purpose: Dart re-shows it once the app is back in the
+        // foreground, where a new start is allowed.
         stopNow()
+        onStoppedByItself?.invoke()
     }
 
     override fun onDestroy() {
