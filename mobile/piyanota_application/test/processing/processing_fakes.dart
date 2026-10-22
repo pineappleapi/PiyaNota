@@ -15,6 +15,7 @@ import 'package:piyanota_application/state/auth_providers.dart';
 import 'package:piyanota_application/state/export_providers.dart';
 import 'package:piyanota_application/state/processing_providers.dart';
 import 'package:piyanota_application/state/scan_job_store.dart';
+import 'package:piyanota_application/state/work_owner.dart';
 
 import '../auth/auth_test_harness.dart';
 import '../export/export_fakes.dart' show FakeNotificationPermission;
@@ -129,6 +130,33 @@ class MemoryScanJobStore implements ScanJobStore {
   Future<void> clear() async => stored = null;
 }
 
+/// Someone is already logged in, so the tracker restores the stored jobs
+/// and the scans' service may run (both wait for a login, review M1).
+class SignedInAlready extends SignedIn {
+  @override
+  bool build() => true;
+}
+
+/// [WorkOwnerStore] in memory: SharedPreferences has no plugin under
+/// widget tests, and its channel call never settles in fake time.
+class MemoryWorkOwnerStore implements WorkOwnerStore {
+  MemoryWorkOwnerStore([this.owner]);
+
+  int? owner;
+
+  @override
+  Future<int?> load() async => owner;
+
+  @override
+  Future<void> save(int userId) async => owner = userId;
+
+  @override
+  Future<void> clear() async => owner = null;
+}
+
+Override signedInOverride() =>
+    signedInProvider.overrideWith(SignedInAlready.new);
+
 /// Lets a test switch the phone's network off and on (PIYA-218 AC10).
 class FakeNetwork {
   final controller = StreamController<bool>.broadcast();
@@ -195,6 +223,7 @@ class ProcessingHarness {
   final secureStorage = FaultySecureStorage({'session_token': 'sess_t'});
   final scans = FakeScanTrackingService();
   final notifications = FakeNotificationPermission();
+  final owners = MemoryWorkOwnerStore();
   late WidgetTester _tester;
 
   /// Owned by the ProviderScope, so unmounting the tree disposes it (and
@@ -209,6 +238,8 @@ class ProcessingHarness {
     networkCheckProvider.overrideWithValue(network.check),
     scanTrackingServiceProvider.overrideWithValue(scans),
     notificationPermissionProvider.overrideWithValue(notifications),
+    signedInOverride(),
+    workOwnerStoreProvider.overrideWithValue(owners),
   ];
 
   TrackedJob? get job => container.read(processingJobsProvider)[kJob];

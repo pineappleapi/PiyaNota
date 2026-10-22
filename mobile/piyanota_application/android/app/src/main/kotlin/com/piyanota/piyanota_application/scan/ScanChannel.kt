@@ -13,7 +13,7 @@ import io.flutter.plugin.common.MethodChannel
  *
  * Methods:
  *  - show({text}) -> null. Starts [ScanTrackingService] with the ongoing
- *    "Converting <title>…", or updates its words.
+ *    "Scanning <title>…", or updates its words.
  *  - stop() -> null. Nothing left to follow.
  *  - notifyResult({jobId, title, text, ok}) -> null. A scan finished while
  *    the app was not on screen; tapping it opens that scan.

@@ -237,12 +237,25 @@ abstract interface class ExportService {
 /// The Android side is `export/ExportChannel.kt`, which hands the render
 /// and save to `ExportWorker.kt` under a foreground service.
 class MethodChannelExportService implements ExportService {
-  MethodChannelExportService({required this._dio, required this._workDir});
+  MethodChannelExportService({
+    required this._dio,
+    required this._workDir,
+    @visibleForTesting Duration? livenessCheck,
+  }) : _livenessCheck = livenessCheck ?? livenessInterval;
 
   static const MethodChannel _channel = MethodChannel('piyanota/export');
 
   final Dio _dio;
   final Future<Directory> Function() _workDir;
+
+  /// How often a handed-off export asks the device whether it still runs
+  /// (review H2): `run`'s reply must never be awaited forever, e.g. when
+  /// the reply was lost with a channel. Two "no" answers in a row (or a
+  /// channel that is gone) end it as interrupted; two, because the reply
+  /// of an export that just ended may still be on its way.
+  static const Duration livenessInterval = Duration(seconds: 15);
+  static const int _livenessMisses = 2;
+  final Duration _livenessCheck;
 
   /// Called by the native side during render and save (ExportChannel.kt).
   static const String _renderProgressMethod = 'progress';
@@ -421,18 +434,20 @@ class MethodChannelExportService implements ExportService {
       token.throwIfCancelled();
       final out = '${work.path}${Platform.pathSeparator}export.mp3';
       handedOff = true;
-      final saved = await _call(
-        () => _channel.invokeMapMethod<String, String>('run', {
-          'inputs': inputs,
-          'speed': job.speed,
-          'outPath': out,
-          'workDir': work.path,
-          'treeUri': treeUri,
-          'fileName': uniqueFileName(job.fileName, {...?names}),
-          'from': progress.startOf(ExportPhase.render),
-          'renderShare': progress.shareOf(ExportPhase.render),
-          'saveShare': progress.shareOf(ExportPhase.save),
-        }),
+      final saved = await _whileAlive(
+        _call(
+          () => _channel.invokeMapMethod<String, String>('run', {
+            'inputs': inputs,
+            'speed': job.speed,
+            'outPath': out,
+            'workDir': work.path,
+            'treeUri': treeUri,
+            'fileName': uniqueFileName(job.fileName, {...?names}),
+            'from': progress.startOf(ExportPhase.render),
+            'renderShare': progress.shareOf(ExportPhase.render),
+            'saveShare': progress.shareOf(ExportPhase.save),
+          }),
+        ),
       );
       final fileName = saved?['fileName'];
       final location = saved?['location'];
@@ -470,6 +485,41 @@ class MethodChannelExportService implements ExportService {
         debugPrint('Export: temp files not removed: $e');
       }
     }
+  }
+
+  /// [call]'s outcome, or [Interrupted] once the device has said twice in
+  /// a row that no export runs (see [livenessInterval]).
+  Future<T> _whileAlive<T>(Future<T> call) {
+    final done = Completer<T>();
+    var misses = 0;
+    final timer = Timer.periodic(_livenessCheck, (_) async {
+      if (done.isCompleted) return;
+      bool? active;
+      try {
+        active = await _channel.invokeMethod<bool>('isActive');
+      } on PlatformException catch (e) {
+        // Unknown, not dead.
+        debugPrint('Export: liveness check failed: ${e.code}');
+      } on MissingPluginException {
+        // The channel is gone, and with it the reply.
+        active = false;
+      }
+      if (done.isCompleted) return;
+      misses = active == false ? misses + 1 : 0;
+      if (misses >= _livenessMisses) {
+        debugPrint('Export: the device no longer runs it; interrupted');
+        done.completeError(const Interrupted());
+      }
+    });
+    call.then(
+      (value) {
+        if (!done.isCompleted) done.complete(value);
+      },
+      onError: (Object e, StackTrace stack) {
+        if (!done.isCompleted) done.completeError(e, stack);
+      },
+    );
+    return done.future.whenComplete(timer.cancel);
   }
 
   /// Moves a file the export made for itself (the click) into its work

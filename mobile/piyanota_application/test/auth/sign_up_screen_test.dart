@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:piyanota_application/models/auth_session.dart';
 import 'package:piyanota_application/screens/auth/auth_messages.dart';
@@ -42,7 +43,11 @@ Future<void> _tapCreate(WidgetTester tester) async {
 }
 
 void main() {
-  setUp(() => FlutterSecureStorage.setMockInitialValues({}));
+  setUp(() {
+    FlutterSecureStorage.setMockInitialValues({});
+    // The work owner (review H1) lives in SharedPreferences.
+    SharedPreferences.setMockInitialValues({});
+  });
 
   testWidgets('a new account drops jobs followed for the last one', (
     tester,

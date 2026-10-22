@@ -2,6 +2,7 @@ package com.piyanota.piyanota_application.export
 
 import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -9,6 +10,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.DocumentsContract
 import android.util.Log
+import com.piyanota.piyanota_application.AppVisibility
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -24,7 +26,7 @@ import java.util.concurrent.RejectedExecutionException
  *
  * Methods:
  *  - pickFolder({keep}) -> tree Uri string, or null when cancelled (AC10,
- *    AC11). The permission is persisted so Open folder works afterwards,
+ *    AC11) or when no Activity has the engine. The permission is persisted so Open folder works afterwards,
  *    and every other persisted folder grant not in `keep` is released.
  *    Only a folder on this phone is accepted ([LocalFolders]); anything
  *    else fails with `not_local_folder` and nothing is persisted. There is
@@ -49,7 +51,10 @@ import java.util.concurrent.RejectedExecutionException
  *    `cancelled` and the partial MP3 (or saved file) is deleted.
  *  - stopAll() -> null. Logout: stops any export and removes its
  *    notifications without a word.
- *  - openFolder({treeUri}) -> whether a file manager could be opened.
+ *  - openFolder({treeUri}) -> whether a file manager could be opened;
+ *    false while no Activity has the engine.
+ *  - isActive() -> whether an export still runs, for Dart's liveness
+ *    check on its `run` await.
  * Native -> Dart: progress, saveProgress, cancelRequested (the
  * notification's Cancel).
  *
@@ -58,10 +63,18 @@ import java.util.concurrent.RejectedExecutionException
  * no_folder_picker, not_local_folder, cancelled_partial (a cancelled save
  * whose partial file could not be removed), busy, plus bad_args.
  */
-internal class ExportChannel(private val activity: Activity, messenger: BinaryMessenger) :
+internal class ExportChannel(context: Context, messenger: BinaryMessenger) :
     ExportWorker.Listener {
     private val channel = MethodChannel(messenger, CHANNEL)
-    private val app = activity.applicationContext
+    private val app = context.applicationContext
+
+    /**
+     * The Activity on screen, for the folder picker and Open folder only;
+     * null while the engine runs without one (review H2). The channel lives
+     * as long as the engine, not the Activity, so an export in Dart's half
+     * keeps running and a handed-off export's reply still reaches Dart.
+     */
+    private var activity: Activity? = null
 
     /** Only for listNames; the render and save run on the worker's thread. */
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
@@ -124,6 +137,7 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
                 ExportWorker.stopAll(app)
                 result.success(null)
             }
+            "isActive" -> result.success(ExportWorker.isActive)
             else -> result.notImplemented()
         }
     }
@@ -216,12 +230,20 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
                 DocumentsContract.buildRootUri(LocalFolders.EXTERNAL_STORAGE, PRIMARY_VOLUME),
             )
         }
+        val host = activity
+        if (host == null) {
+            // No screen to show the picker on; the sheet that asked is gone.
+            result.success(null)
+            return
+        }
         try {
             pendingPick = PendingPick(result, keep)
-            activity.startActivityForResult(intent, PICK_FOLDER_REQUEST)
+            AppVisibility.ownPickerOpen = true
+            host.startActivityForResult(intent, PICK_FOLDER_REQUEST)
         } catch (e: ActivityNotFoundException) {
             // Some stripped-down ROMs ship without a documents UI. Its own
             // code: "choose another folder" cannot help here.
+            AppVisibility.ownPickerOpen = false
             pendingPick = null
             result.error(NO_FOLDER_PICKER, "no folder picker on this device", null)
         }
@@ -230,6 +252,7 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
     /** Called from MainActivity.onActivityResult; true when consumed. */
     fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
         if (requestCode != PICK_FOLDER_REQUEST) return false
+        AppVisibility.ownPickerOpen = false
         val pick = pendingPick ?: return true
         pendingPick = null
         val tree = data?.data
@@ -244,7 +267,7 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
             return true
         }
         try {
-            activity.contentResolver.takePersistableUriPermission(
+            app.contentResolver.takePersistableUriPermission(
                 tree,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
             )
@@ -261,7 +284,7 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
     }
 
     private fun releaseAllBut(keep: Set<String>) {
-        val persisted = activity.contentResolver.persistedUriPermissions
+        val persisted = app.contentResolver.persistedUriPermissions
             .map { it.uri }
             .filter { DocumentsContract.isTreeUri(it) }
             .map { it.toString() }
@@ -271,7 +294,7 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
     private fun release(trees: List<String>) {
         for (tree in trees) {
             try {
-                activity.contentResolver.releasePersistableUriPermission(
+                app.contentResolver.releasePersistableUriPermission(
                     Uri.parse(tree),
                     Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
                 )
@@ -283,8 +306,13 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
     }
 
     private fun openFolder(tree: Uri): Boolean = try {
-        activity.startActivity(ExportNotifications.folderIntent(tree))
-        true
+        val host = activity
+        if (host == null) {
+            false
+        } else {
+            host.startActivity(ExportNotifications.folderIntent(tree))
+            true
+        }
     } catch (e: ActivityNotFoundException) {
         // No file manager handles folders here; Dart hides the button.
         Log.i(TAG, "no activity opens a folder", e)
@@ -321,8 +349,25 @@ internal class ExportChannel(private val activity: Activity, messenger: BinaryMe
     private fun badArgs(result: MethodChannel.Result, what: String) =
         result.error("bad_args", "$what required", null)
 
+    /** An Activity took the engine (first start or reattach). */
+    fun attach(host: Activity) {
+        activity = host
+    }
+
     /**
-     * The engine is going away. An export already handed to the device
+     * The Activity let go of the engine, which may live on. A folder pick
+     * still open can no longer come back, so it ends as cancelled.
+     */
+    fun detach(host: Activity) {
+        if (activity !== host) return
+        activity = null
+        AppVisibility.ownPickerOpen = false
+        pendingPick?.result?.success(null)
+        pendingPick = null
+    }
+
+    /**
+     * The engine is really being destroyed (EngineLifecycleListener). An export already handed to the device
      * carries on under its service; one still in Dart's half ends as
      * interrupted (AC18).
      */

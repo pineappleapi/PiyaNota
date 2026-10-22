@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/library_entry.dart';
 import '../../services/scan_tracking_service.dart';
 import '../../state/processing_providers.dart';
+import '../../state/work_owner.dart';
 import '../library/library_messages.dart';
 import 'scan_navigation.dart';
 import 'scan_status_messages.dart';
@@ -13,9 +14,10 @@ import 'scan_status_messages.dart';
 /// PIYA-218, background half (user decision 2026-10-22): keeps scans
 /// followed when the user leaves the app, and says when they finish.
 ///
-/// - While any scan is running (paused included: it resumes by itself
-///   when the network returns, AC10) the device's foreground service is
-///   kept on with "Converting <title>…", so the tracker's poll goes on.
+/// - While any scan is being polled, after login, the device's foreground
+///   service is kept on with "Scanning <title>…", so the tracker's poll
+///   goes on. Not for a paused (offline) scan: nothing polls it until the
+///   network returns (AC10), and then the service comes back.
 /// - A scan that completes or fails while the app is not on screen gets a
 ///   system notification; tapping it opens the score or its Processing
 ///   screen by the same rule as the bell ([openScanJob]). While the app is
@@ -63,17 +65,7 @@ class _ScanBackgroundHostState extends ConsumerState<ScanBackgroundHost> {
     Map<String, TrackedJob>? previous,
     Map<String, TrackedJob> next,
   ) {
-    final running = [
-      for (final job in next.values)
-        if (job.isRunning) job.title ?? untitledScoreLabel,
-    ];
-    final words = running.isEmpty
-        ? null
-        : ScanStatusMessages.convertingInBackground(running);
-    if (words != _shown) {
-      _shown = words;
-      unawaited(words == null ? _device.stop() : _device.show(words));
-    }
+    _syncService(next);
 
     for (final job in next.values) {
       final before = previous?[job.jobId];
@@ -89,19 +81,40 @@ class _ScanBackgroundHostState extends ConsumerState<ScanBackgroundHost> {
     }
   }
 
+  /// The service runs only while a scan is actually being polled (review
+  /// M6): a paused (offline) job waits for the network listener, which
+  /// needs no foreground service, and nothing polls before login (M1).
+  void _syncService(Map<String, TrackedJob> jobs) {
+    final signedIn = ref.read(signedInProvider);
+    final polled = [
+      if (signedIn)
+        for (final job in jobs.values)
+          if (job.isRunning && job.phase != TrackedPhase.paused)
+            job.title ?? untitledScoreLabel,
+    ];
+    final words = polled.isEmpty
+        ? null
+        : ScanStatusMessages.scanningInBackground(polled);
+    if (words != _shown) {
+      _shown = words;
+      unawaited(words == null ? _device.stop() : _device.show(words));
+    }
+  }
+
   static bool _inForeground() {
     final state = WidgetsBinding.instance.lifecycleState;
     return state == null || state == AppLifecycleState.resumed;
   }
 
-  /// The same words as the in-app banner, so the two never disagree.
+  /// The banner's failure words; for a ready scan AC7's own notification
+  /// wording ("Your piano guide for [Score] is ready.").
   Future<void> _notify(TrackedJob job) {
     final title = job.title ?? untitledScoreLabel;
     final ready = job.phase == TrackedPhase.complete;
     return _device.notifyResult(
       jobId: job.jobId,
       title: ready
-          ? ScanStatusMessages.readyToast(title)
+          ? ScanStatusMessages.readyNotification(title)
           // A failed retake left the earlier version as it was (PIYA-207
           // AC12).
           : job.retakeOfScoreId != null
@@ -126,6 +139,10 @@ class _ScanBackgroundHostState extends ConsumerState<ScanBackgroundHost> {
   @override
   Widget build(BuildContext context) {
     ref.listen(processingJobsProvider, _onJobsChanged);
+    ref.listen<bool>(
+      signedInProvider,
+      (_, _) => _syncService(ref.read(processingJobsProvider)),
+    );
     return widget.child;
   }
 }

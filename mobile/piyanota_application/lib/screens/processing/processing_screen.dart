@@ -217,6 +217,19 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
     _goToLibrary(Navigator.of(context));
   }
 
+  /// The back arrow and system back. While the scan still runs, leaving
+  /// sends it to the background just as the button does, so it asks for
+  /// notifications the same way (review M7, PIYA-218 AC11: "the first time
+  /// a scan is sent to the background").
+  void _leave() {
+    final job = ref.read(processingJobsProvider)[widget.jobId];
+    if (job != null && job.isRunning) {
+      unawaited(_convertInBackground());
+    } else {
+      _backToLibrary();
+    }
+  }
+
   /// "Convert in Background" (PIYA-218): on Android 13+ the "it's ready"
   /// notification needs the user's yes, asked once here unless an export
   /// already asked. Leaving is decided before the dialog, so a finish
@@ -453,7 +466,7 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _backToLibrary();
+        if (!didPop) _leave();
       },
       child: Scaffold(
         backgroundColor: Colors.white,
@@ -471,7 +484,7 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
                         alignment: Alignment.centerLeft,
                         child: IconButton(
                           tooltip: ProcessingMessages.backToLibrary,
-                          onPressed: _backToLibrary,
+                          onPressed: _leave,
                           color: AppTheme.onboardingHeadingDark,
                           icon: const Icon(Icons.arrow_back_rounded),
                         ),

@@ -9,6 +9,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import com.piyanota.piyanota_application.export.ExportChannel
+import com.piyanota.piyanota_application.export.ExportWorker
 import com.piyanota.piyanota_application.scan.ScanChannel
 import com.piyanota.piyanota_application.scan.ScanTrackingService
 import io.flutter.embedding.android.FlutterActivity
@@ -31,17 +32,23 @@ import java.util.concurrent.atomic.AtomicBoolean
  * It also hosts "piyanota/export" (PIYA-211), see [ExportChannel], and
  * "piyanota/scans" (PIYA-218), see [ScanChannel].
  *
- * PIYA-218: while a conversion is being followed
- * ([ScanTrackingService.wanted]) the Flutter engine outlives this Activity
- * (Back out of the app, or swiped from Recents with the service holding the
- * process), so the Dart poll keeps running. The next Activity picks the
- * same engine up, and it is destroyed once nothing is followed. Otherwise
- * the engine goes with the Activity, as before.
+ * PIYA-218 / PIYA-211: while a conversion is being followed
+ * ([ScanTrackingService.wanted]) or an export runs ([ExportWorker.isActive])
+ * the Flutter engine outlives this Activity (Back out of the app, or swiped
+ * from Recents with a service holding the process), so the Dart poll and
+ * the export's Dart half keep running. The next Activity picks the same
+ * engine up, and it is destroyed once nothing needs it. Otherwise the
+ * engine goes with the Activity, as before.
+ *
+ * The engine is built here, on the application context, so a kept engine
+ * never holds on to the Activity that first created it (review M4). The
+ * export channel lives as long as the engine, not the Activity (review
+ * H2): it is disposed, and a Dart-side export reported interrupted, only
+ * when the engine is really destroyed.
  */
 class MainActivity : FlutterActivity() {
     private val pdfExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
-    private var exportChannel: ExportChannel? = null
     private var scanChannel: ScanChannel? = null
     private var deviceChannel: MethodChannel? = null
 
@@ -51,10 +58,27 @@ class MainActivity : FlutterActivity() {
     /** Decided as this Activity lets go of its engine. */
     private var keepEngine = false
 
-    override fun provideFlutterEngine(context: Context): FlutterEngine? {
+    override fun provideFlutterEngine(context: Context): FlutterEngine {
         val retained = FlutterEngineCache.getInstance().get(RETAINED_ENGINE)
         reattached = retained != null
-        return retained
+        if (retained != null) return retained
+        // Plugins register themselves (the constructor's default), as
+        // FlutterActivity would for an engine it built.
+        val engine = FlutterEngine(applicationContext, flutterShellArgs.toArray())
+        val export = ExportChannel(applicationContext, engine.dartExecutor.binaryMessenger)
+        engineExport?.dispose()
+        engineExport = export
+        engine.addEngineLifecycleListener(
+            object : FlutterEngine.EngineLifecycleListener {
+                override fun onPreEngineRestart() = Unit
+
+                override fun onEngineWillDestroy() {
+                    export.dispose()
+                    if (engineExport === export) engineExport = null
+                }
+            },
+        )
+        return engine
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -73,8 +97,8 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        exportChannel?.dispose()
-        exportChannel = ExportChannel(this, flutterEngine.dartExecutor.binaryMessenger)
+        engineExport?.attach(this)
+        ExportWorker.onIdle = { releaseEngineWhenIdle() }
         attached = true
         scanChannel = ScanChannel(this, flutterEngine.dartExecutor.binaryMessenger, { releaseEngineWhenIdle() })
         val device = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
@@ -137,14 +161,16 @@ class MainActivity : FlutterActivity() {
     // FlutterActivity is a plain Activity, not a ComponentActivity, so the
     // Activity Result API is not available; the classic callback is.
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (exportChannel?.onActivityResult(requestCode, resultCode, data) == true) return
+        if (engineExport?.onActivityResult(requestCode, resultCode, data) == true) return
         super.onActivityResult(requestCode, resultCode, data)
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         // Asked just before shouldDestroyEngineWithHost, as the Activity
-        // detaches. The scan channel stays: Dart may still use it.
-        keepEngine = ScanTrackingService.wanted
+        // detaches. The scan and export channels stay: Dart may still use
+        // them. A Dart-side export keeps running without the Activity.
+        keepEngine = ScanTrackingService.wanted || ExportWorker.isActive
+        engineExport?.detach(this)
         val cache = FlutterEngineCache.getInstance()
         if (keepEngine) cache.put(RETAINED_ENGINE, flutterEngine) else cache.remove(RETAINED_ENGINE)
         deviceChannel?.setMethodCallHandler(null)
@@ -157,18 +183,16 @@ class MainActivity : FlutterActivity() {
 
     override fun onResume() {
         super.onResume()
-        AppVisibility.visible = true
+        AppVisibility.resumed = true
     }
 
     override fun onPause() {
-        AppVisibility.visible = false
+        AppVisibility.resumed = false
         super.onPause()
     }
 
     override fun onDestroy() {
         pdfExecutor.shutdown()
-        exportChannel?.dispose()
-        exportChannel = null
         super.onDestroy()
     }
 
@@ -182,14 +206,17 @@ class MainActivity : FlutterActivity() {
         /** An Activity has the engine; only touched on the main thread. */
         var attached = false
 
+        /** The engine's export channel; one engine exists at a time. */
+        var engineExport: ExportChannel? = null
+
         /**
-         * Nothing is followed any more. An engine kept alive past its
+         * Nothing is followed and no export runs any more. An engine kept alive past its
          * Activity is destroyed, so the next launch starts at Login as
          * usual, once Dart has had time to save the finished jobs.
          */
         fun releaseEngineWhenIdle() {
             Handler(Looper.getMainLooper()).postDelayed({
-                if (attached || ScanTrackingService.wanted) return@postDelayed
+                if (attached || ScanTrackingService.wanted || ExportWorker.isActive) return@postDelayed
                 val cache = FlutterEngineCache.getInstance()
                 val engine = cache.get(RETAINED_ENGINE) ?: return@postDelayed
                 cache.remove(RETAINED_ENGINE)

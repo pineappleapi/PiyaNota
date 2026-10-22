@@ -29,7 +29,13 @@ import 'package:piyanota_application/state/score_library_providers.dart';
 
 import '../export/export_fakes.dart';
 import '../processing/processing_fakes.dart'
-    show FakeNetwork, MemoryScanJobStore, done, failed, running;
+    show
+        FakeNetwork,
+        MemoryScanJobStore,
+        done,
+        failed,
+        running,
+        signedInOverride;
 
 /// Answers each job's polls from its own script; the last entry repeats.
 class _JobsApi implements ProcessingApi {
@@ -113,6 +119,7 @@ class _App {
     processingApiProvider.overrideWithValue(api),
     scoreLibraryApiProvider.overrideWithValue(libraryApi),
     scanJobStoreProvider.overrideWithValue(store),
+    signedInOverride(),
     networkAvailabilityProvider.overrideWithValue(network.controller.stream),
     networkCheckProvider.overrideWithValue(network.check),
     exportServiceProvider.overrideWithValue(exportService),

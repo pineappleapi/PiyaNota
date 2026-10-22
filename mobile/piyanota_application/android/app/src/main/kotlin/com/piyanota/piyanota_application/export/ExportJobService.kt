@@ -37,13 +37,19 @@ class ExportJobService : Service() {
             return START_NOT_STICKY
         }
         ExportWorker.service = this
-        enterForeground(fallback = false)
+        if (!enterForeground(fallback = false)) {
+            // Refused: don't linger as a plain started service. The export
+            // carries on in the process, without the notification's guard.
+            stopNow()
+            return START_NOT_STICKY
+        }
         // Not restarted by Android: an export cut short by a killed process
         // cannot be resumed, and Dart reports it as interrupted.
         return START_NOT_STICKY
     }
 
-    private fun enterForeground(fallback: Boolean) {
+    /** False when Android refused the foreground start. */
+    private fun enterForeground(fallback: Boolean): Boolean {
         val notice = ExportWorker.currentNotice()
         val notification = if (notice != null && !fallback) {
             ExportNotifications.progress(this, notice, ExportWorker.currentPercent())
@@ -57,6 +63,7 @@ class ExportJobService : Service() {
             } else {
                 startForeground(ExportNotifications.PROGRESS_ID, notification)
             }
+            return true
         } catch (e: RuntimeException) {
             // Android 12+ refuses a foreground start from the background
             // (ForegroundServiceStartNotAllowedException). The export was
@@ -64,9 +71,9 @@ class ExportJobService : Service() {
             // does, the export carries on as long as the process lives.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && e is ForegroundServiceStartNotAllowedException) {
                 Log.w(TAG, "export service not allowed in the foreground", e)
-            } else {
-                throw e
+                return false
             }
+            throw e
         }
     }
 

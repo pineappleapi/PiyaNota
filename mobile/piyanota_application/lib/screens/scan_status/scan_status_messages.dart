@@ -68,20 +68,24 @@ class ScanStatusMessages {
   static const String dismissToast = 'Dismiss';
 
   // System notifications while the app is away (user decision
-  // 2026-10-22): the ongoing one, then one per finished scan.
-  static String convertingInBackground(List<String> titles) =>
-      titles.length == 1
-      ? 'Converting ${titles.single}…'
-      : 'Converting ${titles.length} scores…';
+  // 2026-10-22): the ongoing one, then one per finished scan. AC12: "scan"
+  // and "piano guide", no "convert".
+  static String scanningInBackground(List<String> titles) => titles.length == 1
+      ? 'Scanning ${titles.single}…'
+      : 'Scanning ${titles.length} scores…';
+
+  /// AC7's background wording, word for word.
+  static String readyNotification(String title) =>
+      'Your piano guide for $title is ready.';
   static const String readyNotificationHint = 'Tap to play it.';
 
-  // Asked once on Android 13+ at "Convert in Background", unless the first
-  // export already asked.
+  // Asked once on Android 13+ when a scan is first sent to the background
+  // (Convert in Background, the back arrow or system back), unless the
+  // first export already asked. AC11: a one-line reason. The buttons match
+  // the export's prompt (ExportMessages).
   static const String notificationsTitle = 'Tell you when it\'s ready?';
   static const String notificationsBody =
-      'PiyaNota can let you know in your notifications when this score is '
-      'ready, so you can leave the app while it converts. The scan works '
-      'either way.';
+      'We\'ll let you know when your piano guide is ready.';
   static const String notificationsLater = 'Not now';
   static const String notificationsAllow = 'Allow';
 

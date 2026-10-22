@@ -11,7 +11,7 @@ import android.util.Log
 import com.piyanota.piyanota_application.MainActivity
 
 /**
- * The conversion notifications (PIYA-218): an ongoing "Converting <title>…"
+ * The conversion notifications (PIYA-218): an ongoing "Scanning <title>…"
  * while a scan runs and the app is followed by [ScanTrackingService], then
  * one per scan that finished while the app was not on screen, which opens
  * that score (or its Processing screen) when tapped.

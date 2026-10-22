@@ -5,7 +5,7 @@ import 'package:flutter/services.dart';
 
 /// The device half of following conversions in the background (PIYA-218,
 /// user decision 2026-10-22). While [show] is in force a foreground
-/// service keeps the app alive with a "Converting <title>…" notification,
+/// service keeps the app alive with a "Scanning <title>…" notification,
 /// so the tracker's own poll keeps running when the user leaves the app;
 /// [notifyResult] posts the system notification for a scan that finished
 /// while the app was not on screen.

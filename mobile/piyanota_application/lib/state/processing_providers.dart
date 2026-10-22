@@ -14,6 +14,7 @@ import '../services/scan_tracking_service.dart';
 import 'auth_providers.dart';
 import 'scan_job_store.dart';
 import 'score_library_providers.dart';
+import 'work_owner.dart';
 
 /// Timing rules for following a job. Polls are spaced from the end of the
 /// previous request, not on a fixed clock, so a slow network never stacks
@@ -32,6 +33,13 @@ class ProcessingTiming {
   /// Spec §7 "Progress stalls": the helper line changes after this long
   /// without the percentage moving.
   static const Duration stallAfter = Duration(seconds: 90);
+
+  /// A 429 without a usable wait (PIYA-102 AC9).
+  static const Duration rateLimitedWait = Duration(seconds: 10);
+
+  /// The longest a 429's wait is honoured for, so a bad value can't
+  /// silence a scan for hours; the limit is per minute anyway.
+  static const Duration maxRateLimitedWait = Duration(minutes: 2);
 
   static int get stallAfterPolls =>
       (stallAfter.inMilliseconds / pollInterval.inMilliseconds).ceil();
@@ -304,6 +312,10 @@ class ProcessingJobsController extends Notifier<Map<String, TrackedJob>> {
   /// False until the stored jobs have been read: saving before then would
   /// overwrite them with whatever was tracked in the meantime.
   bool _restored = false;
+
+  /// The restore runs once per controller, at the first login; [forgetAll]
+  /// also counts, since after it there is nothing left to restore.
+  bool _restoreStarted = false;
   String? _lastSaved;
 
   StreamSubscription<bool>? _network;
@@ -321,7 +333,14 @@ class ProcessingJobsController extends Notifier<Map<String, TrackedJob>> {
       unawaited(_network?.cancel());
       _network = null;
     });
-    unawaited(_restore());
+    // Not before login (review M1): there is no token to poll with yet, and
+    // a different account's login clears the store first (startSession).
+    ref.listen<bool>(signedInProvider, (_, signedIn) {
+      if (signedIn && !_restoreStarted) {
+        _restoreStarted = true;
+        unawaited(_restore());
+      }
+    }, fireImmediately: true);
     return const {};
   }
 
@@ -491,6 +510,7 @@ class ProcessingJobsController extends Notifier<Map<String, TrackedJob>> {
     state = const {};
     // Nothing is left to restore; save normally from now on.
     _restored = true;
+    _restoreStarted = true;
     _lastSaved = ScanJobStore.encodeJobs(const []);
     unawaited(_store.clear());
   }
@@ -538,6 +558,15 @@ class ProcessingJobsController extends Notifier<Map<String, TrackedJob>> {
     final job = state[jobId];
     if (job == null) return;
 
+    if (error is ProcessingRateLimitedException) {
+      // The server answered, so this is neither a lost connection nor a
+      // step towards pausing: keep the job as it is and ask again only
+      // after the wait (PIYA-218 AC13).
+      _stop(jobId);
+      _timers[jobId] = Timer(_rateLimitedWait(error), () => _poll(jobId));
+      return;
+    }
+
     final now = _now();
     var next = status != null
         ? _withStatus(job, status)
@@ -554,6 +583,15 @@ class ProcessingJobsController extends Notifier<Map<String, TrackedJob>> {
     // belongs to a superseded loop, and must not keep running beside this.
     _stop(jobId);
     _timers[jobId] = Timer(ProcessingTiming.pollInterval, () => _poll(jobId));
+  }
+
+  static Duration _rateLimitedWait(ProcessingRateLimitedException error) {
+    final wait = error.retryAfter ?? ProcessingTiming.rateLimitedWait;
+    return wait < ProcessingTiming.pollInterval
+        ? ProcessingTiming.pollInterval
+        : wait > ProcessingTiming.maxRateLimitedWait
+        ? ProcessingTiming.maxRateLimitedWait
+        : wait;
   }
 
   static TrackedJob _withStatus(TrackedJob job, ProcessingStatus status) {
@@ -598,7 +636,9 @@ class ProcessingJobsController extends Notifier<Map<String, TrackedJob>> {
         // 409 only belongs to cancel; on a poll it's as unexpected as a 5xx.
         ProcessingNetworkException() ||
         ProcessingServerException() ||
-        ProcessingConflictException() =>
+        ProcessingConflictException() ||
+        // Handled in _poll before this; listed for exhaustiveness.
+        ProcessingRateLimitedException() =>
           now.difference(since) >= ProcessingTiming.pauseAfter
               ? TrackedPhase.paused
               : TrackedPhase.reconnecting,

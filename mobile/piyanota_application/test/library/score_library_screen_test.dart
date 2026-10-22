@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:piyanota_application/models/processing_status.dart';
 import 'package:piyanota_application/models/score_summary.dart';
@@ -119,6 +120,8 @@ Future<void> _pumpLibrary(
   List<Override> extraOverrides = const [],
 }) async {
   FlutterSecureStorage.setMockInitialValues({});
+  // The work owner (review H1) lives in SharedPreferences.
+  SharedPreferences.setMockInitialValues({});
   _lastPlaybackArguments = null;
   tester.view.physicalSize = physicalSize;
   tester.view.devicePixelRatio = devicePixelRatio;

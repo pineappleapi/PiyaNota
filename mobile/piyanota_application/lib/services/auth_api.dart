@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 
 import '../config/api_config.dart';
 import '../models/auth_session.dart';
+import 'retry_after.dart';
 
 /// Failure categories the auth screens must render distinctly (PIYA-202 AC2
 /// vs AC7, PIYA-203 AC5) — kept as types, not message strings, so the UI
@@ -262,7 +263,7 @@ class HttpAuthApi implements AuthApi {
       _unauthorized => const AuthSessionExpiredException(),
       _forbidden => const CurrentPasswordIncorrectException(),
       _tooManyRequests => AuthRateLimitedException(
-        retryAfterSeconds: _retryAfterSeconds(response),
+        retryAfterSeconds: retryAfterSecondsOf(response),
       ),
       _badRequest => _validationFailure(response),
       _ => const AuthServerException(),
@@ -282,19 +283,6 @@ class HttpAuthApi implements AuthApi {
       code: _errorCode(body),
       field: error?['field'] is String ? error!['field'] as String : null,
     );
-  }
-
-  /// PIYA-322 AC5 sends the wait twice; the body wins, as on uploads
-  /// (PIYA-101 AC6). Only the delta-seconds form of `Retry-After` is read:
-  /// the contract never sends an HTTP date, and a wrong guess is worse
-  /// than the sheet's "try again later".
-  static int? _retryAfterSeconds(Response<dynamic>? response) {
-    final fromBody = _errorObject(response?.data)?['retryAfterSeconds'];
-    if (fromBody is int && fromBody >= 0) return fromBody;
-    final header = int.tryParse(
-      response?.headers.value('retry-after')?.trim() ?? '',
-    );
-    return header != null && header >= 0 ? header : null;
   }
 
   static Map<String, dynamic>? _errorObject(Object? body) {

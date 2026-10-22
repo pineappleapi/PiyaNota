@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:piyanota_application/routes/app_routes.dart';
 import 'package:piyanota_application/screens/auth/auth_messages.dart';
@@ -67,7 +68,11 @@ String _demoCode(WidgetTester tester) {
 }
 
 void main() {
-  setUp(() => FlutterSecureStorage.setMockInitialValues({}));
+  setUp(() {
+    FlutterSecureStorage.setMockInitialValues({});
+    // The work owner (review H1) lives in SharedPreferences.
+    SharedPreferences.setMockInitialValues({});
+  });
 
   testWidgets(
     'AC1: Send Code disabled until the email is non-empty and well-formed',

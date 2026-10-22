@@ -12,6 +12,7 @@ import 'package:piyanota_application/services/processing_api.dart';
 import 'package:piyanota_application/services/score_library_api.dart';
 import 'package:piyanota_application/state/processing_providers.dart';
 import 'package:piyanota_application/state/score_library_providers.dart';
+import 'package:piyanota_application/state/work_owner.dart';
 
 import '../processing/processing_fakes.dart';
 
@@ -29,6 +30,7 @@ class _JobsApi implements ProcessingApi {
     final next = queue.isNotEmpty ? queue.removeAt(0) : _last[jobId];
     if (next != null) _last[jobId] = next;
     if (next is ProcessingStatus) return next;
+    if (next is ProcessingException) throw next;
     throw StateError('Nothing scripted for $jobId');
   }
 
@@ -58,9 +60,12 @@ void main() {
   ProcessingJobsController tracker() =>
       container.read(processingJobsProvider.notifier);
 
-  Future<void> pump(WidgetTester tester) async {
+  late FakeNetwork network;
+
+  Future<void> pump(WidgetTester tester, {bool signedIn = true}) async {
     api = _JobsApi();
     device = FakeScanTrackingService();
+    network = FakeNetwork();
     final navigatorKey = GlobalKey<NavigatorState>();
     await tester.pumpWidget(
       ProviderScope(
@@ -69,6 +74,11 @@ void main() {
           scanJobStoreProvider.overrideWithValue(MemoryScanJobStore()),
           scanTrackingServiceProvider.overrideWithValue(device),
           scoreLibraryApiProvider.overrideWithValue(_LibraryApi()),
+          networkAvailabilityProvider.overrideWithValue(
+            network.controller.stream,
+          ),
+          networkCheckProvider.overrideWithValue(network.check),
+          if (signedIn) signedInOverride(),
         ],
         child: MaterialApp(
           navigatorKey: navigatorKey,
@@ -124,13 +134,14 @@ void main() {
     tracker().track('a', title: 'Paraiso');
     await tester.pump();
     expect(device.shown, [
-      ScanStatusMessages.convertingInBackground(['Paraiso']),
+      ScanStatusMessages.scanningInBackground(['Paraiso']),
     ]);
-    expect(device.shown.single, 'Converting Paraiso…');
+    // AC12: "scan", not "convert".
+    expect(device.shown.single, 'Scanning Paraiso…');
 
     tracker().track('b', title: 'Bahay Kubo');
     await tester.pump();
-    expect(device.shown.last, 'Converting 2 scores…');
+    expect(device.shown.last, 'Scanning 2 scores…');
 
     // Progress alone doesn't touch the notification.
     await poll(tester);
@@ -138,7 +149,7 @@ void main() {
 
     tracker().forget('b');
     await tester.pump();
-    expect(device.shown.last, 'Converting Paraiso…');
+    expect(device.shown.last, 'Scanning Paraiso…');
     expect(device.stops, 0);
 
     await poll(tester);
@@ -147,16 +158,46 @@ void main() {
     await end(tester);
   });
 
-  testWidgets('a paused scan keeps the service: it resumes by itself', (
-    tester,
-  ) async {
+  testWidgets('a paused (offline) scan stops the service, and it comes '
+      'back when polling does (review M6)', (tester) async {
     await pump(tester);
-    api.script('a', [running(10)]);
+    api.script('a', [running(10), const ProcessingNetworkException()]);
     tracker().track('a', title: 'Paraiso');
     await tester.pump();
     expect(device.shown, hasLength(1));
-    // isRunning covers paused (AC10), so nothing stops it.
     expect(device.stops, 0);
+
+    // 30 s of failed polls: paused.
+    for (var i = 0; i < 17; i++) {
+      await poll(tester);
+    }
+    expect(tracker().state['a']!.phase, TrackedPhase.paused);
+    expect(device.stops, 1, reason: 'nothing is polled while paused');
+
+    network.set(false);
+    await tester.pump();
+    api.script('a', [running(20)]);
+    network.set(true);
+    await tester.pump();
+    await tester.pump();
+    expect(tracker().state['a']!.phase, TrackedPhase.active);
+    expect(device.shown.last, 'Scanning Paraiso…');
+    expect(device.shown, hasLength(2));
+    await end(tester);
+  });
+
+  testWidgets('before login nothing runs the service (review M1)', (
+    tester,
+  ) async {
+    await pump(tester, signedIn: false);
+    api.script('a', [running(10)]);
+    tracker().track('a', title: 'Paraiso');
+    await tester.pump();
+    expect(device.shown, isEmpty);
+
+    container.read(signedInProvider.notifier).set(true);
+    await tester.pump();
+    expect(device.shown, ['Scanning Paraiso…']);
     await end(tester);
   });
 
@@ -172,7 +213,9 @@ void main() {
     expect(device.results, hasLength(1));
     final result = device.results.single;
     expect(result.jobId, 'a');
-    expect(result.title, ScanStatusMessages.readyToast('Paraiso'));
+    // AC7, word for word.
+    expect(result.title, 'Your piano guide for Paraiso is ready.');
+    expect(result.title, ScanStatusMessages.readyNotification('Paraiso'));
     expect(result.text, ScanStatusMessages.readyNotificationHint);
     expect(result.ok, isTrue);
 

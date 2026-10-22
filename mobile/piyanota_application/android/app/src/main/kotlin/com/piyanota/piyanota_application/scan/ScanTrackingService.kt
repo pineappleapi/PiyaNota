@@ -32,9 +32,11 @@ class ScanTrackingService : Service() {
         val text = text
         // Must enter the foreground once whatever happens, or Android
         // stops the app.
-        enterForeground(text ?: FALLBACK_TEXT)
-        if (text == null) {
-            // Dart stopped following before the service got going.
+        val entered = enterForeground(text ?: FALLBACK_TEXT)
+        if (text == null || !entered) {
+            // Dart stopped following before the service got going, or
+            // Android refused the foreground: don't linger as a plain
+            // started service.
             stopNow()
             return START_NOT_STICKY
         }
@@ -44,7 +46,8 @@ class ScanTrackingService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun enterForeground(text: String) {
+    /** False when Android refused the foreground start. */
+    private fun enterForeground(text: String): Boolean {
         val notification = ScanNotifications.ongoing(this, text)
         try {
             val type = ScanNotices.serviceType(Build.VERSION.SDK_INT)
@@ -53,20 +56,22 @@ class ScanTrackingService : Service() {
             } else {
                 startForeground(ScanNotifications.ONGOING_ID, notification)
             }
+            return true
         } catch (e: RuntimeException) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && e is ForegroundServiceStartNotAllowedException) {
                 // Started from the open app, so this should not happen; the
                 // poll still runs as long as the process lives.
                 Log.w(TAG, "scan service not allowed in the foreground", e)
-            } else {
-                throw e
+                return false
             }
+            throw e
         }
     }
 
     override fun onTimeout(startId: Int, fgsType: Int) {
         // Android 15+'s 6 h daily dataSync limit: leave the foreground.
-        // Dart keeps polling while the process lives.
+        // Dart keeps polling while the process lives, but MainActivity no
+        // longer keeps the engine for it (stopNow clears [wanted]).
         stopNow()
     }
 
@@ -75,7 +80,13 @@ class ScanTrackingService : Service() {
         super.onDestroy()
     }
 
+    /**
+     * Also clears [text], so [wanted] goes false and MainActivity stops
+     * keeping the engine for a service that is no longer there. Dart's
+     * next change of words (or a new scan) starts it again.
+     */
     private fun stopNow() {
+        text = null
         if (instance === this) instance = null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -90,7 +101,7 @@ class ScanTrackingService : Service() {
         private const val TAG = "PiyaNotaScan"
 
         /** Only seen for a moment, when following ended before the start. */
-        private const val FALLBACK_TEXT = "Converting…"
+        private const val FALLBACK_TEXT = "Scanning…"
 
         /** The ongoing notification's words; null when nothing is followed. */
         @Volatile

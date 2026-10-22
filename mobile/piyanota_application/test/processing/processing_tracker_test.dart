@@ -30,6 +30,7 @@ void _withTracker(
         scanJobStoreProvider.overrideWithValue(MemoryScanJobStore()),
         networkAvailabilityProvider.overrideWithValue(const Stream.empty()),
         networkCheckProvider.overrideWithValue(() async => null),
+        signedInOverride(),
       ],
     );
     final tracker = container.read(processingJobsProvider.notifier);
@@ -65,6 +66,50 @@ void main() {
         expect(api.fetches, 3);
         expect(job()!.percent, 40);
         expect(job()!.status!.currentPage, 2);
+      });
+    });
+
+    test('a 429 waits as long as the server asks, without counting as a '
+        'failure (review M9)', () {
+      final api = ScriptedProcessingApi([
+        running(10),
+        const ProcessingRateLimitedException(retryAfter: Duration(seconds: 20)),
+        running(30),
+      ]);
+      _withTracker(api, (async, tracker, job) {
+        tracker.track(kJob);
+        async.flushMicrotasks();
+        async.elapse(_tick);
+        expect(api.fetches, 2);
+        expect(job()!.phase, TrackedPhase.active);
+        expect(job()!.failedPolls, 0);
+        expect(job()!.percent, 10);
+
+        async.elapse(const Duration(seconds: 20) - _tick);
+        expect(api.fetches, 2, reason: 'not before Retry-After');
+        async.elapse(_tick);
+        expect(api.fetches, 3);
+        expect(job()!.percent, 30);
+      });
+    });
+
+    test('a 429 with no wait, or an absurd one, is held to sane bounds', () {
+      final api = ScriptedProcessingApi([
+        running(10),
+        const ProcessingRateLimitedException(),
+        const ProcessingRateLimitedException(retryAfter: Duration(hours: 1)),
+        running(30),
+      ]);
+      _withTracker(api, (async, tracker, job) {
+        tracker.track(kJob);
+        async.flushMicrotasks();
+        async.elapse(_tick);
+        expect(api.fetches, 2);
+        async.elapse(ProcessingTiming.rateLimitedWait);
+        expect(api.fetches, 3, reason: 'no Retry-After: the default wait');
+        async.elapse(ProcessingTiming.maxRateLimitedWait);
+        expect(api.fetches, 4, reason: 'capped');
+        expect(job()!.percent, 30);
       });
     });
 

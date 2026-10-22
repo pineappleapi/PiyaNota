@@ -743,6 +743,49 @@ void main() {
       );
     });
 
+    test('a run the device no longer has is Interrupted, not a hang '
+        '(review H2)', () async {
+      final never = Completer<Object?>();
+      mock(
+        (call) => switch (call.method) {
+          'listNames' => <String>[],
+          'run' => never.future,
+          'isActive' => false,
+          _ => null,
+        },
+      );
+      await expectLater(
+        MethodChannelExportService(
+          dio: Dio(),
+          workDir: () async => work,
+          livenessCheck: const Duration(milliseconds: 10),
+        ).export(job(), 'content://tree/x'),
+        throwsA(isA<Interrupted>()),
+      );
+      expect(calls.where((c) => c.method == 'isActive'), hasLength(2));
+    });
+
+    test('a run the device still has keeps waiting for its answer', () async {
+      final answer = Completer<Object?>();
+      mock(
+        (call) => switch (call.method) {
+          'listNames' => <String>[],
+          'run' => answer.future,
+          'isActive' => true,
+          _ => null,
+        },
+      );
+      final result = MethodChannelExportService(
+        dio: Dio(),
+        workDir: () async => work,
+        livenessCheck: const Duration(milliseconds: 10),
+      ).export(job(), 'content://tree/x');
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      expect(calls.where((c) => c.method == 'isActive').length, greaterThan(2));
+      answer.complete({'fileName': 'Song_Soprano.mp3', 'location': 'Music'});
+      expect((await result).fileName, 'Song_Soprano.mp3');
+    });
+
     test('an unknown scheme is GenerationFailed', () async {
       mock((_) => null);
       await expectLater(

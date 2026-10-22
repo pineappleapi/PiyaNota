@@ -79,6 +79,12 @@ internal object ExportWorker {
     private var job: Job? = null
     var listener: Listener? = null
 
+    /**
+     * Called on the main thread once no export runs any more, so
+     * MainActivity can let go of an engine it kept only for this one.
+     */
+    var onIdle: (() -> Unit)? = null
+
     /** The running service, so a finished export can stop it. */
     var service: ExportJobService? = null
 
@@ -175,6 +181,7 @@ internal object ExportWorker {
         }
         ExportNotifications.cancelAll(context)
         stopService()
+        onIdle?.invoke()
     }
 
     /** The device's half: render, then save. [reply] gets the outcome once. */
@@ -255,6 +262,7 @@ internal object ExportWorker {
             }
         }
         stopService()
+        onIdle?.invoke()
     }
 
     private fun stopService() {

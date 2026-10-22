@@ -11,9 +11,15 @@ import 'package:piyanota_application/services/session_storage.dart';
 import '../auth/auth_test_harness.dart';
 
 class _StubAdapter implements HttpClientAdapter {
-  _StubAdapter({this.status = 200, this.body, this.connectionFails = false});
+  _StubAdapter({
+    this.status = 200,
+    this.body,
+    this.connectionFails = false,
+    this.headers = const {},
+  });
 
   final int status;
+  final Map<String, List<String>> headers;
   final Object? body;
   final bool connectionFails;
   RequestOptions? lastRequest;
@@ -36,6 +42,7 @@ class _StubAdapter implements HttpClientAdapter {
       status,
       headers: {
         Headers.contentTypeHeader: [Headers.jsonContentType],
+        ...headers,
       },
     );
   }
@@ -240,6 +247,48 @@ void main() {
           reason: '$status',
         );
       }
+    });
+
+    test('429 is rate limited, with the wait the server asked for (review '
+        'M9)', () async {
+      Future<Duration?> waitOf(_StubAdapter adapter) async {
+        try {
+          await _api(adapter).fetchStatus('j');
+        } on ProcessingRateLimitedException catch (e) {
+          return e.retryAfter;
+        }
+        fail('expected ProcessingRateLimitedException');
+      }
+
+      // The body's error.retryAfterSeconds wins over the header.
+      expect(
+        await waitOf(
+          _StubAdapter(
+            status: 429,
+            body: {
+              'success': false,
+              'error': {'code': 'rate_limited', 'retryAfterSeconds': 42},
+            },
+            headers: {
+              'retry-after': ['5'],
+            },
+          ),
+        ),
+        const Duration(seconds: 42),
+      );
+      expect(
+        await waitOf(
+          _StubAdapter(
+            status: 429,
+            body: {},
+            headers: {
+              'retry-after': ['7'],
+            },
+          ),
+        ),
+        const Duration(seconds: 7),
+      );
+      expect(await waitOf(_StubAdapter(status: 429, body: {})), isNull);
     });
 
     test('no connection is a network error', () async {

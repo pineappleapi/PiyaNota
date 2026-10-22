@@ -298,6 +298,9 @@ void main() {
           tester.tap(find.byTooltip(ProcessingMessages.backToLibrary)),
       'system Back': (tester) async {
         await tester.binding.handlePopRoute();
+        // Leaving now waits on the notification check (review M7), which
+        // settles a frame later on this path than after a tap.
+        await tester.pump();
       },
     };
     for (final MapEntry(key: name, value: leave) in exits.entries) {
@@ -358,6 +361,50 @@ void main() {
       expect(h.notifications.requests, 0);
       expect(find.text(kLibrary), findsOneWidget);
       expect(find.textContaining('ROUTE:playback'), findsNothing);
+    });
+
+    for (final (name, leave) in <(String, Future<void> Function(WidgetTester))>[
+      (
+        'the back arrow',
+        (tester) =>
+            tester.tap(find.byTooltip(ProcessingMessages.backToLibrary)),
+      ),
+      (
+        'system Back',
+        (tester) async {
+          await tester.binding.handlePopRoute();
+          await tester.pump();
+        },
+      ),
+    ]) {
+      testWidgets('$name asks the same way while the scan runs (review '
+          'M7)', (tester) async {
+        final h = ProcessingHarness(ScriptedProcessingApi([running(30)]));
+        h.notifications.askFirst = true;
+        await pumpProcessing(tester, h);
+        await leave(tester);
+        await _settleNavigation(tester);
+        expect(
+          find.text(ScanStatusMessages.notificationsTitle),
+          findsOneWidget,
+        );
+        await tester.tap(find.text(ScanStatusMessages.notificationsLater));
+        await _settleNavigation(tester);
+        expect(find.text(kLibrary), findsOneWidget);
+        expect(h.notifications.asks, 1);
+      });
+    }
+
+    testWidgets('a finished scan leaves without asking', (tester) async {
+      final h = ProcessingHarness(
+        ScriptedProcessingApi([failed(FailureReason.noStaffDetected)]),
+      );
+      h.notifications.askFirst = true;
+      await pumpProcessing(tester, h);
+      await tester.tap(find.byTooltip(ProcessingMessages.backToLibrary));
+      await _settleNavigation(tester);
+      expect(find.text(ScanStatusMessages.notificationsTitle), findsNothing);
+      expect(find.text(kLibrary), findsOneWidget);
     });
 
     testWidgets('not asked when already asked: straight to the library', (

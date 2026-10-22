@@ -1,5 +1,6 @@
 import '../../models/voice_part.dart';
 import '../../services/export_service.dart';
+import '../scan_status/scan_status_messages.dart';
 
 /// Every user-facing string on the Export Audio modal (PIYA-211), in
 /// plain words for choir members (NFR-3). No error codes.
@@ -119,12 +120,14 @@ class ExportMessages {
 
   // Asked once, before the first export's folder pick, on Android 13+.
   static const String notificationsTitle = 'Show export progress?';
+  // One line, and the same buttons as the scan's prompt
+  // (ScanStatusMessages), since whichever comes first is the only ask.
   static const String notificationsBody =
-      'PiyaNota can show how an export is going in your notifications, so '
-      'you can leave the app while it finishes. The export works either '
-      'way.';
-  static const String notificationsLater = 'Not now';
-  static const String notificationsAllow = 'Allow';
+      'See how your export is going, even outside the app.';
+  static const String notificationsLater =
+      ScanStatusMessages.notificationsLater;
+  static const String notificationsAllow =
+      ScanStatusMessages.notificationsAllow;
 
   /// What went wrong, in the same words the sheet uses.
   static String failureMessage(ExportFailure failure) => switch (failure) {

@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 
 import '../config/api_config.dart';
 import '../models/processing_status.dart';
+import 'retry_after.dart';
 import 'session_storage.dart';
 
 /// Typed failures so Processing owns the wording and picks the right
@@ -33,6 +34,16 @@ class ProcessingConflictException extends ProcessingException {
   const ProcessingConflictException();
 }
 
+/// 429 `rate_limited` on a status poll (PIYA-102 AC9: 120 reads per user
+/// per minute). Not a failure of the job or the network: the tracker
+/// waits [retryAfter] (or its own default when the server gives none)
+/// before the next poll, PIYA-218 AC13.
+class ProcessingRateLimitedException extends ProcessingException {
+  const ProcessingRateLimitedException({this.retryAfter});
+
+  final Duration? retryAfter;
+}
+
 /// 5xx, an unexpected status, or a body without a usable `data.status`.
 /// Treated as transient while polling: the server may recover.
 class ProcessingServerException extends ProcessingException {
@@ -56,6 +67,7 @@ class HttpProcessingApi implements ProcessingApi {
   static const int _unauthorized = 401;
   static const int _notFound = 404;
   static const int _conflict = 409;
+  static const int _tooManyRequests = 429;
 
   /// PIYA-101 AC12 `job_superseded`: a whole-score retake replaced the
   /// job, so for polling it is as gone as a 404 (as in PIYA-103).
@@ -124,6 +136,12 @@ class HttpProcessingApi implements ProcessingApi {
           _unauthorized => const ProcessingSessionExpiredException(),
           _notFound || _gone => const ProcessingJobNotFoundException(),
           _conflict => const ProcessingConflictException(),
+          _tooManyRequests => ProcessingRateLimitedException(
+            retryAfter: switch (retryAfterSecondsOf(e.response)) {
+              final seconds? => Duration(seconds: seconds),
+              null => null,
+            },
+          ),
           _ => const ProcessingServerException(),
         };
       case DioExceptionType.transformTimeout:
