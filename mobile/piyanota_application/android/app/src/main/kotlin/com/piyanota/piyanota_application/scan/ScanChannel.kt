@@ -20,7 +20,9 @@ import io.flutter.plugin.common.MethodChannel
  *  - clearResult({jobId}) -> null. Seen in the app, or forgotten.
  *  - stopAll() -> null. Logout: the service and every conversion
  *    notification go.
- * Native -> Dart: open({jobId}), a result notification was tapped.
+ * Native -> Dart: open({jobId}), a result notification was tapped;
+ * stopped(), the service went by itself (Android 15+ timeout, or a refused
+ * start), so Dart must send its words again to bring it back.
  */
 internal class ScanChannel(
     context: Context,
@@ -32,6 +34,8 @@ internal class ScanChannel(
     private val channel = MethodChannel(messenger, CHANNEL)
 
     init {
+        // The newest channel (this Activity's) answers; the engine is the same.
+        ScanTrackingService.onStoppedByItself = { channel.invokeMethod("stopped", null) }
         channel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "show" -> {

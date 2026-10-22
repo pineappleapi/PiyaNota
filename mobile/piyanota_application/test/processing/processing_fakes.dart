@@ -323,11 +323,18 @@ class FakeScanTrackingService implements ScanTrackingService {
   final List<({String jobId, String title, String text, bool ok})> results = [];
   final List<String> cleared = [];
   final StreamController<String> _opened = StreamController.broadcast();
+  final StreamController<void> _stopped = StreamController.broadcast();
 
   void tap(String jobId) => _opened.add(jobId);
 
+  /// The native side's own stop (timeout, refused start).
+  void stopByItself() => _stopped.add(null);
+
   @override
   Stream<String> get opened => _opened.stream;
+
+  @override
+  Stream<void> get stopped => _stopped.stream;
 
   @override
   Future<void> show(String text) async => shown.add(text);

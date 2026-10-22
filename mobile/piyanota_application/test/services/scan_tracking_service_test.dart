@@ -50,6 +50,21 @@ void main() {
     expect(calls[2].arguments, {'jobId': 'a'});
   });
 
+  test('a native stopped() call reaches Dart (review M1)', () async {
+    answer();
+    final service = MethodChannelScanTrackingService();
+    final stops = <void>[];
+    final sub = service.stopped.listen(stops.add);
+    await messenger.handlePlatformMessage(
+      channel.name,
+      channel.codec.encodeMethodCall(const MethodCall('stopped')),
+      (_) {},
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(stops, hasLength(1));
+    await sub.cancel();
+  });
+
   test('never throws: a native error or no native side is swallowed', () async {
     answer((_) => throw PlatformException(code: 'boom'));
     final service = MethodChannelScanTrackingService();

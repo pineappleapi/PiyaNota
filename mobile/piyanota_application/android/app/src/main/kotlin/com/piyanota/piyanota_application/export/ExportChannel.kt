@@ -355,6 +355,14 @@ internal class ExportChannel(context: Context, messenger: BinaryMessenger) :
     }
 
     /**
+     * Back on screen. A pick's result arrives before onResume, so with none
+     * pending the picker is closed, whatever the flag still says.
+     */
+    fun onResumed() {
+        if (pendingPick == null) AppVisibility.ownPickerOpen = false
+    }
+
+    /**
      * The Activity let go of the engine, which may live on. A folder pick
      * still open can no longer come back, so it ends as cancelled.
      */

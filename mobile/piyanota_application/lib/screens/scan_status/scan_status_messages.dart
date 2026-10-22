@@ -74,6 +74,10 @@ class ScanStatusMessages {
       ? 'Scanning ${titles.single}…'
       : 'Scanning ${titles.length} scores…';
 
+  /// Every scan still followed is paused for want of a network (AC10); it
+  /// carries on by itself once the connection returns.
+  static const String waitingForConnection = 'Waiting for connection…';
+
   /// AC7's background wording, word for word.
   static String readyNotification(String title) =>
       'Your piano guide for $title is ready.';

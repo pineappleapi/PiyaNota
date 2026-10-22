@@ -35,6 +35,10 @@ abstract interface class ScanTrackingService {
 
   /// Job ids of tapped result notifications.
   Stream<String> get opened;
+
+  /// The service went without being asked (Android 15+'s daily timeout,
+  /// or a refused start): what was last [show]n is no longer up.
+  Stream<void> get stopped;
 }
 
 class MethodChannelScanTrackingService implements ScanTrackingService {
@@ -45,8 +49,13 @@ class MethodChannelScanTrackingService implements ScanTrackingService {
 
   final MethodChannel _channel;
   final StreamController<String> _opened = StreamController.broadcast();
+  final StreamController<void> _stopped = StreamController.broadcast();
 
   Future<void> _onCall(MethodCall call) async {
+    if (call.method == 'stopped') {
+      _stopped.add(null);
+      return;
+    }
     if (call.method != 'open') return;
     final arguments = call.arguments;
     final jobId = arguments is Map ? arguments['jobId'] : null;
@@ -55,6 +64,9 @@ class MethodChannelScanTrackingService implements ScanTrackingService {
 
   @override
   Stream<String> get opened => _opened.stream;
+
+  @override
+  Stream<void> get stopped => _stopped.stream;
 
   @override
   Future<void> show(String text) => _quietly('show', {'text': text});

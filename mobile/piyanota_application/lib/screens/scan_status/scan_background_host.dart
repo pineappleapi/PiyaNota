@@ -14,10 +14,16 @@ import 'scan_status_messages.dart';
 /// PIYA-218, background half (user decision 2026-10-22): keeps scans
 /// followed when the user leaves the app, and says when they finish.
 ///
-/// - While any scan is being polled, after login, the device's foreground
+/// - While any scan is followed, after login, the device's foreground
 ///   service is kept on with "Scanning <title>…", so the tracker's poll
-///   goes on. Not for a paused (offline) scan: nothing polls it until the
-///   network returns (AC10), and then the service comes back.
+///   goes on. A scan paused for want of a network keeps it too, with
+///   "Waiting for connection…" once every scan is paused (review N1): the
+///   service keeps the engine, and so the network listener that resumes
+///   the poll (AC10), alive while the app is away.
+/// - When the service went by itself (Android 15+'s timeout, a refused
+///   start) the device says so, and the words are sent again at the next
+///   change or when the app comes back to the foreground, where a start is
+///   allowed. No notice of its own: the timeout stays silent until then.
 /// - A scan that completes or fails while the app is not on screen gets a
 ///   system notification; tapping it opens the score or its Processing
 ///   screen by the same rule as the bell ([openScanJob]). While the app is
@@ -41,8 +47,15 @@ class ScanBackgroundHost extends ConsumerStatefulWidget {
   ConsumerState<ScanBackgroundHost> createState() => _ScanBackgroundHostState();
 }
 
-class _ScanBackgroundHostState extends ConsumerState<ScanBackgroundHost> {
+class _ScanBackgroundHostState extends ConsumerState<ScanBackgroundHost>
+    with WidgetsBindingObserver {
   StreamSubscription<String>? _opened;
+  StreamSubscription<void>? _stopped;
+
+  /// The device stopped the service itself. From the background a new
+  /// start would only be refused again (and after Android 15's timeout it
+  /// must not be tried), so it waits for the foreground.
+  bool _stoppedByDevice = false;
 
   /// The ongoing notification's words as last sent; null when stopped.
   String? _shown;
@@ -53,10 +66,22 @@ class _ScanBackgroundHostState extends ConsumerState<ScanBackgroundHost> {
   void initState() {
     super.initState();
     _opened = _device.opened.listen(_open);
+    _stopped = _device.stopped.listen((_) {
+      _shown = null;
+      _stoppedByDevice = true;
+    });
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _resync();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    unawaited(_stopped?.cancel());
     unawaited(_opened?.cancel());
     super.dispose();
   }
@@ -81,20 +106,35 @@ class _ScanBackgroundHostState extends ConsumerState<ScanBackgroundHost> {
     }
   }
 
-  /// The service runs only while a scan is actually being polled (review
-  /// M6): a paused (offline) job waits for the network listener, which
-  /// needs no foreground service, and nothing polls before login (M1).
+  /// Back in the foreground: show the words again, in case the service
+  /// went while the app was away (a foreground start is allowed now).
+  void _resync() {
+    if (!mounted) return;
+    _shown = null;
+    _stoppedByDevice = false;
+    _syncService(ref.read(processingJobsProvider));
+  }
+
+  /// The service runs while any scan is followed after login (nothing
+  /// polls before, M1), offline-paused ones included (N1). It stops once
+  /// none is left, or on logout.
   void _syncService(Map<String, TrackedJob> jobs) {
-    final signedIn = ref.read(signedInProvider);
-    final polled = [
-      if (signedIn)
+    final followed = [
+      if (ref.read(signedInProvider))
         for (final job in jobs.values)
-          if (job.isRunning && job.phase != TrackedPhase.paused)
-            job.title ?? untitledScoreLabel,
+          if (job.isRunning) job,
     ];
-    final words = polled.isEmpty
+    final polled = [
+      for (final job in followed)
+        if (job.phase != TrackedPhase.paused) job.title ?? untitledScoreLabel,
+    ];
+    final words = followed.isEmpty
         ? null
+        : polled.isEmpty
+        ? ScanStatusMessages.waitingForConnection
         : ScanStatusMessages.scanningInBackground(polled);
+    if (words != null && _stoppedByDevice && !_inForeground()) return;
+    _stoppedByDevice = false;
     if (words != _shown) {
       _shown = words;
       unawaited(words == null ? _device.stop() : _device.show(words));

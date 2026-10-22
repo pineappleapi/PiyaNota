@@ -38,6 +38,8 @@ class ScanTrackingService : Service() {
             // Android refused the foreground: don't linger as a plain
             // started service.
             stopNow()
+            // Only a refusal is news to Dart; a null text was its own stop.
+            if (text != null) onStoppedByItself?.invoke()
             return START_NOT_STICKY
         }
         instance = this
@@ -116,6 +118,15 @@ class ScanTrackingService : Service() {
          */
         val wanted: Boolean get() = text != null
 
+        /**
+         * Tells Dart the service went without being asked (Android 15+
+         * timeout, or a refused start), so its cache of the words it last
+         * sent no longer matches and the next sync starts it again.
+         * Main thread only; set by ScanChannel.
+         */
+        @Volatile
+        var onStoppedByItself: (() -> Unit)? = null
+
         /** Starts the service, or updates its notification if it runs. */
         fun show(context: Context, words: String) {
             val app = context.applicationContext
@@ -138,6 +149,8 @@ class ScanTrackingService : Service() {
                 // 12+, ForegroundServiceStartNotAllowedException): the
                 // poll runs while the process lives, without the guard.
                 Log.w(TAG, "scan service not started", e)
+                text = null
+                onStoppedByItself?.invoke()
             }
         }
 

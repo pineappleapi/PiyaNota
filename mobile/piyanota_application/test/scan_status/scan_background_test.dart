@@ -158,21 +158,26 @@ void main() {
     await end(tester);
   });
 
-  testWidgets('a paused (offline) scan stops the service, and it comes '
-      'back when polling does (review M6)', (tester) async {
-    await pump(tester);
-    api.script('a', [running(10), const ProcessingNetworkException()]);
-    tracker().track('a', title: 'Paraiso');
-    await tester.pump();
-    expect(device.shown, hasLength(1));
-    expect(device.stops, 0);
-
+  Future<void> pauseOffline(WidgetTester tester) async {
     // 30 s of failed polls: paused.
     for (var i = 0; i < 17; i++) {
       await poll(tester);
     }
     expect(tracker().state['a']!.phase, TrackedPhase.paused);
-    expect(device.stops, 1, reason: 'nothing is polled while paused');
+  }
+
+  testWidgets('an offline pause keeps the service, waiting for the '
+      'connection, and polling resumes by itself (review N1)', (tester) async {
+    await pump(tester);
+    api.script('a', [running(10), const ProcessingNetworkException()]);
+    tracker().track('a', title: 'Paraiso');
+    await tester.pump();
+    expect(device.shown, ['Scanning Paraiso…']);
+
+    await pauseOffline(tester);
+    expect(device.stops, 0, reason: 'the engine must stay for the resume');
+    expect(device.shown.last, ScanStatusMessages.waitingForConnection);
+    expect(device.shown.last, 'Waiting for connection…');
 
     network.set(false);
     await tester.pump();
@@ -182,7 +187,54 @@ void main() {
     await tester.pump();
     expect(tracker().state['a']!.phase, TrackedPhase.active);
     expect(device.shown.last, 'Scanning Paraiso…');
-    expect(device.shown, hasLength(2));
+    expect(device.stops, 0);
+    await end(tester);
+  });
+
+  testWidgets('one scan paused, another polled: still "Scanning"', (
+    tester,
+  ) async {
+    await pump(tester);
+    api.script('a', [running(10), const ProcessingNetworkException()]);
+    tracker().track('a', title: 'Paraiso');
+    await tester.pump();
+    await pauseOffline(tester);
+    api.script('b', [running(10)]);
+    tracker().track('b', title: 'Bahay Kubo');
+    await tester.pump();
+    expect(device.shown.last, 'Scanning Bahay Kubo…');
+    await end(tester);
+  });
+
+  testWidgets('a stop from the device side: the words go again on the next '
+      'change, or when the app comes back (review M1)', (tester) async {
+    await pump(tester);
+    api.script('a', [running(10)]);
+    api.script('b', [running(10)]);
+    tracker().track('a', title: 'Paraiso');
+    await tester.pump();
+    expect(device.shown, ['Scanning Paraiso…']);
+
+    // Android 15's timeout while away: nothing is re-sent at once.
+    toBackground(tester);
+    device.stopByItself();
+    await tester.pump();
+    await poll(tester);
+    expect(device.shown, hasLength(1), reason: 'silent while away');
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(device.shown, ['Scanning Paraiso…', 'Scanning Paraiso…']);
+
+    // Same words after another native stop: a change re-sends them.
+    device.stopByItself();
+    await tester.pump();
+    tracker().track('b', title: 'Bahay Kubo');
+    await tester.pump();
+    tracker().forget('b');
+    await tester.pump();
+    expect(device.shown.last, 'Scanning Paraiso…');
+    expect(device.shown, hasLength(4));
     await end(tester);
   });
 

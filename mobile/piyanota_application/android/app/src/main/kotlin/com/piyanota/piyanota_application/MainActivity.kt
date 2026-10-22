@@ -179,11 +179,13 @@ class MainActivity : FlutterActivity() {
         super.cleanUpFlutterEngine(flutterEngine)
     }
 
+    // Load-bearing: the default is false for a host-provided engine, so without this every engine built in provideFlutterEngine would leak.
     override fun shouldDestroyEngineWithHost(): Boolean = !keepEngine
 
     override fun onResume() {
         super.onResume()
         AppVisibility.resumed = true
+        engineExport?.onResumed()
     }
 
     override fun onPause() {
