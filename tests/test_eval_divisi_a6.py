@@ -198,3 +198,14 @@ def test_evaluate_passes_tie_sources(monkeypatch):
            "_ties": {"p|Alto|0": ["native"]}}
     out = ev.evaluate(None, Path("."), [row], {"p|Alto|0": ["up"]})
     assert out["total"]["bucket"]["tie_native"] == [1, 1]
+
+
+def test_load_builds_excludes_font(tmp_path):
+    import json
+    import eval_divisi_a6 as ev
+    (tmp_path / "manifest").mkdir()
+    rows = [{"piece": f"p{i}", "split": "val", "font": f, "tokens": []} for i, f in enumerate(("Bravura", "Gootville"))]
+    (tmp_path / "manifest" / "phase2_manifest.jsonl").write_text("\n".join(json.dumps(r) for r in rows),
+                                                                  encoding="utf-8")
+    got, _ = ev.load_builds([tmp_path], "val", "all", False, 0, 0, None, exclude_fonts=["Gootville"])
+    assert [r["font"] for r in got] == ["Bravura"]

@@ -27,7 +27,8 @@ COMMIT = "169d4f0a81d8945d1c38f9d01d562f1081a22d8f"  # full sha of the reviewed 
 BRANCH = "piya106/stroke-calibration"
 # (output folder, seed). One session: train-1's arm took ~29 min/epoch on a 54.6k-strip epoch; A6's is 55.9k
 # (30311 Phase 1 + 7578 divisi + 17980 CPM, replay capped at the pool), so 2 x 8 epochs is ~8 h of the 11 h budget.
-RUNS = (("a6_s1", 1), ("a6_s2", 2))
+# v1 (2026-10-21) ran a6_s1 in 560 min and skipped a6_s2 on budget; v2 runs a6_s2 alone in its own session.
+RUNS = (("a6_s2", 2),)
 SESSION_BUDGET_MIN = 11 * 60        # Kaggle GPU sessions stop at 12 h and a killed session keeps no output
 INIT_SHA256 = {1: "5c444ad395179dfe6751b8de032d7a34b4a3ccfccebdd7fc28e2404c624eaf93",
                2: "f79892acbcb3a410f8a55c2b4f7289354111a29a7ed439c2990cfd755cbdaed4"}

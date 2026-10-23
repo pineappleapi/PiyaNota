@@ -579,8 +579,12 @@ def _jsonable(x: Any) -> Any:
 
 
 def load_builds(builds: Sequence[Path], split: str, half: str, chord_only: bool, limit: int, seed: int,
-                groups: Mapping[str, str] | None) -> tuple[list[dict[str, Any]], bool]:
+                groups: Mapping[str, str] | None,
+                exclude_fonts: Sequence[str] = ()) -> tuple[list[dict[str, Any]], bool]:
     """Rows of every build folder, each tagged with its folder, stems and phase (`test_phase.json`).
+
+    `exclude_fonts` drops rows by font before the subsample: tuning-half selection excludes the held-out chord font
+    (freeze A6.5), so the font the held-out gate measures never steers the epoch choice.
 
     Returns the rows and whether every folder had stems.
     """
@@ -593,7 +597,7 @@ def load_builds(builds: Sequence[Path], split: str, half: str, chord_only: bool,
         summary = b / "divisi_summary.json"
         ties = json.loads(summary.read_text(encoding="utf-8")).get("tie_sources") if summary.exists() else None
         rows += [{**r, "_build": b, "_stems": stems, "_ties": ties, "_phase": phase}
-                 for r in load_rows(b, split, half, chord_only, 0, seed, groups)]
+                 for r in load_rows(b, split, half, chord_only, 0, seed, groups) if r["font"] not in exclude_fonts]
     if limit and len(rows) > limit:
         rows = random.Random(seed).sample(rows, limit)
     return rows, all_stems
@@ -611,14 +615,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--chord-strips-only", action="store_true", help="skip strips without chordnotes")
     ap.add_argument("--limit", type=int, default=0, help="fixed-seed subsample of strips (0 = all)")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--exclude-font", action="append", default=[], help="drop strips in this font (repeatable)")
     ap.add_argument("--canary-ok", action="append", default=[], help="label whose canary is under its caps")
     ap.add_argument("--out", type=Path, default=Path("a6_eval.json"))
     a = ap.parse_args(argv)
     groups = divisi_halves.load_groups(a.halves) if a.halves else None
     clean = divisi_halves.load_clean_test_pieces(a.halves) if a.halves else None
-    rows, have_stems = load_builds(a.build, a.split, a.half, a.chord_strips_only, a.limit, a.seed, groups)
-    print(f"{len(rows)} strips ({a.split}, half={a.half}, chord_only={a.chord_strips_only}, builds={len(a.build)})")
+    rows, have_stems = load_builds(a.build, a.split, a.half, a.chord_strips_only, a.limit, a.seed, groups,
+                                   a.exclude_font)
+    print(f"{len(rows)} strips ({a.split}, half={a.half}, chord_only={a.chord_strips_only}, builds={len(a.build)}, "
+          f"excluded fonts={a.exclude_font})")
     result: dict[str, Any] = {"n_strips": len(rows), "half": a.half, "stems": have_stems,
+                              "excluded_fonts": a.exclude_font,
                               "not_run": list(NOT_RUN_GATES), "checkpoints": {},
                               "bootstrap": {"method": "percentile", "B": BOOT_N, "lower_quantile": BOOT_LOWER_PCT,
                                             "seed": BOOT_SEED, "resampled_unit": "piece"},

@@ -482,3 +482,88 @@ at the later pin commit. No test photo, test render or `piyanota_dataset` page w
   - **Split check:** confirm that `run_info.divisi_val_strips_test_half_excluded` is about half of 1692.
   - **Tie residual:** before the eval, check that every tie continuation's alter equals its tie start's, and turn
     "none expected" into a count.
+
+#### A6.6 Interim result, seed 1 only: B' FAIL under the both-seeds rule (2026-10-23)
+**Status: interim.** Seed 1 fails three non-2nd gates on the test half. Design section 6 and section 5 above say
+"both seeds must pass", so the arm fails whatever seed 2 shows. Seed 2 is still run, only to report the range. Per
+the kill rule, v1 ships with chords off. No Phase 4 strip, `piyanota_dataset` photo or test piece was opened.
+- **Training kernel v1** (`piamac/piyanota-divisi-a6-train`, COMMIT 169d4f0; Tesla T4, torch 2.11.0+cu128):
+  - a6_s1: rc 0, 8 of 8 epochs, 560 min. Epoch times were uneven (7276, 2012, 1782, 2673, 7052, 2297, 2066,
+    2002 s).
+  - a6_s2: skipped on budget ("560 min used, longest run 560 min"). Under the A6.5 short-seed rule it is rerun
+    alone. Kernel v2, pushed 2026-10-23, changes only `RUNS = (("a6_s2", 2),)`: same COMMIT, bundle, args and
+    inits. v2 replaces v1's Kaggle output; v1's output is kept locally in `D:/PiyaNota/datasets/phase2_divisi_a6/`.
+- **Pre-eval checks (A6.5 conditions):**
+  - Split: `divisi_val_strips` 838 (tuning), `divisi_val_strips_test_half_excluded` 854, of 1692. Gootville:
+    tuning 169, test 172 (of 341).
+  - Tie residual: 2110 ties in 364 corpus MEIs. 0 have a start/continuation pitch or alter mismatch, and 0 have
+    unresolved ids. 1580 carry no accidental on either end (same key-signature alter). The checker caught a planted
+    mismatch.
+  - `zeroed_by_zero_infinity`: 0 in every epoch (all and chord).
+- **Non-regression, seed 1 (training log, pass on every epoch):**
+  - Non-chord val SER (Phase 2 val, manifest 78165b43, 1769 strips): .0011 to .0023, against v1 seed 1's best
+    .00259 (epoch 8: .0012).
+  - Canary clean/distorted: at most .0278/.0450 on every epoch, and .0220/.0314 at epoch 8, against caps
+    .03695/.05317.
+  - Offline CPU re-eval of the saved epoch-8 file (`canary_check.py` with the chord vocab, 399 pinned stems):
+    clean .0220, distorted .0314, the same as the log, so the evaluated file is the logged epoch.
+  - Dev pitch recall with chordnotes stripped (`eval_dev_nofermata.py --strip-chordnotes`, grey e1c, dev data):
+    - Camera: v1 95.62%, s1e8 95.30% (McNemar 27 vs 19, p .30).
+    - Digital: 96.43% vs 96.63% (p .80).
+    - Both are within the 1 pp drop limit, and neither difference is significant.
+- **Selection (tuning half, Gootville excluded; `eval_divisi_a6.py --exclude-font Gootville`):**
+  - The run used 669 strips and 5011 GT heads. `--exclude-font` is the A6.5 selection condition, added after the
+    run and before any test-half eval (uncommitted at the time of writing).
+  - P / head recall / min bucket recall per epoch:
+
+    | Epoch | P | Head recall | Min bucket |
+    |---|---|---|---|
+    | 1 | .786 | .582 | .015 (ledger) |
+    | 2 | .843 | .728 | .163 |
+    | 3 | .903 | .827 | .406 |
+    | 4 | .946 | .871 | .484 |
+    | 5 | .967 | .908 | .587 |
+    | 6 | .974 | .924 | .628 |
+    | 7 | .977 | .925 | .626 |
+    | 8 | .977 | .929 | .642 |
+
+    From epoch 2 on, the min bucket is triad.
+  - The 2nds are at least .899 by epoch 4, so the fallback cannot fire.
+  - **Selected epoch 8**, the last epoch. Triad recall flattens over epochs 5 to 8.
+  - The selection was fixed before the test half was opened.
+- **Test half, s1e8** (sha256 `0c8c11eb895cd4bcaf2f4ee9b75d860d77e9eaa4c3a1089ee51979a149179e09`):
+  - Inputs: renders t1-t11, 5290 strips, 41028 GT heads, 1748 of 19115 columns duplicated. The piece bootstrap
+    resamples the 14 source pieces pooled across all renders.
+  - **PASS:**
+    - Recall: 3rd .955, 4th .950, 5th .954, 6th .946, 7th .942, 8ve .956, 2nd_up .939, 2nd_down .966. Every lower
+      bound is above its target.
+    - Head precision .971.
+    - Extra heads on plain columns .0005.
+    - Chordnote hallucination 0 of 19172 notes.
+    - Held-out font gap -.0024 (in-font .923, Gootville .925).
+  - **FAIL:**
+    - Triad recall .626 (n 5586, Wilson LB .613, bootstrap LB .609; target .85).
+    - Ledger recall .676 (n 2041, LB .656/.634; target .85).
+    - Exact triad set .301 (n 2798; target .75).
+  - Diagnostic only: AUROC .924, accidental-member recall .873.
+  - Per font (diagnostic):
+
+    | Font | Triad | Ledger | Exact triad set |
+    |---|---|---|---|
+    | In-font | .630 | .687 | .311 |
+    | Gootville | .618 | .654 | .283 |
+
+    The failure is not a font effect.
+- **ml-cv-lead post-results review (2026-10-23):**
+  - The eval is valid, with the caveats above (all checked).
+  - The failure is read as mostly structural, but this cannot be decided post hoc. The evidence:
+    - Triad is the largest bucket yet the worst.
+    - Recall flattens over epochs 5 to 8.
+    - Exact set .301 is near .626^3, consistent with one member dropped per column, which points to a
+      CTC-frames-per-column limit.
+  - Ledger may be an exposure problem: only 4.5% of members have 2+ ledger lines.
+  - Nothing pre-registered changes. A longer run or an architecture change is a new design (A7) with fresh test
+    renders, because this test half has now shaped the next hypothesis.
+  - Error breakdowns (triad misses by member position, ledger misses by ledger count) go on the tuning half only,
+    labelled diagnostic.
+- **Seed 2 still owed:** fetch, tuning-half selection and the test half, reported as a range with seed 1.
