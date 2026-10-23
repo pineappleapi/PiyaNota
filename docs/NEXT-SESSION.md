@@ -4,37 +4,27 @@ Handoff doc for continuing PiyaNota work in a fresh session. Read this first; it
 full detail rather than repeating it. Written 2026-09-14, rewritten 2026-09-16, rewritten 2026-09-19,
 rewritten 2026-09-24, top sections added 2026-09-28.
 
-## Divisi A6 training finished: fetch and evaluate (2026-10-23, newest, read first)
+## Divisi A6 result: FAIL on both seeds, user decision owed (2026-10-23, newest, read first)
 
-Ticket PIYA-106, divisi (same-stem chord) reader, route A6. Branch `piya106/stroke-calibration` at 43219e9.
-- **Plan:** `docs/superpowers/plans/2026-10-18-divisi-a6.md`. Task 9 is the training run; Task 7 is the eval CLI.
-- **Ledger:** `.superpowers/sdd/2026-10-18-divisi-a6/progress.md`.
-- **Frozen decisions:** `docs/decisions/piya-106-divisi-arm-freeze.md`, sections A6 to A6.5.
+Ticket PIYA-106, divisi (same-stem chord) reader, route A6. Branch `piya106/stroke-calibration`.
+- **Record:** `docs/decisions/piya-106-divisi-arm-freeze.md`, sections A6.6 (gate result) and A6.7 (diagnosis).
+- **Diagnosis plan:** `docs/superpowers/plans/2026-10-23-divisi-a6-failure-diagnosis.md`; script
+  `training/phase2/diag_divisi_a6.py` (tuning half only, refuses the test half).
+- **Outputs:** seed 1 in `D:/PiyaNota/datasets/phase2_divisi_a6/`, seed 2 in `D:/PiyaNota/datasets/phase2_divisi_a6_v2/a6_s2/`,
+  evals and diagnostics in `D:/PiyaNota/datasets/phase2_divisi_a6/a6eval/`.
 
-**Done:**
-- Build kernel `piamac/piyanota-divisi-a6-build` v2: divisi manifest sha256 `deb09dcf…09c1b3`, 11163 rows, every mix
-  gate passed. Its one failed gate, `free_new_accidentals` = 15, was an audit false positive (tie continuations).
-  The audit is fixed in 169d4f0; the corpus is kept as built (A6.5).
-- Training kernel `piamac/piyanota-divisi-a6-train` v1, COMMIT 169d4f0, was **COMPLETE** on 2026-10-23.
-  - It ran 2 seeds (`a6_s1`, `a6_s2`) x 8 epochs, divisi share 0.20, Gootville held out, every epoch checkpointed.
-  - Its output is still on Kaggle; nothing has been fetched or evaluated yet.
+**Result:** B' FAIL on both seeds (s1e8, s2e8; epoch 8 selected on the tuning half for both).
+- Test-half range: triad recall .626-.633, ledger recall .676-.685, exact triad set .301-.314 (targets .85/.85/.75).
+- Every other gate passes: interval buckets, head precision .971, no hallucination, held-out font gap about 0.
+- Diagnosis (route R3, ml-cv-lead confirmed): a chord-count collapse. About half of triad columns emit only one chordnote,
+  usually keeping the top head. It is not a frame-gap or seconds effect, and is the same on both seeds.
 
-**Next, in order:**
-1. **Fetch:** run `kaggle kernels output piamac/piyanota-divisi-a6-train -p D:/PiyaNota/datasets/phase2_divisi_a6`.
-   - First read `kernel_status.json`: both runs should show returncode 0 and 8 epochs.
-   - If a seed shows `timeout_budget` or skipped, it is not the pre-registered run: rerun it in a second session.
-2. **Halves file:** `halves.json` from the build kernel output was never downloaded (low-memory kill).
-   Fetch only that file from `piamac/piyanota-divisi-a6-build` into `D:/PiyaNota/datasets/divisi_a6_build_v2/`.
-   `a6_gates.json` and the manifest are already there.
-3. **Split check:** `run_info.divisi_val_strips_test_half_excluded` should be about 846, half of 1692 (A6.5).
-4. **Tie residual:** check that every tie continuation's alter equals its tie start's, and report the count (A6.5).
-5. **Task 7 eval** with `training/phase2/eval_divisi_a6.py`:
-   - Select the epoch on the tuning half, **with Gootville strips excluded**.
-   - Then score the test-half gates, the canary on **every** epoch, non-chord SER, and dev pitch recall with chordnotes
-     stripped.
-   - Report both seeds as a range; never cherry-pick one.
-6. **Review and record:** get the ml-cv-lead post-results review, then write the result into the freeze doc and
-   memory `divisi-full-2-relaunch.md`.
+**Next: user decision (chords for v1):**
+1. **A7-data:** retrain with triad share .30 and 2+ ledger members at 15%, plus a column-level head-count check. The
+   pre-registered A7 list is in A6.7. It needs fresh test renders and two seeds.
+2. **Dyad-only** for v1, with the head-count flag.
+3. **Chords off** for v1 (the A6 kill rule's default).
+- Ledger recall is a separate item whichever is chosen.
 
 **Standing rules:**
 - Never open `D:/PiyaNota/datasets/phase4_strips/`, `piyanota_dataset` photos, or the test pieces (including the

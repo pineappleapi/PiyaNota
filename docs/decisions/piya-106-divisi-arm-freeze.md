@@ -483,8 +483,8 @@ at the later pin commit. No test photo, test render or `piyanota_dataset` page w
   - **Tie residual:** before the eval, check that every tie continuation's alter equals its tie start's, and turn
     "none expected" into a count.
 
-#### A6.6 Interim result, seed 1 only: B' FAIL under the both-seeds rule (2026-10-23)
-**Status: interim.** Seed 1 fails three non-2nd gates on the test half. Design section 6 and section 5 above say
+#### A6.6 Result: B' FAIL on both seeds (2026-10-23)
+**Status: final (seed 2 added below).** Seed 1 fails three non-2nd gates on the test half. Design section 6 and section 5 above say
 "both seeds must pass", so the arm fails whatever seed 2 shows. Seed 2 is still run, only to report the range. Per
 the kill rule, v1 ships with chords off. No Phase 4 strip, `piyanota_dataset` photo or test piece was opened.
 - **Training kernel v1** (`piamac/piyanota-divisi-a6-train`, COMMIT 169d4f0; Tesla T4, torch 2.11.0+cu128):
@@ -566,4 +566,91 @@ the kill rule, v1 ships with chords off. No Phase 4 strip, `piyanota_dataset` ph
     renders, because this test half has now shaped the next hypothesis.
   - Error breakdowns (triad misses by member position, ledger misses by ledger count) go on the tuning half only,
     labelled diagnostic.
-- **Seed 2 still owed:** fetch, tuning-half selection and the test half, reported as a range with seed 1.
+- **Seed 2 (kernel v2, same COMMIT, bundle and args; Tesla T4):**
+  - a6_s2: 8 of 8 epochs. Split re-checked: 838/854, same as seed 1.
+  - Training log, every epoch: canary under caps (epoch 8 .0236/.0334, caps .03738/.05496); non-chord val SER
+    epoch 8 .0013. The offline canary and dev-pitch re-checks done for seed 1 were not repeated for seed 2.
+  - Selection (tuning half, Gootville excluded, same procedure): **epoch 8**, P .976, min bucket recall .638 (triad).
+    Selection fixed before the test half was opened.
+  - Test half, s2e8 against s1e8 (same renders and inputs):
+
+    | Gate | s1e8 | s2e8 | Target |
+    |---|---|---|---|
+    | Triad recall | .626 | .633 | .85 |
+    | Ledger recall | .676 | .685 | .85 |
+    | Exact triad set | .301 | .314 | .75 |
+    | Head precision | .971 | .971 | .95 |
+    | Held-out font gap | -.0024 | -.0031 | .05 |
+
+    Every other gate passes on both seeds. Per font, s2e8: in-font triad .636 / ledger .690 / exact .320,
+    Gootville .627 / .673 / .304.
+- **Result: B' FAIL on both seeds.** Range: triad .626-.633, ledger .676-.685, exact triad set .301-.314. v1 ships
+  with chords off unless the user decides otherwise (see A6.7).
+
+#### A6.7 Failure diagnosis, seeds 1 and 2 (diagnostic, tuning half) (2026-10-23)
+
+Diagnostic only. No gate, threshold or A6.6 verdict changes. Rules were pre-registered with ml-cv-lead before the
+run (`docs/superpowers/plans/2026-10-23-divisi-a6-failure-diagnosis.md`). Script: `training/phase2/diag_divisi_a6.py`.
+Output: `D:/PiyaNota/datasets/phase2_divisi_a6/a6eval/diag_s1e8_tuning.json`.
+
+- **Run:**
+  - s1e8, tuning half, 644 chord strips, all fonts.
+  - Cross-check without Gootville matches the gate run exactly: 690 members, 345 triad columns, 135 ledger.
+  - span mismatch 0, duplicate columns 0, valid-gap fraction .931.
+- **Gap and seconds results:**
+  - Fewer than 15% of valid members had a gap of 4 frames or less, so the tight cut fell back to P25 = 9 frames.
+  - R1(a) gap: ratio 0.93, CI [0.64, 1.42], Mantel-Haenszel ratio 0.92. FAIL.
+  - R1(b) has-a-2nd: ratio 1.05, CI [0.83, 1.40]. FAIL.
+- **R2:**
+  - The spread condition holds.
+  - The prior test is not positive: in columns with a gap of 8 or more, the share emitting 2 or more chordnotes is
+    .526 (325 columns; threshold under .5). The rare-shape leg was not run.
+  - R2 FAIL.
+- **Route: R3.** The no-Gootville sensitivity check gives the same result. Because two-seed disagreement also routes
+  to R3, the route is final whatever seed 2 shows.
+- **Ledger:**
+  - Non-triad ledger recall is .869 (n 130), CI [.755, .963]. The lower bound is under .80, so ledger is not
+    attributed to the triad failure.
+  - Ledger is a separate A7 item.
+- **Post hoc, not pre-registered (ml-cv-lead cross-tab):**
+  - All 432 triad columns have one middle and one top member. Misses split middle 224, top 74.
+  - The model emits only one chordnote in 195 of 432 columns (45%). It keeps the top head 147 times and the middle
+    41 times.
+  - The emission rate is flat across gaps (.51 to .53).
+  - With 2 or more emitted, middle recall is .73 against .93 for top.
+  - Reading: a chord-count collapse, not a geometry or seconds effect.
+  - A member credited through the predicted main note's step (2 cases with no predicted chordnote) follows the
+    eval's `head_scores` semantics.
+  - Only 11 pieces; bwv383 and bwv311 hold 99 of 298 misses, so the CIs are coarse.
+- **Net heads (not deduped):** 2972 gained, 162 false.
+- **ml-cv-lead decision (R3):**
+  - Next is A7-data, with triad share .30 and 2+ ledger members at 15%, same recipe.
+  - Pair it with a column-level head-count check. A dropped member emits no token and so has no confidence.
+  - A crop classifier as the main fix is not supported.
+  - A7 pre-registers:
+    - triad member recall;
+    - the share of triad columns emitting 2+ chordnotes, target at least .85;
+    - a middle-recall floor;
+    - dyad and non-chord non-regression;
+    - fresh test renders;
+    - two seeds reported as a range;
+    - the head-count check's catch rate and false-flag rate on a split it was not tuned on.
+  - Stopping chords for v1, or shipping dyad-only, is a user decision. Either needs the head-count flag.
+- **Seed 2 diagnostic (s2e8, tuning half, same script; `diag_s2e8_tuning.json`):**
+  - Cross-check without Gootville: 690 / 345 / 135, a match. Span mismatch 0, duplicates 0, valid gap .935.
+  - Tight cut fell back to P25 = 9 frames again.
+  - R1(a) gap: ratio 0.88, CI [0.56, 1.40]. R1(b) has-a-2nd: 0.97, CI [0.79, 1.24]. Both FAIL.
+  - Prior test: .491 (334 columns), so positive and R2 passes, which routes seed 2 to A7-data. Seed 1 was .526.
+    The seeds disagree, so the route is **R3** by rule.
+  - Ledger non-triad recall .846, CI [.73, .944]. Still a separate item.
+  - Misses middle 220, top 83 (seed 1: 224, 74).
+  - One-chordnote triad columns, both seeds grouped the same way: s1 190 of 422, s2 205 of 424. Kept head: s1 top 140
+    / middle 40 / none 10; s2 top 141 / middle 48 / none 16.
+  - Hits credited with no predicted chordnote (eval semantics): s1 2 of 566, s2 3 of 561.
+  - Net heads: 2962 gained, 166 false.
+- **ml-cv-lead on seed 2 (2026-10-23):** The decision stands: A7-data plus the head-count check, with ledger kept
+  separate.
+  - The seeds disagree only because the prior test straddles its .5 cutoff (.526 against .491). It is no evidence
+    either way.
+  - Seed 2's R2 pass is not support for A7-data, and the prior test is dropped as a decision input for A7.
+  - The collapse is the same on both seeds, so the variance caveat is not triggered. It is the stable target.
