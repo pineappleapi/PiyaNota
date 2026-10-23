@@ -16,7 +16,7 @@ Ticket PIYA-106, divisi (same-stem chord) reader, route A6. Branch `piya106/stro
 **Result:** B' FAIL on both seeds (s1e8, s2e8; epoch 8 selected on the tuning half for both).
 - Test-half range: triad recall .626-.633, ledger recall .676-.685, exact triad set .301-.314 (targets .85/.85/.75).
 - Every other gate passes: interval buckets, head precision .971, no hallucination, held-out font gap about 0.
-- Diagnosis (route R3, ml-cv-lead confirmed): a chord-count collapse. About half of triad columns emit only one chordnote,
+- Diagnosis (route R3, ml-cv-lead confirmed): a chord-count collapse. About half of triad columns (195-210 of 432) emit one chordnote,
   usually keeping the top head. It is not a frame-gap or seconds effect, and is the same on both seeds.
 
 **Next: user decision (chords for v1):**

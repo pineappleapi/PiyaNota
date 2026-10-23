@@ -644,8 +644,16 @@ Output: `D:/PiyaNota/datasets/phase2_divisi_a6/a6eval/diag_s1e8_tuning.json`.
     The seeds disagree, so the route is **R3** by rule.
   - Ledger non-triad recall .846, CI [.73, .944]. Still a separate item.
   - Misses middle 220, top 83 (seed 1: 224, 74).
-  - One-chordnote triad columns, both seeds grouped the same way: s1 190 of 422, s2 205 of 424. Kept head: s1 top 140
-    / middle 40 / none 10; s2 top 141 / middle 48 / none 16.
+  - One-chordnote triad columns: s1 195 of 432, s2 210 of 432. Columns are rebuilt from consecutive member pairs,
+    because the JSON has no column key. Every pair is one middle and one top member, same piece and `gi`.
+  - Hit heads in those columns:
+
+    | Seed | Top only | Middle only | Both | None |
+    |---|---|---|---|---|
+    | s1 | 143 | 37 | 4 | 11 |
+    | s2 | 144 | 47 | 3 | 16 |
+
+    The seed-1 cross-tab above (top 147, middle 41) counts the "both" columns under each head.
   - Hits credited with no predicted chordnote (eval semantics): s1 2 of 566, s2 3 of 561.
   - Net heads: 2962 gained, 166 false.
 - **ml-cv-lead on seed 2 (2026-10-23):** The decision stands: A7-data plus the head-count check, with ledger kept
