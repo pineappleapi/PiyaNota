@@ -569,7 +569,14 @@ the kill rule, v1 ships with chords off. No Phase 4 strip, `piyanota_dataset` ph
 - **Seed 2 (kernel v2, same COMMIT, bundle and args; Tesla T4):**
   - a6_s2: 8 of 8 epochs. Split re-checked: 838/854, same as seed 1.
   - Training log, every epoch: canary under caps (epoch 8 .0236/.0334, caps .03738/.05496); non-chord val SER
-    epoch 8 .0013. The offline canary and dev-pitch re-checks done for seed 1 were not repeated for seed 2.
+    epoch 8 .0013.
+  - Offline re-checks (run 2026-10-26, same commands as seed 1, on `phase2_seed2_epoch8.pt`):
+    - CPU canary (`canary_check.py`, chord vocab, 399 pinned stems): clean .0236, distorted .0334. Same as the log
+      and under the caps.
+    - Dev pitch recall with chordnotes stripped (grey e1c, dev data): camera v1 95.62%, s2e8 94.91% (-0.71 pp; McNemar
+      33 vs 15, p .013). Digital 96.43% against 95.93% (p .40).
+    - Both drops are within the 1 pp limit, so the rule passes. McNemar is reported, not gated. Unlike seed 1, the
+      camera loss is significant: a small real cost, not noise.
   - Selection (tuning half, Gootville excluded, same procedure): **epoch 8**, P .976, min bucket recall .638 (triad).
     Selection fixed before the test half was opened.
   - Test half, s2e8 against s1e8 (same renders and inputs):
@@ -697,4 +704,49 @@ The user chose this after reading both experts' advice.
   - Chords on also needs a one-shot real-divisi-photo check and non-chord non-regression on real dev data for both
     seeds.
   - The flag does not exist yet.
-- **Owed before A7 design closes:** seed 2's offline canary and dev-pitch re-checks (only seed 1's were run).
+- **Owed before A7 design closes:** seed 2's offline canary and dev-pitch re-checks. Done 2026-10-26, see A6.6.
+  The canary passes. Camera dev pitch drops 0.71 pp, within the limit, with McNemar p .013.
+
+#### A6.9 A7 scope (user decisions, 2026-10-26; design doc to follow)
+
+- **Scope (user):** A7 reads two kinds of divisi.
+  - (1) Same-stem chords: 2-3 heads on one stem, with the same rhythm.
+  - (2) Different-rhythm divisi: up to 2 parts on one staff, each with its own note values and each filling the bar.
+  - Playback stays merged into the voice's one track (earlier ruling). A bar with 3 different-rhythm parts is
+    flagged, not read.
+- **Clusters (user):** chords like C4-D4-E4 occur in real choral scores. A6's random-interval triads stay.
+  - Chord-shape templates (choral-conductor) are added alongside them, at about 50/50.
+  - The eval reports clusters, templates and random intervals as separate rows.
+- **Two arms in one kernel (user, on ml-cv-lead's advice):** C (chords only) and CL (chords + layers), same seeds.
+  - Each kind has its own stop check and its own gates, never one aggregate.
+  - Arm C keeps the chord result clean if layers interfere: a stems-down layer-2 head at a chord's x looks like a
+    chordnote.
+- **Token scheme (ml-cv-lead):**
+  - A `layer.split` token follows the barline of a two-layer bar, and the next barline closes the split.
+  - Inside the bar, events go in drawn-x order, so CTC alignment stays monotonic.
+  - Layer-1 tokens are unchanged. Layer-2 notes and rests use fused classes, e.g. `note.eighth.l2-L2` and
+    `rest.quarter.l2`.
+  - A pre-registered frame-budget audit runs before training. Its cap is set after checking the CRNN's frames per bar.
+  - The converter allows exactly 2 layers, behind a new G1c gate.
+- **Split stems with the same rhythm (user, reverses A3):** labelled as layers, not as the chord form. Opposed stems
+  are a local cue the model can see.
+- **Ledger gate (user):** lower bound >= .80 plus point estimate >= .85.
+  - It counts at least 1000 non-triad ledger heads over all 14 test pieces, with no piece above a .15 share.
+  - Triad ledger members count under the triad gate.
+  - 2+ ledger heads are reported only, with n >= 300.
+- **Fallback (default taken; the user did not object):**
+  - If only chords pass on CL, ship CL with layer-2 events dropped and flagged. This needs non-regression on
+    single-layer strips and a cap on false `layer.split` firings.
+  - Otherwise ship C if C passes.
+  - Otherwise chords stay off, every detected chord column is flagged, and Soprano and Tenor play the top note.
+- **Test set (default taken):** the 14 A6 test-half pieces, with new injection seeds disjoint from A6's. A6 test
+  renders and results are not evidence for A7.
+- **Real check (user supplies):** 5 MuseScore pieces with ground truth, plus camera photos of each.
+  - Test-only, scored once after the synthetic gates pass. Never used for tuning, including the head-count flag.
+  - What they can show: gross pass or fail per kind, and a digital-against-camera pair per piece.
+  - What they cannot claim: generalisation or prevalence. Nor font shift, because Leland (MuseScore's font) is a
+    Verovio training font.
+  - Below a pre-registered minimum n per kind, results are descriptive only.
+- **Cost:** v1 waits for A7 (A6.8). Engineering is done once.
+  - GPU is about 2x one A6 run, plus 10-20% for the longer layer sequences.
+  - Combining saves one build/freeze/eval cycle, about a week.
