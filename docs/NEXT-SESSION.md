@@ -4,7 +4,7 @@ Handoff doc for continuing PiyaNota work in a fresh session. Read this first; it
 full detail rather than repeating it. Written 2026-09-14, rewritten 2026-09-16, rewritten 2026-09-19,
 rewritten 2026-09-24, top sections added 2026-09-28.
 
-## Divisi A6 result: FAIL on both seeds, user decision owed (2026-10-23, newest, read first)
+## Divisi A6 result: FAIL on both seeds, v1 held for A7-data (2026-10-26, newest, read first)
 
 Ticket PIYA-106, divisi (same-stem chord) reader, route A6. Branch `piya106/stroke-calibration`.
 - **Record:** `docs/decisions/piya-106-divisi-arm-freeze.md`, sections A6.6 (gate result) and A6.7 (diagnosis).
@@ -19,12 +19,23 @@ Ticket PIYA-106, divisi (same-stem chord) reader, route A6. Branch `piya106/stro
 - Diagnosis (route R3, ml-cv-lead confirmed): a chord-count collapse. About half of triad columns (195-210 of 432) emit one chordnote,
   usually keeping the top head. It is not a frame-gap or seconds effect, and is the same on both seeds.
 
-**Next: user decision (chords for v1):**
-1. **A7-data:** retrain with triad share .30 and 2+ ledger members at 15%, plus a column-level head-count check. The
-   pre-registered A7 list is in A6.7. It needs fresh test renders and two seeds.
-2. **Dyad-only** for v1, with the head-count flag.
-3. **Chords off** for v1 (the A6 kill rule's default).
-- Ledger recall is a separate item whichever is chosen.
+**User decision (2026-10-26, freeze doc A6.8): v1 is held for A7-data.** Experts' views are recorded in A6.8.
+
+**Next, in order:**
+1. Seed 2's owed checks, CPU only: `canary_check.py` with the chord vocab on `phase2_seed2_epoch8.pt`, and
+   `eval_dev_nofermata.py --strip-chordnotes` for s2e8. Record both in A6.6.
+2. Write the A7 design and plan (superpowers:writing-plans). Ask ml-cv-lead before writing, and choral-conductor
+   on chord forms.
+   - **Corpus:** triad share .30, 2+ ledger members 15%. Size the ledger n so the piece-bootstrap LB can clear .80.
+     Use fresh test renders.
+   - **Stop check first:** at least .85 of triad columns emit 2+ chordnotes on the tuning half, before the test
+     half is opened.
+   - **Ship gates:** triad member recall, exact triad set, middle-recall floor, the A6 dyad gates and non-chord
+     non-regression. Two seeds.
+   - **Head-count flag:** read from the image, not from CTC output. Report catch and false-flag rates on an untuned
+     split.
+   - **Fallback:** pre-register the v1 fallback if A7 fails: voice-aware chords off or dyad-only.
+3. The user reviews the plan, then ml-cv-lead gives a pre-launch GO, then the user OKs every Kaggle push.
 
 **Standing rules:**
 - Never open `D:/PiyaNota/datasets/phase4_strips/`, `piyanota_dataset` photos, or the test pieces (including the

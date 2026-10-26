@@ -662,3 +662,39 @@ Output: `D:/PiyaNota/datasets/phase2_divisi_a6/a6eval/diag_s1e8_tuning.json`.
     either way.
   - Seed 2's R2 pass is not support for A7-data, and the prior test is dropped as a decision input for A7.
   - The collapse is the same on both seeds, so the variance caveat is not triggered. It is the stable target.
+
+#### A6.8 v1 chords decision: hold v1 for A7-data (user decision, 2026-10-26)
+
+**Decision (user):** v1 is held until A7-data is run and scored. Chords are not shipped off, and dyad-only is not
+shipped, in the meantime. This supersedes A6.6's "v1 ships with chords off" for now. If A7 fails, the v1 fallback
+must be pre-registered in the A7 design before A7 runs.
+
+The user chose this after reading both experts' advice.
+
+- **choral-conductor (judgment, not counted):** recommends dyad-only v1 with the head-count flag, and A7 after v1.
+  - In open-score SATB, dyads outnumber triads about 10:1. Triads are mostly final chords, in Bass or Soprano.
+  - The A6 triads come from Bach chorale harmony, so A6 does not say how common triads are in real scores.
+  - For a singer, a wrong note is worst, a silently missing note is next, and a flagged column costs little.
+  - "Lowest note only" is not neutral. It plays Soprano II and Tenor II and hides Soprano I's melody. If chords are
+    off, consider the top note for Soprano and Tenor, and flag every chord column.
+  - For a triad, keep the bass and the top note; the outer lines matter most.
+  - App flags: "possible missing divisi note" with bar and voice, a per-piece count, and a note that divisi plays in
+    one track.
+- **ml-cv-lead:** recommends chords off for v1, A7-data as v1.1 in parallel, and dyad-only last.
+  - Dyad-only cannot be judged from A6. The dyad buckets show that 2-note columns read well. They do not show that
+    a triad is flagged rather than shipped as a confident dyad. 195-210 of 432 triad columns already collapse.
+  - Dyad-only would need its own pre-registered gate. That gate would measure the unflagged triad-as-dyad rate and
+    the flag's catch and false-flag rates.
+  - (a) Post-hoc evidence justifies the GPU spend. It is not evidence of a fix.
+    - A7 pre-registers the 2+ chordnote emission share (target at least .85) as its first stop check. It runs on the
+      tuning half, before the test half is opened.
+    - Ship gates stay triad member recall, exact triad set and the middle-recall floor, on fresh renders.
+  - (b) Ledger is recorded as **underpowered, not tested**, not as "separate" or "fine". The point estimates are
+    .846-.869, with n 106-130 in 11 pieces. A7 must pre-register a ledger n large enough to clear the bound.
+- **Both agree:** any chords-on v1 needs a column head-count flag read from the image, not from CTC output. A
+  dropped member emits no token, so it has no confidence.
+  - The flag must be validated on a split it was not tuned on.
+  - Chords on also needs a one-shot real-divisi-photo check and non-chord non-regression on real dev data for both
+    seeds.
+  - The flag does not exist yet.
+- **Owed before A7 design closes:** seed 2's offline canary and dev-pitch re-checks (only seed 1's were run).
