@@ -1,0 +1,67 @@
+{
+  "_doc": "PDF system -> score bars and staff groups, read by hand from the PDFs (PIYA-106 A7 data, 2026-10-26). Per piece: 'staves' = default list of PDF staves, each a list of MEI staff @n merged onto that staff, or {'auto': [n...]} = every candidate staff with a note in the system, one PDF staff each (MuseScore hides empty staves). 'pages' = [page, [system...]], a system = first bar @n, or an object {first, staves (null = skip), sys (system index on the page when earlier systems are not listed)}. A system runs to the bar before the next one. Bar @n equals the printed bar number (pickups are @n 0).",
+  "Ave_Maris_Stella": {
+    "staves": [["1", "2"], ["3", "4"], ["5", "6"], ["7", "8", "9"]],
+    "pages": [[1, ["1", "6", "12"]], [2, ["18", "25", "31"]], [3, ["37", "42", "48"]], [4, ["52", "57", "63"]]]
+  },
+  "Both_Sides_Now": {
+    "staves": [["1"], ["2"], ["3"], ["4"]],
+    "pages": [[1, ["1", "5", "9"]], [2, ["13", "17", "21"]], [3, ["25", "28", "31"]], [4, ["35", "39", "43"]],
+              [5, ["47", "51", "54"]], [6, ["57", "60", "64"]], [7, ["68", "72", "76"]], [8, ["80", "85"]],
+              [9, ["89", "94"]]]
+  },
+  "For_Good": {
+    "staves": [["1", "2"], ["3", "4"], ["5", "6"], ["7", "8"]],
+    "pages": [[1, ["1", "6"]], [2, ["11", "16", "20"]], [3, ["24", "29", "34"]], [4, ["39", "43", "47"]],
+              [5, ["52", "57", "61"]], [6, ["65", "69", "74"]]]
+  },
+  "Handog": {
+    "_note": "Only the 4-staff SATB systems; the 5-7 staff systems move parts between staves bar by bar.",
+    "staves": [["1", "2"], ["3", "4"], ["5", "6"], ["7", "8"]],
+    "pages": [[1, ["1", "4"]], [2, ["7", "10"]], [3, ["13", {"first": "16", "staves": null}]],
+              [4, [{"first": "19", "staves": null}, {"first": "22", "staves": null}]],
+              [5, [{"first": "25", "staves": null}]], [6, [{"first": "28", "staves": null}]],
+              [7, [{"first": "34", "staves": null}]], [8, [{"first": "40", "staves": null}]],
+              [9, [{"first": "43", "staves": null}]], [10, [{"first": "46", "staves": null}, "49"]],
+              [11, ["52", "55"]], [12, [{"first": "58", "staves": null}, "62"]], [13, ["69", "76"]],
+              [14, ["80", "82"]]]
+  },
+  "It_Is_Not_Death_to_Die": {
+    "_note": "Only the 4-vocal-staff systems from p8 s2; earlier pages combine S/A on one staff, p14-15 is the cello part.",
+    "staves": [["1"], ["2"], ["3"], ["4"]],
+    "pages": [[0, [{"first": "0", "staves": null}]], [8, [{"first": "60", "sys": 2}]], [9, ["63", "66"]],
+              [10, ["69", "73"]], [11, ["76", "79"]], [12, ["82", "86"]], [13, ["90", "95"]]]
+  },
+  "Its_Amazing": {
+    "staves": {"auto": ["1", "2", "3", "4", "5", "6", "7", "8"]},
+    "pages": [[1, ["0", "3", "6", "10", "14"]], [2, ["18", "21"]], [3, ["26", "30", "34"]], [4, ["37", "41", "44"]],
+              [5, ["48", "52"]], [6, ["55", "59"]], [7, ["63", "66"]]]
+  },
+  "Moonriver": {
+    "_note": "The PDF has a bar the score lacks (S 'my huckleberry' eighths, PDF bar 32; score ends at 39, PDF at 40), so every system from 29 on is skipped.",
+    "staves": [["1"], ["2"], ["3"], ["4", "5"]],
+    "pages": [[1, ["1", "5", "9"]], [2, ["13", "17", "21"]],
+              [3, ["25", {"first": "29", "staves": null}, {"first": "33", "staves": null}]],
+              [4, [{"first": "37", "staves": null}]]]
+  },
+  "Nandemonaiya": {
+    "staves": {"auto": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]},
+    "pages": [[1, ["0", "5", "9", "13"]], [2, ["17", "21", "24"]], [3, ["27", "30", "34"]], [4, ["37", "41", "45"]],
+              [5, ["49", "52", "55"]], [6, ["59", "63", "66"]], [7, ["69", "72", "75"]], [8, ["78", "80", "82"]],
+              [9, ["84", "87", "90"]], [10, ["93", "96", "100"]], [11, ["103", "107", "109"]], [12, ["111", "114"]]]
+  },
+  "No_Mount_Too_High": {
+    "staves": {"auto": ["1", "2"]},
+    "pages": [[1, ["0", "4", "8", "12"]], [2, ["15", "19", "22"]], [3, ["26", "28", "31"]], [4, ["34", "37", "38"]],
+              [5, ["40", "42", "45"]], [6, ["48", "51", "54"]], [7, ["56"]]]
+  },
+  "Vinea_mea_electa": {
+    "staves": [["1", "2"], ["3", "4"], ["5", "6"], ["7", "8"]],
+    "pages": [[1, [{"first": "1", "staves": [["1", "2"], ["3"], ["4"], ["5", "6"], ["7"], ["8"]]},
+                   {"first": "3", "staves": [["1", "2"], ["3"], ["4"], ["5", "6"], ["7"], ["8"]]}]],
+              [2, ["5", "8", "13", "17"]],
+              [3, ["20", {"first": "23", "staves": [["1", "2"], ["3"], ["4"], ["5", "6"], ["7", "8"]]},
+                   {"first": "27", "staves": [["1", "2"], ["3"], ["4"], ["5", "6"], ["7"], ["8"]]}]],
+              [4, ["29", "31", "33", "36"]]]
+  }
+}
