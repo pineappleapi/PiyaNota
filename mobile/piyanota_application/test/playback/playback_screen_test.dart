@@ -203,6 +203,37 @@ void main() {
     });
   });
 
+  group('time labels under the seek bar ends (PIYA-208-V2.1)', () {
+    testWidgets('each time sits under its track end, a small gap below', (
+      tester,
+    ) async {
+      await pumpPlayback(tester, ready());
+      final bar = find.byKey(const ValueKey('seek-bar'));
+      final box = tester.renderObject<RenderBox>(bar);
+      final theme = SliderTheme.of(tester.element(bar));
+      // The painted track, not the widget box: Slider insets the track.
+      final origin = box.localToGlobal(Offset.zero);
+      final track = theme.trackShape!.getPreferredRect(
+        parentBox: box,
+        offset: origin,
+        sliderTheme: theme,
+        isEnabled: true,
+        isDiscrete: false,
+      );
+      final position = tester.getRect(
+        find.byKey(const ValueKey('time-position')),
+      );
+      final total = tester.getRect(find.byKey(const ValueKey('time-duration')));
+
+      expect(position.left, closeTo(track.left, 0.5));
+      expect(total.right, closeTo(track.right, 0.5));
+      // Mockup: track bottom to digit top is 14 dp (412 px = 412 dp, scale
+      // 1); minus ~5 dp of line leading, the text box starts 9 dp below.
+      expect(position.top - track.bottom, closeTo(9, 0.5));
+      expect(total.top - track.bottom, closeTo(9, 0.5));
+    });
+  });
+
   group('indicator (AC6, AC7)', () {
     testWidgets('band follows the audio across systems', (tester) async {
       final harness = ready();
