@@ -83,6 +83,7 @@ class FakeScoreLibraryApi implements ScoreLibraryApi {
   final Map<String, List<ScoreSummary>> _scoresByAccount = {};
   final Map<String, int> _fetchCallsByAccount = {};
   final Map<String, int> _deleteCallsByAccount = {};
+  final Map<String, int> _updateCallsByAccount = {};
 
   @override
   Future<List<ScoreSummary>> fetchLibrary({String? query}) async {
@@ -127,6 +128,28 @@ class FakeScoreLibraryApi implements ScoreLibraryApi {
     final before = scores.length;
     scores.removeWhere((score) => score.scoreId == scoreId);
     if (scores.length == before) throw const ScoreNotFoundException();
+  }
+
+  /// Edits are kept in the per-account list, so a refetch and the fake
+  /// playback result both see them for the rest of the session.
+  @override
+  Future<ScoreSummary> updateScore(
+    int scoreId, {
+    required String title,
+    String? arranger,
+  }) async {
+    await Future<void>.delayed(latency);
+    final account = await _currentAccount();
+    if (_shouldFail(_updateCallsByAccount, account)) {
+      throw const ScoreLibraryServerException();
+    }
+    final scores = _scoresFor(account);
+    final index = scores.indexWhere((score) => score.scoreId == scoreId);
+    if (index == -1) throw const ScoreNotFoundException();
+    return scores[index] = scores[index].withDetails(
+      title: title,
+      arranger: arranger,
+    );
   }
 
   /// Stands in for the score row PIYA-101/310 creates with the job, so a

@@ -67,6 +67,33 @@ class ScoreLibraryController extends AsyncNotifier<List<ScoreSummary>> {
   Future<void> deleteOnServer(int scoreId) =>
       ref.read(scoreLibraryApiProvider).deleteScore(scoreId);
 
+  /// PIYA-205-V2.4 AC4: saves the edit, then swaps just that card's values
+  /// in the loaded list — no refetch, so scroll position and the other
+  /// cards are untouched. On failure the old values stay and the error
+  /// reaches the caller.
+  Future<void> updateOnServer(
+    int scoreId, {
+    required String title,
+    String? arranger,
+  }) async {
+    final updated = await ref
+        .read(scoreLibraryApiProvider)
+        .updateScore(scoreId, title: title, arranger: arranger);
+    if (!ref.mounted) return;
+    final current = state.value;
+    if (current == null) return;
+    state = AsyncData([
+      for (final score in current)
+        if (score.scoreId == scoreId)
+          score.withDetails(
+            title: updated.title ?? title,
+            arranger: updated.arranger,
+          )
+        else
+          score,
+    ]);
+  }
+
   /// Records that the user opened [scoreId] for playback, moving it to the
   /// top of the library straight away.
   ///

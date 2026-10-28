@@ -18,6 +18,7 @@ import '../processing/processing_messages.dart';
 import '../scan_status/scan_navigation.dart';
 import 'library_messages.dart';
 import 'widgets/delete_score_dialog.dart';
+import 'widgets/edit_score_dialog.dart';
 import 'widgets/library_bottom_nav.dart';
 import 'widgets/library_header.dart';
 import 'widgets/score_cards.dart';
@@ -265,6 +266,58 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
     final gone = await _deleteScore(entry);
     if (gone && mounted && !rowContext.mounted) _finishRemoval(entry.scoreId);
     return gone;
+  }
+
+  /// Scores whose edit dialog is open or whose save is in flight, so a
+  /// double tap can't stack two dialogs or two PATCHes.
+  final Set<int> _editingIds = {};
+
+  /// PIYA-205-V2.4: dialog, then the server save; the card updates in place
+  /// only on success (AC4), otherwise the old values stay and a snack bar
+  /// says why.
+  Future<void> _editScore(LibraryEntry entry) async {
+    final scoreId = entry.scoreId;
+    if (!_editingIds.add(scoreId)) return;
+    try {
+      final edited = await showDialog<EditedScoreDetails>(
+        context: context,
+        builder: (context) => EditScoreDialog(
+          title: entry.score.title ?? '',
+          arranger: entry.score.arranger,
+        ),
+      );
+      if (edited == null || !mounted) return;
+      var message = LibraryMessages.editSaved;
+      SnackBarAction? action;
+      try {
+        await ref
+            .read(scoreLibraryProvider.notifier)
+            .updateOnServer(
+              scoreId,
+              title: edited.title,
+              arranger: edited.arranger,
+            );
+      } on ScoreNotFoundException {
+        message = LibraryMessages.deleteAlreadyGone;
+        ref.read(scoreLibraryProvider.notifier).removeLocally(scoreId);
+      } on SessionExpiredException {
+        message = LibraryMessages.sessionExpired;
+        action = SnackBarAction(
+          label: LibraryMessages.logInAgain,
+          onPressed: _returnToLogin,
+        );
+      } on ScoreLibraryNetworkException {
+        message = LibraryMessages.editNetworkError;
+      } on ScoreLibraryServerException {
+        message = LibraryMessages.editServerError;
+      } catch (e, stack) {
+        if (kDebugMode) debugPrint('Score edit failed: $e\n$stack');
+        message = LibraryMessages.editServerError;
+      }
+      if (mounted) _showSnackBar(message, action: action);
+    } finally {
+      _editingIds.remove(scoreId);
+    }
   }
 
   void _finishRemoval(int scoreId) {
@@ -605,6 +658,9 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
           scanFailed: scanFailed,
           onTap: () => _openScore(entry),
           onDelete: () => _deleteViaTrash(entry, rowContext),
+          // A failed scan can still be renamed; running scans render as
+          // ScanningScoreCard, which has no pencil.
+          onEdit: () => _editScore(entry),
         ),
       ),
     );

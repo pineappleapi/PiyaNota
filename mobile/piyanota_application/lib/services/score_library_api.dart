@@ -47,6 +47,15 @@ abstract interface class ScoreLibraryApi {
   /// callers must not remove the entry before this resolves (PIYA-215 AC2).
   Future<void> deleteScore(int scoreId);
 
+  /// PIYA-205-V2.4 / backend B5. Changes only the title and arranger
+  /// ([arranger] null clears it) and returns the updated entry. 404 is
+  /// [ScoreNotFoundException].
+  Future<ScoreSummary> updateScore(
+    int scoreId, {
+    required String title,
+    String? arranger,
+  });
+
   /// The user opened [scoreId] for playback, so its last-opened date should
   /// move to now. Callers update their local list themselves and treat a
   /// failure here as non-fatal.
@@ -126,6 +135,32 @@ class HttpScoreLibraryApi implements ScoreLibraryApi {
         options: options,
       ),
     );
+  }
+
+  @override
+  Future<ScoreSummary> updateScore(
+    int scoreId, {
+    required String title,
+    String? arranger,
+  }) async {
+    final response = await _send(
+      (options) => _dio.patch<Map<String, dynamic>>(
+        ApiConfig.scorePath(scoreId),
+        // Only these two fields: key, tempo and time signature are not
+        // editable (B5).
+        data: {'title': title, 'arranger': arranger},
+        options: options,
+      ),
+    );
+    final data = response.data?['data'];
+    if (data is! Map<String, dynamic>) {
+      throw const ScoreLibraryServerException();
+    }
+    try {
+      return ScoreSummary.fromJson(data);
+    } on FormatException {
+      throw const ScoreLibraryServerException();
+    }
   }
 
   Future<Response<Map<String, dynamic>>> _send(

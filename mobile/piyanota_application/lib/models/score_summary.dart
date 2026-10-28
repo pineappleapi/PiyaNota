@@ -41,6 +41,19 @@ class ScoreSummary {
     pageCount: pageCount,
   );
 
+  /// This entry with an edited title and arranger (PIYA-205-V2.4). Separate
+  /// from [copyWith] because a cleared arranger is null, which copyWith's
+  /// "null keeps the old value" can't express.
+  ScoreSummary withDetails({required String title, String? arranger}) =>
+      ScoreSummary(
+        scoreId: scoreId,
+        title: title,
+        lastActivityAt: lastActivityAt,
+        thumbnailUrl: thumbnailUrl,
+        arranger: arranger,
+        pageCount: pageCount,
+      );
+
   /// Throws [FormatException] only for a missing or invalid `scoreId` — the
   /// caller skips that entry and keeps the rest. Any other broken field is
   /// dropped to null.

@@ -239,4 +239,53 @@ void main() {
       );
     });
   });
+
+  group('updateScore (PIYA-205-V2.4, backend B5)', () {
+    final ok = {
+      'data': {'scoreId': 102, 'title': 'New', 'arranger': 'Ann'},
+    };
+
+    test('PATCHes the score path with only title and arranger', () async {
+      final adapter = _StubAdapter(body: ok);
+      final updated = await _apiWith(adapter)
+          .updateScore(102, title: 'New', arranger: 'Ann');
+
+      expect(adapter.lastRequest?.method, 'PATCH');
+      expect(adapter.lastRequest?.path, ApiConfig.scorePath(102));
+      expect(adapter.lastRequest?.headers['Authorization'], 'Bearer $_token');
+      expect(adapter.lastRequest?.data, {'title': 'New', 'arranger': 'Ann'});
+      expect(updated.title, 'New');
+      expect(updated.arranger, 'Ann');
+    });
+
+    test(
+      'a cleared arranger is sent as null so the server clears it',
+      () async {
+        final adapter = _StubAdapter(
+          body: {
+            'data': {'scoreId': 102, 'title': 'New'},
+          },
+        );
+        final updated = await _apiWith(adapter).updateScore(102, title: 'New');
+        expect(adapter.lastRequest?.data, {'title': 'New', 'arranger': null});
+        expect(updated.arranger, isNull);
+      },
+    );
+
+    test('404 maps to ScoreNotFoundException', () async {
+      final adapter = _StubAdapter(status: 404, body: {'message': 'nope'});
+      await expectLater(
+        _apiWith(adapter).updateScore(999, title: 'x'),
+        throwsA(isA<ScoreNotFoundException>()),
+      );
+    });
+
+    test('a body without an entry is a server failure', () async {
+      final adapter = _StubAdapter(body: {'message': 'ok'});
+      await expectLater(
+        _apiWith(adapter).updateScore(102, title: 'x'),
+        throwsA(isA<ScoreLibraryServerException>()),
+      );
+    });
+  });
 }

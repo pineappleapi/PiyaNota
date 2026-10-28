@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:piyanota_application/models/processing_status.dart';
 import 'package:piyanota_application/models/score_summary.dart';
 import 'package:piyanota_application/routes/app_routes.dart';
+import 'package:piyanota_application/screens/capture/capture_messages.dart';
 import 'package:piyanota_application/screens/library/library_messages.dart';
 import 'package:piyanota_application/screens/library/score_library_screen.dart';
 import 'package:piyanota_application/screens/library/widgets/library_bottom_nav.dart';
@@ -32,10 +33,28 @@ import '../processing/processing_fakes.dart'
 /// [ScoreLibraryApi] whose every call is answered by the test, either
 /// immediately or via a [Completer] so in-flight states are observable.
 class ScriptedScoreLibraryApi implements ScoreLibraryApi {
-  ScriptedScoreLibraryApi({required this.onFetch, this.onDelete});
+  ScriptedScoreLibraryApi({
+    required this.onFetch,
+    this.onDelete,
+    this.onUpdate,
+  });
 
   Future<List<ScoreSummary>> Function() onFetch;
   Future<void> Function(int scoreId)? onDelete;
+  Future<ScoreSummary> Function(int scoreId, String title, String? arranger)?
+  onUpdate;
+  final List<({int id, String title, String? arranger})> updates = [];
+
+  @override
+  Future<ScoreSummary> updateScore(
+    int scoreId, {
+    required String title,
+    String? arranger,
+  }) {
+    updates.add((id: scoreId, title: title, arranger: arranger));
+    return onUpdate!(scoreId, title, arranger);
+  }
+
   Future<void> Function(int scoreId)? onRecordOpened;
   int fetchCalls = 0;
   final List<int> deletedIds = [];
@@ -940,9 +959,7 @@ void main() {
       );
     });
 
-    testWidgets('bell stays tappable over the logo (V2.1 AC5)', (
-      tester,
-    ) async {
+    testWidgets('bell stays tappable over the logo (V2.1 AC5)', (tester) async {
       await _pumpLibrary(tester, _apiReturning(_scores), topInset: 24);
       await tester.pumpAndSettle();
 
@@ -989,7 +1006,10 @@ void main() {
         closeTo(154.55 + extraLines, 2),
       );
       // The corner mark is still shown and doesn't push the text around.
-      expect(find.byKey(const ValueKey('library-header-backdrop-logo')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('library-header-backdrop-logo')),
+        findsOneWidget,
+      );
     });
 
     testWidgets('Capture is a true circle; Library shows as selected', (
@@ -1136,7 +1156,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       // At 2x the decorative mark yields its width to the heading.
-      expect(find.byKey(const ValueKey('library-header-backdrop-logo')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('library-header-backdrop-logo')),
+        findsNothing,
+      );
       // Undated untitled scores sort last; scroll to them.
       await _scrollListUntilBuilt(tester, find.text('New Score (1)'));
       expect(find.text('New Score (1)'), findsOneWidget);
@@ -1581,6 +1604,207 @@ void main() {
       expect(find.text(_playbackMarker), findsOneWidget);
       // Unmount so the tracker's timers go with it.
       await tester.pumpWidget(const SizedBox());
+    });
+  });
+
+  group('PIYA-205-V2.4 edit title and arranger', () {
+    ScriptedScoreLibraryApi editApi({
+      Future<ScoreSummary> Function(int, String, String?)? onUpdate,
+    }) {
+      final api = _apiReturning(_scores);
+      api.onUpdate =
+          onUpdate ??
+          (id, title, arranger) async => _scores
+              .firstWhere((s) => s.scoreId == id)
+              .withDetails(title: title, arranger: arranger);
+      return api;
+    }
+
+    Finder pencilFor(String title) => find.descendant(
+      of: find
+          .ancestor(of: find.text(title), matching: find.byType(Material))
+          .first,
+      matching: find.byIcon(Icons.edit_rounded),
+    );
+
+    String fieldText(WidgetTester tester, String key) =>
+        tester.widget<TextField>(find.byKey(Key(key))).controller!.text;
+
+    testWidgets('AC1/AC2: the pencil opens a pre-filled form', (tester) async {
+      await _pumpLibrary(tester, editApi());
+      await tester.pumpAndSettle();
+      await tester.tap(pencilFor('Bituin Walang Ningning'));
+      await tester.pumpAndSettle();
+
+      expect(find.text(LibraryMessages.editDialogTitle), findsOneWidget);
+      expect(fieldText(tester, 'edit-title'), 'Bituin Walang Ningning');
+      expect(fieldText(tester, 'edit-arranger'), 'Robert Delgado');
+      // Only the two fields: no key, tempo or time signature.
+      expect(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.byType(TextField),
+        ),
+        findsNWidgets(2),
+      );
+    });
+
+    testWidgets('AC4: saving updates just that card, with no refetch', (
+      tester,
+    ) async {
+      final api = editApi();
+      await _pumpLibrary(tester, api);
+      await tester.pumpAndSettle();
+      final fetches = api.fetchCalls;
+
+      await tester.tap(pencilFor('Paraiso'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('edit-title')),
+        '  Paraiso II ',
+      );
+      await tester.enterText(find.byKey(const Key('edit-arranger')), 'Ann');
+      await tester.tap(find.text(LibraryMessages.editSave));
+      await tester.pumpAndSettle();
+
+      expect(api.updates.single, (
+        id: 102,
+        title: 'Paraiso II',
+        arranger: 'Ann',
+      ));
+      expect(find.text('Paraiso II'), findsOneWidget);
+      expect(find.text('Paraiso'), findsNothing);
+      expect(find.textContaining('Ann'), findsOneWidget);
+      expect(api.fetchCalls, fetches);
+    });
+
+    testWidgets('AC3: a blank title cannot be saved; input is capped at 120', (
+      tester,
+    ) async {
+      final api = editApi();
+      await _pumpLibrary(tester, api);
+      await tester.pumpAndSettle();
+      await tester.tap(pencilFor('Paraiso'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byKey(const Key('edit-title')), '   ');
+      await tester.pump();
+      await tester.tap(find.text(LibraryMessages.editSave));
+      await tester.pumpAndSettle();
+      expect(api.updates, isEmpty);
+      expect(find.text(LibraryMessages.editDialogTitle), findsOneWidget);
+
+      await tester.enterText(find.byKey(const Key('edit-title')), 'x' * 130);
+      await tester.pump();
+      expect(fieldText(tester, 'edit-title').length, 120);
+      // Same labels as the capture form.
+      expect(find.text(CaptureMessages.titleLabel), findsOneWidget);
+      expect(find.text(CaptureMessages.arrangerLabel), findsOneWidget);
+    });
+
+    testWidgets('AC4: a failed save keeps the old values and shows an error', (
+      tester,
+    ) async {
+      final api = editApi(
+        onUpdate: (_, _, _) async => throw const ScoreLibraryServerException(),
+      );
+      await _pumpLibrary(tester, api);
+      await tester.pumpAndSettle();
+      await tester.tap(pencilFor('Paraiso'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('edit-title')), 'Changed');
+      await tester.tap(find.text(LibraryMessages.editSave));
+      await tester.pumpAndSettle();
+
+      expect(find.text(LibraryMessages.editServerError), findsOneWidget);
+      expect(find.text('Paraiso'), findsOneWidget);
+      expect(find.text('Changed'), findsNothing);
+    });
+
+    testWidgets('AC5: Cancel discards and sends nothing', (tester) async {
+      final api = editApi();
+      await _pumpLibrary(tester, api);
+      await tester.pumpAndSettle();
+      await tester.tap(pencilFor('Paraiso'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('edit-title')), 'Changed');
+      await tester.tap(find.text(LibraryMessages.editCancel));
+      await tester.pumpAndSettle();
+
+      expect(api.updates, isEmpty);
+      expect(find.text('Paraiso'), findsOneWidget);
+      expect(find.text('Changed'), findsNothing);
+    });
+
+    testWidgets('AC6: Playback opens with the edited title', (tester) async {
+      await _pumpLibrary(tester, editApi());
+      await tester.pumpAndSettle();
+      await tester.tap(pencilFor('Paraiso'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('edit-title')), 'Paraiso II');
+      await tester.tap(find.text(LibraryMessages.editSave));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Paraiso II'));
+      await tester.pumpAndSettle();
+      expect(
+        (_lastPlaybackArguments! as PlaybackArguments).title,
+        'Paraiso II',
+      );
+    });
+
+    testWidgets('AC1: a processing card has no pencil', (tester) async {
+      final processing = ScriptedProcessingApi([running(40)]);
+      await _pumpLibrary(
+        tester,
+        editApi(),
+        extraOverrides: [processingApiProvider.overrideWithValue(processing)],
+      );
+      await tester.pumpAndSettle();
+      ProviderScope.containerOf(tester.element(find.byType(ScoreLibraryScreen)))
+          .read(processingJobsProvider.notifier)
+          .track('job-new', title: 'Paraiso', retakeOfScoreId: 102);
+      await tester.pump();
+
+      expect(find.byType(ScanningScoreCard), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(ScanningScoreCard),
+          matching: find.byIcon(Icons.edit_rounded),
+        ),
+        findsNothing,
+      );
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('pencil: labelled, 48 dp target, same look as the trash', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await _pumpLibrary(tester, editApi());
+      await tester.pumpAndSettle();
+
+      expect(
+        find.bySemanticsLabel(LibraryMessages.editSemantics),
+        findsNWidgets(3),
+      );
+      final pencil = tester.widget<Icon>(find.byIcon(Icons.edit_rounded).first);
+      final trash = tester.widget<Icon>(
+        find.byIcon(Icons.delete_rounded).first,
+      );
+      expect(pencil.color, trash.color);
+      expect(pencil.size, trash.size);
+      final hit = tester.getSize(
+        find
+            .ancestor(
+              of: find.byIcon(Icons.edit_rounded).first,
+              matching: find.byType(InkWell),
+            )
+            .first,
+      );
+      expect(hit.width, greaterThanOrEqualTo(48));
+      expect(hit.height, greaterThanOrEqualTo(48));
+      handle.dispose();
     });
   });
 }

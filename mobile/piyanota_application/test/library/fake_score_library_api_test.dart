@@ -176,4 +176,56 @@ void main() {
       );
     },
   );
+
+  group('updateScore (PIYA-205-V2.4 AC7)', () {
+    test('stores the edit for the session, per account', () async {
+      final h = _Harness();
+      await h.logIn(FakeAuthApi.demoEmail, FakeAuthApi.demoPassword);
+
+      final updated = await h.library.updateScore(
+        102,
+        title: 'Paraiso (rev)',
+        arranger: null,
+      );
+      expect(updated.title, 'Paraiso (rev)');
+      expect(updated.pageCount, 14);
+
+      final scores = await h.library.fetchLibrary();
+      final paraiso = scores.firstWhere((s) => s.scoreId == 102);
+      expect(paraiso.title, 'Paraiso (rev)');
+      expect(paraiso.arranger, isNull);
+      expect(
+        h.library.scoreFor(account: FakeAuthApi.demoEmail, scoreId: 102)?.title,
+        'Paraiso (rev)',
+      );
+    });
+
+    test('an unknown id is ScoreNotFoundException', () async {
+      final h = _Harness();
+      await h.logIn(FakeAuthApi.demoEmail, FakeAuthApi.demoPassword);
+      await expectLater(
+        h.library.updateScore(999, title: 'x'),
+        throwsA(isA<ScoreNotFoundException>()),
+      );
+    });
+
+    test(
+      'flaky accounts fail every other edit, starting with the 1st',
+      () async {
+        final h = _Harness();
+        await h.signUp('tester${FakeScoreLibraryApi.flakyDomain}');
+
+        await expectLater(
+          h.library.updateScore(101, title: 'A'),
+          throwsA(isA<ScoreLibraryServerException>()),
+        );
+        expect((await h.library.updateScore(101, title: 'B')).title, 'B');
+        await expectLater(
+          h.library.updateScore(101, title: 'C'),
+          throwsA(isA<ScoreLibraryServerException>()),
+        );
+        expect((await h.library.updateScore(101, title: 'D')).title, 'D');
+      },
+    );
+  });
 }

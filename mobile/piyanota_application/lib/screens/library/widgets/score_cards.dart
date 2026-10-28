@@ -35,9 +35,11 @@ class _CardShell extends StatelessWidget {
     this.onTap,
     this.onLongPress,
     this.overlays = const [],
+    this.rightReserve = _CardMetrics.rightReserve,
   });
 
   final Color fill;
+  final double rightReserve;
   final Widget child;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
@@ -67,10 +69,10 @@ class _CardShell extends StatelessWidget {
                 minHeight: _CardMetrics.minHeight,
               ),
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(
+                padding: EdgeInsets.fromLTRB(
                   _CardMetrics.leftInset,
                   _CardMetrics.verticalPadding,
-                  _CardMetrics.rightReserve,
+                  rightReserve,
                   _CardMetrics.verticalPadding,
                 ),
                 child: child,
@@ -179,6 +181,7 @@ class ScoreCard extends StatelessWidget {
     required this.entry,
     required this.onTap,
     required this.onDelete,
+    this.onEdit,
     this.isDeleting = false,
     this.scanFailed = false,
   });
@@ -186,6 +189,9 @@ class ScoreCard extends StatelessWidget {
   final LibraryEntry entry;
   final VoidCallback onTap;
   final VoidCallback onDelete;
+
+  /// PIYA-205-V2.4: opens the edit form. Null hides the pencil.
+  final VoidCallback? onEdit;
 
   /// PIYA-218 AC2/AC3: this card's scan failed. The card says so in place
   /// of its subtitle; tapping it opens the failure view, and it can still
@@ -220,6 +226,10 @@ class ScoreCard extends StatelessWidget {
   // it: 10 dp from the right, 7 from the bottom. On the 82 dp card it ends
   // well below the chevron.
   static const double _trashHitSize = 48;
+  // The pencil is the trash's twin: same 16 dp glyph, colour, inset and
+  // 48 dp hit area, directly to its left. The text column reserves both hit
+  // areas so a tap on the details line can't land on either.
+  static const double _editRightReserve = 2 * _trashHitSize;
   static const EdgeInsets _trashGlyphInset = EdgeInsets.only(
     right: 10,
     bottom: 7,
@@ -234,6 +244,9 @@ class ScoreCard extends StatelessWidget {
     return _CardShell(
       fill: AppTheme.libraryScoreCardFill,
       onTap: isDeleting ? null : onTap,
+      rightReserve: onEdit == null
+          ? _CardMetrics.rightReserve
+          : _editRightReserve,
       overlays: [
         const Positioned(
           top: _chevronInset,
@@ -246,6 +259,36 @@ class ScoreCard extends StatelessWidget {
             ),
           ),
         ),
+        if (onEdit case final onEdit?)
+          Positioned(
+            right: _trashHitSize,
+            bottom: 0,
+            width: _trashHitSize,
+            height: _trashHitSize,
+            child: Semantics(
+              button: true,
+              enabled: !isDeleting,
+              label: LibraryMessages.editSemantics,
+              onTap: isDeleting ? null : onEdit,
+              excludeSemantics: true,
+              child: InkWell(
+                onTap: isDeleting ? null : onEdit,
+                splashFactory: NoSplash.splashFactory,
+                highlightColor: AppTheme.darken(AppTheme.libraryScoreCardFill),
+                child: const Padding(
+                  padding: _trashGlyphInset,
+                  child: Align(
+                    alignment: Alignment.bottomRight,
+                    child: Icon(
+                      Icons.edit_rounded,
+                      size: _trashSize,
+                      color: AppTheme.libraryTrash,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
         Positioned(
           right: 0,
           bottom: 0,

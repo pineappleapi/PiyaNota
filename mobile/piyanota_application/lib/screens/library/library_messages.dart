@@ -58,6 +58,16 @@ class LibraryMessages {
 
   static String deleted(String title) => '"$title" deleted';
 
+  static const String editDialogTitle = 'Edit score details';
+  static const String editSave = 'Save';
+  static const String editCancel = 'Cancel';
+  static const String editSemantics = 'Edit score details';
+  static const String editNetworkError =
+      "Couldn't save — check your internet connection.";
+  static const String editServerError =
+      "Couldn't save your changes. Please try again.";
+  static const String editSaved = 'Score details saved';
+
   static String deleteSemantics(String title) => 'Delete $title';
 
   /// Read out for the trash/swipe spinner while the delete is in flight.

@@ -46,6 +46,13 @@ class _LibraryApi implements ScoreLibraryApi {
   Future<void> deleteScore(int scoreId) async {}
 
   @override
+  Future<ScoreSummary> updateScore(
+    int scoreId, {
+    required String title,
+    String? arranger,
+  }) => throw UnimplementedError();
+
+  @override
   Future<void> recordOpened(int scoreId) async {}
 }
 
