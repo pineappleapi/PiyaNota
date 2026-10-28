@@ -1413,10 +1413,15 @@ void main() {
       VoicePart.tenor: AppTheme.mixerTenor,
       VoicePart.bass: AppTheme.mixerBass,
     };
+    // The test font is Ahem (1 em per glyph); load the SDK's Roboto so chip
+    // widths are realistic. Without FLUTTER_ROOT the width test is skipped.
+    final flutterRoot = Platform.environment['FLUTTER_ROOT'];
+    final fontsSkip = flutterRoot == null
+        ? 'FLUTTER_ROOT is unset, so the SDK Roboto cannot be loaded'
+        : null;
     setUpAll(() async {
-      // The test font is Ahem (1 em per glyph); load the SDK's Roboto so
-      // chip widths are realistic.
-      final root = Platform.environment['FLUTTER_ROOT']!;
+      if (flutterRoot == null) return;
+      final root = flutterRoot;
       final loader = FontLoader('Roboto');
       for (final f in ['regular', 'bold', 'medium']) {
         final bytes = File(
@@ -1432,16 +1437,27 @@ void main() {
       return (math.max(hi, lo) + 0.05) / (math.min(hi, lo) + 0.05);
     }
 
-    testWidgets('AC1: all four fit on one line at 360 dp, scale 1.0', (
-      tester,
-    ) async {
+    // One line is guaranteed only at text scale 1.0; above that the Wrap
+    // lets chips wrap for NFR-10 rather than clip.
+    testWidgets('AC1: all four on one line at 360 dp, scale 1.0, with 12% '
+        'slack for the wider Plus Jakarta Sans', (tester) async {
       await pumpPlayback(tester, ready(), size: const Size(360, 800));
       final tops = [
         for (final v in VoicePart.values) tester.getTopLeft(chip(v)).dy,
       ];
       expect(tops.toSet(), hasLength(1), reason: '$tops');
+      // Roboto stands in for Plus Jakarta Sans (about 8-10% wider, not
+      // available offline): the row must end 12% short of the 328 dp width
+      // between the 16 dp gutters.
+      expect(
+        tester.getRect(chip(VoicePart.bass)).right,
+        lessThanOrEqualTo(16 + 0.88 * 328),
+      );
+      for (final v in VoicePart.values) {
+        expect(tester.getSize(chip(v)).height, greaterThanOrEqualTo(48));
+      }
       expect(tester.takeException(), isNull);
-    });
+    }, skip: fontsSkip != null);
 
     testWidgets('AC1: large text wraps instead of overflowing', (tester) async {
       await pumpPlayback(
@@ -1462,11 +1478,19 @@ void main() {
       for (final MapEntry(:key, :value) in fills.entries) {
         final c = tester.widget<FilterChip>(chip(key));
         expect(c.selectedColor, value, reason: key.name);
+        // The painted fill, not just the property: FilterChip paints it as an
+        // Ink ShapeDecoration (its Material has no colour of its own).
+        final ink = tester.widget<Ink>(
+          find.descendant(of: chip(key), matching: find.byType(Ink)),
+        );
+        expect(
+          (ink.decoration! as ShapeDecoration).color,
+          value,
+          reason: key.name,
+        );
         expect(c.labelStyle!.color, Colors.white, reason: key.name);
         expect(c.checkmarkColor, Colors.white, reason: key.name);
         final r = ratio(c.labelStyle!.color!, value);
-        // ignore: avoid_print
-        print('contrast ${key.name}: ${r.toStringAsFixed(2)}');
         expect(r, greaterThanOrEqualTo(4.5), reason: key.name);
       }
     });
@@ -1479,7 +1503,11 @@ void main() {
         ready(voices: {VoicePart.soprano, VoicePart.alto}, review: false),
         size: const Size(360, 800),
       );
-      tester.widget<FilterChip>(chip(VoicePart.alto)).onSelected!(false);
+      // Missing voices open the failed-voices alert, whose barrier covers the
+      // chips by design; answer it, then tap the chip for real.
+      await tester.tap(find.text(PlaybackMessages.ok));
+      await tester.pumpAndSettle();
+      await tester.tap(chip(VoicePart.alto));
       await tester.pump();
       final off = tester.widget<FilterChip>(chip(VoicePart.alto));
       expect(off.selected, isFalse);

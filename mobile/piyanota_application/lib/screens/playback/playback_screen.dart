@@ -667,7 +667,7 @@ class _VoiceChips extends StatelessWidget {
   final ValueChanged<VoicePart> onToggle;
   final ValueChanged<VoicePart> onUnreadable;
 
-  static const double _chipGap = 4;
+  static const double _chipGap = 2;
 
   @override
   Widget build(BuildContext context) {
@@ -685,8 +685,8 @@ class _VoiceChips extends StatelessWidget {
                 color: AppTheme.playbackSubtle,
               ),
             ),
-            // A Wrap, not a Row: at 360 dp and text scale 1.0 it is one line
-            // (the chips are compact); large text wraps rather than clip (NFR-10).
+            // A Wrap, not a Row: one line is guaranteed only at text scale 1.0;
+            // above that it wraps rather than clips (NFR-10).
             Wrap(
               spacing: _chipGap,
               children: [
@@ -734,7 +734,7 @@ class _VoiceChip extends StatelessWidget {
   /// 16 dp gutters at text scale 1.0 (PIYA-208-V2.5 AC1).
   static const double _labelSize = 13;
   static const double _chipPadding = 4;
-  static const double _labelPadding = 2;
+  static const double _labelPadding = 1;
 
   /// Each voice's own colour, shared with the Voice Mixer; white on all
   /// four is >= 4.5:1 (see AppTheme.mixerSoprano).
