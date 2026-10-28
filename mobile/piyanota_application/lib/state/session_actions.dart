@@ -56,8 +56,8 @@ Future<void> endLocalSession(WidgetRef ref) async {
 
 /// Stores a freshly issued session. Work kept on the device (stored scans,
 /// a background export) is kept when it is this account's, which is the
-/// normal case: every cold start comes through Login (no auto-login,
-/// PIYA-214). It is dropped first when another account owned it, or when
+/// normal case: the same person logging in again after their session
+/// expired. It is dropped first when another account owned it, or when
 /// the owner is unknown. Only then is the session marked signed in, which
 /// lets the tracker restore and poll. Rethrows storage failures for the
 /// caller's own error message.

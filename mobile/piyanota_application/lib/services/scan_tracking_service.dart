@@ -36,6 +36,11 @@ abstract interface class ScanTrackingService {
   /// Job ids of tapped result notifications.
   Stream<String> get opened;
 
+  /// The job of the result notification whose tap started the app (a cold
+  /// start, which [opened] can't report: Dart wasn't listening yet), or
+  /// null. Taken once, so it never opens twice (PIYA-202-V2.2 AC5).
+  Future<String?> takeLaunchJob();
+
   /// The service went without being asked (Android 15+'s daily timeout,
   /// or a refused start): what was last [show]n is no longer up.
   Stream<void> get stopped;
@@ -93,6 +98,19 @@ class MethodChannelScanTrackingService implements ScanTrackingService {
 
   @override
   Future<void> stopAll() => _quietly('stopAll');
+
+  @override
+  Future<String?> takeLaunchJob() async {
+    try {
+      return await _channel.invokeMethod<String>('takeLaunchJob');
+    } on PlatformException catch (e) {
+      debugPrint('Scan tracking: takeLaunchJob failed: $e');
+    } on MissingPluginException catch (e) {
+      // Tests and platforms without the native side.
+      debugPrint('Scan tracking: takeLaunchJob unavailable: $e');
+    }
+    return null;
+  }
 
   Future<void> _quietly(
     String method, [

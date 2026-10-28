@@ -355,4 +355,14 @@ class FakeScanTrackingService implements ScanTrackingService {
 
   @override
   Future<void> stopAll() async => stopAllCalls++;
+
+  /// The notification tap that started the app, if any.
+  String? launchJob;
+
+  @override
+  Future<String?> takeLaunchJob() async {
+    final jobId = launchJob;
+    launchJob = null;
+    return jobId;
+  }
 }

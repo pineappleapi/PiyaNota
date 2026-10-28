@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -14,9 +16,16 @@ import 'screens/playback/playback_screen.dart';
 import 'screens/processing/processing_screen.dart';
 import 'screens/scan_status/scan_background_host.dart';
 import 'screens/scan_status/scan_toast_host.dart';
+import 'screens/scan_status/scan_navigation.dart';
 import 'screens/settings/settings_screen.dart';
+import 'services/score_library_api.dart';
 import 'splash_gate.dart';
+import 'state/auth_providers.dart';
 import 'state/onboarding_providers.dart';
+import 'state/processing_providers.dart';
+import 'state/score_library_providers.dart';
+import 'state/session_actions.dart';
+import 'state/work_owner.dart';
 import 'theme/app_theme.dart';
 
 /// Root widget. Route table is populated as PIYA-2xx screens land.
@@ -125,23 +134,102 @@ class _PiyaNotaAppState extends State<PiyaNotaApp> {
   }
 }
 
-/// Decides, on cold start, whether to show onboarding (PIYA-201 AC1) or go
-/// straight to Login. Onboarding itself is not a named route since it's a
-/// one-time gate, not something re-navigated to later.
+/// Decides, on cold start, where the app opens: onboarding on first launch
+/// (PIYA-201 AC1), else the Score Library when a stored session is still
+/// valid (PIYA-202-V2.2), else Login. Onboarding itself is not a named
+/// route since it's a one-time gate, not something re-navigated to later.
 ///
-/// Skipping Login when a stored session token is still valid belongs to
-/// Auth Flow Integration (PIYA-214), not here.
-class _AppEntryPoint extends ConsumerWidget {
+/// The session check is a secure-storage read, so it resolves behind the
+/// cold-start splash; if it ever outlasts it, a blank screen shows, never
+/// a Login that would flash away.
+class _AppEntryPoint extends ConsumerStatefulWidget {
   const _AppEntryPoint();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_AppEntryPoint> createState() => _AppEntryPointState();
+}
+
+class _AppEntryPointState extends ConsumerState<_AppEntryPoint> {
+  static const Widget _placeholder = Scaffold(backgroundColor: Colors.white);
+
+  /// Started once onboarding is known to be done; true = signed in.
+  Future<bool>? _session;
+
+  /// AC5: the scan whose notification tap started the app, opened once
+  /// the tracker has restored it.
+  String? _launchJobId;
+
+  Future<bool> _restoreSession() async {
+    bool valid;
+    try {
+      valid = await ref.read(sessionStorageProvider).hasValidSession();
+    } catch (e, stack) {
+      // Unreadable storage can't prove a session, so treat it as none.
+      debugPrint('Session check failed: $e\n$stack');
+      valid = false;
+    }
+    if (!valid || !mounted) return false;
+    // Same as a login, minus the new token: the stored scans are this
+    // account's (logout and a different login clear them), so the
+    // tracker restores and polls them.
+    ref.read(signedInProvider.notifier).set(true);
+    _watchFirstLibraryLoad();
+    // Not awaited: the Library needn't wait on the platform channel.
+    unawaited(_takeLaunchJob());
+    return true;
+  }
+
+  Future<void> _takeLaunchJob() async {
+    final jobId = await ref.read(scanTrackingServiceProvider).takeLaunchJob();
+    if (jobId == null || !mounted) return;
+    _launchJobId = jobId;
+    _openLaunchJob(ref.read(processingJobsProvider));
+  }
+
+  /// AC2 (backend note B2): the first PIYA-306 load is the server's check
+  /// of the restored token. A 401 there sends the user to Login; any other
+  /// failure (offline, AC3) leaves the Library's own error state up.
+  void _watchFirstLibraryLoad() {
+    late final ProviderSubscription<AsyncValue<Object?>> subscription;
+    subscription = ref.listenManual(scoreLibraryProvider, (_, next) {
+      if (next.isLoading) return;
+      subscription.close();
+      if (next.error is SessionExpiredException) unawaited(_toLogin());
+    });
+  }
+
+  Future<void> _toLogin() async {
+    await endLocalSession(ref);
+    if (!mounted) return;
+    Navigator.of(context)
+        .pushNamedAndRemoveUntil(AppRoutes.login, (_) => false);
+  }
+
+  void _openLaunchJob(Map<String, TrackedJob> jobs) {
+    final job = jobs[_launchJobId];
+    if (job == null) return;
+    _launchJobId = null;
+    unawaited(openScanJob(Navigator.of(context), ref, job));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.listen(processingJobsProvider, (_, jobs) => _openLaunchJob(jobs));
     final onboardingCompleted = ref.watch(onboardingCompletedProvider);
 
     return onboardingCompleted.when(
-      data: (completed) =>
-          completed ? const LoginScreen() : const OnboardingFlowScreen(),
-      loading: () => const Scaffold(backgroundColor: Colors.white),
+      data: (completed) {
+        if (!completed) return const OnboardingFlowScreen();
+        return FutureBuilder<bool>(
+          future: _session ??= _restoreSession(),
+          builder: (context, snapshot) => switch (snapshot.data) {
+            true => const ScoreLibraryScreen(),
+            false => const LoginScreen(),
+            null => _placeholder,
+          },
+        );
+      },
+      loading: () => _placeholder,
       error: (_, _) => const OnboardingFlowScreen(),
     );
   }

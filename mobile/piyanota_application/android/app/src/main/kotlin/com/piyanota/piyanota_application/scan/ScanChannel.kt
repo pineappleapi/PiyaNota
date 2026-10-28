@@ -20,6 +20,8 @@ import io.flutter.plugin.common.MethodChannel
  *  - clearResult({jobId}) -> null. Seen in the app, or forgotten.
  *  - stopAll() -> null. Logout: the service and every conversion
  *    notification go.
+ *  - takeLaunchJob() -> String?. The job of the notification whose tap
+ *    started a fresh engine ([holdLaunch]), once; null after that.
  * Native -> Dart: open({jobId}), a result notification was tapped;
  * stopped(), the service went by itself (Android 15+ timeout, or a refused
  * start), so Dart must send its words again to bring it back.
@@ -35,6 +37,9 @@ internal class ScanChannel(
     private val channel = MethodChannel(messenger, CHANNEL)
 
     private val stoppedCallback: () -> Unit = { channel.invokeMethod("stopped", null) }
+
+    /** A cold start's tapped notification, kept until Dart asks for it. */
+    private var launchJobId: String? = null
 
     init {
         // The newest channel (this Activity's) answers; the engine is the same.
@@ -76,6 +81,10 @@ internal class ScanChannel(
                         result.success(null)
                     }
                 }
+                "takeLaunchJob" -> {
+                    result.success(launchJobId)
+                    launchJobId = null
+                }
                 "stopAll" -> {
                     ScanTrackingService.stop(app)
                     ScanNotifications.cancelAll(app)
@@ -99,13 +108,24 @@ internal class ScanChannel(
 
     /**
      * Passes a tapped result notification's job to Dart. Only called when
-     * Dart is already running (MainActivity decides); the extra is removed
-     * so the same Intent never opens it twice.
+     * Dart is already running (MainActivity decides, else [holdLaunch]);
+     * the extra is removed so the same Intent never opens it twice.
      */
     fun deliver(intent: Intent?) {
         val jobId = intent?.getStringExtra(ScanNotices.EXTRA_JOB_ID) ?: return
         intent.removeExtra(ScanNotices.EXTRA_JOB_ID)
         channel.invokeMethod("open", mapOf("jobId" to jobId))
+    }
+
+    /**
+     * A fresh engine's Dart isn't listening yet, so the tapped job waits
+     * here until Dart has restored the session and asks (PIYA-202-V2.2
+     * AC5). The extra is removed as in [deliver].
+     */
+    fun holdLaunch(intent: Intent?) {
+        val jobId = intent?.getStringExtra(ScanNotices.EXTRA_JOB_ID) ?: return
+        intent.removeExtra(ScanNotices.EXTRA_JOB_ID)
+        launchJobId = jobId
     }
 
     private companion object {

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -73,6 +74,8 @@ void main() {
     tester,
   ) async {
     SharedPreferences.setMockInitialValues({'onboarding_completed': true});
+    // No stored session, so the routed screen is Login (PIYA-202-V2.2).
+    FlutterSecureStorage.setMockInitialValues({});
     await tester.pumpWidget(const ProviderScope(child: PiyaNotaApp()));
     await tester.pump(); // resolve onboardingCompletedProvider
 

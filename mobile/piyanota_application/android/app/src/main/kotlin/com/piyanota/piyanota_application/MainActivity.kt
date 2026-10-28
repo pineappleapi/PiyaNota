@@ -90,10 +90,10 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // A fresh engine starts at Login (no auto-login yet, PIYA-214), and
-        // logging in forgets every followed scan, so a tap only opens its
-        // scan when Dart was already running.
-        if (reattached) scanChannel?.deliver(intent)
+        // A running Dart gets the tap now. A fresh engine's Dart isn't
+        // listening yet: it takes the job once auto-login has restored the
+        // session (PIYA-202-V2.2 AC5).
+        if (reattached) scanChannel?.deliver(intent) else scanChannel?.holdLaunch(intent)
     }
 
     override fun onNewIntent(intent: Intent) {

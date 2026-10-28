@@ -54,6 +54,12 @@ class FakeAuthApi implements AuthApi {
   /// can scope its data per account the way the real API scopes by the
   /// token's `userId` (PIYA-205 AC1 / PIYA-308 AC2).
   final Map<String, String> _emailsByToken = {};
+
+  /// Tokens minted before this fake existed came from an earlier run of
+  /// the app, which this in-memory fake can't remember. They carry their
+  /// account, so a stay-signed-in launch (PIYA-202-V2.2) can be demoed.
+  final int _createdMicros = DateTime.now().microsecondsSinceEpoch;
+  static final RegExp _tokenPattern = RegExp(r'^fake_sess_\d+_(\d+)_(.+)$');
   int _nextUserId = 1;
 
   /// When each recent wrong current password happened, per account, for
@@ -163,7 +169,7 @@ class FakeAuthApi implements AuthApi {
     required String newPassword,
   }) async {
     await Future<void>.delayed(latency);
-    final email = _emailsByToken[token];
+    final email = accountForToken(token);
     if (email == null) throw const AuthSessionExpiredException();
     if (email.endsWith(offlineDomain)) throw const AuthNetworkException();
 
@@ -213,7 +219,21 @@ class FakeAuthApi implements AuthApi {
 
   /// The (normalized) email a token from this fake was issued to, or null
   /// for an unknown token — the fake equivalent of the server's 401.
-  String? accountForToken(String token) => _emailsByToken[token];
+  String? accountForToken(String token) =>
+      _emailsByToken[token] ?? _fromEarlierRun(token);
+
+  /// shortcut: any earlier-run token of a still-registered account (only
+  /// [demoEmail] survives a restart) is honoured, so a revocation made in
+  /// that run is forgotten; fine for the fake, the real server decides.
+  String? _fromEarlierRun(String token) {
+    final match = _tokenPattern.firstMatch(token);
+    final issued = int.tryParse(match?.group(1) ?? '');
+    final email = match?.group(2);
+    if (issued == null || email == null || issued >= _createdMicros) {
+      return null;
+    }
+    return _passwordsByEmail.containsKey(email) ? email : null;
+  }
 
   void _checkNewPassword(String password, String confirmation) {
     if (password != confirmation) {
@@ -242,7 +262,7 @@ class FakeAuthApi implements AuthApi {
   AuthSession _issueSession(String email) {
     final userId = _nextUserId++;
     final token =
-        'fake_sess_${userId}_${DateTime.now().microsecondsSinceEpoch}';
+        'fake_sess_${userId}_${DateTime.now().microsecondsSinceEpoch}_$email';
     _emailsByToken[token] = email;
     return AuthSession(
       userId: userId,
