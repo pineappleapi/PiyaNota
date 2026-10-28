@@ -292,6 +292,8 @@ class PlaybackController extends Notifier<PlaybackState> {
   Set<int>? _plannedSubdivisions;
 
   /// A click plan is being written or attached (see [_prepareClick]).
+  /// Voices muted only by the default mix (V2.2); a hand-set mute leaves it.
+  Set<VoicePart> _mixMuted = {};
   bool _clickBusy = false;
 
   /// A slider release arrived while [_clickBusy]; re-checked after.
@@ -387,9 +389,12 @@ class PlaybackController extends Notifier<PlaybackState> {
     });
     _failureSub = engine.failures.listen(_onFailure);
     _clickFailureSub = engine.clickFailures.listen(_onClickFailure);
-    // 209 AC5: every voice unmuted at full volume, nothing soloed,
-    // metronome off, speed at the score's tempo. A fresh controller
-    // (autoDispose) means a reopened score starts here again (209 AC6).
+    // PIYA-209-V2.2 replaces 209 AC5: every slider at full volume, nothing
+    // soloed, metronome off, speed at the score's tempo; the voices the
+    // default selection left out start muted so the Mixer shows what is
+    // heard. A fresh controller (autoDispose) means a reopened score starts
+    // here again (209 AC6).
+    _mixMuted = playable.difference(selected);
     final volumes = {
       for (final voice in result.audioTracks.keys) voice: fullVolume,
     };
@@ -400,6 +405,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       arranger: result.arranger ?? _libraryArranger(),
       selected: selected,
       volumes: volumes,
+      muted: _mixMuted,
       duration: engine.duration,
       timingUnavailable: timingFailed,
       failedVoices: failedVoices,
@@ -636,8 +642,15 @@ class PlaybackController extends Notifier<PlaybackState> {
       return;
     }
     var selected = state.selected.difference({failure.voice});
-    if (selected.isEmpty) selected = remaining;
+    var muted = state.muted;
+    if (selected.isEmpty) {
+      // V2.2 AC3: the fallback turns the rest on and unmutes them.
+      selected = remaining;
+      muted = muted.difference(_mixMuted);
+      _mixMuted = {};
+    }
     state = state.copyWith(
+      muted: muted,
       failedVoices: {...state.failedVoices, failure.voice},
       selected: selected,
       // A solo on a voice that can't play would silence the rest.
@@ -780,6 +793,11 @@ class PlaybackController extends Notifier<PlaybackState> {
       selected.remove(voice);
     } else {
       selected.add(voice);
+      // Chip on must be heard: lift only the default mix's own mute, never
+      // one the user set.
+      if (_mixMuted.remove(voice)) {
+        state = state.copyWith(muted: state.muted.difference({voice}));
+      }
     }
     state = state.copyWith(selected: selected);
     _applyGains();
@@ -802,6 +820,7 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// unmuting plays at that level, 0% included (user decision 2026-10-22).
   void setVoiceMuted(VoicePart voice, {required bool muted}) {
     if (!state.available.contains(voice)) return;
+    _mixMuted.remove(voice);
     state = state.copyWith(
       muted: muted ? {...state.muted, voice} : state.muted.difference({voice}),
     );

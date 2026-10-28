@@ -73,6 +73,74 @@ void main() {
     await tester.pump();
   }
 
+  group('default mix follows the default voice (PIYA-209-V2.2)', () {
+    Finder chipOf(VoicePart v) => find.byKey(ValueKey('voice-chip-${v.name}'));
+    const others = [VoicePart.soprano, VoicePart.tenor, VoicePart.bass];
+
+    testWidgets('default Alto: others show Mute at 100%, only Alto heard', (
+      tester,
+    ) async {
+      final harness = ready();
+      await pumpPlayback(tester, harness, defaultVoice: VoicePart.alto);
+      await openMixer(tester);
+
+      expect(controller(tester).state.muted, others.toSet());
+      for (final voice in VoicePart.values) {
+        expect(sliderValue(tester, voiceRow(voice)), 1);
+      }
+      for (final voice in others) {
+        expect(harness.engine.volumes[voice], 0, reason: voice.name);
+      }
+      expect(harness.engine.volumes[VoicePart.alto], 1);
+    });
+
+    testWidgets('no default voice: nothing muted, all four heard', (
+      tester,
+    ) async {
+      final harness = ready();
+      await pumpPlayback(tester, harness);
+      expect(controller(tester).state.muted, isEmpty);
+      expect(harness.engine.volumes.values.every((v) => v == 1), isTrue);
+    });
+
+    testWidgets('default Alto failed: fallback voices all heard, none muted', (
+      tester,
+    ) async {
+      final harness = ready(failAtLoad: {VoicePart.alto});
+      await pumpPlayback(tester, harness, defaultVoice: VoicePart.alto);
+      expect(controller(tester).state.muted, isEmpty);
+      for (final voice in others) {
+        expect(harness.engine.volumes[voice], 1, reason: voice.name);
+      }
+    });
+
+    testWidgets('default Alto, then Soprano chip on: Soprano is heard', (
+      tester,
+    ) async {
+      final harness = ready();
+      await pumpPlayback(tester, harness, defaultVoice: VoicePart.alto);
+      await tapIn(tester, chipOf(VoicePart.soprano));
+
+      expect(harness.engine.volumes[VoicePart.soprano], 1);
+      expect(controller(tester).state.muted, {VoicePart.tenor, VoicePart.bass});
+    });
+
+    testWidgets('a voice the user muted stays muted when its chip goes on', (
+      tester,
+    ) async {
+      final harness = ready();
+      await pumpPlayback(tester, harness, defaultVoice: VoicePart.alto);
+      // User takes over Soprano's mute: unmute, then mute again by hand.
+      controller(tester)
+        ..setVoiceMuted(VoicePart.soprano, muted: false)
+        ..setVoiceMuted(VoicePart.soprano, muted: true);
+      await tapIn(tester, chipOf(VoicePart.soprano));
+
+      expect(harness.engine.volumes[VoicePart.soprano], 0);
+      expect(controller(tester).state.muted, contains(VoicePart.soprano));
+    });
+  });
+
   group('rows and defaults (AC1, AC2, AC5)', () {
     testWidgets('a row per voice plus Metronome Click, each with a slider, '
         'a Solo box and a Mute toggle; all unmuted at full volume', (
