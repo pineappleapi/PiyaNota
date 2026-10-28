@@ -234,6 +234,116 @@ void main() {
     });
   });
 
+  group('seek-bar drag is silent, then resumes (PIYA-208-V2.2)', () {
+    Future<(PlaybackHarness, TestGesture)> dragging(
+      WidgetTester tester, {
+      required bool playing,
+    }) async {
+      final harness = ready();
+      await pumpPlayback(tester, harness);
+      if (playing) {
+        await tester.tap(find.byKey(const ValueKey('play-pause')));
+        await tester.pump();
+        expect(harness.engine.playing, isTrue);
+      }
+      final rect = tester.getRect(find.byKey(const ValueKey('seek-bar')));
+      final gesture = await tester.startGesture(
+        Offset(rect.left + rect.width * 0.1, rect.center.dy),
+      );
+      // Several ticks: only the first may pause.
+      for (final f in [0.3, 0.5, 0.8]) {
+        await gesture.moveTo(
+          Offset(rect.left + rect.width * f, rect.center.dy),
+        );
+        await tester.pump();
+      }
+      return (harness, gesture);
+    }
+
+    testWidgets('a drag while playing pauses once, with no seek yet', (
+      tester,
+    ) async {
+      final (harness, gesture) = await dragging(tester, playing: true);
+      expect(harness.engine.playing, isFalse);
+      expect(harness.engine.pauseCalls, 1);
+      expect(harness.engine.seeks, isEmpty);
+      await gesture.up();
+      await tester.pump();
+    });
+
+    testWidgets('release seeks, then plays again from the new position', (
+      tester,
+    ) async {
+      final (harness, gesture) = await dragging(tester, playing: true);
+      final gate = Completer<void>();
+      harness.engine.seekGate = gate;
+      final playsBefore = harness.engine.playCalls;
+      await gesture.up();
+      await tester.pump();
+      // Seek issued, not landed: no play before it.
+      expect(harness.engine.seeks, hasLength(1));
+      expect(harness.engine.playCalls, playsBefore);
+      gate.complete();
+      await tester.pump();
+      await tester.pump();
+      expect(harness.engine.playCalls, playsBefore + 1);
+      expect(harness.engine.playing, isTrue);
+      expect(
+        harness.engine.position.inMilliseconds,
+        closeTo(harness.engine.seeks.single.inMilliseconds, 100),
+      );
+    });
+
+    testWidgets('a drag while paused stays paused', (tester) async {
+      final (harness, gesture) = await dragging(tester, playing: false);
+      await gesture.up();
+      await tester.pump();
+      await tester.pump();
+      expect(harness.engine.seeks, hasLength(1));
+      expect(harness.engine.pauseCalls, 0);
+      expect(harness.engine.playCalls, 0);
+      expect(harness.engine.playing, isFalse);
+    });
+
+    testWidgets('a failed seek still ends the drag and resumes', (
+      tester,
+    ) async {
+      final (harness, gesture) = await dragging(tester, playing: true);
+      harness.engine.seekError = StateError('seek failed');
+      await gesture.up();
+      await tester.pump();
+      await tester.pump();
+      expect(harness.engine.playing, isTrue);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+      'play tapped mid-drag stays silent and is honoured on release',
+      (tester) async {
+        final (harness, gesture) = await dragging(tester, playing: false);
+        await tester.tap(find.byKey(const ValueKey('play-pause')));
+        await tester.pump();
+        expect(harness.engine.playing, isFalse);
+        await gesture.up();
+        await tester.pump();
+        await tester.pump();
+        expect(harness.engine.playing, isTrue);
+      },
+    );
+
+    testWidgets('pause tapped mid-drag keeps it paused on release', (
+      tester,
+    ) async {
+      final (harness, gesture) = await dragging(tester, playing: true);
+      await tester.tap(find.byKey(const ValueKey('play-pause')));
+      await tester.pump();
+      await gesture.up();
+      await tester.pump();
+      await tester.pump();
+      expect(harness.engine.playing, isFalse);
+    });
+  });
+
   group('indicator (AC6, AC7)', () {
     testWidgets('band follows the audio across systems', (tester) async {
       final harness = ready();

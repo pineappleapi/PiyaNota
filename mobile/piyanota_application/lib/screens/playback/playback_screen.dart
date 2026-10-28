@@ -53,6 +53,17 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
   /// Bumped by every seek-bar change, so an earlier drag's seek finishing
   /// late can't clear [_dragging] while a newer drag is in progress.
   int _dragGeneration = 0;
+
+  /// A drag is under the finger and the first change has already paused
+  /// the audio. Unlike [_dragging], it ends at release, not when the seek
+  /// lands, so a new drag started meanwhile pauses again.
+  bool _dragHeld = false;
+
+  /// Audio should play again once the current drag's seek lands (AC2).
+  /// Set by the first change of a drag from the engine's state; left set
+  /// by a release whose seek is overtaken by a newer drag, so that drag
+  /// resumes it (the engine is already paused by then and would say no).
+  bool _resumeAfterDrag = false;
   bool _leaving = false;
 
   PlaybackController get _controller =>
@@ -116,18 +127,47 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
   /// the seek bar, times and band follow the audio again.
   Future<void> _onSeekEnd(Duration value) async {
     final drag = _dragGeneration;
+    _dragHeld = false;
     _display.value = value;
     try {
       await _controller.seek(value);
     } on Object catch (e, stack) {
       debugPrint('Playback: seek failed: $e\n$stack');
     } finally {
+      // Resume even if the seek failed: the drag is over either way (AC7).
+      if (drag == _dragGeneration && _resumeAfterDrag) {
+        _resumeAfterDrag = false;
+        _run(_controller.play(), 'play after drag');
+      }
       if (drag == _dragGeneration) _dragging = false;
       if (mounted && !_dragging) {
         _syncDisplay();
         _jumps.value++;
       }
     }
+  }
+
+  /// Silent while dragging (AC1): the first change of a drag remembers
+  /// whether to resume and pauses once, through the controller so all
+  /// voices and the click stop together; later ticks do nothing.
+  void _holdAudioForDrag() {
+    if (_dragHeld) return;
+    _dragHeld = true;
+    final playing = ref
+        .read(playbackControllerProvider(widget.scoreId))
+        .playing;
+    _resumeAfterDrag = _resumeAfterDrag || playing;
+    if (playing) _run(_controller.pause(), 'pause for drag');
+  }
+
+  /// Play/pause tapped mid-drag must not start audio under the finger, so
+  /// it only flips what happens on release.
+  void _onPlayPause() {
+    if (_dragHeld) {
+      _resumeAfterDrag = !_resumeAfterDrag;
+      return;
+    }
+    _run(_controller.togglePlay(), 'play');
   }
 
   void _onPlayingChanged(bool playing) {
@@ -465,7 +505,7 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
                 display: _display,
                 duration: state.duration,
                 playing: state.playing,
-                onPlayPause: () => _run(_controller.togglePlay(), 'play'),
+                onPlayPause: _onPlayPause,
                 onToStart: () =>
                     unawaited(_afterSeek(_controller.skipToStart())),
                 onToEnd: () => unawaited(_afterSeek(_controller.skipToEnd())),
@@ -476,6 +516,7 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
                   _afterSeek(_controller.skipBy(PlaybackController.skipStep)),
                 ),
                 onSeekChanged: (value) {
+                  _holdAudioForDrag();
                   _dragging = true;
                   _dragGeneration++;
                   _display.value = value;
