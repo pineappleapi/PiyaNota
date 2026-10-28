@@ -90,9 +90,8 @@ class VoiceMixerSheet extends ConsumerWidget {
             Text(
               PlaybackMessages.metronomeClick,
               // Same style on or off (PIYA-209-V2.1): only the controls dim.
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: AppTheme.sheetText,
-              ),
+              style: Theme.of(context).textTheme.bodyMedium
+                  ?.copyWith(color: AppTheme.sheetText),
             ),
             _MetronomeSwitch(
               on: state.metronomeOn,
@@ -224,7 +223,8 @@ class _MixerRow extends StatelessWidget {
     );
     final slider = Opacity(
       key: const ValueKey('mixer-slider-fade'),
-      opacity: inactive ? 0.45 : 1,
+      // A muted row dims like a switched-off metronome (PIYA-209-V2.4).
+      opacity: inactive || muted ? 0.45 : 1,
       child: Row(
         children: [
           const SpeakerGlyph(muted: true),
@@ -234,6 +234,7 @@ class _MixerRow extends StatelessWidget {
               child: Semantics(
                 label: PlaybackMessages.volumeLabel(name),
                 child: SheetSliderTheme(
+                  gradientFill: true,
                   child: Slider(
                     // Muting leaves the slider where it was (AC4).
                     value: volume,

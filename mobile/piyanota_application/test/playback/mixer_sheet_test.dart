@@ -245,6 +245,46 @@ void main() {
       expect(harness.engine.volumes[VoicePart.soprano], 1);
     });
 
+    testWidgets('every volume slider fills green-to-blue (PIYA-209-V2.4)', (
+      tester,
+    ) async {
+      await pumpPlayback(tester, ready());
+      await openMixer(tester);
+      for (final r in [...VoicePart.values.map(voiceRow), metronomeRow]) {
+        final theme = tester.widget<SliderTheme>(
+          find.descendant(of: r, matching: find.byType(SliderTheme)).first,
+        );
+        final shape = theme.data.trackShape;
+        expect(shape, isA<GradientTrackShape>());
+        expect((shape! as GradientTrackShape).colors, [
+          AppTheme.gradientEnd,
+          AppTheme.gradientStart,
+        ]);
+      }
+    });
+
+    testWidgets('a muted row slider is dimmed, an unmuted one is opaque', (
+      tester,
+    ) async {
+      await pumpPlayback(tester, ready());
+      await openMixer(tester);
+      final alto = voiceRow(VoicePart.alto);
+      double fade() => tester
+          .widget<Opacity>(
+            find.descendant(
+              of: alto,
+              matching: find.byKey(const ValueKey('mixer-slider-fade')),
+            ),
+          )
+          .opacity;
+      if (fade() < 1) await tapIn(tester, muteIn(alto)); // start unmuted
+      expect(fade(), 1);
+      await tapIn(tester, muteIn(alto));
+      expect(fade(), lessThan(1));
+      await tapIn(tester, muteIn(alto));
+      expect(fade(), 1);
+    });
+
     testWidgets('mute silences without moving the slider; unmute restores', (
       tester,
     ) async {
@@ -303,9 +343,7 @@ void main() {
     });
 
     testWidgets('muting keeps the level and unmuting plays at it, 0% '
-        'included, voice and click (user decision 2026-10-22)', (
-      tester,
-    ) async {
+        'included, voice and click (user decision 2026-10-22)', (tester) async {
       final harness = ready();
       await pumpPlayback(tester, harness);
       await openMixer(tester);

@@ -191,17 +191,26 @@ class SheetCheckbox extends StatelessWidget {
 }
 
 /// The mockups' slider: left of the thumb white with an indigo outline,
-/// right of it navy; a white thumb with the same outline.
+/// right of it navy; a white thumb with the same outline. With
+/// [gradientFill] (the Voice Mixer's volume sliders, PIYA-209-V2.4) the left
+/// part is the brand gradient instead of white.
 class SheetSliderTheme extends StatelessWidget {
-  const SheetSliderTheme({super.key, required this.child});
+  const SheetSliderTheme({
+    super.key,
+    required this.child,
+    this.gradientFill = false,
+  });
 
   final Widget child;
+  final bool gradientFill;
 
   @override
   Widget build(BuildContext context) => SliderTheme(
     data: SliderTheme.of(context).copyWith(
       trackHeight: 5,
-      trackShape: const _OutlinedTrackShape(),
+      trackShape: gradientFill
+          ? const GradientTrackShape()
+          : const _OutlinedTrackShape(),
       thumbShape: const _RingThumbShape(),
       overlayColor: AppTheme.sliderOutline.withValues(alpha: 0.12),
       overlayShape: const RoundSliderOverlayShape(overlayRadius: 18),
@@ -213,7 +222,10 @@ class SheetSliderTheme extends StatelessWidget {
 }
 
 class _OutlinedTrackShape extends SliderTrackShape with BaseSliderTrackShape {
-  const _OutlinedTrackShape();
+  const _OutlinedTrackShape({this.colors});
+
+  /// Left-to-right fill colours across the whole track; null fills white.
+  final List<Color>? colors;
 
   @override
   void paint(
@@ -251,10 +263,7 @@ class _OutlinedTrackShape extends SliderTrackShape with BaseSliderTrackShape {
         RRect.fromRectAndRadius(inactive, radius),
         Paint()..color = AppTheme.sliderInactive,
       )
-      ..drawRRect(
-        RRect.fromRectAndRadius(active, radius),
-        Paint()..color = Colors.white,
-      )
+      ..drawRRect(RRect.fromRectAndRadius(active, radius), _fill(rect, ltr))
       ..drawRRect(
         RRect.fromRectAndRadius(active.deflate(0.5), radius),
         Paint()
@@ -262,6 +271,26 @@ class _OutlinedTrackShape extends SliderTrackShape with BaseSliderTrackShape {
           ..style = PaintingStyle.stroke,
       );
   }
+
+  Paint _fill(Rect track, bool ltr) {
+    final paint = Paint()..color = Colors.white;
+    final stops = colors;
+    if (stops == null) return paint;
+    // Spans the full track, not just the filled part, so a given level
+    // always has the same colour; green at the quiet end, blue at the loud.
+    return paint
+      ..shader = LinearGradient(
+        begin: ltr ? Alignment.centerLeft : Alignment.centerRight,
+        end: ltr ? Alignment.centerRight : Alignment.centerLeft,
+        colors: stops,
+      ).createShader(track);
+  }
+}
+
+/// [SheetSliderTheme]'s track with the brand gradient as the active fill.
+class GradientTrackShape extends _OutlinedTrackShape {
+  const GradientTrackShape()
+    : super(colors: const [AppTheme.gradientEnd, AppTheme.gradientStart]);
 }
 
 class _RingThumbShape extends SliderComponentShape {
