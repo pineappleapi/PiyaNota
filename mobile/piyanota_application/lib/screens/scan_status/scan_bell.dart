@@ -26,10 +26,13 @@ import 'scan_status_messages.dart';
 /// token: white like the header's other glyphs, [AppTheme.errorRed] for
 /// the badge (the app's one error/attention red).
 class ScanBell extends ConsumerWidget {
-  const ScanBell({super.key});
+  const ScanBell({super.key, this.iconSize = defaultIconSize});
+
+  /// Glyph size; the hit box stays [size] (48 dp).
+  final double iconSize;
 
   static const double size = 48;
-  static const double _iconSize = 26;
+  static const double defaultIconSize = 26;
   static const double _ringSize = 36;
   static const double _ringStroke = 2;
   // Reduce motion: the ring stays, drawn still, three-quarters round.
@@ -82,7 +85,10 @@ class ScanBell extends ConsumerWidget {
             IconButton(
               tooltip: ScanStatusMessages.bellIdle,
               onPressed: () => showScanPanel(context),
-              iconSize: _iconSize,
+              iconSize: iconSize,
+              // Zero padding so a glyph larger than 26 dp still fits the
+              // 48 dp box; the button's 48 dp minimum tap target remains.
+              padding: EdgeInsets.zero,
               color: Colors.white,
               icon: Icon(
                 active || unread > 0

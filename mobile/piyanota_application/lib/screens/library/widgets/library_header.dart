@@ -48,7 +48,20 @@ class LibraryHeader extends StatelessWidget {
   // from the P's counter (hole) vs the asset's: 0.21 dp per asset px.
   static const double _backdropLogoWidth = 191;
   static const double _backdropLogoHeight = 256;
+  // Measured from the header top including the reference's status bar, so it
+  // does not follow the safe-area inset (a backdrop); needs a phone check.
   static const double _backdropLogoTop = 27;
+
+  // Bell (PIYA-205-V2.1 AC4), reference ink bbox x 352..383, y 61..94: ~32 dp
+  // wide, right inset 28-29 dp. The Material bell's ink is 16/24 of its icon
+  // box wide and stops 4/24 short of the box's right edge, so a 44 dp icon
+  // gives ~29 dp of ink; the 48 dp hit box is centred on it (2 dp each side).
+  static const double _bellIconSize = 44;
+  static const double _bellInkRightInset = 29;
+  static const double _bellRight =
+      _bellInkRightInset -
+      _bellIconSize * 4 / 24 -
+      (ScanBell.size - _bellIconSize) / 2;
   // 256 / 0.6165 (mark height fraction of the 2000 px canvas).
   static const double _backdropLogoCanvas = 415;
 
@@ -110,7 +123,6 @@ class LibraryHeader extends StatelessWidget {
                   // PIYA-218 AC5 / PIYA-205-V2.1 AC4: far top-right corner, in
                   // the empty band above the title (in the title's row when
                   // the logo band is dropped at large text).
-                  const Positioned(top: 0, right: 0, child: ScanBell()),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -166,6 +178,22 @@ class LibraryHeader extends StatelessWidget {
               ),
             ),
           ),
+          // Outside the padded content so it can sit closer to the edge than
+          // the header padding, and last so it stays on top and tappable.
+          const Positioned.fill(
+            child: SafeArea(
+              bottom: false,
+              child: Stack(
+                children: [
+                  Positioned(
+                    top: topGap,
+                    right: _bellRight,
+                    child: ScanBell(iconSize: _bellIconSize),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -183,7 +211,7 @@ class _BackdropLogo extends StatelessWidget {
     return IgnorePointer(
       child: ExcludeSemantics(
         child: SizedBox(
-          key: const ValueKey('library-header-logo'),
+          key: const ValueKey('library-header-backdrop-logo'),
           width: LibraryHeader._backdropLogoWidth,
           height: LibraryHeader._backdropLogoHeight,
           child: Opacity(

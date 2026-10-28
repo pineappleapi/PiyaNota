@@ -836,7 +836,7 @@ void main() {
       await _pumpLibrary(tester, _apiReturning(_scores), topInset: 24);
       await tester.pumpAndSettle();
 
-      final logo = find.byKey(const ValueKey('library-header-logo'));
+      final logo = find.byKey(const ValueKey('library-header-backdrop-logo'));
       final rect = tester.getRect(logo);
       // AC1: touches the left screen edge.
       expect(rect.left, closeTo(0, 0.5));
@@ -913,16 +913,29 @@ void main() {
       await _pumpLibrary(tester, _apiReturning(_scores), topInset: 24);
       await tester.pumpAndSettle();
 
-      final bell = tester.getRect(find.byKey(const ValueKey('scan-bell')));
-      final search = tester.getRect(find.byType(TextField));
+      final bellBox = find.byKey(const ValueKey('scan-bell'));
+      final icon = tester.getRect(
+        find.descendant(of: bellBox, matching: find.byType(Icon)),
+      );
       final screenWidth =
           tester.view.physicalSize.width / tester.view.devicePixelRatio;
-      // Right edge = the header's right padding = the search field's edge.
-      expect(bell.right, closeTo(search.right, 0.5));
-      expect(bell.right, lessThan(screenWidth));
+      // Reference (re-measured, PIL): bell ink x 352..383, y 61..94 on a 412
+      // px screen -> 28 dp right inset (29 counting the edge pixel), ~32 dp
+      // wide. The Material bell's ink stops 4/24 of the icon box short of
+      // its right edge (side bearing), so the box edge sits that much
+      // further right than the ink.
+      const refInkInset = 29.0;
+      final bearing = icon.width * 4 / 24;
+      expect(icon.right - bearing, closeTo(screenWidth - refInkInset, 2));
+      // ~32 dp of ink: the glyph's ink is 16/24 of the box wide.
+      expect(icon.width * 16 / 24, closeTo(32, 4));
+      // Tap target stays at least 48 dp.
+      final box = tester.getRect(bellBox);
+      expect(box.width, greaterThanOrEqualTo(48));
+      expect(box.height, greaterThanOrEqualTo(48));
       // Top row, above the title.
       expect(
-        bell.bottom,
+        box.bottom,
         lessThanOrEqualTo(tester.getRect(find.text(LibraryMessages.title)).top),
       );
     });
@@ -976,7 +989,7 @@ void main() {
         closeTo(154.55 + extraLines, 2),
       );
       // The corner mark is still shown and doesn't push the text around.
-      expect(find.byKey(const ValueKey('library-header-logo')), findsOneWidget);
+      expect(find.byKey(const ValueKey('library-header-backdrop-logo')), findsOneWidget);
     });
 
     testWidgets('Capture is a true circle; Library shows as selected', (
@@ -1123,7 +1136,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       // At 2x the decorative mark yields its width to the heading.
-      expect(find.byKey(const ValueKey('library-header-logo')), findsNothing);
+      expect(find.byKey(const ValueKey('library-header-backdrop-logo')), findsNothing);
       // Undated untitled scores sort last; scroll to them.
       await _scrollListUntilBuilt(tester, find.text('New Score (1)'));
       expect(find.text('New Score (1)'), findsOneWidget);
