@@ -3,6 +3,7 @@ import 'dart:math';
 import '../models/auth_session.dart';
 import 'auth_api.dart';
 import 'auth_validators.dart';
+import 'backoff.dart';
 
 /// In-memory stand-in for the Module 3 auth API until it's deployed, so the
 /// auth screens can be demoed end to end. Behaves like the real contract
@@ -59,6 +60,11 @@ class FakeAuthApi implements AuthApi {
   /// the PIYA-322 AC5 sliding window.
   final Map<String, List<DateTime>> _changePasswordFailures = {};
 
+  /// PIYA-202-V2.1 AC7: wrong logins per account and when the current wait
+  /// ends, on the same schedule as the app's own throttle.
+  final Map<String, int> _loginFailures = {};
+  final Map<String, DateTime> _loginBlockedUntil = {};
+
   @override
   Future<AuthSession> login({
     required String email,
@@ -67,9 +73,24 @@ class FakeAuthApi implements AuthApi {
     await Future<void>.delayed(latency);
     final normalized = _normalize(email);
     if (normalized.endsWith(offlineDomain)) throw const AuthNetworkException();
+    final now = _now();
+    final blockedUntil = _loginBlockedUntil[normalized];
+    // Even the right password waits, like the real 429, so the limit can't
+    // be bypassed by guessing during it.
+    if (blockedUntil != null && now.isBefore(blockedUntil)) {
+      throw AuthRateLimitedException(
+        retryAfterSeconds: (blockedUntil.difference(now).inMilliseconds / 1000)
+            .ceil(),
+      );
+    }
     if (_passwordsByEmail[normalized] != password) {
+      final failures = (_loginFailures[normalized] ?? 0) + 1;
+      _loginFailures[normalized] = failures;
+      _loginBlockedUntil[normalized] = now.add(backoffAfter(failures));
       throw const InvalidCredentialsException();
     }
+    _loginFailures.remove(normalized);
+    _loginBlockedUntil.remove(normalized);
     return _issueSession(normalized);
   }
 

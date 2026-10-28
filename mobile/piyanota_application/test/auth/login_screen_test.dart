@@ -11,6 +11,7 @@ import 'package:piyanota_application/screens/auth/auth_messages.dart';
 import 'package:piyanota_application/screens/auth/login_screen.dart';
 import 'package:piyanota_application/screens/auth/sign_up_screen.dart';
 import 'package:piyanota_application/services/auth_api.dart';
+import 'package:piyanota_application/services/login_throttle.dart';
 import 'package:piyanota_application/services/session_storage.dart';
 
 import 'package:piyanota_application/state/processing_providers.dart';
@@ -78,6 +79,156 @@ void main() {
     await tester.enterText(_emailField, '   ');
     await tester.pump();
     expect(isButtonEnabled(tester, _logIn), isFalse);
+  });
+
+  group('PIYA-202-V2.1 wait after a wrong login', () {
+    ScriptedAuthApi wrongPassword() => ScriptedAuthApi(
+      onLogin: () async => throw const InvalidCredentialsException(),
+    );
+
+    Future<void> resubmit(WidgetTester tester) async {
+      await tester.tap(buttonLabelled(_logIn));
+      await tester.pump();
+      await tester.pump();
+    }
+
+    testWidgets('AC1: 1st wrong password shows 0:30 and disables Log In', (
+      tester,
+    ) async {
+      await pumpAuthScreen(
+        tester,
+        screen: const LoginScreen(),
+        api: wrongPassword(),
+      );
+      await _fillAndSubmit(tester);
+      await tester.pump();
+
+      expect(find.text('Try again in 0:30'), findsOneWidget);
+      expect(find.text(AuthMessages.incorrectCredentials), findsOneWidget);
+      expect(isButtonEnabled(tester, _logIn), isFalse);
+    });
+
+    testWidgets('AC1: countdown ticks down and re-enables at 0', (
+      tester,
+    ) async {
+      await pumpAuthScreen(
+        tester,
+        screen: const LoginScreen(),
+        api: wrongPassword(),
+      );
+      await _fillAndSubmit(tester);
+      await tester.pump();
+
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('Try again in 0:29'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 28));
+      expect(find.text('Try again in 0:01'), findsOneWidget);
+      expect(isButtonEnabled(tester, _logIn), isFalse);
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.textContaining('Try again in'), findsNothing);
+      expect(isButtonEnabled(tester, _logIn), isTrue);
+    });
+
+    testWidgets('AC2: 2nd wrong password gives 1:00', (tester) async {
+      await pumpAuthScreen(
+        tester,
+        screen: const LoginScreen(),
+        api: wrongPassword(),
+      );
+      await _fillAndSubmit(tester);
+      await tester.pump(const Duration(seconds: 30));
+      await resubmit(tester);
+
+      expect(find.text('Try again in 1:00'), findsOneWidget);
+    });
+
+    testWidgets('AC3: a success resets the count', (tester) async {
+      var succeed = false;
+      final api = ScriptedAuthApi(
+        onLogin: () async => succeed
+            ? testSession()
+            : throw const InvalidCredentialsException(),
+      );
+      await pumpAuthScreen(tester, screen: const LoginScreen(), api: api);
+      await _fillAndSubmit(tester);
+      await tester.pump(const Duration(seconds: 30));
+      succeed = true;
+      await resubmit(tester);
+      await tester.pumpAndSettle();
+      expect(find.text(libraryMarker), findsOneWidget);
+
+      final throttle = LoginThrottle();
+      expect(await throttle.remaining(_email), Duration.zero);
+      final at = DateTime.utc(2026, 10, 28, 9);
+      await throttle.recordFailure(_email, now: at);
+      expect(
+        await throttle.remaining(_email, now: at),
+        const Duration(seconds: 30),
+      );
+    });
+
+    testWidgets('AC5: server retryAfterSeconds 90 shows 1:30', (tester) async {
+      final api = ScriptedAuthApi(
+        onLogin: () async =>
+            throw const AuthRateLimitedException(retryAfterSeconds: 90),
+      );
+      await pumpAuthScreen(tester, screen: const LoginScreen(), api: api);
+      await _fillAndSubmit(tester);
+      await tester.pump();
+
+      expect(find.text('Try again in 1:30'), findsOneWidget);
+      expect(isButtonEnabled(tester, _logIn), isFalse);
+    });
+
+    testWidgets('AC6: a network failure adds nothing to the count', (
+      tester,
+    ) async {
+      final api = ScriptedAuthApi(
+        onLogin: () async => throw const AuthNetworkException(),
+      );
+      await pumpAuthScreen(tester, screen: const LoginScreen(), api: api);
+      await _fillAndSubmit(tester);
+      await tester.pump();
+
+      expect(find.textContaining('Try again in'), findsNothing);
+      expect(isButtonEnabled(tester, _logIn), isTrue);
+      expect(await LoginThrottle().remaining(_email), Duration.zero);
+    });
+
+    testWidgets('AC4: a different email is not blocked', (tester) async {
+      await pumpAuthScreen(
+        tester,
+        screen: const LoginScreen(),
+        api: wrongPassword(),
+      );
+      await _fillAndSubmit(tester);
+      await tester.pump();
+      expect(isButtonEnabled(tester, _logIn), isFalse);
+
+      await tester.enterText(_emailField, 'other@example.com');
+      await tester.pump();
+      await tester.pump();
+      expect(find.textContaining('Try again in'), findsNothing);
+      expect(isButtonEnabled(tester, _logIn), isTrue);
+    });
+
+    testWidgets('AC4: a saved wait survives reopening the screen', (
+      tester,
+    ) async {
+      await LoginThrottle().recordFailure(_email);
+      await pumpAuthScreen(
+        tester,
+        screen: const LoginScreen(),
+        api: wrongPassword(),
+      );
+      await tester.enterText(_emailField, _email);
+      await tester.enterText(_passwordField, _password);
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('Try again in 0:30'), findsOneWidget);
+      expect(isButtonEnabled(tester, _logIn), isFalse);
+    });
   });
 
   testWidgets('AC2: invalid credentials show inline error, email kept', (

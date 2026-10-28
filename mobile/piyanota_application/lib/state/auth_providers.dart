@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../config/api_config.dart';
 import '../services/auth_api.dart';
 import '../services/fake_auth_api.dart';
+import '../services/login_throttle.dart';
 import '../services/session_storage.dart';
 
 final dioProvider = Provider<Dio>((ref) {
@@ -31,6 +32,8 @@ final authApiProvider = Provider<AuthApi>((ref) {
 /// Score Library) can resolve the tokens it issued to accounts. Only read
 /// while [ApiConfig.useFakeAuth] is true.
 final fakeAuthApiProvider = Provider<FakeAuthApi>((ref) => FakeAuthApi());
+
+final loginThrottleProvider = Provider<LoginThrottle>((ref) => LoginThrottle());
 
 final sessionStorageProvider = Provider<SessionStorage>((ref) {
   return SessionStorage();

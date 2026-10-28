@@ -17,6 +17,13 @@ class AuthMessages {
   static const String sessionSaveFailed =
       "Couldn't save your sign-in on this device. Please try again.";
 
+  /// PIYA-202-V2.1 AC1: m:ss, e.g. "Try again in 0:30".
+  static String tryAgainIn(Duration wait) {
+    final seconds = wait.inSeconds;
+    final rest = (seconds % 60).toString().padLeft(2, '0');
+    return 'Try again in ${seconds ~/ 60}:$rest';
+  }
+
   static const String emailRequired = 'Enter your email address';
   static const String emailInvalid = 'Enter a valid email address';
   static const String passwordsDoNotMatch = 'Passwords do not match';

@@ -185,7 +185,8 @@ void main() {
     'AC5: success returns to the existing Login with a confirmation, and '
     'the new password works',
     (tester) async {
-      final api = FakeAuthApi(latency: Duration.zero);
+      var now = DateTime.utc(2026, 10, 28, 9);
+      final api = FakeAuthApi(latency: Duration.zero, clock: () => now);
       await pumpAuthScreen(
         tester,
         screen: const LoginScreen(),
@@ -218,6 +219,9 @@ void main() {
       expect(find.text(AuthMessages.incorrectCredentials), findsOneWidget);
       expect(find.text(AuthMessages.passwordResetSuccess), findsNothing);
 
+      // PIYA-202-V2.1: the wrong attempt above starts a wait.
+      await tester.pump(const Duration(seconds: 30));
+      now = now.add(const Duration(seconds: 30));
       await tester.enterText(_field(1), _newPassword);
       await tester.pump();
       await tester.tap(buttonLabelled('Log In'));

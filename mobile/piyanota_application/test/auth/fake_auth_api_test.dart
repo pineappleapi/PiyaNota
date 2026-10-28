@@ -75,6 +75,46 @@ void main() {
     );
   });
 
+  group('login wait (PIYA-202-V2.1 AC7)', () {
+    Matcher rateLimited(int seconds) => throwsA(
+      isA<AuthRateLimitedException>().having(
+        (e) => e.retryAfterSeconds,
+        'retryAfterSeconds',
+        seconds,
+      ),
+    );
+
+    test('repeated wrong logins are limited on the 30 s doubling', () async {
+      var now = DateTime.utc(2026, 10, 28, 9);
+      final api = FakeAuthApi(latency: Duration.zero, clock: () => now);
+      Future<void> wrong() =>
+          api.login(email: FakeAuthApi.demoEmail, password: 'nope');
+
+      await expectLater(wrong(), throwsA(isA<InvalidCredentialsException>()));
+      await expectLater(wrong(), rateLimited(30));
+      now = now.add(const Duration(seconds: 30));
+      await expectLater(wrong(), throwsA(isA<InvalidCredentialsException>()));
+      now = now.add(const Duration(seconds: 20));
+      await expectLater(wrong(), rateLimited(40));
+    });
+
+    test('a correct login after the wait resets the count', () async {
+      var now = DateTime.utc(2026, 10, 28, 9);
+      final api = FakeAuthApi(latency: Duration.zero, clock: () => now);
+      Future<void> wrong() =>
+          api.login(email: FakeAuthApi.demoEmail, password: 'nope');
+
+      await expectLater(wrong(), throwsA(isA<InvalidCredentialsException>()));
+      now = now.add(const Duration(seconds: 30));
+      await api.login(
+        email: FakeAuthApi.demoEmail,
+        password: FakeAuthApi.demoPassword,
+      );
+      await expectLater(wrong(), throwsA(isA<InvalidCredentialsException>()));
+      await expectLater(wrong(), rateLimited(30));
+    });
+  });
+
   group('password reset (PIYA-303/304)', () {
     const newPassword = 'choir2026';
 
