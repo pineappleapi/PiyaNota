@@ -12,14 +12,22 @@ const String _untilKeyPrefix = 'login_throttle.until.';
 /// out the user's real account. The server enforces its own limit too (AC5);
 /// this one only makes the wait visible and survivable offline.
 class LoginThrottle {
+  /// [clock] exists so screen tests don't depend on the real time.
+  LoginThrottle({DateTime Function()? clock}) : _clock = clock ?? DateTime.now;
+
+  final DateTime Function() _clock;
+
+  /// The throttle's notion of now, so a screen counting down agrees with
+  /// the stored deadline.
+  DateTime now() => _clock();
+
   /// Time left before [email] may try again; zero when free to submit.
   Future<Duration> remaining(String email, {DateTime? now}) async {
     final prefs = await SharedPreferences.getInstance();
     final untilMs = prefs.getInt(_untilKeyPrefix + _key(email));
     if (untilMs == null) return Duration.zero;
-    final left = DateTime.fromMillisecondsSinceEpoch(
-      untilMs,
-    ).difference(now ?? DateTime.now());
+    final left = DateTime.fromMillisecondsSinceEpoch(untilMs)
+        .difference(now ?? _clock());
     return left.isNegative ? Duration.zero : left;
   }
 
@@ -58,7 +66,7 @@ class LoginThrottle {
     DateTime? now,
   ) => prefs.setInt(
     _untilKeyPrefix + key,
-    (now ?? DateTime.now()).add(wait).millisecondsSinceEpoch,
+    (now ?? _clock()).add(wait).millisecondsSinceEpoch,
   );
 
   /// Same normalisation as the fake backend, so a differently-cased or

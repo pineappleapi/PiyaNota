@@ -24,6 +24,9 @@ class AuthMessages {
     return 'Try again in ${seconds ~/ 60}:$rest';
   }
 
+  /// Spoken when the wait ends; there is nothing visible to prompt it.
+  static const String canTryAgain = 'You can try again now';
+
   static const String emailRequired = 'Enter your email address';
   static const String emailInvalid = 'Enter a valid email address';
   static const String passwordsDoNotMatch = 'Passwords do not match';

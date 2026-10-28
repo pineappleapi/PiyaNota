@@ -39,12 +39,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   String? _errorMessage;
   String? _noticeMessage;
 
-  /// PIYA-202-V2.1: time left before the typed email may try again. Counted
-  /// down by [_waitTimer] rather than re-read from the clock so the label
-  /// and the button flip together.
+  /// PIYA-202-V2.1: when the typed email may try again. Each tick recomputes
+  /// from this deadline, so a countdown frozen while the app was in the
+  /// background catches up instead of drifting.
+  DateTime? _waitUntil;
   Duration _wait = Duration.zero;
   Timer? _waitTimer;
   String _waitEmail = '';
+
+  /// What screen readers hear. Fixed when a wait starts (and replaced when
+  /// it ends) so the live region speaks once, not on every tick of the
+  /// visible countdown.
+  String? _liveLabel;
+
+  /// Finishes the password-reset throttle clear before the first wait read.
+  Future<void>? _pendingReset;
 
   static const Duration _waitTick = Duration(seconds: 1);
 
@@ -83,24 +92,51 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Future<void> _syncWait() async {
     final email = _emailController.text.trim().toLowerCase();
     _waitEmail = email;
-    final left = email.isEmpty
-        ? Duration.zero
-        : await ref.read(loginThrottleProvider).remaining(email);
+    if (email.isEmpty) {
+      if (_waitUntil != null) _endWait(announce: false);
+      return;
+    }
+    await _pendingReset;
+    final left = await ref.read(loginThrottleProvider).remaining(email);
     // The user kept typing while we read; the newer call owns the state.
     if (!mounted || email != _waitEmail) return;
+    if (left == Duration.zero && _waitUntil == null) return;
     _startWait(left);
   }
 
   void _startWait(Duration left) {
     _waitTimer?.cancel();
-    // Round up so "29.99 s left" reads 0:30, not 0:29.
-    final seconds = (left.inMilliseconds / 1000).ceil();
-    setState(() => _wait = Duration(seconds: seconds));
-    if (seconds <= 0) return;
-    _waitTimer = Timer.periodic(_waitTick, (timer) {
-      final next = _wait - _waitTick;
-      setState(() => _wait = next.isNegative ? Duration.zero : next);
-      if (_wait == Duration.zero) timer.cancel();
+    if (left <= Duration.zero) {
+      _endWait(announce: false);
+      return;
+    }
+    _waitUntil = ref.read(loginThrottleProvider).now().add(left);
+    setState(() {
+      _wait = _remainingWait();
+      _liveLabel = AuthMessages.tryAgainIn(_wait);
+    });
+    _waitTimer = Timer.periodic(_waitTick, (_) {
+      if (_remainingWait() == Duration.zero) {
+        _endWait(announce: true);
+      } else {
+        setState(() => _wait = _remainingWait());
+      }
+    });
+  }
+
+  /// Whole seconds left, rounded up so 29.99 s reads 0:30, not 0:29.
+  Duration _remainingWait() {
+    final left = _waitUntil!.difference(ref.read(loginThrottleProvider).now());
+    if (left <= Duration.zero) return Duration.zero;
+    return Duration(seconds: (left.inMilliseconds / 1000).ceil());
+  }
+
+  void _endWait({required bool announce}) {
+    _waitTimer?.cancel();
+    _waitUntil = null;
+    setState(() {
+      _wait = Duration.zero;
+      _liveLabel = announce ? AuthMessages.canTryAgain : null;
     });
   }
 
@@ -114,6 +150,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   /// any stale password cleared — the old one no longer works.
   void _applyPasswordReset(PasswordResetSucceeded reset) {
     _noticeMessage = AuthMessages.passwordResetSuccess;
+    // A reset lifts the login wait for that email (PIYA-202-V2.1).
+    if (reset.email.isNotEmpty) {
+      _pendingReset = ref.read(loginThrottleProvider).reset(reset.email);
+    }
     _errorMessage = null;
     if (reset.email.isNotEmpty) _emailController.text = reset.email;
     _passwordController.clear();
@@ -124,6 +164,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         .pushNamed(AppRoutes.passwordReset);
     if (!mounted || result is! PasswordResetSucceeded) return;
     setState(() => _applyPasswordReset(result));
+    _waitEmail = '';
+    _syncWait();
   }
 
   Future<void> _submit() async {
@@ -254,14 +296,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           ),
         ),
         const SizedBox(height: _sectionGap),
-        if (_wait > Duration.zero) ...[
-          Text(
-            AuthMessages.tryAgainIn(_wait),
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: AppTheme.primaryBlue),
-          ),
-          const SizedBox(height: _fieldGap),
-        ],
+        Semantics(
+          liveRegion: _liveLabel != null,
+          label: _liveLabel,
+          child: _wait > Duration.zero
+              ? Padding(
+                  padding: const EdgeInsets.only(bottom: _fieldGap),
+                  child: ExcludeSemantics(
+                    child: Text(
+                      AuthMessages.tryAgainIn(_wait),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: AppTheme.primaryBlue),
+                    ),
+                  ),
+                )
+              : const SizedBox.shrink(),
+        ),
         PrimaryPillButton(
           label: 'Log In',
           onPressed: _canSubmit ? _submit : null,

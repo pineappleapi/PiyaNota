@@ -146,6 +146,10 @@ class FakeAuthApi implements AuthApi {
     // a weak-password 400 doesn't burn the user's code.
     _grantsByCode.remove(resetToken.trim());
     _passwordsByEmail[grant.email] = newPassword;
+    // PIYA-202-V2.1: a reset proves control of the mailbox, so it lifts any
+    // login wait the forgotten password caused.
+    _loginFailures.remove(grant.email);
+    _loginBlockedUntil.remove(grant.email);
   }
 
   /// PIYA-322 stand-in, in the contract's order: session (AC1), rate limit

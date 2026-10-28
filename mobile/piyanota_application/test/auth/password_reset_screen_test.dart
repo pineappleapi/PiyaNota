@@ -185,8 +185,7 @@ void main() {
     'AC5: success returns to the existing Login with a confirmation, and '
     'the new password works',
     (tester) async {
-      var now = DateTime.utc(2026, 10, 28, 9);
-      final api = FakeAuthApi(latency: Duration.zero, clock: () => now);
+      final api = FakeAuthApi(latency: Duration.zero);
       await pumpAuthScreen(
         tester,
         screen: const LoginScreen(),
@@ -195,6 +194,14 @@ void main() {
           AppRoutes.passwordReset: (_) => const PasswordResetScreen(),
         },
       );
+
+      // A locked-out user resets the password: PIYA-202-V2.1 wait clears.
+      await tester.enterText(_field(0), FakeAuthApi.demoEmail);
+      await tester.enterText(_field(1), 'wrong-pass1');
+      await tester.pump();
+      await tester.tap(buttonLabelled('Log In'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Try again in'), findsOneWidget);
 
       await tester.tap(find.text('Forgot Password?'));
       await tester.pumpAndSettle();
@@ -211,17 +218,7 @@ void main() {
         findsOneWidget,
       );
 
-      // The old password no longer works; the new one does.
-      await tester.enterText(_field(1), FakeAuthApi.demoPassword);
-      await tester.pump();
-      await tester.tap(buttonLabelled('Log In'));
-      await tester.pumpAndSettle();
-      expect(find.text(AuthMessages.incorrectCredentials), findsOneWidget);
-      expect(find.text(AuthMessages.passwordResetSuccess), findsNothing);
-
-      // PIYA-202-V2.1: the wrong attempt above starts a wait.
-      await tester.pump(const Duration(seconds: 30));
-      now = now.add(const Duration(seconds: 30));
+      expect(find.textContaining('Try again in'), findsNothing);
       await tester.enterText(_field(1), _newPassword);
       await tester.pump();
       await tester.tap(buttonLabelled('Log In'));

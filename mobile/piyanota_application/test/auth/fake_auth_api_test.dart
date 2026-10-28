@@ -98,6 +98,29 @@ void main() {
       await expectLater(wrong(), rateLimited(40));
     });
 
+    test('a completed password reset clears the wait', () async {
+      final now = DateTime.utc(2026, 10, 28, 9);
+      final api = FakeAuthApi(latency: Duration.zero, clock: () => now);
+      await expectLater(
+        api.login(email: FakeAuthApi.demoEmail, password: 'nope'),
+        throwsA(isA<InvalidCredentialsException>()),
+      );
+      await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
+      await api.confirmPasswordReset(
+        resetToken: api.demoInboxCodeFor(FakeAuthApi.demoEmail)!,
+        newPassword: 'Newpass123',
+        newPasswordConfirmation: 'Newpass123',
+      );
+
+      // Same instant: still inside the 30 s, yet the new password gets in,
+      // and the old one is simply wrong again (count restarted).
+      await api.login(email: FakeAuthApi.demoEmail, password: 'Newpass123');
+      await expectLater(
+        api.login(email: FakeAuthApi.demoEmail, password: 'nope'),
+        throwsA(isA<InvalidCredentialsException>()),
+      );
+    });
+
     test('a correct login after the wait resets the count', () async {
       var now = DateTime.utc(2026, 10, 28, 9);
       final api = FakeAuthApi(latency: Duration.zero, clock: () => now);
