@@ -155,6 +155,11 @@ class _AppEntryPointState extends ConsumerState<_AppEntryPoint> {
   /// Started once onboarding is known to be done; true = signed in.
   Future<bool>? _session;
 
+  /// Auto-login is a cold-start rule (PIYA-202-V2.2). Once this launch
+  /// showed onboarding, finishing it is the user picking Sign Up or Login,
+  /// so a stored session must not restore under that route (PIYA-205-V2.3).
+  bool _showedOnboarding = false;
+
   Future<bool> _restoreSession() async {
     bool valid;
     try {
@@ -212,7 +217,12 @@ class _AppEntryPointState extends ConsumerState<_AppEntryPoint> {
 
     return onboardingCompleted.when(
       data: (completed) {
-        if (!completed) return const OnboardingFlowScreen();
+        if (!completed) {
+          _showedOnboarding = true;
+          return const OnboardingFlowScreen();
+        }
+        // Onboarding's own push replaces this route; blank until it does.
+        if (_showedOnboarding) return _placeholder;
         return FutureBuilder<bool>(
           future: _session ??= _restoreSession(),
           // A check that blew up can't prove a session: Login, not a

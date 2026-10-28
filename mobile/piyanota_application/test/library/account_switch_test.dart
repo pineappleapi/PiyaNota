@@ -21,6 +21,7 @@ import 'package:piyanota_application/state/auth_providers.dart';
 import 'package:piyanota_application/state/playback_providers.dart';
 import 'package:piyanota_application/state/processing_providers.dart';
 import 'package:piyanota_application/state/scan_job_store.dart';
+import 'package:piyanota_application/state/score_library_providers.dart';
 import 'package:piyanota_application/state/work_owner.dart';
 
 import '../playback/playback_fakes.dart';
@@ -246,4 +247,88 @@ void main() {
     );
     expect(find.text(LibraryMessages.emptySubtitle), findsOneWidget);
   });
+
+  // A stored session with onboarding not done (onboarding flag lost, token
+  // kept). Finishing onboarding is the user choosing Sign Up or Login, not
+  // a cold start, so the old session must not restore underneath it. Fast
+  // fakes, so a Library mounted under the route would show its cards.
+  for (final (label, toSignUp) in [
+    ('Get Started', ['Next', 'Next', 'Get Started']),
+    ('Skip', ['Skip', 'Sign Up']),
+  ]) {
+    testWidgets('finishing onboarding via $label never mounts the stored '
+        'session Library before sign-up', (tester) async {
+      const fast = Duration(milliseconds: 20);
+      SharedPreferences.setMockInitialValues({});
+      FlutterSecureStorage.setMockInitialValues({
+        'session_token': 'fake_sess_1_0_${FakeAuthApi.demoEmail}',
+        'session_expires_at': DateTime.now()
+            .toUtc()
+            .add(const Duration(days: 30))
+            .toIso8601String(),
+        'session_email': FakeAuthApi.demoEmail,
+      });
+      tester.view.physicalSize = const Size(1080, 2340);
+      tester.view.devicePixelRatio = 2.75;
+      addTearDown(tester.view.reset);
+      final auth = FakeAuthApi(latency: fast);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            fakeAuthApiProvider.overrideWithValue(auth),
+            scoreLibraryApiProvider.overrideWith(
+              (ref) => FakeScoreLibraryApi(
+                sessionStorage: ref.watch(sessionStorageProvider),
+                accountForToken: auth.accountForToken,
+                latency: fast,
+              ),
+            ),
+            playbackEngineFactoryProvider.overrideWithValue(
+              FakePlaybackEngine.new,
+            ),
+          ],
+          child: const PiyaNotaApp(),
+        ),
+      );
+
+      var signedUp = false;
+      Future<void> frames(Duration d) async {
+        for (var t = Duration.zero; t < d; t += frame) {
+          await tester.pump(frame);
+          expect(
+            find.byType(ScoreCard, skipOffstage: false),
+            findsNothing,
+            reason: 'a demo score card was built ($label, $t)',
+          );
+          if (signedUp) continue;
+          expect(
+            find.byType(ScoreLibraryScreen, skipOffstage: false),
+            findsNothing,
+            reason: 'a Library mounted before sign-up ($label, $t)',
+          );
+        }
+      }
+
+      await frames(splashIntroDuration + settle);
+      for (final button in toSignUp) {
+        await tester.tap(find.text(button));
+        await frames(settle);
+      }
+      for (var i = 0; i < 3; i++) {
+        await tester.enterText(
+          find.byType(TextFormField).at(i),
+          [newEmail, newPassword, newPassword][i],
+        );
+        await frames(frame);
+      }
+      final submit = find.widgetWithText(ElevatedButton, 'Create Account');
+      await tester.ensureVisible(submit);
+      await frames(frame);
+      await tester.tap(submit);
+      // From here the Library may mount: it is the new account's, empty.
+      signedUp = true;
+      await frames(settle);
+      expect(find.text(LibraryMessages.emptySubtitle), findsOneWidget);
+    });
+  }
 }
