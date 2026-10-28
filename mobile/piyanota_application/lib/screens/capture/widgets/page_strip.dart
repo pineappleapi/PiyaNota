@@ -20,6 +20,7 @@ class PageStrip extends StatefulWidget {
     required this.onRemove,
     required this.onAdd,
     this.flashId,
+    this.selectedId,
     this.enabled = true,
   });
 
@@ -35,6 +36,9 @@ class PageStrip extends StatefulWidget {
 
   /// A just-added item, flashed once and scrolled into view.
   final int? flashId;
+
+  /// The photo "Page X of N" describes; exposed to TalkBack as selected.
+  final int? selectedId;
   final bool enabled;
 
   static const double thumbWidth = 84;
@@ -171,6 +175,7 @@ class _PageStripState extends State<PageStrip> {
                     total: photoCount,
                     imageSource: widget.imageSource,
                     flash: item.id == widget.flashId,
+                    selected: item.id == widget.selectedId,
                     onOpen: () => widget.onOpen(item),
                     onEdit: widget.enabled ? () => widget.onEdit(item) : null,
                     onRemove: widget.enabled
@@ -333,9 +338,13 @@ class _FlashState extends State<_Flash> with SingleTickerProviderStateMixin {
 }
 
 class _ThumbFrame extends StatelessWidget {
-  const _ThumbFrame({required this.child});
+  const _ThumbFrame({required this.child, this.selected = false});
 
   final Widget child;
+  final bool selected;
+
+  static const double _selectedBorder = 4;
+  static const double _border = 2;
 
   @override
   Widget build(BuildContext context) {
@@ -345,7 +354,10 @@ class _ThumbFrame extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppTheme.captureAccent, width: 2),
+        border: Border.all(
+          color: AppTheme.captureAccent,
+          width: selected ? _selectedBorder : _border,
+        ),
       ),
       clipBehavior: Clip.antiAlias,
       child: child,
@@ -360,6 +372,7 @@ class _PhotoThumb extends StatelessWidget {
     required this.total,
     required this.imageSource,
     required this.flash,
+    required this.selected,
     required this.onOpen,
     required this.onEdit,
     required this.onRemove,
@@ -372,6 +385,7 @@ class _PhotoThumb extends StatelessWidget {
   final int total;
   final PageImageSource imageSource;
   final bool flash;
+  final bool selected;
   final VoidCallback onOpen;
   final VoidCallback? onEdit;
   final VoidCallback? onRemove;
@@ -383,11 +397,13 @@ class _PhotoThumb extends StatelessWidget {
     return _Flash(
       active: flash,
       child: _ThumbFrame(
+        selected: selected,
         child: Stack(
           fit: StackFit.expand,
           children: [
             Semantics(
               button: true,
+              selected: selected,
               label: CaptureMessages.pageSemantics(number, total),
               customSemanticsActions: {
                 const CustomSemanticsAction(label: CaptureMessages.moveEarlier):

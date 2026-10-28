@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io' show FileSystemException;
+import 'dart:ui' show Tristate;
 
 import 'package:flutter/gestures.dart' show kLongPressTimeout;
 import 'package:flutter/material.dart';
@@ -30,6 +31,16 @@ Future<void> _shoot(WidgetTester tester, [int times = 1]) async {
 Future<void> _addGallery(WidgetTester tester, CaptureHarness h, int n) async {
   h.picker.gallery = [for (var i = 0; i < n; i++) 'g$i.jpg'];
   await tester.tap(find.text(CaptureMessages.gallery));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _tapThumb(WidgetTester tester, int number, int total) async {
+  await tester.tap(_label(CaptureMessages.pageSemantics(number, total)));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _closePreview(WidgetTester tester) async {
+  await tester.tap(find.byTooltip(CaptureMessages.close));
   await tester.pumpAndSettle();
 }
 
@@ -287,7 +298,8 @@ void main() {
         _label(CaptureMessages.pageSemantics(1, 3)),
         CaptureMessages.moveLater,
       );
-      expect(find.text(CaptureMessages.pageOf(2, 3)), findsOneWidget);
+      // g2 (added last) stays selected and did not change slot.
+      expect(find.text(CaptureMessages.pageOf(3, 3)), findsOneWidget);
 
       await tester.tap(find.text(CaptureMessages.createScoreWith(3)));
       await tester.pumpAndSettle();
@@ -359,6 +371,151 @@ void main() {
         await tester.pumpAndSettle();
       }
       expect(find.text(CaptureMessages.createScoreWith(3)), findsOneWidget);
+    });
+
+    testWidgets('2 pages: drag swaps them and the label follows (V2.2)', (
+      tester,
+    ) async {
+      final h = CaptureHarness();
+      await pumpCapture(tester, h);
+      await _addGallery(tester, h, 2);
+      final gesture = await tester.startGesture(
+        tester.getCenter(_label(CaptureMessages.pageSemantics(1, 2))),
+      );
+      await tester.pump(kLongPressTimeout + const Duration(milliseconds: 100));
+      for (var i = 0; i < 12; i++) {
+        await gesture.moveBy(const Offset(20, 0));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      // g1 was selected; it is now first.
+      expect(find.text(CaptureMessages.pageOf(1, 2)), findsOneWidget);
+      await tester.tap(find.text(CaptureMessages.createScoreWith(2)));
+      await tester.pumpAndSettle();
+      expect(h.upload.imageCalls.single, [
+        'prepared/g1.jpg',
+        'prepared/g0.jpg',
+      ]);
+    });
+
+    for (final dx in [-20.0, 20.0]) {
+      testWidgets('2 pages: page ${dx < 0 ? 2 : 1} dragged ${dx.abs()} dp x 7 '
+          '(V2.2)', (tester) async {
+        final h = CaptureHarness();
+        await pumpCapture(tester, h);
+        await _addGallery(tester, h, 2);
+        final from = dx < 0 ? 2 : 1;
+        final gesture = await tester.startGesture(
+          tester.getCenter(_label(CaptureMessages.pageSemantics(from, 2))),
+        );
+        await tester.pump(
+          kLongPressTimeout + const Duration(milliseconds: 100),
+        );
+        for (var i = 0; i < 7; i++) {
+          await gesture.moveBy(Offset(dx, 0));
+          await tester.pump(const Duration(milliseconds: 16));
+        }
+        await gesture.up();
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(CaptureMessages.createScoreWith(2)));
+        await tester.pumpAndSettle();
+        expect(h.upload.imageCalls.single, [
+          'prepared/g1.jpg',
+          'prepared/g0.jpg',
+        ]);
+      });
+    }
+
+    testWidgets('2 pages: Move later / Move earlier swap them (V2.2)', (
+      tester,
+    ) async {
+      final h = CaptureHarness();
+      await pumpCapture(tester, h);
+      await _addGallery(tester, h, 2);
+      await _semanticsAction(
+        tester,
+        _label(CaptureMessages.pageSemantics(1, 2)),
+        CaptureMessages.moveLater,
+      );
+      // g1 stays selected and is now first.
+      expect(find.text(CaptureMessages.pageOf(1, 2)), findsOneWidget);
+      await _semanticsAction(
+        tester,
+        _label(CaptureMessages.pageSemantics(2, 2)),
+        CaptureMessages.moveEarlier,
+      );
+      expect(find.text(CaptureMessages.pageOf(2, 2)), findsOneWidget);
+    });
+
+    testWidgets('1 page: nothing to reorder, no error (V2.2 AC2)', (
+      tester,
+    ) async {
+      final h = CaptureHarness();
+      await pumpCapture(tester, h);
+      await _addGallery(tester, h, 1);
+      final node = tester.getSemantics(
+        _label(CaptureMessages.pageSemantics(1, 1)),
+      );
+      final data = node.getSemanticsData();
+      expect(data.customSemanticsActionIds ?? const [], isEmpty);
+      expect(find.text(CaptureMessages.pageOf(1, 1)), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('tap selects; reorder keeps it; delete/undo/add stay right '
+        '(V2.1)', (tester) async {
+      final h = CaptureHarness();
+      await pumpCapture(tester, h);
+      await _addGallery(tester, h, 3);
+      // Added last, so page 3 is selected.
+      expect(find.text(CaptureMessages.pageOf(3, 3)), findsOneWidget);
+
+      await _tapThumb(tester, 1, 3);
+      await _closePreview(tester);
+      expect(find.text(CaptureMessages.pageOf(1, 3)), findsOneWidget);
+      expect(
+        tester
+            .getSemantics(_label(CaptureMessages.pageSemantics(1, 3)))
+            .getSemanticsData()
+            .flagsCollection
+            .isSelected,
+        Tristate.isTrue,
+      );
+      final hit = tester.getRect(_label(CaptureMessages.pageSemantics(1, 3)));
+      expect(hit.width, greaterThanOrEqualTo(48));
+      expect(hit.height, greaterThanOrEqualTo(48));
+
+      // Moving the selected photo to the end: X follows.
+      await _semanticsAction(
+        tester,
+        _label(CaptureMessages.pageSemantics(1, 3)),
+        CaptureMessages.moveLater,
+      );
+      await _semanticsAction(
+        tester,
+        _label(CaptureMessages.pageSemantics(2, 3)),
+        CaptureMessages.moveLater,
+      );
+      expect(find.text(CaptureMessages.pageOf(3, 3)), findsOneWidget);
+
+      // Deleting another page: selected photo stays selected, N drops.
+      await tester.tap(_label(CaptureMessages.removePage(1)));
+      await tester.pumpAndSettle();
+      expect(find.text(CaptureMessages.pageOf(2, 2)), findsOneWidget);
+      // Undo brings the page back before it: selected moves to 3 of 3.
+      await tester.tap(find.text(CaptureMessages.undo));
+      await tester.pumpAndSettle();
+      expect(find.text(CaptureMessages.pageOf(1, 3)), findsOneWidget);
+
+      // Deleting the selected one selects the last page.
+      await tester.tap(_label(CaptureMessages.removePage(1)));
+      await tester.pumpAndSettle();
+      expect(find.text(CaptureMessages.pageOf(2, 2)), findsOneWidget);
+
+      await _addGallery(tester, h, 1);
+      expect(find.text(CaptureMessages.pageOf(3, 3)), findsOneWidget);
     });
 
     testWidgets('arrows appear only when the strip overflows', (tester) async {

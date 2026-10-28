@@ -60,7 +60,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   CaptureSession _session = const CaptureSession();
   int _nextId = 0;
 
-  /// The page "Page X of N" talks about: the last one added or moved.
+  /// The selected page "Page X of N" talks about: set by a tap or an add or
+  /// Undo, and kept across reorders so X follows the photo, not the slot.
   int? _focusId;
 
   /// Flashed once in the strip; cleared on the next change.
@@ -529,7 +530,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
 
   void _reorder(int oldIndex, int newIndex) {
     final id = _session.items[oldIndex].id;
-    _setSession(_session.reorder(oldIndex, newIndex), focus: id);
+    _setSession(_session.reorder(oldIndex, newIndex));
     final index = _session.indexOf(id) + 1;
     SemanticsService.sendAnnouncement(
       View.of(context),
@@ -598,6 +599,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
 
   Future<void> _open(CaptureItem item) {
     final index = _session.indexOf(item.id);
+    setState(() => _focusId = item.id);
     return Navigator.of(context).push<void>(
       MaterialPageRoute(
         fullscreenDialog: true,
@@ -927,6 +929,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                           items: _session.items,
                           imageSource: ref.read(pageImageSourceProvider),
                           flashId: _flashId,
+                          selectedId: _focusId,
                           enabled: _canAct,
                           onReorder: _reorder,
                           onOpen: _open,
