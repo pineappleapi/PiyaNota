@@ -90,15 +90,25 @@ class FakeAuthApi implements AuthApi {
   final Map<String, int> _loginFailures = {};
   final Map<String, DateTime> _loginBlockedUntil = {};
 
+  /// B1.4: when each account's last wrong login happened.
+  final Map<String, DateTime> _lastWrongLogin = {};
+
   /// PIYA-204-V2.4 / B4.4: wrong reset codes per account since its last
   /// successful reset (a new code request does not clear them, B4.6), and
   /// when the current wait ends.
   final Map<String, int> _wrongCodes = {};
   final Map<String, DateTime> _wrongCodeBlockedUntil = {};
 
+  /// B4.6: when each account's last wrong code happened.
+  final Map<String, DateTime> _lastWrongCode = {};
+
   /// B3.1: when each recent reset request was made, per email, for the
   /// sliding hour. A request refused with 429 is not recorded.
   final Map<String, List<DateTime>> _resetRequests = {};
+
+  /// B1.4 / B4.6: a count whose last wrong attempt is 24 h old starts over.
+  static bool _isStale(DateTime? last, DateTime now) =>
+      last != null && !now.isBefore(last.add(wrongCountResetAfter));
 
   @override
   Future<AuthSession> login({
@@ -119,13 +129,16 @@ class FakeAuthApi implements AuthApi {
       );
     }
     if (_passwordsByEmail[normalized] != password) {
-      final failures = (_loginFailures[normalized] ?? 0) + 1;
+      final stale = _isStale(_lastWrongLogin[normalized], now);
+      final failures = (stale ? 0 : _loginFailures[normalized] ?? 0) + 1;
       _loginFailures[normalized] = failures;
+      _lastWrongLogin[normalized] = now;
       _loginBlockedUntil[normalized] = now.add(backoffAfter(failures));
       throw const InvalidCredentialsException();
     }
     _loginFailures.remove(normalized);
     _loginBlockedUntil.remove(normalized);
+    _lastWrongLogin.remove(normalized);
     return _issueSession(normalized);
   }
 
@@ -204,8 +217,10 @@ class FakeAuthApi implements AuthApi {
     if (grant.code != resetToken.trim()) {
       // B4.4: every wrong code is a 400; from the 3rd on it also starts a
       // wait, which the next request meets as a 429.
-      final count = (_wrongCodes[normalized] ?? 0) + 1;
+      final stale = _isStale(_lastWrongCode[normalized], now);
+      final count = (stale ? 0 : _wrongCodes[normalized] ?? 0) + 1;
       _wrongCodes[normalized] = count;
+      _lastWrongCode[normalized] = now;
       if (count > resetCodeFreeAttempts) {
         _wrongCodeBlockedUntil[normalized] = now.add(
           backoffAfter(count - resetCodeFreeAttempts),
@@ -219,11 +234,13 @@ class FakeAuthApi implements AuthApi {
     _grantsByEmail.remove(normalized);
     _wrongCodes.remove(normalized);
     _wrongCodeBlockedUntil.remove(normalized);
+    _lastWrongCode.remove(normalized);
     _passwordsByEmail[normalized] = newPassword;
     // PIYA-202-V2.1: a reset proves control of the mailbox, so it lifts any
     // login wait the forgotten password caused.
     _loginFailures.remove(normalized);
     _loginBlockedUntil.remove(normalized);
+    _lastWrongLogin.remove(normalized);
   }
 
   /// PIYA-322 stand-in, in the contract's order: session (AC1), rate limit

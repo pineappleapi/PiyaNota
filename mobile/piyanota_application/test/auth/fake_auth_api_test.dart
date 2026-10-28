@@ -429,4 +429,97 @@ void main() {
       expect(again.userId, signedUp.userId);
     });
   });
+
+  group('24 h reset of wrong counts (B1.4, B4.6)', () {
+    const almostDay = Duration(hours: 23, minutes: 59);
+    const day = Duration(hours: 24);
+    final start = DateTime.utc(2026, 10, 28, 9);
+
+    Matcher rateLimited(int seconds) => throwsA(
+      isA<AuthRateLimitedException>().having(
+        (e) => e.retryAfterSeconds,
+        'retryAfterSeconds',
+        seconds,
+      ),
+    );
+
+    // Wrong login at start, then another [after] later; returns the wait
+    // the second one earned.
+    Future<void> secondWrongLogin(Duration after, int expectedWait) async {
+      var now = start;
+      final api = FakeAuthApi(latency: Duration.zero, clock: () => now);
+      Future<void> wrong() =>
+          api.login(email: FakeAuthApi.demoEmail, password: 'nope');
+      await expectLater(wrong(), throwsA(isA<InvalidCredentialsException>()));
+      now = start.add(after);
+      await expectLater(wrong(), throwsA(isA<InvalidCredentialsException>()));
+      await expectLater(wrong(), rateLimited(expectedWait));
+    }
+
+    test('login: 23 h 59 m after the last wrong try the count is kept', () {
+      return secondWrongLogin(almostDay, 60);
+    });
+
+    test('login: at 24 h the count resets, the first wait comes again', () {
+      return secondWrongLogin(day, 30);
+    });
+
+    Future<void> secondWrongCode(Duration after, int expectedWait) async {
+      var now = start;
+      final api = FakeAuthApi(latency: Duration.zero, clock: () => now);
+      Future<void> wrong() => api.confirmPasswordReset(
+        email: FakeAuthApi.demoEmail,
+        resetToken: '000000',
+        newPassword: 'choir2026',
+        newPasswordConfirmation: 'choir2026',
+      );
+      await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
+      // Two free wrong codes, the 3rd starts the 30 s wait.
+      for (var i = 0; i < 3; i++) {
+        await expectLater(wrong(), throwsA(isA<ResetCodeWrongException>()));
+      }
+      now = start.add(after);
+      // The earlier code has expired by now; a fresh one keeps the count (B4.6).
+      await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
+      final good = api.demoInboxCodeFor(FakeAuthApi.demoEmail)!;
+      Future<void> wrongNow() => api.confirmPasswordReset(
+        email: FakeAuthApi.demoEmail,
+        resetToken: good == '000000' ? '000001' : '000000',
+        newPassword: 'choir2026',
+        newPasswordConfirmation: 'choir2026',
+      );
+      await expectLater(wrongNow(), throwsA(isA<ResetCodeWrongException>()));
+      await expectLater(wrongNow(), rateLimited(expectedWait));
+    }
+
+    test('code: 23 h 59 m after the last wrong code the count is kept', () {
+      return secondWrongCode(almostDay, 60);
+    });
+
+    test('code: at 24 h the count resets, so 2 more are free again', () async {
+      var now = start;
+      final api = FakeAuthApi(latency: Duration.zero, clock: () => now);
+      Future<void> wrong(String code) => api.confirmPasswordReset(
+        email: FakeAuthApi.demoEmail,
+        resetToken: code,
+        newPassword: 'choir2026',
+        newPasswordConfirmation: 'choir2026',
+      );
+      await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
+      for (var i = 0; i < 3; i++) {
+        await expectLater(
+          wrong('000000'),
+          throwsA(isA<ResetCodeWrongException>()),
+        );
+      }
+      now = start.add(day);
+      await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
+      final good = api.demoInboxCodeFor(FakeAuthApi.demoEmail)!;
+      final bad = good == '000000' ? '000001' : '000000';
+      // Count restarted: wrong #1 and #2 start no wait, #3 waits 30 s.
+      await expectLater(wrong(bad), throwsA(isA<ResetCodeWrongException>()));
+      await expectLater(wrong(bad), throwsA(isA<ResetCodeWrongException>()));
+      await wrong(good);
+    });
+  });
 }

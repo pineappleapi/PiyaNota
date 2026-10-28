@@ -5,6 +5,10 @@ import 'backoff.dart';
 const String _failuresKeyPrefix = 'login_throttle.failures.';
 const String _untilKeyPrefix = 'login_throttle.until.';
 
+/// When the last wrong password happened. Absent in data saved by older
+/// versions; then the count simply has no 24 h clock until the next failure.
+const String _lastKeyPrefix = 'login_throttle.last.';
+
 /// Per-email wait after wrong passwords (PIYA-202-V2.1), kept in
 /// shared_preferences so closing the app does not shorten it (AC4).
 ///
@@ -35,9 +39,18 @@ class LoginThrottle {
   Future<void> recordFailure(String email, {DateTime? now}) async {
     final prefs = await SharedPreferences.getInstance();
     final key = _key(email);
-    final failures = (prefs.getInt(_failuresKeyPrefix + key) ?? 0) + 1;
+    final at = now ?? _clock();
+    final lastMs = prefs.getInt(_lastKeyPrefix + key);
+    final stale =
+        lastMs != null &&
+        !at.isBefore(
+          DateTime.fromMillisecondsSinceEpoch(lastMs).add(wrongCountResetAfter),
+        );
+    final saved = prefs.getInt(_failuresKeyPrefix + key) ?? 0;
+    final failures = (stale ? 0 : saved) + 1;
     await prefs.setInt(_failuresKeyPrefix + key, failures);
-    await _setUntil(prefs, key, backoffAfter(failures), now);
+    await prefs.setInt(_lastKeyPrefix + key, at.millisecondsSinceEpoch);
+    await _setUntil(prefs, key, backoffAfter(failures), at);
   }
 
   /// Shows the server's 429 wait instead of our own. The count is left
@@ -57,6 +70,7 @@ class LoginThrottle {
     final key = _key(email);
     await prefs.remove(_failuresKeyPrefix + key);
     await prefs.remove(_untilKeyPrefix + key);
+    await prefs.remove(_lastKeyPrefix + key);
   }
 
   Future<void> _setUntil(

@@ -15,6 +15,11 @@ const int _maxDoublings = 5;
 /// B4.4): the 3rd is the first counted by [backoffAfter], so it waits 30 s.
 const int resetCodeFreeAttempts = 2;
 
+/// A wrong-attempt count starts again from 0 once this long has passed since
+/// the last wrong attempt (PIYA-202-V2.1 AC8, PIYA-204-V2.4 AC6; backend
+/// notes B1.4 and B4.6). Without it, one typo a year ago would still count.
+const Duration wrongCountResetAfter = Duration(hours: 24);
+
 /// Wait after [failures] counted failures: 30 s, doubling, capped at 15 min.
 /// 0 → Duration.zero.
 ///
