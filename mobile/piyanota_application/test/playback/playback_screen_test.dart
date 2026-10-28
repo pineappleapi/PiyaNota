@@ -204,6 +204,22 @@ void main() {
   });
 
   group('time labels under the seek bar ends (PIYA-208-V2.1)', () {
+    testWidgets(
+      'the seek bar keeps a 48 dp hit box; a tap below the track seeks',
+      (tester) async {
+        final harness = ready();
+        await pumpPlayback(tester, harness);
+        final rect = tester.getRect(find.byKey(const ValueKey('seek-bar')));
+        expect(rect.height, greaterThanOrEqualTo(48));
+        // 20 dp below the track centre: where the time labels now sit.
+        await tester.tapAt(
+          Offset(rect.left + rect.width * 0.75, rect.center.dy + 20),
+        );
+        await tester.pump();
+        expect(harness.engine.seeks, hasLength(1));
+      },
+    );
+
     testWidgets('each time sits under its track end, a small gap below', (
       tester,
     ) async {
@@ -314,7 +330,43 @@ void main() {
       await tester.pump();
       await tester.pump();
       expect(harness.engine.playing, isTrue);
+      expect(
+        positionText(tester),
+        PlaybackMessages.time(harness.engine.position),
+      );
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a release at the very end does not restart from 0', (
+      tester,
+    ) async {
+      final (harness, gesture) = await dragging(tester, playing: true);
+      final rect = tester.getRect(find.byKey(const ValueKey('seek-bar')));
+      await gesture.moveTo(Offset(rect.right + 40, rect.center.dy));
+      await tester.pump();
+      final playsBefore = harness.engine.playCalls;
+      await gesture.up();
+      await tester.pump();
+      await tester.pump();
+      expect(harness.engine.seeks.last, harness.engine.duration);
+      expect(harness.engine.playCalls, playsBefore);
+      expect(harness.engine.playing, isFalse);
+    });
+
+    testWidgets('an app pause while the seek is pending keeps audio paused', (
+      tester,
+    ) async {
+      final (harness, gesture) = await dragging(tester, playing: true);
+      final gate = Completer<void>();
+      harness.engine.seekGate = gate;
+      await gesture.up();
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pump();
+      gate.complete();
+      await tester.pump();
+      await tester.pump();
+      expect(harness.engine.playing, isFalse);
     });
 
     testWidgets(
