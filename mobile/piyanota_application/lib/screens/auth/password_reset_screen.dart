@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -12,6 +13,7 @@ import '../../services/auth_validators.dart';
 import '../../services/fake_auth_api.dart';
 import '../../state/auth_providers.dart';
 import '../../state/resend_cooldowns.dart';
+import '../../state/reset_code_waits.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/primary_pill_button.dart';
 import 'auth_messages.dart';
@@ -88,6 +90,10 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
   /// [resendCooldownsProvider], keyed by email (PIYA-204-V2.2).
   Timer? _resendCooldownTimer;
 
+  /// PIYA-204-V2.4: repaints the wrong-code countdown once a second. The
+  /// time itself lives in [resetCodeWaitsProvider], keyed by email.
+  Timer? _waitTimer;
+
   static const double _fieldGap = 16;
   static const double _sectionGap = 24;
 
@@ -117,6 +123,7 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
   @override
   void dispose() {
     _resendCooldownTimer?.cancel();
+    _waitTimer?.cancel();
     _createAccountTap.dispose();
     for (final controller in _controllers) {
       controller.dispose();
@@ -153,6 +160,37 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
     });
   }
 
+  /// Time left before the code may be tried again; zero when free.
+  Duration get _wait =>
+      ref.read(resetCodeWaitsProvider.notifier).remaining(_requestedEmail);
+
+  /// Repaints each second until the stored deadline passes. Spoken once at
+  /// the start and once at the end; the visible countdown is not a live
+  /// region, or TalkBack would read every tick, and a focused read still
+  /// gets the current value because the Text stays in semantics.
+  void _tickWait({bool announce = false}) {
+    _waitTimer?.cancel();
+    if (_wait == Duration.zero) return;
+    if (announce) _announce(AuthMessages.tryAgainIn(_wait));
+    _waitTimer = Timer.periodic(_cooldownTick, (timer) {
+      if (!mounted) return;
+      final done = _wait == Duration.zero;
+      setState(() {});
+      if (done) {
+        timer.cancel();
+        _announce(AuthMessages.canTryAgain);
+      }
+    });
+  }
+
+  void _announce(String message) {
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      message,
+      Directionality.of(context),
+    );
+  }
+
   void _stopResendCooldown() {
     _resendCooldownTimer?.cancel();
     ref.read(resendCooldownsProvider.notifier).clear(_requestedEmail);
@@ -164,11 +202,15 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
   bool get _canRequestCode =>
       !_isSubmitting && AuthValidators.isValidEmail(_emailController.text);
 
+  // V2.4 AC2: typing stays allowed during the wait; only submitting is not.
   bool get _canContinueWithCode =>
-      !_isSubmitting && AuthValidators.isWellFormedResetCode(_code);
+      !_isSubmitting &&
+      _wait == Duration.zero &&
+      AuthValidators.isWellFormedResetCode(_code);
 
   bool get _canResetPassword =>
       !_isSubmitting &&
+      _wait == Duration.zero &&
       _passwordController.text.isNotEmpty &&
       _confirmController.text.isNotEmpty;
 
@@ -215,6 +257,7 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
         _noticeMessage = AuthMessages.resetCodeSent;
         _step = _ResetStep.code;
         _tickResendCooldown();
+        _tickWait();
       });
       return;
     }
@@ -263,7 +306,10 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
       // Only a real send starts a cooldown: an unregistered email returned
       // above sends no code.
       ref.read(resendCooldownsProvider.notifier).recordSent(email);
+      // V2.4 AC4: a new code starts the wrong-code count afresh.
+      ref.read(resetCodeWaitsProvider.notifier).reset(email);
       _tickResendCooldown();
+      _tickWait();
     });
   }
 
@@ -301,6 +347,8 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
 
     String? error;
     var codeRejected = false;
+    var waiting = false;
+    var wrongCode = false;
     try {
       await ref
           .read(authApiProvider)
@@ -312,6 +360,22 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
     } on ResetCodeInvalidException {
       error = AuthMessages.resetCodeInvalid;
       codeRejected = true;
+    } on ResetCodeWrongException {
+      // The reset is still alive, so unlike an expired code it keeps its
+      // resend cooldown; only the typed code is wrong.
+      error = AuthMessages.resetCodeWrong;
+      codeRejected = true;
+      wrongCode = true;
+    } on AuthRateLimitedException catch (e) {
+      // The server's wait replaces our own count (V2.4 AC5).
+      waiting = true;
+      final seconds = e.retryAfterSeconds;
+      final waits = ref.read(resetCodeWaitsProvider.notifier);
+      if (seconds != null && seconds > 0) {
+        waits.recordServerWait(_requestedEmail, Duration(seconds: seconds));
+      } else {
+        waits.recordWrong(_requestedEmail);
+      }
     } on AuthNetworkException {
       error = AuthMessages.network;
     } on AuthValidationException catch (e) {
@@ -324,9 +388,10 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
     }
 
     if (!mounted) return;
-    if (error == null) {
+    if (error == null && !waiting) {
       // The code is spent, so a later reset for this email must send anew.
       _stopResendCooldown();
+      ref.read(resetCodeWaitsProvider.notifier).reset(_requestedEmail);
       _finish();
       return;
     }
@@ -335,14 +400,16 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
     // corrected code doesn't mean retyping them. Cleared before
     // _isSubmitting drops so the listener doesn't wipe the new error.
     if (codeRejected) _codeController.clear();
+    if (wrongCode) {
+      ref.read(resetCodeWaitsProvider.notifier).recordWrong(_requestedEmail);
+    }
     setState(() {
       _isSubmitting = false;
-      if (codeRejected) {
-        _step = _ResetStep.code;
-        // The code is dead either way; a new one is the only way forward.
-        _stopResendCooldown();
-      }
+      if (codeRejected || waiting) _step = _ResetStep.code;
+      // An expired code is dead; a new one is the only way forward.
+      if (codeRejected && !wrongCode) _stopResendCooldown();
       _errorMessage = error;
+      _tickWait(announce: wrongCode || waiting);
     });
   }
 
@@ -495,6 +562,22 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
     ];
   }
 
+  List<Widget> _waitNotice() {
+    final wait = _wait;
+    if (wait == Duration.zero) return const [];
+    return [
+      const SizedBox(height: _fieldGap),
+      Text(
+        AuthMessages.tryAgainIn(wait),
+        textAlign: TextAlign.center,
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+          color: AppTheme.authSubtitle,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    ];
+  }
+
   List<Widget> _codeStep() {
     return [
       if (ApiConfig.useFakeAuth) ...[
@@ -533,6 +616,7 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
           ),
         ],
       ),
+      ..._waitNotice(),
       const SizedBox(height: _sectionGap),
       PrimaryPillButton(
         label: 'Continue',
@@ -576,6 +660,7 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
           ),
         ),
       ),
+      ..._waitNotice(),
       const SizedBox(height: _sectionGap),
       PrimaryPillButton(
         label: 'Reset Password',

@@ -11,6 +11,10 @@ const Duration _maxWait = Duration(minutes: 15);
 /// exponent here keeps the shift from overflowing for any failure count.
 const int _maxDoublings = 5;
 
+/// Wrong reset codes allowed before the wait starts (PIYA-204-V2.4 AC2,
+/// backend note B4); the 4th is the first one counted by [backoffAfter].
+const int resetCodeFreeAttempts = 3;
+
 /// Wait after [failures] counted failures: 30 s, doubling, capped at 15 min.
 /// 0 → Duration.zero.
 ///

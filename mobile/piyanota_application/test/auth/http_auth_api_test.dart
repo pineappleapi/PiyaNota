@@ -248,6 +248,34 @@ void main() {
       expect(confirm(api), throwsA(isA<ResetCodeInvalidException>()));
     });
 
+    test('confirm 400 reset_code_invalid maps to ResetCodeWrongException', () {
+      final api = _apiWith(
+        _StubAdapter(status: 400, body: {'error': 'reset_code_invalid'}),
+      );
+      expect(confirm(api), throwsA(isA<ResetCodeWrongException>()));
+    });
+
+    test('confirm 429 carries retryAfterSeconds', () {
+      final api = _apiWith(
+        _StubAdapter(
+          status: 429,
+          body: {
+            'error': {'code': 'rate_limited', 'retryAfterSeconds': 60},
+          },
+        ),
+      );
+      expect(
+        confirm(api),
+        throwsA(
+          isA<AuthRateLimitedException>().having(
+            (e) => e.retryAfterSeconds,
+            'retryAfterSeconds',
+            60,
+          ),
+        ),
+      );
+    });
+
     test('confirm 400 (weak password) maps to AuthValidationException', () {
       final api = _apiWith(
         _StubAdapter(status: 400, body: {'message': 'Password too weak'}),

@@ -48,6 +48,10 @@ class AuthMessages {
   static const String emailNotRegisteredEnd = '?';
   static const String resetCodeInvalid =
       'That code is invalid or has expired. Request a new code and try again.';
+
+  /// PIYA-204-V2.4 AC1 (exact text). Separate from [resetCodeInvalid],
+  /// which is for an expired or used code (AC3).
+  static const String resetCodeWrong = 'Verification code is wrong. Try again.';
   static const String resetCodeIncomplete =
       'Enter the 6-digit code from your email';
   static const String passwordResetSuccess =

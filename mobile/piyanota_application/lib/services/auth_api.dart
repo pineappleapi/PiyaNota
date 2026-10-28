@@ -61,6 +61,17 @@ class ResetCodeInvalidException extends AuthException {
   const ResetCodeInvalidException();
 }
 
+/// 400 `reset_code_invalid` from Password Reset Confirm (backend note B4,
+/// PIYA-204-V2.4): the code is wrong, but the reset is still alive. Kept
+/// apart from [ResetCodeInvalidException] (410, expired or used) because
+/// the user retypes a wrong code but must request a new expired one.
+class ResetCodeWrongException extends AuthException {
+  const ResetCodeWrongException();
+}
+
+/// Backend note B4's `error.code` for a wrong reset code.
+const String resetCodeWrongCode = 'reset_code_invalid';
+
 /// Backend note B3's `error.code` for an unregistered reset email.
 const String emailNotRegisteredCode = 'email_not_registered';
 
@@ -264,6 +275,12 @@ class HttpAuthApi implements AuthApi {
         const EmailNotRegisteredException(),
       _conflict => const EmailAlreadyRegisteredException(),
       _gone => const ResetCodeInvalidException(),
+      // B1/B4: the login and reset-code waits arrive as 429.
+      _tooManyRequests => AuthRateLimitedException(
+        retryAfterSeconds: retryAfterSecondsOf(response),
+      ),
+      _badRequest when _errorCode(response?.data) == resetCodeWrongCode =>
+        const ResetCodeWrongException(),
       _badRequest => _validationFailure(response),
       _ => const AuthServerException(),
     };

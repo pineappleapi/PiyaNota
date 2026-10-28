@@ -208,10 +208,65 @@ void main() {
       );
     });
 
-    test('unknown code is a 410', () {
+    test('unknown code is a wrong code (400), not an expired one', () {
       expect(
         confirm(_api(), '000000'),
-        throwsA(isA<ResetCodeInvalidException>()),
+        throwsA(isA<ResetCodeWrongException>()),
+      );
+    });
+
+    test(
+      '4th wrong code onwards is rate limited, doubling from 30 s',
+      () async {
+        var now = DateTime.utc(2026, 10, 28, 9);
+        final api = FakeAuthApi(latency: Duration.zero, clock: () => now);
+        await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
+        final good = api.demoInboxCodeFor(FakeAuthApi.demoEmail)!;
+        for (var i = 0; i < 3; i++) {
+          await expectLater(
+            confirm(api, '000000'),
+            throwsA(isA<ResetCodeWrongException>()),
+          );
+        }
+        await expectLater(
+          confirm(api, '000000'),
+          throwsA(
+            isA<AuthRateLimitedException>().having(
+              (e) => e.retryAfterSeconds,
+              'retryAfterSeconds',
+              30,
+            ),
+          ),
+        );
+        // Even the right code waits, so the limit can't be guessed around.
+        await expectLater(
+          confirm(api, good),
+          throwsA(isA<AuthRateLimitedException>()),
+        );
+        now = now.add(const Duration(seconds: 30));
+        await expectLater(
+          confirm(api, '000000'),
+          throwsA(
+            isA<AuthRateLimitedException>().having(
+              (e) => e.retryAfterSeconds,
+              'retryAfterSeconds',
+              60,
+            ),
+          ),
+        );
+      },
+    );
+
+    test('a new code request resets the wrong-code count', () async {
+      final api = _api();
+      await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
+      for (var i = 0; i < 4; i++) {
+        await confirm(api, '000000').then((_) {}, onError: (_) {});
+      }
+      await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
+      await expectLater(
+        confirm(api, '000000'),
+        throwsA(isA<ResetCodeWrongException>()),
       );
     });
 

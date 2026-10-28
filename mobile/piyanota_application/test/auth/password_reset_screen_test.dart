@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart' show ProviderScope;
 import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -15,6 +17,7 @@ import 'package:piyanota_application/screens/auth/sign_up_screen.dart';
 import 'package:piyanota_application/services/auth_api.dart';
 import 'package:piyanota_application/services/fake_auth_api.dart';
 import 'package:piyanota_application/state/resend_cooldowns.dart';
+import 'package:piyanota_application/state/reset_code_waits.dart';
 
 import 'auth_test_harness.dart';
 
@@ -348,6 +351,240 @@ void main() {
     expect(api.lastEmail, _email);
     expect(find.text(AuthMessages.resetCodeInvalid), findsNothing);
     expect(find.text(AuthMessages.resetCodeSent), findsOneWidget);
+  });
+
+  group('PIYA-204-V2.4 wrong code and wait', () {
+    Future<void> submitCode(WidgetTester tester, {bool first = false}) async {
+      await _enterCode(tester);
+      if (first) {
+        await _enterNewPassword(tester);
+      } else {
+        await _tapButton(tester, _resetPassword);
+        await tester.pump();
+      }
+      await tester.pumpAndSettle();
+    }
+
+    ScriptedAuthApi wrongApi({Object Function()? failure}) {
+      return ScriptedAuthApi(
+        onRequestReset: () async {},
+        onConfirmReset: () async =>
+            throw (failure?.call() ?? const ResetCodeWrongException()),
+      );
+    }
+
+    testWidgets('AC1: wrong code shows its message and keeps the passwords', (
+      tester,
+    ) async {
+      await pumpAuthScreen(
+        tester,
+        screen: const PasswordResetScreen(),
+        api: wrongApi(),
+      );
+      await _requestCode(tester);
+      await submitCode(tester, first: true);
+
+      expect(
+        find.text('Verification code is wrong. Try again.'),
+        findsOneWidget,
+      );
+      expect(find.text('Enter Code'), findsOneWidget);
+      expect(find.textContaining('Try again in'), findsNothing);
+
+      await _enterCode(tester);
+      expect(
+        find.widgetWithText(TextFormField, _newPassword),
+        findsNWidgets(2),
+      );
+    });
+
+    testWidgets('AC2: wrong codes 1-3 have no wait, the 4th starts 0:30', (
+      tester,
+    ) async {
+      final clock = _TestClock();
+      await pumpAuthScreen(
+        tester,
+        screen: const PasswordResetScreen(),
+        api: wrongApi(),
+        extraOverrides: [clock.override],
+      );
+      await _requestCode(tester);
+      await submitCode(tester, first: true);
+      for (var i = 2; i <= 3; i++) {
+        await submitCode(tester);
+        expect(find.textContaining('Try again in'), findsNothing, reason: '$i');
+      }
+      await submitCode(tester);
+
+      expect(find.text('Try again in 0:30'), findsOneWidget);
+      await tester.enterText(_field(0), _code);
+      await tester.pump();
+      expect(isButtonEnabled(tester, _continue), isFalse);
+
+      await clock.advance(tester, const Duration(seconds: 10));
+      expect(find.text('Try again in 0:20'), findsOneWidget);
+      await clock.advance(tester, const Duration(seconds: 20));
+      expect(find.textContaining('Try again in'), findsNothing);
+      expect(isButtonEnabled(tester, _continue), isTrue);
+
+      // A further wrong code doubles the wait.
+      await _tapButton(tester, _continue);
+      await tester.pumpAndSettle();
+      await _tapButton(tester, _resetPassword);
+      await tester.pumpAndSettle();
+      expect(find.text('Try again in 1:00'), findsOneWidget);
+    });
+
+    testWidgets('AC2: the wait is announced at start and end', (tester) async {
+      final announcements = <String>[];
+      tester.binding.defaultBinaryMessenger
+          .setMockDecodedMessageHandler<dynamic>(SystemChannels.accessibility, (
+            message,
+          ) async {
+            if (message is Map && message['type'] == 'announce') {
+              announcements.add((message['data'] as Map)['message'] as String);
+            }
+            return null;
+          });
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger
+            .setMockDecodedMessageHandler<dynamic>(
+              SystemChannels.accessibility,
+              null,
+            ),
+      );
+      final clock = _TestClock();
+      final handle = tester.ensureSemantics();
+      await pumpAuthScreen(
+        tester,
+        screen: const PasswordResetScreen(),
+        api: wrongApi(
+          failure: () => const AuthRateLimitedException(retryAfterSeconds: 30),
+        ),
+        extraOverrides: [clock.override],
+      );
+      await _requestCode(tester);
+      await submitCode(tester, first: true);
+
+      expect(announcements, contains('Try again in 0:30'));
+      expect(find.bySemanticsLabel('Try again in 0:30'), findsOneWidget);
+      await clock.advance(tester, const Duration(seconds: 30));
+      expect(announcements.last, AuthMessages.canTryAgain);
+      handle.dispose();
+    });
+
+    testWidgets('AC3: an expired code keeps its own message and no wait', (
+      tester,
+    ) async {
+      await pumpAuthScreen(
+        tester,
+        screen: const PasswordResetScreen(),
+        api: wrongApi(failure: () => const ResetCodeInvalidException()),
+      );
+      await _requestCode(tester);
+      await submitCode(tester, first: true);
+
+      expect(find.text(AuthMessages.resetCodeInvalid), findsOneWidget);
+      expect(find.text('Verification code is wrong. Try again.'), findsNothing);
+      expect(find.textContaining('Try again in'), findsNothing);
+    });
+
+    testWidgets('AC4: a newly requested code resets the wrong-code count', (
+      tester,
+    ) async {
+      final clock = _TestClock();
+      await pumpAuthScreen(
+        tester,
+        screen: const PasswordResetScreen(),
+        api: wrongApi(),
+        extraOverrides: [clock.override],
+      );
+      await _requestCode(tester);
+      await submitCode(tester, first: true);
+      await submitCode(tester);
+      await submitCode(tester);
+
+      await clock.advance(tester, const Duration(seconds: 30));
+      await tester.ensureVisible(
+        find.widgetWithText(TextButton, 'Resend code'),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(TextButton, 'Resend code'));
+      await tester.pumpAndSettle();
+
+      // Three more wrong codes: still under the limit, so no wait.
+      await submitCode(tester);
+      await submitCode(tester);
+      await submitCode(tester);
+      expect(find.textContaining('Try again in'), findsNothing);
+    });
+
+    testWidgets('AC4: a successful reset resets the count, per email', (
+      tester,
+    ) async {
+      final api = ScriptedAuthApi(
+        onRequestReset: () async {},
+        onConfirmReset: () async {},
+      );
+      await pumpAuthScreen(
+        tester,
+        screen: const PasswordResetScreen(),
+        api: api,
+        stubLogin: true,
+      );
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(PasswordResetScreen)),
+      );
+      final waits = container.read(resetCodeWaitsProvider.notifier);
+      // Padding and case share one count.
+      waits.recordWrong(' Maria@Example.com ');
+      waits.recordWrong(_email);
+      expect(waits.failures(_email), 2);
+
+      await _requestCode(tester);
+      expect(waits.failures(_email), 0);
+
+      waits.recordWrong(_email);
+      await _enterCode(tester);
+      await _enterNewPassword(tester);
+      await tester.pumpAndSettle();
+      expect(waits.failures(_email), 0);
+    });
+
+    testWidgets('AC5: the server 429 retryAfterSeconds wins over our count', (
+      tester,
+    ) async {
+      await pumpAuthScreen(
+        tester,
+        screen: const PasswordResetScreen(),
+        api: wrongApi(
+          failure: () => const AuthRateLimitedException(retryAfterSeconds: 90),
+        ),
+      );
+      await _requestCode(tester);
+      await submitCode(tester, first: true);
+
+      expect(find.text('Try again in 1:30'), findsOneWidget);
+    });
+
+    testWidgets('a network failure is not counted as a wrong code', (
+      tester,
+    ) async {
+      await pumpAuthScreen(
+        tester,
+        screen: const PasswordResetScreen(),
+        api: wrongApi(failure: () => const AuthNetworkException()),
+      );
+      await _requestCode(tester);
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(PasswordResetScreen)),
+      );
+      await submitCode(tester, first: true);
+      expect(
+        container.read(resetCodeWaitsProvider.notifier).failures(_email),
+        0,
+      );
+    });
   });
 
   testWidgets('Resend code is locked for 30 seconds after each send', (
