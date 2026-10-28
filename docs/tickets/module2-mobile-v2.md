@@ -53,6 +53,7 @@ Q1–Q6 were answered by the user on 2026-10-28. The answers are folded into the
 5. The server enforces the limit as well (backend V2 note B1). When the server answers 429 with `retryAfterSeconds`, the app shows that wait instead of its own count.
 6. A network failure (AC7) does not count as a wrong attempt.
 7. Fake: the fake backend applies the same schedule, so it can be tested with `demo@piyanota.app` and a wrong password.
+8. The count also resets after 24 h with no wrong attempt, on the device and on the server (user decision 2026-10-29; backend V2 note B1.4).
 
 ### PIYA-202-V2.2 — Stay signed in (auto-login)
 **Now:** every launch goes through Login (`app.dart:126` note).
@@ -103,6 +104,7 @@ Per **[Q3]** (accepted).
 3. An expired code keeps its own message (code expired, request a new one), separate from "wrong".
 4. A successful reset, or a new code being sent, resets the wrong-code count. **[Call]**
 5. The server enforces the limit (backend V2 note B4); a 429 `retryAfterSeconds` overrides the app's own count.
+6. The wrong-code count also resets after 24 h with no wrong code (user decision 2026-10-29; backend V2 note B4.6). The fake backend applies the same rule.
 
 ---
 
@@ -240,6 +242,19 @@ Per **[Q6]**.
 **Acceptance Criteria:**
 1. The filled part of every Mixer volume slider uses the brand green-to-blue gradient instead of white, so the level is easy to read.
 2. A muted row's slider is clearly dimmed, so muted and unmuted rows look different.
+
+---
+
+## PIYA-212 — Settings
+
+### PIYA-212-V2.1 — "All voices" option for the default voice
+User decision 2026-10-29: once a voice is picked, there must be a way back to hearing all voices by default.
+**Acceptance Criteria:**
+1. The Settings "Default voice" picker offers "All voices" as well as Soprano, Alto, Tenor and Bass.
+2. Choosing "All voices" removes the saved default voice, so the next score opened plays all four voices (PIYA-209-V2.2 AC1).
+3. When no default voice is saved (onboarding "I'm a Conductor / I'm not sure yet", or "All voices" chosen in Settings), the picker shows "All voices" as selected.
+4. Finishing onboarding with "I'm a Conductor / I'm not sure yet" also removes any previously saved default voice.
+5. "All voices" is readable by screen readers like the other options, and the picker fits a 360 dp-wide phone with no overflow.
 
 ---
 

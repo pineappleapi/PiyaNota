@@ -517,13 +517,13 @@ What the backend needs for this to hold:
 
 ### V2 notes (2026-10-28) — backend changes needed by app Version 2
 
-_Source: `docs/tickets/module2-mobile-v2.md`. Reviewed by backend-lead 2026-10-29: agreed as worded below, once the app sends `email` to PIYA-304 (B4.2) and the two [Decision needed] items are answered. Until Module 3 builds them, the app's fake backend simulates them. All waits below are enforced by the server; the app's own countdowns are UX only and are not a security control._
+_Source: `docs/tickets/module2-mobile-v2.md`. Reviewed by backend-lead 2026-10-29: agreed as worded below, once the app sends `email` to PIYA-304 (B4.2). The two 24 h reset rules (B1.4, B4.6) were decided by the user on 2026-10-29. Until Module 3 builds them, the app's fake backend simulates them. All waits below are enforced by the server; the app's own countdowns are UX only and are not a security control._
 
 - **B1 — Login wait time (PIYA-202-V2.1).** PIYA-302 gets a server-side limit on wrong logins:
   1. One counter per normalized email (trimmed, lowercased, as PIYA-301), kept whether or not the email is registered, so the limit never reveals which emails exist. Durable: it survives a restart and is shared across workers (as PIYA-322 AC5).
   2. Wrong attempt N (N ≥ 1) returns the generic 401 (AC3) and starts a wait of 30 s × 2^(N−1), capped at 15 min (V2 doc Q4).
   3. During a wait, every login for that email returns 429 `rate_limited` with a `Retry-After` header (integer seconds) and `error.retryAfterSeconds`, in the PIYA-101 AC9 envelope. This is checked before the password, so the right password waits too. A request made during the wait is not counted as a wrong attempt.
-  4. The count resets on a successful login and on a successful password reset (PIYA-304). The account is never locked permanently. **[Decision needed: the count also resets after 24 h with no wrong attempt.]**
+  4. The count resets on a successful login and on a successful password reset (PIYA-304). The account is never locked permanently. The count also resets after 24 h with no wrong attempt (user decision 2026-10-29).
   5. A separate per-IP counter limits guessing across many emails: starting value 30 wrong logins per IP per 15 min, set in config, same 429. Keep it high enough for a choir sharing one venue Wi-Fi.
   6. Accepted residual risk: anyone who knows an email can keep that account waiting by sending one wrong password every 15 min. A password reset lifts the wait.
 - **B2 — Stay signed in (PIYA-202-V2.2).** No new endpoint. The app checks a stored token on launch through PIYA-306 (401 = Login). PIYA-314's expiry policy decides how long "stay signed in" lasts.
@@ -537,7 +537,7 @@ _Source: `docs/tickets/module2-mobile-v2.md`. Reviewed by backend-lead 2026-10-2
   3. PIYA-304 AC3 changes: 410 `reset_token_expired_or_invalid` means there is no live reset for that email (expired, used, superseded or never requested). 400 `reset_code_invalid` means a live reset exists but the code is wrong.
   4. One wrong-code counter per account, durable. Wrong code N returns 400 `reset_code_invalid`. From N = 3 it also starts a wait of 30 s × 2^(N−3), capped at 15 min (Q4: 30 s after the 3rd, 1 min after the 4th, and so on).
   5. During a wait, every PIYA-304 request for that email returns 429 `rate_limited` with `Retry-After` and `error.retryAfterSeconds`, without checking the code. Requests made during the wait are not counted.
-  6. The counter resets only on a successful reset. A new code request (PIYA-303) does not reset it; the app may still clear its own displayed count (PIYA-204-V2.4 AC4). **[Decision needed: the counter also resets after 24 h with no wrong code.]**
+  6. The counter resets only on a successful reset. A new code request (PIYA-303) does not reset it; the app may still clear its own displayed count (PIYA-204-V2.4 AC4). The counter also resets after 24 h with no wrong code (user decision 2026-10-29).
   7. A 400 for a weak new password neither consumes the code nor counts as a wrong code.
   8. A per-IP limit across emails: starting value 30 wrong codes per IP per hour, set in config, same 429.
   9. Needs a real email sender, which Module 3 doesn't have yet.
