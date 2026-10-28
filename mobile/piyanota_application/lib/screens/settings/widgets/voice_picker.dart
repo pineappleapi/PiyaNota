@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
 
 import '../../../models/voice_part.dart';
+import '../../../theme/app_theme.dart';
 import '../../playback/mixer_sheet.dart';
 import '../settings_messages.dart';
 
-/// PIYA-212 AC7: the four voices as single-select pills in their Voice
-/// Mixer colours, so the choice looks like the voice it turns on in
-/// Playback. The chosen pill is filled with a white tick; the rest are
-/// outlined in their colour. Every mixer colour is 4.5:1 against white
-/// either way round (see AppTheme.mixerSoprano), so both states pass AA.
+/// PIYA-212 AC7 and PIYA-212-V2.1: "All voices" plus the four voices as
+/// single-select pills. The voices wear their Voice Mixer colours, so the
+/// choice looks like the voice it turns on in Playback; "All voices" belongs
+/// to no one voice and uses the chip text colour (white on it 5.9:1). The
+/// chosen pill is filled with a white tick; the rest are outlined in their
+/// colour. Every mixer colour is 4.5:1 against white either way round (see
+/// AppTheme.mixerSoprano), so both states pass AA.
 class VoicePicker extends StatelessWidget {
   const VoicePicker({
     super.key,
@@ -16,9 +19,11 @@ class VoicePicker extends StatelessWidget {
     required this.onChanged,
   });
 
-  /// Null when none was ever chosen (onboarding skipped).
+  /// Null when no voice is saved: "All voices" is then the selected pill.
   final VoicePart? selected;
-  final ValueChanged<VoicePart> onChanged;
+
+  /// Null means "All voices" (PIYA-212-V2.1).
+  final ValueChanged<VoicePart?> onChanged;
 
   static const double _gap = 8;
 
@@ -28,9 +33,16 @@ class VoicePicker extends StatelessWidget {
       spacing: _gap,
       runSpacing: _gap,
       children: [
+        _VoicePill(
+          label: SettingsMessages.allVoices,
+          color: AppTheme.playbackChipText,
+          selected: selected == null,
+          onTap: () => onChanged(null),
+        ),
         for (final voice in VoicePart.values)
           _VoicePill(
-            voice: voice,
+            label: voice.label,
+            color: VoiceMixerSheet.pillColors[voice]!,
             selected: voice == selected,
             onTap: () => onChanged(voice),
           ),
@@ -41,12 +53,14 @@ class VoicePicker extends StatelessWidget {
 
 class _VoicePill extends StatelessWidget {
   const _VoicePill({
-    required this.voice,
+    required this.label,
+    required this.color,
     required this.selected,
     required this.onTap,
   });
 
-  final VoicePart voice;
+  final String label;
+  final Color color;
   final bool selected;
   final VoidCallback onTap;
 
@@ -60,7 +74,6 @@ class _VoicePill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = VoiceMixerSheet.pillColors[voice]!;
     final foreground = selected ? Colors.white : color;
     final shape = StadiumBorder(
       side: BorderSide(color: color, width: _outlineWidth),
@@ -70,7 +83,7 @@ class _VoicePill extends StatelessWidget {
       button: true,
       selected: selected,
       inMutuallyExclusiveGroup: true,
-      label: SettingsMessages.voiceSemantics(voice.label),
+      label: SettingsMessages.voiceSemantics(label),
       excludeSemantics: true,
       onTap: onTap,
       child: AnimatedContainer(
@@ -108,7 +121,7 @@ class _VoicePill extends StatelessWidget {
                     // wraps (the pill grows taller) rather than overflow.
                     Flexible(
                       child: Text(
-                        voice.label,
+                        label,
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.labelLarge?.copyWith(
                           fontSize: _fontSize,

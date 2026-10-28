@@ -18,9 +18,9 @@ class OnboardingPrefsService {
   Future<void> completeOnboarding({VoicePart? defaultVoice}) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_completedKey, true);
-    if (defaultVoice != null) {
-      await prefs.setString(_defaultVoiceKey, defaultVoice.name);
-    }
+    // PIYA-212-V2.1 AC4: "I'm not sure yet" must not leave an older pick
+    // behind.
+    await _writeVoice(prefs, defaultVoice);
   }
 
   Future<VoicePart?> getDefaultVoicePart() async {
@@ -31,9 +31,18 @@ class OnboardingPrefsService {
   }
 
   /// PIYA-212 AC7: Settings changes the same pref onboarding set, without
-  /// touching the completed flag.
-  Future<void> setDefaultVoicePart(VoicePart voice) async {
+  /// touching the completed flag. Null ("All voices", PIYA-212-V2.1) removes
+  /// it, so playback starts with all four voices.
+  Future<void> setDefaultVoicePart(VoicePart? voice) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_defaultVoiceKey, voice.name);
+    await _writeVoice(prefs, voice);
+  }
+
+  Future<void> _writeVoice(SharedPreferences prefs, VoicePart? voice) async {
+    if (voice == null) {
+      await prefs.remove(_defaultVoiceKey);
+    } else {
+      await prefs.setString(_defaultVoiceKey, voice.name);
+    }
   }
 }

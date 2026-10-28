@@ -131,7 +131,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     });
   }
 
-  Future<void> _setVoice(VoicePart voice) async {
+  Future<void> _setVoice(VoicePart? voice) async {
     final previous = _voice;
     if (voice == previous) return;
     setState(() => _voice = voice);

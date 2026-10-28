@@ -54,6 +54,8 @@ class SettingsMessages {
   // AC7.
   static const String defaultVoice = 'Default voice';
   static const String defaultVoiceCaption = 'Plays first when you open a score';
+  // PIYA-212-V2.1: the way back to no default voice.
+  static const String allVoices = 'All voices';
   static String voiceSemantics(String voice) => '$voice, default voice';
 
   // AC8.

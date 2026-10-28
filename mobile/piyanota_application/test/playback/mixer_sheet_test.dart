@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:piyanota_application/models/voice_part.dart';
+import 'package:piyanota_application/services/onboarding_prefs_service.dart';
 import 'package:piyanota_application/screens/playback/playback_messages.dart';
 import 'package:piyanota_application/screens/playback/sheet_parts.dart';
 import 'package:piyanota_application/state/playback_providers.dart';
@@ -99,6 +101,23 @@ void main() {
     ) async {
       final harness = ready();
       await pumpPlayback(tester, harness);
+      expect(controller(tester).state.muted, isEmpty);
+      expect(harness.engine.volumes.values.every((v) => v == 1), isTrue);
+    });
+
+    testWidgets('PIYA-212-V2.1 AC2: after All voices is chosen in Settings, '
+        'the next score plays all four', (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'onboarding_default_voice': VoicePart.alto.name,
+      });
+      await OnboardingPrefsService().setDefaultVoicePart(null);
+      final store = await SharedPreferences.getInstance();
+      final harness = ready();
+      await pumpPlayback(
+        tester,
+        harness,
+        prefs: {for (final k in store.getKeys()) k: store.get(k)!},
+      );
       expect(controller(tester).state.muted, isEmpty);
       expect(harness.engine.volumes.values.every((v) => v == 1), isTrue);
     });

@@ -53,6 +53,28 @@ void main() {
       );
     });
 
+    test(
+      'AC4: finishing onboarding with no voice removes a saved one',
+      () async {
+        final prefs = OnboardingPrefsService();
+        await prefs.setDefaultVoicePart(VoicePart.alto);
+        await prefs.completeOnboarding(defaultVoice: null);
+        expect(await prefs.getDefaultVoicePart(), isNull);
+        expect(await prefs.isOnboardingCompleted(), isTrue);
+      },
+    );
+
+    test(
+      'setting null removes the saved voice, onboarding flag stays',
+      () async {
+        final prefs = OnboardingPrefsService();
+        await prefs.completeOnboarding(defaultVoice: VoicePart.alto);
+        await prefs.setDefaultVoicePart(null);
+        expect(await prefs.getDefaultVoicePart(), isNull);
+        expect(await prefs.isOnboardingCompleted(), isTrue);
+      },
+    );
+
     test('setting a voice does not mark onboarding complete', () async {
       final prefs = OnboardingPrefsService();
       await prefs.setDefaultVoicePart(VoicePart.tenor);

@@ -147,6 +147,10 @@ class _Harness {
 Finder _pill(VoicePart voice) =>
     find.bySemanticsLabel(SettingsMessages.voiceSemantics(voice.label));
 
+Finder get _allVoicesPill => find.bySemanticsLabel(
+  SettingsMessages.voiceSemantics(SettingsMessages.allVoices),
+);
+
 Finder get _tempoValue => find.byKey(const ValueKey('settings-tempo-value'));
 
 /// Centres [finder] in the list, so it is clear of both the header and
@@ -334,6 +338,91 @@ void main() {
         isSemantics(isSelected: false),
       );
     });
+  });
+
+  group('All voices (PIYA-212-V2.1)', () {
+    testWidgets('AC1: offered next to the four voices', (tester) async {
+      await _Harness(session: _liveSession()).pump(tester);
+      expect(find.text(SettingsMessages.allVoices), findsOneWidget);
+      for (final voice in VoicePart.values) {
+        expect(find.text(voice.label), findsOneWidget);
+      }
+    });
+
+    testWidgets('AC3, AC5: no saved voice shows All voices selected, with a '
+        'screen-reader label', (tester) async {
+      await _Harness(session: _liveSession()).pump(tester);
+      expect(
+        tester.getSemantics(_allVoicesPill),
+        isSemantics(
+          isSelected: true,
+          isButton: true,
+          isInMutuallyExclusiveGroup: true,
+          label: SettingsMessages.voiceSemantics(SettingsMessages.allVoices),
+        ),
+      );
+      for (final voice in VoicePart.values) {
+        expect(
+          tester.getSemantics(_pill(voice)),
+          isSemantics(isSelected: false),
+        );
+      }
+    });
+
+    testWidgets('AC2: choosing it removes the saved voice', (tester) async {
+      await _Harness(
+        session: _liveSession(),
+        prefs: {'onboarding_default_voice': VoicePart.alto.name},
+      ).pump(tester);
+      await tester.tap(find.text(SettingsMessages.allVoices));
+      await tester.pumpAndSettle();
+
+      expect(await OnboardingPrefsService().getDefaultVoicePart(), isNull);
+      expect(
+        (await SharedPreferences.getInstance()).containsKey(
+          'onboarding_default_voice',
+        ),
+        isFalse,
+      );
+      expect(
+        tester.getSemantics(_allVoicesPill),
+        isSemantics(isSelected: true),
+      );
+      expect(
+        tester.getSemantics(_pill(VoicePart.alto)),
+        isSemantics(isSelected: false),
+      );
+    });
+
+    testWidgets('picking a voice again after All voices saves it', (
+      tester,
+    ) async {
+      await _Harness(session: _liveSession()).pump(tester);
+      await tester.tap(find.text(VoicePart.tenor.label));
+      await tester.pumpAndSettle();
+      expect(
+        await OnboardingPrefsService().getDefaultVoicePart(),
+        VoicePart.tenor,
+      );
+    });
+
+    for (final (size, scale) in const [
+      (Size(360, 640), 1.0),
+      (Size(360, 640), 1.3),
+    ]) {
+      testWidgets('AC5: no overflow at 360 dp, ${scale}x text', (tester) async {
+        await _Harness(
+          session: _liveSession(),
+          prefs: {'onboarding_default_voice': VoicePart.soprano.name},
+        ).pump(tester, logicalSize: size, textScale: scale);
+        await _scrollTo(tester, find.text(SettingsMessages.allVoices));
+        expect(tester.takeException(), isNull);
+        expect(
+          tester.getRect(find.text(SettingsMessages.allVoices)).right,
+          lessThanOrEqualTo(size.width),
+        );
+      });
+    }
   });
 
   group('default tempo (AC8)', () {
