@@ -184,6 +184,7 @@ void main() {
     };
 
     Future<void> confirm(HttpAuthApi api) => api.confirmPasswordReset(
+      email: 'maria@example.com',
       resetToken: '482913',
       newPassword: 'choir2026',
       newPasswordConfirmation: 'choir2026',
@@ -247,12 +248,13 @@ void main() {
       );
     });
 
-    test('confirm posts PIYA-304 field names', () async {
+    test('confirm posts PIYA-304 field names, with the email (B4.2)', () async {
       final adapter = _StubAdapter(body: confirmOk);
       await confirm(_apiWith(adapter));
 
       expect(adapter.lastRequest?.path, ApiConfig.passwordResetConfirmPath);
       expect(adapter.lastRequest?.data, {
+        'email': 'maria@example.com',
         'resetToken': '482913',
         'newPassword': 'choir2026',
         'newPasswordConfirmation': 'choir2026',

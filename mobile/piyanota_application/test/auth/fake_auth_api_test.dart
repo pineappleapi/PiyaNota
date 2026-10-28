@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:piyanota_application/services/auth_api.dart';
@@ -107,6 +109,7 @@ void main() {
       );
       await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
       await api.confirmPasswordReset(
+        email: FakeAuthApi.demoEmail,
         resetToken: api.demoInboxCodeFor(FakeAuthApi.demoEmail)!,
         newPassword: 'Newpass123',
         newPasswordConfirmation: 'Newpass123',
@@ -141,12 +144,27 @@ void main() {
   group('password reset (PIYA-303/304)', () {
     const newPassword = 'choir2026';
 
-    Future<void> confirm(FakeAuthApi api, String code) =>
-        api.confirmPasswordReset(
-          resetToken: code,
-          newPassword: newPassword,
-          newPasswordConfirmation: newPassword,
-        );
+    Future<void> confirm(
+      FakeAuthApi api,
+      String code, {
+      String email = FakeAuthApi.demoEmail,
+    }) => api.confirmPasswordReset(
+      email: email,
+      resetToken: code,
+      newPassword: newPassword,
+      newPasswordConfirmation: newPassword,
+    );
+
+    /// A code that is surely not [code], so a "wrong code" never hits it.
+    String not(String code) => code == '000000' ? '000001' : '000000';
+
+    Matcher rateLimited(int seconds) => throwsA(
+      isA<AuthRateLimitedException>().having(
+        (e) => e.retryAfterSeconds,
+        'retryAfterSeconds',
+        seconds,
+      ),
+    );
 
     test(
       'registered email gets a 6-digit code that resets the password',
@@ -208,67 +226,94 @@ void main() {
       );
     });
 
-    test('unknown code is a wrong code (400), not an expired one', () {
+    test(
+      'a wrong code for a live reset is a 400, not an expired one',
+      () async {
+        final api = _api();
+        await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
+        final good = api.demoInboxCodeFor(FakeAuthApi.demoEmail)!;
+        await expectLater(
+          confirm(api, not(good)),
+          throwsA(isA<ResetCodeWrongException>()),
+        );
+      },
+    );
+
+    test('no live reset for the email is a 410 (B4.3)', () {
       expect(
         confirm(_api(), '000000'),
-        throwsA(isA<ResetCodeWrongException>()),
+        throwsA(isA<ResetCodeInvalidException>()),
       );
     });
 
+    test('a correct code under a different email is rejected (B4.2)', () async {
+      const other = 'ann@example.com';
+      final api = FakeAuthApi(latency: Duration.zero, random: Random(7));
+      await api.signUp(
+        email: other,
+        password: newPassword,
+        passwordConfirmation: newPassword,
+      );
+      await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
+      final demoCode = api.demoInboxCodeFor(FakeAuthApi.demoEmail)!;
+
+      // No reset was requested for the other account.
+      await expectLater(
+        confirm(api, demoCode, email: other),
+        throwsA(isA<ResetCodeInvalidException>()),
+      );
+      await api.requestPasswordReset(email: other);
+      expect(api.demoInboxCodeFor(other), isNot(demoCode));
+      // Its reset is live, but the demo's code is not its code.
+      await expectLater(
+        confirm(api, demoCode, email: other),
+        throwsA(isA<ResetCodeWrongException>()),
+      );
+      await confirm(api, demoCode);
+    });
+
     test(
-      '4th wrong code onwards is rate limited, doubling from 30 s',
+      'every wrong code is a 400; the 3rd starts a wait of 30 s, 60 s, 120 s',
       () async {
         var now = DateTime.utc(2026, 10, 28, 9);
         final api = FakeAuthApi(latency: Duration.zero, clock: () => now);
         await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
         final good = api.demoInboxCodeFor(FakeAuthApi.demoEmail)!;
-        for (var i = 0; i < 3; i++) {
-          await expectLater(
-            confirm(api, '000000'),
-            throwsA(isA<ResetCodeWrongException>()),
-          );
+        Future<void> wrong() => confirm(api, not(good));
+
+        for (var i = 0; i < 2; i++) {
+          await expectLater(wrong(), throwsA(isA<ResetCodeWrongException>()));
         }
-        await expectLater(
-          confirm(api, '000000'),
-          throwsA(
-            isA<AuthRateLimitedException>().having(
-              (e) => e.retryAfterSeconds,
-              'retryAfterSeconds',
-              30,
-            ),
-          ),
-        );
-        // Even the right code waits, so the limit can't be guessed around.
-        await expectLater(
-          confirm(api, good),
-          throwsA(isA<AuthRateLimitedException>()),
-        );
-        now = now.add(const Duration(seconds: 30));
-        await expectLater(
-          confirm(api, '000000'),
-          throwsA(
-            isA<AuthRateLimitedException>().having(
-              (e) => e.retryAfterSeconds,
-              'retryAfterSeconds',
-              60,
-            ),
-          ),
-        );
+        // 3rd, 4th and 5th wrong codes: still "wrong", each then a wait.
+        for (final seconds in [30, 60, 120]) {
+          await expectLater(wrong(), throwsA(isA<ResetCodeWrongException>()));
+          // Even the right code waits, and a request during the wait is
+          // not counted (B4.5), or the next wait would not double.
+          await expectLater(confirm(api, good), rateLimited(seconds));
+          await expectLater(wrong(), rateLimited(seconds));
+          now = now.add(Duration(seconds: seconds));
+        }
+        await confirm(api, good);
       },
     );
 
-    test('a new code request resets the wrong-code count', () async {
-      final api = _api();
-      await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
-      for (var i = 0; i < 4; i++) {
-        await confirm(api, '000000').then((_) {}, onError: (_) {});
-      }
-      await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
-      await expectLater(
-        confirm(api, '000000'),
-        throwsA(isA<ResetCodeWrongException>()),
-      );
-    });
+    test(
+      'a new code request does not reset the wrong-code count (B4.6)',
+      () async {
+        final api = _api();
+        await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
+        for (var i = 0; i < 2; i++) {
+          await confirm(api, '000000').then((_) {}, onError: (_) {});
+        }
+        await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
+        final good = api.demoInboxCodeFor(FakeAuthApi.demoEmail)!;
+        await expectLater(
+          confirm(api, not(good)),
+          throwsA(isA<ResetCodeWrongException>()),
+        );
+        await expectLater(confirm(api, good), rateLimited(30));
+      },
+    );
 
     test('code expires after resetCodeLifetime', () async {
       var now = DateTime.utc(2026, 10, 8, 9);
@@ -292,9 +337,10 @@ void main() {
       final second = api.demoInboxCodeFor(FakeAuthApi.demoEmail)!;
 
       expect(second, isNot(first));
+      // B4.3: a reset is still live, so the old code is just wrong (400).
       await expectLater(
         confirm(api, first),
-        throwsA(isA<ResetCodeInvalidException>()),
+        throwsA(isA<ResetCodeWrongException>()),
       );
       await confirm(api, second);
     });
@@ -306,6 +352,7 @@ void main() {
 
       await expectLater(
         api.confirmPasswordReset(
+          email: FakeAuthApi.demoEmail,
           resetToken: code,
           newPassword: 'short',
           newPasswordConfirmation: 'short',

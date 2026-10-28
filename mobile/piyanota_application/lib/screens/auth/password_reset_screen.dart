@@ -355,6 +355,7 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
       await ref
           .read(authApiProvider)
           .confirmPasswordReset(
+            email: _requestedEmail,
             resetToken: _code,
             newPassword: _passwordController.text,
             newPasswordConfirmation: _confirmController.text,
@@ -376,20 +377,17 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
       if (seconds != null && seconds > 0) {
         waits.recordServerWait(_requestedEmail, Duration(seconds: seconds));
       } else {
-        // A 429 must always show a wait. While the count is still within
-        // the free attempts recordWrong sets none, so use the first step.
-        waits.recordWrong(_requestedEmail);
-        if (waits.remaining(_requestedEmail) == Duration.zero) {
-          waits.recordServerWait(
-            _requestedEmail,
-            backoffAfter(
-              math.max(
-                1,
-                waits.failures(_requestedEmail) - resetCodeFreeAttempts,
-              ),
+        // A 429 must always show a wait, but is not a wrong code (B4.5), so
+        // the count stays; within the free attempts use the first step.
+        waits.recordServerWait(
+          _requestedEmail,
+          backoffAfter(
+            math.max(
+              1,
+              waits.failures(_requestedEmail) - resetCodeFreeAttempts,
             ),
-          );
-        }
+          ),
+        );
       }
     } on AuthNetworkException {
       error = AuthMessages.network;

@@ -36,6 +36,7 @@ class ScriptedAuthApi implements AuthApi {
   int confirmResetCalls = 0;
   String? lastEmail;
   String? lastResetToken;
+  String? lastConfirmEmail;
   String? lastNewPassword;
 
   @override
@@ -47,11 +48,13 @@ class ScriptedAuthApi implements AuthApi {
 
   @override
   Future<void> confirmPasswordReset({
+    required String email,
     required String resetToken,
     required String newPassword,
     required String newPasswordConfirmation,
   }) {
     confirmResetCalls++;
+    lastConfirmEmail = email;
     lastResetToken = resetToken;
     lastNewPassword = newPassword;
     return onConfirmReset!();

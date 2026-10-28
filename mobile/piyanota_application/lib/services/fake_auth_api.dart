@@ -46,9 +46,10 @@ class FakeAuthApi implements AuthApi {
   final Random _random;
   final Map<String, String> _passwordsByEmail = {demoEmail: demoPassword};
 
-  /// Outstanding codes, keyed by code because PIYA-304 identifies the
-  /// account by `resetToken` alone (no email in the confirm request).
-  final Map<String, _ResetGrant> _grantsByCode = {};
+  /// The live reset per account: at most one, since a new request voids
+  /// the old code (PIYA-303 AC5). Keyed by email because the server finds
+  /// the reset by email, never by the code alone (backend note B4.2).
+  final Map<String, _ResetGrant> _grantsByEmail = {};
 
   /// Which account each issued token belongs to, so the fake Score Library
   /// can scope its data per account the way the real API scopes by the
@@ -84,16 +85,11 @@ class FakeAuthApi implements AuthApi {
   final Map<String, int> _loginFailures = {};
   final Map<String, DateTime> _loginBlockedUntil = {};
 
-  /// PIYA-204-V2.4 / B4: wrong reset codes since the last code request or
-  /// successful reset, and when the current wait ends. One counter for the
-  /// whole fake because the confirm call carries no email, so a wrong code
-  /// can't be tied to an account (the real server ties it to the reset).
-  int _wrongCodes = 0;
-
-  /// Codes that were once real but are now spent or superseded: the real
-  /// server calls those 410, unlike a code it never issued (400).
-  final Set<String> _deadCodes = {};
-  DateTime? _wrongCodeBlockedUntil;
+  /// PIYA-204-V2.4 / B4.4: wrong reset codes per account since its last
+  /// successful reset (a new code request does not clear them, B4.6), and
+  /// when the current wait ends.
+  final Map<String, int> _wrongCodes = {};
+  final Map<String, DateTime> _wrongCodeBlockedUntil = {};
 
   @override
   Future<AuthSession> login({
@@ -153,64 +149,61 @@ class FakeAuthApi implements AuthApi {
       throw const EmailNotRegisteredException();
     }
 
-    // PIYA-303 AC5: a new request voids any earlier unused code.
-    _grantsByCode.removeWhere((code, grant) {
-      final superseded = grant.email == normalized;
-      if (superseded) _deadCodes.add(code);
-      return superseded;
-    });
-    _wrongCodes = 0;
-    _wrongCodeBlockedUntil = null;
-    _grantsByCode[_newCode()] = _ResetGrant(
-      email: normalized,
+    // PIYA-303 AC5: replacing the entry voids any earlier unused code.
+    _grantsByEmail[normalized] = _ResetGrant(
+      code: _newCode(),
       expiresAt: _now().add(resetCodeLifetime),
     );
   }
 
   @override
   Future<void> confirmPasswordReset({
+    required String email,
     required String resetToken,
     required String newPassword,
     required String newPasswordConfirmation,
   }) async {
     await Future<void>.delayed(latency);
+    final normalized = _normalize(email);
     final now = _now();
-    final blockedUntil = _wrongCodeBlockedUntil;
-    // Even the right code waits, so the limit can't be guessed around.
+    final blockedUntil = _wrongCodeBlockedUntil[normalized];
+    // B4.5: even the right code waits, so the limit can't be guessed
+    // around, and a request during the wait is not counted.
     if (blockedUntil != null && now.isBefore(blockedUntil)) {
       throw AuthRateLimitedException(
         retryAfterSeconds: (blockedUntil.difference(now).inMilliseconds / 1000)
             .ceil(),
       );
     }
-    final grant = _grantsByCode[resetToken.trim()];
-    if (grant == null && _deadCodes.contains(resetToken.trim())) {
+    final grant = _grantsByEmail[normalized];
+    // B4.3: no live reset for this email (expired, used, superseded or
+    // never requested) is 410, whatever the code.
+    if (grant == null || !now.isBefore(grant.expiresAt)) {
       throw const ResetCodeInvalidException();
     }
-    if (grant == null) {
-      _wrongCodes++;
-      if (_wrongCodes <= resetCodeFreeAttempts) {
-        throw const ResetCodeWrongException();
+    if (grant.code != resetToken.trim()) {
+      // B4.4: every wrong code is a 400; from the 3rd on it also starts a
+      // wait, which the next request meets as a 429.
+      final count = (_wrongCodes[normalized] ?? 0) + 1;
+      _wrongCodes[normalized] = count;
+      if (count > resetCodeFreeAttempts) {
+        _wrongCodeBlockedUntil[normalized] = now.add(
+          backoffAfter(count - resetCodeFreeAttempts),
+        );
       }
-      final wait = backoffAfter(_wrongCodes - resetCodeFreeAttempts);
-      _wrongCodeBlockedUntil = now.add(wait);
-      throw AuthRateLimitedException(retryAfterSeconds: wait.inSeconds);
-    }
-    if (!now.isBefore(grant.expiresAt)) {
-      throw const ResetCodeInvalidException();
+      throw const ResetCodeWrongException();
     }
     _checkNewPassword(newPassword, newPasswordConfirmation);
     // PIYA-304 AC4: single use — consumed only once the reset succeeds, so
     // a weak-password 400 doesn't burn the user's code.
-    _grantsByCode.remove(resetToken.trim());
-    _deadCodes.add(resetToken.trim());
-    _wrongCodes = 0;
-    _wrongCodeBlockedUntil = null;
-    _passwordsByEmail[grant.email] = newPassword;
+    _grantsByEmail.remove(normalized);
+    _wrongCodes.remove(normalized);
+    _wrongCodeBlockedUntil.remove(normalized);
+    _passwordsByEmail[normalized] = newPassword;
     // PIYA-202-V2.1: a reset proves control of the mailbox, so it lifts any
     // login wait the forgotten password caused.
-    _loginFailures.remove(grant.email);
-    _loginBlockedUntil.remove(grant.email);
+    _loginFailures.remove(normalized);
+    _loginBlockedUntil.remove(normalized);
   }
 
   /// PIYA-322 stand-in, in the contract's order: session (AC1), rate limit
@@ -262,14 +255,9 @@ class FakeAuthApi implements AuthApi {
   /// sent (unregistered address) or it expired. Debug demo aid only — the
   /// real API never returns the code to the client.
   String? demoInboxCodeFor(String email) {
-    final normalized = _normalize(email);
-    final now = _now();
-    for (final MapEntry(key: code, value: grant) in _grantsByCode.entries) {
-      if (grant.email == normalized && now.isBefore(grant.expiresAt)) {
-        return code;
-      }
-    }
-    return null;
+    final grant = _grantsByEmail[_normalize(email)];
+    if (grant == null || !_now().isBefore(grant.expiresAt)) return null;
+    return grant.code;
   }
 
   /// The (normalized) email a token from this fake was issued to, or null
@@ -301,16 +289,8 @@ class FakeAuthApi implements AuthApi {
     }
   }
 
-  String _newCode() {
-    String code;
-    do {
-      code = _random
-          .nextInt(_resetCodeSpace)
-          .toString()
-          .padLeft(resetCodeLength, '0');
-    } while (_grantsByCode.containsKey(code));
-    return code;
-  }
+  String _newCode() =>
+      _random.nextInt(_resetCodeSpace).toString().padLeft(resetCodeLength, '0');
 
   String _normalize(String email) => email.trim().toLowerCase();
 
@@ -333,8 +313,8 @@ class FakeAuthApi implements AuthApi {
 }
 
 class _ResetGrant {
-  const _ResetGrant({required this.email, required this.expiresAt});
+  const _ResetGrant({required this.code, required this.expiresAt});
 
-  final String email;
+  final String code;
   final DateTime expiresAt;
 }

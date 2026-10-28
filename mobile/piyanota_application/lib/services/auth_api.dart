@@ -116,8 +116,11 @@ abstract interface class AuthApi {
   /// [EmailNotRegisteredException] and no code is sent.
   Future<void> requestPasswordReset({required String email});
 
-  /// PIYA-304. [resetToken] is the code the user received by email.
+  /// PIYA-304. [resetToken] is the code the user received by email;
+  /// [email] is the address it was requested for, since the server finds
+  /// the reset by email and never by the code alone (backend note B4.2).
   Future<void> confirmPasswordReset({
+    required String email,
     required String resetToken,
     required String newPassword,
     required String newPasswordConfirmation,
@@ -182,11 +185,13 @@ class HttpAuthApi implements AuthApi {
 
   @override
   Future<void> confirmPasswordReset({
+    required String email,
     required String resetToken,
     required String newPassword,
     required String newPasswordConfirmation,
   }) async {
     await _post(ApiConfig.passwordResetConfirmPath, {
+      'email': email,
       'resetToken': resetToken,
       'newPassword': newPassword,
       'newPasswordConfirmation': newPasswordConfirmation,

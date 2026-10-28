@@ -23,7 +23,7 @@ class ResetCodeWaits
 
   int failures(String email) => state[_key(email)]?.failures ?? 0;
 
-  /// Counts one wrong code; from the 4th on, starts the next, longer wait.
+  /// Counts one wrong code; from the 3rd on, starts the next, longer wait.
   void recordWrong(String email) {
     final count = failures(email) + 1;
     final over = count - resetCodeFreeAttempts;

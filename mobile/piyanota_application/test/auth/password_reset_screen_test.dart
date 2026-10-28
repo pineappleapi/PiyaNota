@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart' show ProviderScope;
+import 'package:flutter_riverpod/flutter_riverpod.dart' show ProviderContainer, ProviderScope;
 import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -337,6 +337,8 @@ void main() {
     await _enterNewPassword(tester);
     await tester.pumpAndSettle();
 
+    // B4.2: the confirm carries the email the code was requested for.
+    expect(api.lastConfirmEmail, _email);
     expect(find.text('Enter Code'), findsOneWidget);
     expect(find.text(AuthMessages.resetCodeInvalid), findsOneWidget);
     expect(find.widgetWithText(TextFormField, _code), findsNothing);
@@ -398,7 +400,7 @@ void main() {
       );
     });
 
-    testWidgets('AC2: wrong codes 1-3 have no wait, the 4th starts 0:30', (
+    testWidgets('AC2: wrong codes 1-2 have no wait, the 3rd starts 0:30', (
       tester,
     ) async {
       final clock = _TestClock();
@@ -410,13 +412,13 @@ void main() {
       );
       await _requestCode(tester);
       await submitCode(tester, first: true);
-      for (var i = 2; i <= 3; i++) {
-        await submitCode(tester);
-        expect(find.textContaining('Try again in'), findsNothing, reason: '$i');
-      }
+      expect(find.textContaining('Try again in'), findsNothing);
+      await submitCode(tester);
+      expect(find.textContaining('Try again in'), findsNothing);
       await submitCode(tester);
 
       expect(find.text('Try again in 0:30'), findsOneWidget);
+      expect(find.text(AuthMessages.resetCodeWrong), findsOneWidget);
       await tester.enterText(_field(0), _code);
       await tester.pump();
       expect(isButtonEnabled(tester, _continue), isFalse);
@@ -427,13 +429,31 @@ void main() {
       expect(find.textContaining('Try again in'), findsNothing);
       expect(isButtonEnabled(tester, _continue), isTrue);
 
-      // A further wrong code doubles the wait.
+      // A further wrong code doubles the wait, and is still "wrong" (B4.4).
       await _tapButton(tester, _continue);
       await tester.pumpAndSettle();
       await _tapButton(tester, _resetPassword);
       await tester.pumpAndSettle();
       expect(find.text('Try again in 1:00'), findsOneWidget);
+      expect(find.text(AuthMessages.resetCodeWrong), findsOneWidget);
     });
+
+    test(
+      'the wait after the 3rd, 4th and 5th wrong codes is 30, 60, 120 s',
+      () {
+        final clock = _TestClock();
+        final container = ProviderContainer(overrides: [clock.override]);
+        addTearDown(container.dispose);
+        final waits = container.read(resetCodeWaitsProvider.notifier);
+        waits.recordWrong(_email);
+        waits.recordWrong(_email);
+        expect(waits.remaining(_email), Duration.zero);
+        for (final seconds in [30, 60, 120]) {
+          waits.recordWrong(_email);
+          expect(waits.remaining(_email), Duration(seconds: seconds));
+        }
+      },
+    );
 
     testWidgets('AC2: the wait is announced at start and end', (tester) async {
       final announcements = <String>[];
@@ -512,8 +532,7 @@ void main() {
       await tester.tap(find.widgetWithText(TextButton, 'Resend code'));
       await tester.pumpAndSettle();
 
-      // Three more wrong codes: still under the limit, so no wait.
-      await submitCode(tester);
+      // Two more wrong codes: still under the limit, so no wait.
       await submitCode(tester);
       await submitCode(tester);
       expect(find.textContaining('Try again in'), findsNothing);
