@@ -5,12 +5,11 @@ import '../../scan_status/scan_bell.dart';
 import '../library_messages.dart';
 
 /// Gradient top section of the Score Library: "My Scores" and a status
-/// subtitle on the left, the faded logo mark in the top-right corner (as on
-/// Login/Sign-Up), then the outlined search field.
+/// subtitle on the left, the bell in the top-right corner, a large faded
+/// logo mark behind everything on the left, then the outlined search field.
 ///
 /// Dimensions are read off the 412 dp-wide mockup (1 px = 1 dp there),
-/// except the logo, which the user moved out of the mockup's centred,
-/// edge-hugging spot (round-2 review, 2026-10-08).
+/// except the logo (PIYA-205-V2.1), which is measured off the v2 reference.
 class LibraryHeader extends StatelessWidget {
   const LibraryHeader({
     super.key,
@@ -41,7 +40,17 @@ class LibraryHeader extends StatelessWidget {
   /// content, so neither the logo nor the title touches the top edge.
   static const double topGap = 12;
   static const double titleToLogoGap = 12;
-  static const double _bellToLogoGap = 4;
+
+  // Backdrop logo (PIYA-205-V2.1), measured on PIYA205_HomePage_Version2.png
+  // (412 px wide = 412 dp, so 1 px = 1 dp; header block 246 dp tall):
+  // mark's right edge x=191, top y=27, left edge at x=0 (cropped by the
+  // screen edge); its bottom runs past the header and is clipped. Size is
+  // from the P's counter (hole) vs the asset's: 0.21 dp per asset px.
+  static const double _backdropLogoWidth = 191;
+  static const double _backdropLogoHeight = 256;
+  static const double _backdropLogoTop = 27;
+  // 256 / 0.6165 (mark height fraction of the 2000 px canvas).
+  static const double _backdropLogoCanvas = 415;
 
   /// Title top below the safe area, as in round 1 (61f5583): its 2 dp top
   /// gap + the 49 dp centred mark + a 10 dp gap. The mark has since moved
@@ -76,82 +85,120 @@ class LibraryHeader extends StatelessWidget {
 
     return DecoratedBox(
       decoration: const BoxDecoration(gradient: AppTheme.libraryHeaderGradient),
-      child: SafeArea(
-        bottom: false,
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(
-            horizontalPadding,
-            topGap,
-            horizontalPadding,
-            bottomGap,
-          ),
-          // The mark is laid out on its own layer so it can never move the
-          // title or the search field.
-          child: Stack(
-            children: [
-              if (showLogo)
-                const Positioned(top: 0, right: 0, child: LibraryHeaderLogo()),
-              // PIYA-218 AC5. With the mark shown, the bell sits in the
-              // empty band above the title, just left of the mark; without
-              // it, in the title's row at the right edge.
-              Positioned(
-                top: 0,
-                right: showLogo ? logoMarkWidth + _bellToLogoGap : 0,
-                child: const ScanBell(),
+      // The backdrop logo is laid out on the header itself (not inside the
+      // padded content) so it can touch the left screen edge, and is clipped
+      // at the header's bottom as in the reference.
+      child: Stack(
+        children: [
+          if (showLogo)
+            const Positioned(
+              left: 0,
+              top: _backdropLogoTop,
+              child: _BackdropLogo(),
+            ),
+          SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                horizontalPadding,
+                topGap,
+                horizontalPadding,
+                bottomGap,
               ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+              child: Stack(
                 children: [
-                  // Round-1 position at normal sizes. At large text the
-                  // mark is hidden and its band is dropped too, so on a
-                  // 320 dp phone at 2x the results stay in view (NFR-10).
-                  SizedBox(height: showLogo ? titleTop - topGap : 0),
-                  MediaQuery.withClampedTextScaling(
-                    maxScaleFactor: headingMaxTextScale,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Padding(
-                          // Only the title shares a band with the mark (it
-                          // ends 72 dp down); the subtitle is below it and
-                          // keeps the full width.
-                          padding: EdgeInsets.only(
-                            right: showLogo
-                                ? logoMarkWidth + titleToLogoGap
-                                : ScanBell.size + titleToLogoGap,
-                          ),
-                          child: Semantics(
-                            header: true,
-                            child: Text(
-                              LibraryMessages.title,
-                              style: textTheme.headlineLarge?.copyWith(
-                                fontSize: titleFontSize,
-                                fontWeight: FontWeight.w700,
-                                height: titleLineHeight,
+                  // PIYA-218 AC5 / PIYA-205-V2.1 AC4: far top-right corner, in
+                  // the empty band above the title (in the title's row when
+                  // the logo band is dropped at large text).
+                  const Positioned(top: 0, right: 0, child: ScanBell()),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Round-1 position at normal sizes. At large text the
+                      // mark is hidden and its band is dropped too, so on a
+                      // 320 dp phone at 2x the results stay in view (NFR-10).
+                      SizedBox(height: showLogo ? titleTop - topGap : 0),
+                      MediaQuery.withClampedTextScaling(
+                        maxScaleFactor: headingMaxTextScale,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              // The bell is above the title when the band is
+                              // kept; otherwise it shares the title's row.
+                              padding: EdgeInsets.only(
+                                right: showLogo
+                                    ? 0
+                                    : ScanBell.size + titleToLogoGap,
+                              ),
+                              child: Semantics(
+                                header: true,
+                                child: Text(
+                                  LibraryMessages.title,
+                                  style: textTheme.headlineLarge?.copyWith(
+                                    fontSize: titleFontSize,
+                                    fontWeight: FontWeight.w700,
+                                    height: titleLineHeight,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            Text(
+                              subtitle,
+                              style: textTheme.bodyLarge?.copyWith(
+                                fontSize: subtitleFontSize,
+                                height: subtitleLineHeight,
                                 color: Colors.white,
                               ),
                             ),
-                          ),
+                          ],
                         ),
-                        Text(
-                          subtitle,
-                          style: textTheme.bodyLarge?.copyWith(
-                            fontSize: subtitleFontSize,
-                            height: subtitleLineHeight,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: _subtitleToSearchGap),
-                  LibrarySearchField(
-                    controller: searchController,
-                    onChanged: onSearchChanged,
+                      ),
+                      const SizedBox(height: _subtitleToSearchGap),
+                      LibrarySearchField(
+                        controller: searchController,
+                        onChanged: onSearchChanged,
+                      ),
+                    ],
                   ),
                 ],
               ),
-            ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The large faded mark behind the header text. Ignores pointers and is
+/// excluded from semantics so the title, search field and bell stay fully
+/// tappable and readable (PIYA-205-V2.1 AC5).
+class _BackdropLogo extends StatelessWidget {
+  const _BackdropLogo();
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: ExcludeSemantics(
+        child: SizedBox(
+          key: const ValueKey('library-header-logo'),
+          width: LibraryHeader._backdropLogoWidth,
+          height: LibraryHeader._backdropLogoHeight,
+          child: Opacity(
+            opacity: AppTheme.libraryHeaderLogoOpacity,
+            child: OverflowBox(
+              minWidth: LibraryHeader._backdropLogoCanvas,
+              minHeight: LibraryHeader._backdropLogoCanvas,
+              maxWidth: LibraryHeader._backdropLogoCanvas,
+              maxHeight: LibraryHeader._backdropLogoCanvas,
+              child: Image.asset(
+                LibraryHeader._logoAsset,
+                width: LibraryHeader._backdropLogoCanvas,
+                height: LibraryHeader._backdropLogoCanvas,
+              ),
+            ),
           ),
         ),
       ),
@@ -172,7 +219,7 @@ class LibraryHeaderLogo extends StatelessWidget {
         width: LibraryHeader.logoMarkWidth,
         height: LibraryHeader._logoMarkHeight,
         child: Opacity(
-          opacity: AppTheme.libraryHeaderLogoOpacity,
+          opacity: AppTheme.settingsHeaderLogoOpacity,
           child: OverflowBox(
             minWidth: LibraryHeader._logoCanvasSize,
             minHeight: LibraryHeader._logoCanvasSize,

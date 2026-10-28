@@ -153,7 +153,12 @@ class AppTheme {
   // derived from the sampled colours above rather than dropper-sampled:
   // - Header logo: the full-colour PNG at reduced opacity (user asked for it
   //   faded, not flat white like the auth watermark), top-right.
-  static const double libraryHeaderLogoOpacity = 0.4;
+  //   Settings (PIYA-212) still draws this corner mark.
+  static const double settingsHeaderLogoOpacity = 0.4;
+  // - Library header logo (PIYA-205-V2.1 AC3 [Call]): 10% visible, read from
+  //   the reference's faint mark (peak lift over the gradient is only ~+23
+  //   of 255 red).
+  static const double libraryHeaderLogoOpacity = 0.10;
   // - Selected bottom-nav tab: a white pill behind the icon at this alpha,
   //   visible on both nav gradient stops without competing with the labels.
   static const double libraryNavIndicatorAlpha = 0.22;

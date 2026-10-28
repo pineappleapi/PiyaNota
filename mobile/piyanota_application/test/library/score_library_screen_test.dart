@@ -830,35 +830,77 @@ void main() {
   });
 
   group('header, nav and motion polish', () {
-    testWidgets('logo sits top-right, faded, clear of the safe area', (
+    testWidgets('logo sits on the left edge, behind the text, at 10% (V2.1)', (
       tester,
     ) async {
-      const statusBar = 24.0;
-      await _pumpLibrary(tester, _apiReturning(_scores), topInset: statusBar);
+      await _pumpLibrary(tester, _apiReturning(_scores), topInset: 24);
       await tester.pumpAndSettle();
 
       final logo = find.byKey(const ValueKey('library-header-logo'));
       final rect = tester.getRect(logo);
-      final screenWidth =
-          tester.view.physicalSize.width / tester.view.devicePixelRatio;
-      expect(rect.top, greaterThanOrEqualTo(statusBar + 8));
-      expect(rect.left, greaterThan(screenWidth / 2));
-      // Right edge lines up with the search field's.
-      expect(
-        rect.right,
-        closeTo(tester.getRect(find.byType(TextField)).right, 0.5),
+      // AC1: touches the left screen edge.
+      expect(rect.left, closeTo(0, 0.5));
+      // AC2: at least as tall as the title + subtitle block it sits behind.
+      final title = tester.getRect(find.text(LibraryMessages.title));
+      final subtitle = tester.getRect(
+        find.text(LibraryMessages.scoreCountSubtitle(_scores.length)),
       );
-
+      expect(rect.height, greaterThanOrEqualTo(subtitle.bottom - title.top));
+      // Reference: mark is ~the header's full height (256 of 246 dp).
+      expect(rect.height, greaterThan(200));
+      // AC3.
       final opacity = tester.widget<Opacity>(
         find.descendant(of: logo, matching: find.byType(Opacity)),
       );
-      expect(opacity.opacity, AppTheme.libraryHeaderLogoOpacity);
-      expect(opacity.opacity, inInclusiveRange(0.35, 0.45));
-      // Title shares the logo's band rather than sitting under it.
-      expect(
-        tester.getRect(find.text(LibraryMessages.title)).top,
-        lessThan(rect.bottom),
+      expect(opacity.opacity, 0.10);
+      expect(AppTheme.libraryHeaderLogoOpacity, 0.10);
+      // AC1/AC5: painted before (behind) the title, search field and bell,
+      // and never a hit-test or semantics target.
+      final header = find.byType(LibraryHeader);
+      final stack = tester.widget<Stack>(
+        find.descendant(of: header, matching: find.byType(Stack)).first,
       );
+      expect(stack.children.first, isA<Positioned>());
+      expect(stack.children[1], isA<SafeArea>());
+      expect(
+        find.ancestor(of: logo, matching: find.byType(IgnorePointer)),
+        findsWidgets,
+      );
+      expect(
+        find.ancestor(of: logo, matching: find.byType(ExcludeSemantics)),
+        findsWidgets,
+      );
+    });
+
+    testWidgets('bell sits at the far top-right of the header (V2.1)', (
+      tester,
+    ) async {
+      await _pumpLibrary(tester, _apiReturning(_scores), topInset: 24);
+      await tester.pumpAndSettle();
+
+      final bell = tester.getRect(find.byKey(const ValueKey('scan-bell')));
+      final search = tester.getRect(find.byType(TextField));
+      final screenWidth =
+          tester.view.physicalSize.width / tester.view.devicePixelRatio;
+      // Right edge = the header's right padding = the search field's edge.
+      expect(bell.right, closeTo(search.right, 0.5));
+      expect(bell.right, lessThan(screenWidth));
+      // Top row, above the title.
+      expect(
+        bell.bottom,
+        lessThanOrEqualTo(tester.getRect(find.text(LibraryMessages.title)).top),
+      );
+    });
+
+    testWidgets('bell stays tappable over the logo (V2.1 AC5)', (
+      tester,
+    ) async {
+      await _pumpLibrary(tester, _apiReturning(_scores), topInset: 24);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('scan-bell')));
+      await tester.pumpAndSettle();
+      expect(find.byType(BottomSheet), findsOneWidget);
     });
 
     testWidgets('title and search sit where round 1 (61f5583) put them', (
