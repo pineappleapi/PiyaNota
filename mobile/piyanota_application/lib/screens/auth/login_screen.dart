@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -46,11 +47,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Duration _wait = Duration.zero;
   Timer? _waitTimer;
   String _waitEmail = '';
-
-  /// What screen readers hear. Fixed when a wait starts (and replaced when
-  /// it ends) so the live region speaks once, not on every tick of the
-  /// visible countdown.
-  String? _liveLabel;
 
   /// Finishes the password-reset throttle clear before the first wait read.
   Future<void>? _pendingReset;
@@ -111,10 +107,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       return;
     }
     _waitUntil = ref.read(loginThrottleProvider).now().add(left);
-    setState(() {
-      _wait = _remainingWait();
-      _liveLabel = AuthMessages.tryAgainIn(_wait);
-    });
+    setState(() => _wait = _remainingWait());
+    _announce(AuthMessages.tryAgainIn(_wait));
     _waitTimer = Timer.periodic(_waitTick, (_) {
       if (_remainingWait() == Duration.zero) {
         _endWait(announce: true);
@@ -134,10 +128,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   void _endWait({required bool announce}) {
     _waitTimer?.cancel();
     _waitUntil = null;
-    setState(() {
-      _wait = Duration.zero;
-      _liveLabel = announce ? AuthMessages.canTryAgain : null;
-    });
+    setState(() => _wait = Duration.zero);
+    if (announce) _announce(AuthMessages.canTryAgain);
+  }
+
+  /// Spoken once at the start and end of a wait. The visible countdown is
+  /// not a live region, or TalkBack would read every tick; a focused read
+  /// still gets the current value because the Text stays in semantics.
+  void _announce(String message) {
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      message,
+      Directionality.of(context),
+    );
   }
 
   bool get _canSubmit =>
@@ -296,22 +299,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           ),
         ),
         const SizedBox(height: _sectionGap),
-        Semantics(
-          liveRegion: _liveLabel != null,
-          label: _liveLabel,
-          child: _wait > Duration.zero
-              ? Padding(
-                  padding: const EdgeInsets.only(bottom: _fieldGap),
-                  child: ExcludeSemantics(
-                    child: Text(
-                      AuthMessages.tryAgainIn(_wait),
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: AppTheme.primaryBlue),
-                    ),
-                  ),
-                )
-              : const SizedBox.shrink(),
-        ),
+        if (_wait > Duration.zero) ...[
+          Text(
+            AuthMessages.tryAgainIn(_wait),
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: AppTheme.primaryBlue),
+          ),
+          const SizedBox(height: _fieldGap),
+        ],
         PrimaryPillButton(
           label: 'Log In',
           onPressed: _canSubmit ? _submit : null,

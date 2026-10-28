@@ -260,7 +260,7 @@ void main() {
       expect(await throttle.remaining(_email), Duration.zero);
     });
 
-    testWidgets('the wait is a live region announced once, not per tick', (
+    testWidgets('the spoken countdown stays current and is announced twice', (
       tester,
     ) async {
       final handle = tester.ensureSemantics();
@@ -268,21 +268,24 @@ void main() {
       await _fillAndSubmit(tester);
       await tester.pump();
 
-      final live = find.bySemanticsLabel('Try again in 0:30');
-      expect(live, findsOneWidget);
       expect(
-        tester.getSemantics(live),
-        matchesSemantics(label: 'Try again in 0:30', isLiveRegion: true),
+        tester.takeAnnouncements(),
+        contains(isAccessibilityAnnouncement('Try again in 0:30')),
       );
+      await elapse(tester, const Duration(seconds: 18));
+      // A focused read is current, and ticks are not announced.
+      expect(find.bySemanticsLabel('Try again in 0:12'), findsOneWidget);
+      expect(find.bySemanticsLabel('Try again in 0:30'), findsNothing);
+      expect(tester.takeAnnouncements(), isEmpty);
 
-      await elapse(tester, const Duration(seconds: 5));
-      expect(find.text('Try again in 0:25'), findsOneWidget);
-      // Announced label is unchanged, so TalkBack stays quiet each second.
-      expect(find.bySemanticsLabel('Try again in 0:30'), findsOneWidget);
-      expect(find.bySemanticsLabel('Try again in 0:25'), findsNothing);
-
-      await elapse(tester, const Duration(seconds: 25));
-      expect(find.bySemanticsLabel(AuthMessages.canTryAgain), findsOneWidget);
+      await elapse(tester, const Duration(seconds: 12));
+      expect(
+        tester.takeAnnouncements(),
+        contains(isAccessibilityAnnouncement(AuthMessages.canTryAgain)),
+      );
+      // No stray node is left behind after the wait.
+      expect(find.bySemanticsLabel(RegExp('Try again')), findsNothing);
+      expect(find.bySemanticsLabel(AuthMessages.canTryAgain), findsNothing);
       handle.dispose();
     });
 
@@ -298,7 +301,10 @@ void main() {
       await _fillAndSubmit(tester);
       await tester.pump();
 
-      expect(find.bySemanticsLabel('Try again in 1:30'), findsOneWidget);
+      expect(
+        tester.takeAnnouncements(),
+        contains(isAccessibilityAnnouncement('Try again in 1:30')),
+      );
       handle.dispose();
     });
   });
