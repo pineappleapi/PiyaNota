@@ -145,9 +145,9 @@ void main() {
     ) async {
       final harness = ready();
       await pumpPlayback(tester, harness, defaultVoice: VoicePart.alto);
-      controller(tester)
-        ..setVoiceMuted(VoicePart.tenor, muted: false)
-        ..setVoiceMuted(VoicePart.tenor, muted: true);
+      // Hand mute on a chip-off voice (unmuting first would now turn its
+      // chip on, which is a different scenario).
+      controller(tester).setVoiceMuted(VoicePart.tenor, muted: true);
       harness.engine.fail(VoicePart.alto);
       await tester.pump();
       await tester.pump();
@@ -155,6 +155,40 @@ void main() {
       expect(harness.engine.volumes[VoicePart.tenor], 0);
       expect(harness.engine.volumes[VoicePart.soprano], 1);
       expect(harness.engine.volumes[VoicePart.bass], 1);
+    });
+
+    testWidgets('default Alto, Mixer Unmute on Soprano: heard, chip on', (
+      tester,
+    ) async {
+      final harness = ready();
+      await pumpPlayback(tester, harness, defaultVoice: VoicePart.alto);
+      controller(tester).setVoiceMuted(VoicePart.soprano, muted: false);
+
+      final state = controller(tester).state;
+      expect(state.voiceGain(VoicePart.soprano), greaterThan(0));
+      expect(state.selected, contains(VoicePart.soprano));
+      expect(harness.engine.volumes[VoicePart.soprano], 1);
+    });
+
+    testWidgets('default Alto, tap Unmute on Soprano row: chip on, undimmed', (
+      tester,
+    ) async {
+      await pumpPlayback(tester, ready(), defaultVoice: VoicePart.alto);
+      await openMixer(tester);
+      final soprano = voiceRow(VoicePart.soprano);
+      await tapIn(tester, muteIn(soprano));
+
+      expect(
+        controller(tester).state.selected,
+        contains(VoicePart.soprano),
+      );
+      final fade = tester.widget<Opacity>(
+        find.descendant(
+          of: soprano,
+          matching: find.byKey(const ValueKey('mixer-slider-fade')),
+        ),
+      );
+      expect(fade.opacity, 1);
     });
 
     testWidgets('a voice the user muted stays muted when its chip goes on', (

@@ -833,9 +833,14 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// unmuting plays at that level, 0% included (user decision 2026-10-22).
   void setVoiceMuted(VoicePart voice, {required bool muted}) {
     if (!state.available.contains(voice)) return;
+    // Unmuting a default-mix mute must also turn the chip on: voiceGain is 0
+    // for a chip-off voice, so the Mixer would show it live but silent.
+    final liftChip =
+        !muted && _mixMuted.contains(voice) && !state.selected.contains(voice);
     _mixMuted = _mixMuted.difference({voice});
     state = state.copyWith(
       muted: muted ? {...state.muted, voice} : state.muted.difference({voice}),
+      selected: liftChip ? {...state.selected, voice} : state.selected,
     );
     _applyGains();
   }
