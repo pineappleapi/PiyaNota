@@ -1702,7 +1702,59 @@ void main() {
       expect(find.text(CaptureMessages.arrangerLabel), findsOneWidget);
     });
 
-    testWidgets('AC4: a failed save keeps the old values and shows an error', (
+    testWidgets('AC4: busy state, then a failure keeps text; retry succeeds', (
+      tester,
+    ) async {
+      var fail = true;
+      var gate = Completer<void>();
+      final api = editApi(
+        onUpdate: (id, title, arranger) async {
+          await gate.future;
+          if (fail) throw const ScoreLibraryNetworkException();
+          return _scores
+              .firstWhere((s) => s.scoreId == id)
+              .withDetails(title: title, arranger: arranger);
+        },
+      );
+      await _pumpLibrary(tester, api);
+      await tester.pumpAndSettle();
+      await tester.tap(pencilFor('Paraiso'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('edit-title')), 'Changed');
+      await tester.tap(find.text(LibraryMessages.editSave));
+      await tester.pump();
+
+      // Busy: spinner, both buttons disabled, text kept.
+      expect(find.byKey(const Key('edit-saving')), findsOneWidget);
+      for (final label in [LibraryMessages.editCancel]) {
+        expect(
+          tester
+              .widget<TextButton>(find.widgetWithText(TextButton, label))
+              .onPressed,
+          isNull,
+        );
+      }
+      expect(fieldText(tester, 'edit-title'), 'Changed');
+
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(find.text(LibraryMessages.editDialogTitle), findsOneWidget);
+      expect(find.text(LibraryMessages.editNetworkError), findsOneWidget);
+      expect(fieldText(tester, 'edit-title'), 'Changed');
+      expect(find.byKey(const Key('edit-saving')), findsNothing);
+      expect(find.text('Paraiso'), findsOneWidget);
+
+      fail = false;
+      gate = Completer<void>()..complete();
+      await tester.tap(find.text(LibraryMessages.editSave));
+      await tester.pumpAndSettle();
+      expect(api.updates, hasLength(2));
+      expect(find.text(LibraryMessages.editDialogTitle), findsNothing);
+      expect(find.text('Changed'), findsOneWidget);
+      expect(find.text('Paraiso'), findsNothing);
+    });
+
+    testWidgets('a server failure shows the server error inline', (
       tester,
     ) async {
       final api = editApi(
@@ -1715,10 +1767,38 @@ void main() {
       await tester.enterText(find.byKey(const Key('edit-title')), 'Changed');
       await tester.tap(find.text(LibraryMessages.editSave));
       await tester.pumpAndSettle();
-
       expect(find.text(LibraryMessages.editServerError), findsOneWidget);
-      expect(find.text('Paraiso'), findsOneWidget);
-      expect(find.text('Changed'), findsNothing);
+    });
+
+    testWidgets('unchanged values close the dialog without a request', (
+      tester,
+    ) async {
+      final api = editApi();
+      await _pumpLibrary(tester, api);
+      await tester.pumpAndSettle();
+      await tester.tap(pencilFor('Paraiso'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('edit-title')), ' Paraiso ');
+      await tester.tap(find.text(LibraryMessages.editSave));
+      await tester.pumpAndSettle();
+      expect(api.updates, isEmpty);
+      expect(find.text(LibraryMessages.editDialogTitle), findsNothing);
+    });
+
+    testWidgets('a 404 closes the dialog and removes the card', (tester) async {
+      final api = editApi(
+        onUpdate: (_, _, _) async => throw const ScoreNotFoundException(),
+      );
+      await _pumpLibrary(tester, api);
+      await tester.pumpAndSettle();
+      await tester.tap(pencilFor('Paraiso'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('edit-title')), 'Changed');
+      await tester.tap(find.text(LibraryMessages.editSave));
+      await tester.pumpAndSettle();
+      expect(find.text(LibraryMessages.editDialogTitle), findsNothing);
+      expect(find.text('Paraiso'), findsNothing);
+      expect(find.text(LibraryMessages.deleteAlreadyGone), findsOneWidget);
     });
 
     testWidgets('AC5: Cancel discards and sends nothing', (tester) async {

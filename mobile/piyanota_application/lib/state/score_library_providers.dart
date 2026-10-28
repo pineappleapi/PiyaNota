@@ -80,6 +80,10 @@ class ScoreLibraryController extends AsyncNotifier<List<ScoreSummary>> {
         .read(scoreLibraryApiProvider)
         .updateScore(scoreId, title: title, arranger: arranger);
     if (!ref.mounted) return;
+    // shortcut: a reload() that started before this save and finishes after
+    // it can overwrite the edited card with the older server copy until the
+    // next refresh; upgrade to a per-id version merge if reload ever becomes
+    // user-triggerable mid-edit (today it is only the error-state Retry).
     final current = state.value;
     if (current == null) return;
     state = AsyncData([

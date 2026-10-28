@@ -279,44 +279,43 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
     final scoreId = entry.scoreId;
     if (!_editingIds.add(scoreId)) return;
     try {
-      final edited = await showDialog<EditedScoreDetails>(
+      await showDialog<void>(
         context: context,
         builder: (context) => EditScoreDialog(
           title: entry.score.title ?? '',
           arranger: entry.score.arranger,
+          onSave: (edited) => _saveEdit(scoreId, edited),
         ),
       );
-      if (edited == null || !mounted) return;
-      var message = LibraryMessages.editSaved;
-      SnackBarAction? action;
-      try {
-        await ref
-            .read(scoreLibraryProvider.notifier)
-            .updateOnServer(
-              scoreId,
-              title: edited.title,
-              arranger: edited.arranger,
-            );
-      } on ScoreNotFoundException {
-        message = LibraryMessages.deleteAlreadyGone;
-        ref.read(scoreLibraryProvider.notifier).removeLocally(scoreId);
-      } on SessionExpiredException {
-        message = LibraryMessages.sessionExpired;
-        action = SnackBarAction(
-          label: LibraryMessages.logInAgain,
-          onPressed: _returnToLogin,
-        );
-      } on ScoreLibraryNetworkException {
-        message = LibraryMessages.editNetworkError;
-      } on ScoreLibraryServerException {
-        message = LibraryMessages.editServerError;
-      } catch (e, stack) {
-        if (kDebugMode) debugPrint('Score edit failed: $e\n$stack');
-        message = LibraryMessages.editServerError;
-      }
-      if (mounted) _showSnackBar(message, action: action);
     } finally {
       _editingIds.remove(scoreId);
+    }
+  }
+
+  /// Runs inside the open dialog. Network and server failures propagate so
+  /// the dialog shows them inline and keeps the text; outcomes that end the
+  /// edit (saved, gone, expired session) return and close it.
+  Future<void> _saveEdit(int scoreId, EditedScoreDetails edited) async {
+    final library = ref.read(scoreLibraryProvider.notifier);
+    try {
+      await library.updateOnServer(
+        scoreId,
+        title: edited.title,
+        arranger: edited.arranger,
+      );
+      if (mounted) _showSnackBar(LibraryMessages.editSaved);
+    } on ScoreNotFoundException {
+      library.removeLocally(scoreId);
+      if (mounted) _showSnackBar(LibraryMessages.deleteAlreadyGone);
+    } on SessionExpiredException {
+      if (!mounted) return;
+      _showSnackBar(
+        LibraryMessages.sessionExpired,
+        action: SnackBarAction(
+          label: LibraryMessages.logInAgain,
+          onPressed: _returnToLogin,
+        ),
+      );
     }
   }
 

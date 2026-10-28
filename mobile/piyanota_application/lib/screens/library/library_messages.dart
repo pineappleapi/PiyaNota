@@ -67,6 +67,7 @@ class LibraryMessages {
   static const String editServerError =
       "Couldn't save your changes. Please try again.";
   static const String editSaved = 'Score details saved';
+  static const String editSaving = 'Saving…';
 
   static String deleteSemantics(String title) => 'Delete $title';
 
