@@ -67,6 +67,9 @@ Future<void> startSession(WidgetRef ref, AuthSession session) async {
   final signedIn = ref.read(signedInProvider.notifier);
   final forgetAccountWork = _accountWorkForgetter(ref);
   final owner = await owners.load();
+  // shortcut: trusts the server never to reuse a user id, so a DB reset or
+  // a switch between fake and real builds can inherit another account's
+  // work; upgrade by storing the email or API base URL with the owner id.
   if (owner != session.userId) forgetAccountWork();
   await storage.save(session);
   await owners.save(session.userId);

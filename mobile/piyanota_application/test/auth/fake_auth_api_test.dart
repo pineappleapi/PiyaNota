@@ -315,4 +315,44 @@ void main() {
       await confirm(api, code);
     });
   });
+
+  group('user ids (PIYA-205-V2.3)', () {
+    test('the demo account is id 1 on every run', () async {
+      final session = await _api().login(
+        email: FakeAuthApi.demoEmail,
+        password: FakeAuthApi.demoPassword,
+      );
+      expect(session.userId, FakeAuthApi.demoUserId);
+      expect(session.userId, 1);
+    });
+
+    test('two logins of one account in a run get the same id', () async {
+      final api = _api();
+      final first = await api.login(
+        email: FakeAuthApi.demoEmail,
+        password: FakeAuthApi.demoPassword,
+      );
+      final second = await api.login(
+        email: FakeAuthApi.demoEmail,
+        password: FakeAuthApi.demoPassword,
+      );
+      expect(second.userId, first.userId);
+      expect(second.sessionToken, isNot(first.sessionToken));
+    });
+
+    test('a new sign-up never gets the demo id, and keeps its id', () async {
+      final api = _api();
+      final signedUp = await api.signUp(
+        email: 'ids@example.com',
+        password: 'secret123',
+        passwordConfirmation: 'secret123',
+      );
+      final again = await api.login(
+        email: 'ids@example.com',
+        password: 'secret123',
+      );
+      expect(signedUp.userId, isNot(1));
+      expect(again.userId, signedUp.userId);
+    });
+  });
 }

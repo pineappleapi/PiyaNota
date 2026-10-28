@@ -69,6 +69,8 @@ class FakeAuthApi implements AuthApi {
   /// id (WorkOwnerStore), so restarting at 1 let a new account inherit the
   /// demo's stored scans (PIYA-205-V2.3). One id per account, like the
   /// server, so a second login of the same account in a run keeps its work.
+  // shortcut: a device clock set back between runs can repeat an earlier
+  // run's id; fake builds only, upgrade if the fake ever persists accounts.
   late int _nextUserId = _createdMicros;
   final Map<String, int> _userIdsByEmail = {demoEmail: demoUserId};
   int _issuedSessions = 1;

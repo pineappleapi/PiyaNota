@@ -230,9 +230,9 @@ void main() {
       newPassword,
     ], 'Create Account');
 
-    // The scan card only renders once the list has loaded, by which time
-    // the poll may have dropped the job; the tracker (which also feeds
-    // the bell) must never take it on for the new account at all.
+    // The tracker assert below carries the repro (it was RED before the
+    // fake ids were made unique across runs); the widget checks are only a
+    // guard, since the fake drops the unknown job before the list loads.
     final container = ProviderScope.containerOf(
       tester.element(find.byType(Navigator)),
     );
