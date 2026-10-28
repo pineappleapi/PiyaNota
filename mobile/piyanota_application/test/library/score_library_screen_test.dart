@@ -1768,6 +1768,11 @@ void main() {
       await tester.tap(find.text(LibraryMessages.editSave));
       await tester.pumpAndSettle();
       expect(find.text(LibraryMessages.editServerError), findsOneWidget);
+      // TalkBack announces the failure.
+      expect(
+        tester.getSemantics(find.text(LibraryMessages.editServerError)),
+        isSemantics(isLiveRegion: true),
+      );
     });
 
     testWidgets('unchanged values close the dialog without a request', (

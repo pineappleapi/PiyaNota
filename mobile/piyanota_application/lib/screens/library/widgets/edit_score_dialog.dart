@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../../models/score_details.dart';
@@ -79,7 +80,8 @@ class _EditScoreDialogState extends State<EditScoreDialog> {
       if (mounted) Navigator.of(context).pop();
     } on ScoreLibraryNetworkException {
       _fail(LibraryMessages.editNetworkError);
-    } on Object {
+    } on Object catch (e, stack) {
+      if (kDebugMode) debugPrint('Score edit failed: $e\n$stack');
       _fail(LibraryMessages.editServerError);
     }
   }
@@ -133,7 +135,14 @@ class _EditScoreDialogState extends State<EditScoreDialog> {
               ),
               if (_error != null) ...[
                 const SizedBox(height: _fieldGap),
-                Text(_error!, style: const TextStyle(color: AppTheme.errorRed)),
+                // Live region so TalkBack announces a failed save.
+                Semantics(
+                  liveRegion: true,
+                  child: Text(
+                    _error!,
+                    style: const TextStyle(color: AppTheme.errorRed),
+                  ),
+                ),
               ],
             ],
           ),
