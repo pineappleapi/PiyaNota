@@ -9,6 +9,17 @@ class ExportMessages {
 
   // Wording from references/PIYA211_ExportAudioModal_UI_1.png.
   static const String title = 'Export Audio';
+
+  // PIYA-211-V2.1: the ticks make ONE mixed file, not one per voice. Split
+  // around the bold word; kept as three parts of one Text so a screen
+  // reader reads it as a single sentence group.
+  static const String explanationBefore =
+      'Pick the voices you want to hear. They are mixed into ';
+  static const String explanationBold = 'one';
+  static const String explanationAfter =
+      ' audio file. For example, ticking Soprano and Alto gives one file '
+      'with both voices singing together, not two separate files.';
+
   static const String allVoices = 'All Voices';
   static const String withClick = 'Include metronome/click';
   static const String download = 'Download Audio';

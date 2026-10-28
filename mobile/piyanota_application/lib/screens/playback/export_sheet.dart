@@ -229,6 +229,24 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
       key: const ValueKey('export-sheet'),
       title: ExportMessages.title,
       children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(10, 4, 8, 12),
+          child: Text.rich(
+            key: const ValueKey('export-explanation'),
+            TextSpan(
+              children: [
+                const TextSpan(text: ExportMessages.explanationBefore),
+                TextSpan(
+                  text: ExportMessages.explanationBold,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const TextSpan(text: ExportMessages.explanationAfter),
+              ],
+            ),
+            style: Theme.of(context).textTheme.bodyMedium
+                ?.copyWith(color: AppTheme.sheetText),
+          ),
+        ),
         ...rows,
         const SizedBox(height: 24),
         if (_notLocal)

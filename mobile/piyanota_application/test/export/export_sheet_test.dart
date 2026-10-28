@@ -1234,6 +1234,72 @@ void main() {
       expect(task.read, isFalse);
     });
   });
+
+  group('explanation (PIYA-211-V2.1)', () {
+    const spoken =
+        'Pick the voices you want to hear. They are mixed into one audio '
+        'file. For example, ticking Soprano and Alto gives one file with '
+        'both voices singing together, not two separate files.';
+
+    testWidgets('AC1: shown first under the title, "one" in bold', (
+      tester,
+    ) async {
+      await pumpPlayback(tester, harness(FakeExportService()));
+      await openExport(tester, clear: false);
+
+      final note = find.byKey(const ValueKey('export-explanation'));
+      expect(note, findsOneWidget);
+      expect(
+        tester.getTopLeft(note).dy,
+        greaterThan(tester.getBottomLeft(find.text(ExportMessages.title)).dy),
+      );
+      expect(
+        tester.getBottomLeft(note).dy,
+        lessThan(tester.getTopLeft(row('soprano')).dy),
+      );
+      final text = tester.widget<Text>(note);
+      expect(text.textSpan!.toPlainText(), spoken);
+      final bold = <String>[];
+      text.textSpan!.visitChildren((span) {
+        if (span is TextSpan && span.style?.fontWeight == FontWeight.w700) {
+          bold.add(span.text!);
+        }
+        return true;
+      });
+      expect(bold, ['one']);
+    });
+
+    testWidgets('AC2: read as one sentence group', (tester) async {
+      final handle = tester.ensureSemantics();
+      await pumpPlayback(tester, harness(FakeExportService()));
+      await openExport(tester, clear: false);
+
+      expect(find.bySemanticsLabel(spoken), findsOneWidget);
+      handle.dispose();
+    });
+
+    for (final height in [640.0, 800.0]) {
+      testWidgets('AC2: 360x$height keeps Download reachable, no overflow', (
+        tester,
+      ) async {
+        await pumpPlayback(
+          tester,
+          harness(FakeExportService()),
+          size: Size(360, height),
+        );
+        await openExport(tester, clear: false);
+
+        await tester.ensureVisible(download);
+        await tester.pump();
+        final rect = tester.getRect(download);
+        expect(rect.bottom, lessThanOrEqualTo(height));
+        expect(rect.top, greaterThanOrEqualTo(0));
+        expect(rect.left, greaterThanOrEqualTo(0));
+        expect(rect.right, lessThanOrEqualTo(360));
+        expect(tester.takeException(), isNull);
+      });
+    }
+  });
 }
 
 /// Thrown by the fake click writer; any error there is "couldn't be made".
