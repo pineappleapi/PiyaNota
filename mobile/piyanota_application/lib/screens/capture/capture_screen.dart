@@ -917,8 +917,16 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                         ),
                         const SizedBox(height: 12),
                         _InputRow(
-                          onGallery: _canAct ? _pickGallery : null,
-                          onShutter: _camera != null && _canAct
+                          // V2.4: a retake is one camera shot. PagePicker only
+                          // offers multi-select, so Gallery is off rather
+                          // than able to bring in several pages.
+                          onGallery: _canAct && widget.retake == null
+                              ? _pickGallery
+                              : null,
+                          onShutter:
+                              _camera != null &&
+                                  _canAct &&
+                                  (widget.retake == null || _photoRoom > 0)
                               ? _takePhoto
                               : null,
                           onPdf: _canAct && widget.retake == null
@@ -938,7 +946,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                           onOpen: _open,
                           onEdit: _edit,
                           onRemove: _remove,
-                          onAdd: _session.hasPdf ? null : _showAddSheet,
+                          onAdd: _session.hasPdf || widget.retake != null
+                              ? null
+                              : _showAddSheet,
                         ),
                         if (_uploadError case final error?) ...[
                           const SizedBox(height: 8),

@@ -40,13 +40,50 @@ void main() {
 
     await _shoot(tester);
     expect(h.camera!.shots, 1);
-    await _shoot(tester);
-    expect(h.camera!.shots, 1, reason: 'a second page is refused');
-    expect(find.text(CaptureMessages.retakeFull), findsOneWidget);
+    expect(find.text(CaptureMessages.sendRetake(2)), findsOneWidget);
+  });
 
-    await tester.tap(find.text(CaptureMessages.gallery));
-    await tester.pumpAndSettle();
+  /// PIYA-206-V2.4 AC1: only the one page can be captured or picked.
+  testWidgets('no add tile; Gallery and PDF are off before and after', (
+    tester,
+  ) async {
+    final h = CaptureHarness();
+    h.picker.gallery = ['g0.jpg', 'g1.jpg'];
+    await pumpCapture(tester, h, retake: _retake);
+
+    for (var round = 0; round < 2; round++) {
+      expect(find.bySemanticsLabel(CaptureMessages.addPages), findsNothing);
+      for (final label in [CaptureMessages.gallery, CaptureMessages.pdf]) {
+        if (find.text(label).evaluate().isNotEmpty) {
+          await tester.tap(find.text(label), warnIfMissed: false);
+          await tester.pumpAndSettle();
+        }
+      }
+      expect(
+        h.processor.prepared,
+        hasLength(round),
+        reason: 'only the camera shot was prepared; Gallery added nothing',
+      );
+      expect(find.text(CaptureMessages.replacePdfTitle), findsNothing);
+      if (round == 0) await _shoot(tester);
+    }
     expect(h.processor.prepared, ['raw-0.jpg']);
+  });
+
+  /// PIYA-206-V2.4 AC2: one photo replaces the page; the shutter is then off.
+  testWidgets('after one photo the shutter is disabled', (tester) async {
+    final h = CaptureHarness();
+    await pumpCapture(tester, h, retake: _retake);
+    await _shoot(tester);
+    expect(
+      tester.getSemantics(find.bySemanticsLabel(CaptureMessages.shutter)),
+      isSemantics(isEnabled: false, hasEnabledState: true),
+    );
+    await _shoot(tester);
+    expect(h.camera!.shots, 1);
+    await tester.tap(find.text(CaptureMessages.sendRetake(2)));
+    await tester.pumpAndSettle();
+    expect(h.upload.resubmitCalls, [('job-1', 1, 'prepared/raw-0.jpg')]);
   });
 
   testWidgets('sends via PIYA-116 and opens Processing on the new job', (
