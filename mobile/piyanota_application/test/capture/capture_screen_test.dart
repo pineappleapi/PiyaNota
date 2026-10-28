@@ -85,6 +85,51 @@ void main() {
       expect(_submitButton(tester).onPressed, isNull);
     });
 
+    // PIYA-206-V2.3 AC1: the + sheet's Camera shows the viewfinder only.
+    testWidgets('Camera from + takes no photo until the shutter', (
+      tester,
+    ) async {
+      final h = CaptureHarness();
+      await pumpCapture(tester, h);
+      await _shoot(tester);
+      expect(h.camera!.shots, 1);
+      await tester.tap(_label(CaptureMessages.addPages));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(CaptureMessages.camera));
+      await tester.pumpAndSettle();
+
+      expect(h.camera!.shots, 1, reason: 'choosing Camera is not a shot');
+      expect(find.text(CaptureMessages.addFrom), findsNothing);
+      expect(find.text(CaptureMessages.pageOf(1, 1)), findsOneWidget);
+      await _shoot(tester);
+      expect(h.camera!.shots, 2);
+    });
+
+    testWidgets('Camera from + restarts a stopped camera, still no photo', (
+      tester,
+    ) async {
+      final h = CaptureHarness();
+      await pumpCapture(tester, h);
+      await _shoot(tester);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      // `inactive` is visible again (frames run) and leaves the camera off.
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pump(); // the "starting" spinner never settles
+      expect(h.cameras, hasLength(1));
+      expect(h.cameras.single.disposed, isTrue);
+
+      await tester.tap(_label(CaptureMessages.addPages));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.tap(find.text(CaptureMessages.camera));
+      await tester.pumpAndSettle();
+
+      expect(h.cameras, hasLength(2));
+      expect(h.camera!.initialized, isTrue);
+      expect(h.cameras.last.shots, 0);
+      expect(h.cameras.first.shots, 1);
+    });
+
     testWidgets('denied: explanation, Allow camera, Open settings', (
       tester,
     ) async {

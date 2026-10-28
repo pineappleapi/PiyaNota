@@ -436,7 +436,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
               ),
             ),
             for (final (source, icon, label) in [
-              if (_camera != null)
+              // Also while paused/restarting, so Camera can bring it back;
+              // not when denied, blocked or missing: the panel explains.
+              if (_camera != null || _status == CameraStatus.starting)
                 (
                   PageSource.camera,
                   Icons.photo_camera_outlined,
@@ -468,8 +470,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     );
     if (!mounted) return;
     switch (choice) {
+      // V2.3: the viewfinder is already on screen; only the shutter shoots.
       case PageSource.camera:
-        await _takePhoto();
+        if (_camera == null) await _startCamera(ask: false);
       case PageSource.gallery:
         await _pickGallery();
       case PageSource.pdf:
