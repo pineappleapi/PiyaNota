@@ -1,4 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
+
+import 'dart:ui' show Tristate;
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -48,6 +52,31 @@ void main() {
       for (final v in ['Soprano', 'Alto', 'Tenor', 'Bass']) {
         expect(_isSelected(tester, v), isFalse, reason: v);
       }
+    });
+
+    testWidgets('every option exposes a tap action to screen readers', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await pumpStep(tester);
+      await _tap(tester, 'Alto');
+
+      for (final label in [
+        'Soprano',
+        'Alto',
+        'Tenor',
+        'Bass',
+        _conductorLabel,
+      ]) {
+        final data = tester.getSemantics(find.text(label)).getSemanticsData();
+        expect(data.hasAction(SemanticsAction.tap), isTrue, reason: label);
+        expect(
+          data.flagsCollection.isSelected == Tristate.isTrue,
+          label == 'Alto',
+          reason: label,
+        );
+      }
+      handle.dispose();
     });
 
     testWidgets('picking Soprano afterwards moves the selection', (
