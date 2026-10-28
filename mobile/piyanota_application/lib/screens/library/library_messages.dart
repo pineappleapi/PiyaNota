@@ -61,7 +61,7 @@ class LibraryMessages {
   static const String editDialogTitle = 'Edit score details';
   static const String editSave = 'Save';
   static const String editCancel = 'Cancel';
-  static const String editSemantics = 'Edit score details';
+  static String editSemantics(String title) => 'Edit details of $title';
   static const String editNetworkError =
       "Couldn't save — check your internet connection.";
   static const String editServerError =

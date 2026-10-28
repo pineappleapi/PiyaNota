@@ -268,7 +268,7 @@ class ScoreCard extends StatelessWidget {
             child: Semantics(
               button: true,
               enabled: !isDeleting,
-              label: LibraryMessages.editSemantics,
+              label: LibraryMessages.editSemantics(entry.displayTitle),
               onTap: isDeleting ? null : onEdit,
               excludeSemantics: true,
               child: InkWell(

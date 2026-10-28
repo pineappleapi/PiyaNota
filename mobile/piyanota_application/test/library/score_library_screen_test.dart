@@ -1869,9 +1869,16 @@ void main() {
       await _pumpLibrary(tester, editApi());
       await tester.pumpAndSettle();
 
+      for (final score in _scores) {
+        expect(
+          find.bySemanticsLabel(LibraryMessages.editSemantics(score.title!)),
+          findsOneWidget,
+          reason: score.title,
+        );
+      }
       expect(
-        find.bySemanticsLabel(LibraryMessages.editSemantics),
-        findsNWidgets(3),
+        LibraryMessages.editSemantics('Paraiso'),
+        isNot(LibraryMessages.editSemantics('Bahay Kubo')),
       );
       final pencil = tester.widget<Icon>(find.byIcon(Icons.edit_rounded).first);
       final trash = tester.widget<Icon>(
