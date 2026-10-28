@@ -317,6 +317,17 @@ class ProcessingJobsController extends Notifier<Map<String, TrackedJob>> {
   /// also counts, since after it there is nothing left to restore.
   bool _restoreStarted = false;
   String? _lastSaved;
+  final Completer<void> _restoredSignal = Completer();
+
+  /// Completes once the stored jobs are back (or [forgetAll] made the
+  /// restore moot). An empty store changes no state, so a listener alone
+  /// can't tell "not restored yet" from "restored, job not there".
+  Future<void> get restored => _restoredSignal.future;
+
+  void _markRestored() {
+    _restored = true;
+    if (!_restoredSignal.isCompleted) _restoredSignal.complete();
+  }
 
   StreamSubscription<bool>? _network;
 
@@ -355,7 +366,8 @@ class ProcessingJobsController extends Notifier<Map<String, TrackedJob>> {
     final epoch = _clearEpoch;
     final stored = await _store.load();
     if (!ref.mounted || epoch != _clearEpoch) return;
-    _restored = true;
+    // Listeners hear of it in a microtask, after the state below is set.
+    _markRestored();
     final added = [
       for (final job in stored)
         if (!state.containsKey(job.jobId)) job,
@@ -509,7 +521,7 @@ class ProcessingJobsController extends Notifier<Map<String, TrackedJob>> {
     // One state change and no per-job saves: the store is cleared below.
     state = const {};
     // Nothing is left to restore; save normally from now on.
-    _restored = true;
+    _markRestored();
     _restoreStarted = true;
     _lastSaved = ScanJobStore.encodeJobs(const []);
     unawaited(_store.clear());

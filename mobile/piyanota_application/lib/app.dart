@@ -155,10 +155,6 @@ class _AppEntryPointState extends ConsumerState<_AppEntryPoint> {
   /// Started once onboarding is known to be done; true = signed in.
   Future<bool>? _session;
 
-  /// AC5: the scan whose notification tap started the app, opened once
-  /// the tracker has restored it.
-  String? _launchJobId;
-
   Future<bool> _restoreSession() async {
     bool valid;
     try {
@@ -179,11 +175,16 @@ class _AppEntryPointState extends ConsumerState<_AppEntryPoint> {
     return true;
   }
 
+  /// AC5: opens the scan whose notification tap started the app. It is
+  /// looked up once, after the restore: a job missing then is gone, and a
+  /// later scan reusing its id must not open by surprise.
   Future<void> _takeLaunchJob() async {
     final jobId = await ref.read(scanTrackingServiceProvider).takeLaunchJob();
     if (jobId == null || !mounted) return;
-    _launchJobId = jobId;
-    _openLaunchJob(ref.read(processingJobsProvider));
+    await ref.read(processingJobsProvider.notifier).restored;
+    final job = mounted ? ref.read(processingJobsProvider)[jobId] : null;
+    if (job == null || !mounted) return;
+    unawaited(openScanJob(Navigator.of(context), ref, job));
   }
 
   /// AC2 (backend note B2): the first PIYA-306 load is the server's check
@@ -205,16 +206,8 @@ class _AppEntryPointState extends ConsumerState<_AppEntryPoint> {
         .pushNamedAndRemoveUntil(AppRoutes.login, (_) => false);
   }
 
-  void _openLaunchJob(Map<String, TrackedJob> jobs) {
-    final job = jobs[_launchJobId];
-    if (job == null) return;
-    _launchJobId = null;
-    unawaited(openScanJob(Navigator.of(context), ref, job));
-  }
-
   @override
   Widget build(BuildContext context) {
-    ref.listen(processingJobsProvider, (_, jobs) => _openLaunchJob(jobs));
     final onboardingCompleted = ref.watch(onboardingCompletedProvider);
 
     return onboardingCompleted.when(
@@ -222,11 +215,15 @@ class _AppEntryPointState extends ConsumerState<_AppEntryPoint> {
         if (!completed) return const OnboardingFlowScreen();
         return FutureBuilder<bool>(
           future: _session ??= _restoreSession(),
-          builder: (context, snapshot) => switch (snapshot.data) {
-            true => const ScoreLibraryScreen(),
-            false => const LoginScreen(),
-            null => _placeholder,
-          },
+          // A check that blew up can't prove a session: Login, not a
+          // placeholder that never goes away.
+          builder: (context, snapshot) => snapshot.hasError
+              ? const LoginScreen()
+              : switch (snapshot.data) {
+                  true => const ScoreLibraryScreen(),
+                  false => const LoginScreen(),
+                  null => _placeholder,
+                },
         );
       },
       loading: () => _placeholder,

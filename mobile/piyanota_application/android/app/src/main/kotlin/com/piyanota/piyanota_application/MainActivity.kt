@@ -93,7 +93,16 @@ class MainActivity : FlutterActivity() {
         // A running Dart gets the tap now. A fresh engine's Dart isn't
         // listening yet: it takes the job once auto-login has restored the
         // session (PIYA-202-V2.2 AC5).
-        if (reattached) scanChannel?.deliver(intent) else scanChannel?.holdLaunch(intent)
+        // Recents and a restore after process death replay the original
+        // intent, extra and all (removeExtra never reaches the task's base
+        // intent), so only a real launch may hold the job.
+        val freshLaunch = savedInstanceState == null &&
+            (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0
+        if (reattached) {
+            scanChannel?.deliver(intent)
+        } else if (freshLaunch) {
+            scanChannel?.holdLaunch(intent)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {

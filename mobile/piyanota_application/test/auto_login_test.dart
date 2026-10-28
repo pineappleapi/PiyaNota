@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
@@ -14,6 +16,7 @@ import 'package:piyanota_application/screens/library/library_messages.dart';
 import 'package:piyanota_application/screens/library/score_library_screen.dart';
 import 'package:piyanota_application/screens/onboarding/widgets/splash_overlay.dart';
 import 'package:piyanota_application/screens/playback/playback_screen.dart';
+import 'package:piyanota_application/screens/processing/processing_screen.dart';
 import 'package:piyanota_application/screens/settings/settings_messages.dart';
 import 'package:piyanota_application/screens/settings/settings_screen.dart';
 import 'package:piyanota_application/services/demo/playback_demo.dart';
@@ -21,14 +24,16 @@ import 'package:piyanota_application/services/fake_auth_api.dart';
 import 'package:piyanota_application/services/fake_score_library_api.dart';
 import 'package:piyanota_application/services/fake_score_result_api.dart';
 import 'package:piyanota_application/services/score_library_api.dart';
+import 'package:piyanota_application/services/session_storage.dart';
 import 'package:piyanota_application/state/auth_providers.dart';
 import 'package:piyanota_application/state/playback_providers.dart';
 import 'package:piyanota_application/state/processing_providers.dart';
 import 'package:piyanota_application/state/scan_job_store.dart';
 import 'package:piyanota_application/state/score_library_providers.dart';
+import 'package:piyanota_application/state/work_owner.dart';
 
 import 'playback/playback_fakes.dart';
-import 'processing/processing_fakes.dart';
+import 'processing/processing_fakes.dart' hide appContainer;
 
 /// Not a file, so the fake result fails at once instead of waiting on
 /// real file IO the test clock never runs (as in library_flow_test).
@@ -52,6 +57,20 @@ class _OfflineLibraryApi implements ScoreLibraryApi {
 
   @override
   Future<void> recordOpened(int scoreId) async {}
+}
+
+/// A session check that answers only when the test says so.
+class _SlowSessionStorage extends SessionStorage {
+  final Completer<bool> answer = Completer();
+
+  @override
+  Future<bool> hasValidSession({DateTime? now}) => answer.future;
+}
+
+/// Marking the session signed in fails, so the launch check throws.
+class _BrokenSignedIn extends SignedIn {
+  @override
+  void set(bool value) => throw StateError('broken');
 }
 
 /// PIYA-202-V2.2: a stored, unexpired session skips Login on launch.
@@ -246,5 +265,59 @@ void main() {
     final navigator = tester.state<NavigatorState>(find.byType(Navigator));
     expect(navigator.canPop(), isTrue);
     expect(device.launchJob, isNull, reason: 'taken, so it opens once');
+  });
+
+  testWidgets('a session check that throws opens Login, not a blank '
+      'screen', (tester) async {
+    FlutterSecureStorage.setMockInitialValues(storedSession());
+    await launch(
+      tester,
+      overrides: [signedInProvider.overrideWith(_BrokenSignedIn.new)],
+    );
+
+    expect(find.byType(LoginScreen), findsOneWidget);
+  });
+
+  testWidgets('a launch job missing from the restored scans is dropped, '
+      'not opened later', (tester) async {
+    FlutterSecureStorage.setMockInitialValues(storedSession());
+    final device = FakeScanTrackingService()..launchJob = 'job-x';
+    await launch(
+      tester,
+      overrides: [
+        scanTrackingServiceProvider.overrideWithValue(device),
+        scanJobStoreProvider.overrideWithValue(MemoryScanJobStore()),
+      ],
+    );
+    expect(find.byType(ScoreLibraryScreen), findsOneWidget);
+
+    // The same job turns up later, e.g. a new scan reusing the id.
+    appContainer(tester).read(processingJobsProvider.notifier).track('job-x');
+    await tester.pump();
+    await tester.pump(settle);
+
+    expect(find.byType(ProcessingScreen), findsNothing);
+    expect(find.byType(ScoreLibraryScreen), findsOneWidget);
+  });
+
+  testWidgets('a session check slower than the splash shows the blank '
+      'placeholder, never Login, then the Library', (tester) async {
+    FlutterSecureStorage.setMockInitialValues(storedSession());
+    final storage = _SlowSessionStorage();
+    await launch(
+      tester,
+      overrides: [sessionStorageProvider.overrideWithValue(storage)],
+    );
+
+    expect(find.byType(SplashOverlay), findsNothing);
+    expect(find.byType(LoginScreen), findsNothing);
+    expect(find.byType(ScoreLibraryScreen), findsNothing);
+
+    storage.answer.complete(true);
+    await tester.pump();
+    await tester.pump(FakeScoreLibraryApi.defaultLatency);
+    await tester.pump(settle);
+    expect(find.byType(LoginScreen), findsNothing);
+    expect(find.byType(ScoreLibraryScreen), findsOneWidget);
   });
 }
