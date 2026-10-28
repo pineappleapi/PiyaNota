@@ -7,6 +7,7 @@ import 'package:piyanota_application/models/voice_part.dart';
 import 'package:piyanota_application/screens/playback/playback_messages.dart';
 import 'package:piyanota_application/screens/playback/sheet_parts.dart';
 import 'package:piyanota_application/state/playback_providers.dart';
+import 'package:piyanota_application/theme/app_theme.dart';
 
 import 'playback_fakes.dart';
 
@@ -327,6 +328,27 @@ void main() {
       // The mixer row never turns the click on by itself.
       controller(tester).setMetronomeOn(on: false);
       expect(engine.clickVolume, 0);
+    });
+
+    testWidgets('off: icon and text are fully opaque in the voice-row style '
+        '(PIYA-209-V2.1)', (tester) async {
+      await pumpPlayback(tester, ready());
+      await openMixer(tester);
+      expect(controller(tester).state.metronomeOn, isFalse);
+      final label = find.descendant(
+        of: metronomeRow,
+        matching: find.text(PlaybackMessages.metronomeClick),
+      );
+      expect(tester.widget<Text>(label).style?.color, AppTheme.sheetText);
+      // Only the slider (its own fade) may be faded, never the row.
+      final fades = find.ancestor(of: label, matching: find.byType(Opacity));
+      for (final o in tester.widgetList<Opacity>(fades)) {
+        expect(o.opacity, 1);
+      }
+      expect(
+        tester.getSemantics(label).label,
+        contains(PlaybackMessages.metronomeClick),
+      );
     });
 
     testWidgets('off: the row looks inactive with a hint, its level, Mute '

@@ -89,8 +89,9 @@ class VoiceMixerSheet extends ConsumerWidget {
           children: [
             Text(
               PlaybackMessages.metronomeClick,
+              // Same style on or off (PIYA-209-V2.1): only the controls dim.
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: clickOff ? AppTheme.sheetSubtle : AppTheme.sheetText,
+                color: AppTheme.sheetText,
               ),
             ),
             _MetronomeSwitch(
@@ -203,7 +204,7 @@ class _MixerRow extends StatelessWidget {
   final ValueChanged<double> onVolume;
 
   /// Usable, but not sounding for now (the metronome with the Speed toggle
-  /// off): the slider is drawn faded. Text keeps AA contrast.
+  /// off): the slider is drawn faded. Icon and text stay fully opaque.
   final bool inactive;
 
   /// Solo, slider and Mute are disabled but the row (its label, which may
