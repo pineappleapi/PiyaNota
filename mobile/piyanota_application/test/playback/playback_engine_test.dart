@@ -74,6 +74,14 @@ class FakeAudioPlayer implements AudioPlayer {
   @override
   Duration? get duration => length;
 
+  /// Replays [length] by default, as just_audio's BehaviorSubject does; a
+  /// test can push a null first (length not known yet) through this.
+  StreamController<Duration?>? durations;
+
+  @override
+  Stream<Duration?> get durationStream =>
+      durations?.stream ?? Stream.value(length);
+
   @override
   Duration get position {
     final started = _startedAt;
@@ -739,6 +747,50 @@ void main() {
         bass.seeks.clear();
         async.elapse(const Duration(seconds: 6));
         expect(bass.seeks, isEmpty);
+      });
+    });
+  });
+
+  group('durationKnown', () {
+    test('known at load: returned at once', () {
+      fakeAsync((async) {
+        final r = rig();
+        unawaited(r.engine.load(tracks()));
+        async.flushMicrotasks();
+        Duration? got;
+        unawaited(r.engine.durationKnown().then((d) => got = d));
+        async.flushMicrotasks();
+        expect(got, const Duration(seconds: 10));
+      });
+    });
+
+    test('reported late: waits for it', () {
+      fakeAsync((async) {
+        final master = FakeAudioPlayer()..durations = StreamController();
+        final r = rig(overrides: {VoicePart.soprano: master});
+        unawaited(r.engine.load(tracks({VoicePart.soprano})));
+        async.flushMicrotasks();
+        Duration? got;
+        unawaited(r.engine.durationKnown().then((d) => got = d));
+        master.durations!.add(null);
+        async.elapse(const Duration(seconds: 2));
+        expect(got, isNull);
+        master.durations!.add(const Duration(seconds: 7));
+        async.flushMicrotasks();
+        expect(got, const Duration(seconds: 7));
+      });
+    });
+
+    test('never reported: zero after the load timeout', () {
+      fakeAsync((async) {
+        final master = FakeAudioPlayer()..durations = StreamController();
+        final r = rig(overrides: {VoicePart.soprano: master});
+        unawaited(r.engine.load(tracks({VoicePart.soprano})));
+        async.flushMicrotasks();
+        Duration? got;
+        unawaited(r.engine.durationKnown().then((d) => got = d));
+        async.elapse(JustAudioPlaybackEngine.loadTimeout);
+        expect(got, Duration.zero);
       });
     });
   });

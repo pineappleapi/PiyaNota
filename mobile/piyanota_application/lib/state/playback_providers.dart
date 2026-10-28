@@ -472,6 +472,17 @@ class PlaybackController extends Notifier<PlaybackState> {
     bool Function() live, {
     required bool replace,
   }) async {
+    // A plan for a zero length is an empty file: "ready" yet silent. So
+    // wait for the length if just_audio doesn't know it yet.
+    final length = await engine.durationKnown();
+    if (!live()) return;
+    if (length <= Duration.zero) {
+      debugPrint('Playback: track length unknown; no metronome click');
+      if (!replace) _clickFailed();
+      return;
+    }
+    // The seek bar read the same unknown length at load.
+    if (state.duration != length) state = state.copyWith(duration: length);
     final chosenBpm = state.chosenBpm;
     final plannedSubdivisions = subdividedBars(_bars, chosenBpm);
     final Uri file;
@@ -481,7 +492,7 @@ class PlaybackController extends Notifier<PlaybackState> {
         events: _eventsOf(state.timeline),
         tempoBpm: state.tempoBpm,
         chosenBpm: chosenBpm,
-        length: engine.duration,
+        length: length,
       );
       file = await ref.read(clickTrackWriterProvider)(plan);
     } on Object catch (e, stack) {

@@ -782,6 +782,41 @@ void main() {
       expect(c.state.clickVolume, 1);
     });
 
+    testWidgets('track length unknown at load: the click waits for it, '
+        'then is planned to the real length and heard', (tester) async {
+      final gate = Completer<Duration>();
+      final harness = PlaybackHarness(
+        ScriptedScoreResultApi([testResult()], timing: testTiming()),
+        engineDuration: const Duration(minutes: 5),
+        engineDurationGate: gate,
+      );
+      await pumpPlayback(tester, harness);
+      final c = controller(tester)..setMetronomeOn(on: true);
+      expect(harness.clickPlans, isEmpty);
+      expect(c.state.clickStatus, ClickStatus.preparing);
+
+      gate.complete(const Duration(minutes: 5));
+      await settle(tester);
+      expect(harness.clickPlans.single.length, const Duration(minutes: 5));
+      expect(c.state.duration, const Duration(minutes: 5));
+      expect(c.state.clickStatus, ClickStatus.ready);
+      expect(harness.engine.clickVolume, 1);
+    });
+
+    testWidgets('track length never known: the click is unavailable, never '
+        'silently on', (tester) async {
+      final gate = Completer<Duration>();
+      final harness = PlaybackHarness(
+        ScriptedScoreResultApi([testResult()], timing: testTiming()),
+        engineDurationGate: gate,
+      );
+      await pumpPlayback(tester, harness);
+      gate.complete(Duration.zero);
+      await settle(tester);
+      expect(harness.clickPlans, isEmpty);
+      expect(controller(tester).state.clickStatus, ClickStatus.unavailable);
+    });
+
     testWidgets('on while the click is still preparing: heard the moment it '
         'is ready, transport untouched', (tester) async {
       final gate = Completer<bool>();

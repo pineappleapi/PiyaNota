@@ -50,8 +50,13 @@ abstract interface class PlaybackEngine {
   /// the indicator, so both follow the audio at any speed.
   Duration get position;
 
-  /// The master track's length, known after [load].
+  /// The master track's length, known after [load]; zero while just_audio
+  /// can't tell it yet (some MP3s report it only once playback has begun).
   Duration get duration;
+
+  /// [duration] once it is known, waiting for it if need be; zero if it
+  /// still isn't after [JustAudioPlaybackEngine.loadTimeout].
+  Future<Duration> durationKnown();
 
   bool get playing;
 
@@ -348,6 +353,18 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
 
   @override
   Duration get duration => _master?.duration ?? Duration.zero;
+
+  @override
+  Future<Duration> durationKnown() async {
+    final master = _master;
+    if (master == null) return Duration.zero;
+    // shortcut: waits on the master at call time; a master swap mid-wait
+    // still gets that track's length, which is close enough for the click.
+    final known = await master.durationStream
+        .firstWhere((d) => d != null && d > Duration.zero, orElse: () => null)
+        .timeout(loadTimeout, onTimeout: () => null);
+    return known ?? Duration.zero;
+  }
 
   @override
   bool get playing => _master?.playing ?? false;

@@ -42,9 +42,16 @@ class FakePlaybackEngine implements PlaybackEngine {
     this.failAtLoad = const {},
     this.clickAttachFails = false,
     this.clickAttachGate,
+    this.durationGate,
   });
 
   final Duration trackDuration;
+
+  /// When set, [duration] reads zero until [durationKnown] has it, like
+  /// just_audio for an MP3 whose length ExoPlayer can't tell at load.
+  /// Completing it with zero stands for the engine's wait timing out.
+  final Completer<Duration>? durationGate;
+  Duration? _lateDuration;
 
   /// When set, [attachClick] waits for it, holding the click in
   /// "preparing"; completing it with false fails the attach.
@@ -129,7 +136,15 @@ class FakePlaybackEngine implements PlaybackEngine {
   Stream<PlaybackFailure> get failures => _failures.stream;
 
   @override
-  Duration get duration => trackDuration;
+  Duration get duration =>
+      durationGate == null ? trackDuration : _lateDuration ?? Duration.zero;
+
+  @override
+  Future<Duration> durationKnown() async {
+    final gate = durationGate;
+    if (gate == null) return trackDuration;
+    return _lateDuration = await gate.future;
+  }
 
   @override
   bool get playing => _startedAt != null;
@@ -443,7 +458,11 @@ class PlaybackHarness {
     this.clickAttachGate,
     this.clickWriter,
     this.exportService,
+    this.engineDurationGate,
   });
+
+  /// See [FakePlaybackEngine.durationGate].
+  final Completer<Duration>? engineDurationGate;
 
   /// Replaces the device export channel (PIYA-211).
   final ExportService? exportService;
@@ -490,6 +509,7 @@ class PlaybackHarness {
         failAtLoad: engineFailAtLoad,
         clickAttachFails: clickAttachFails,
         clickAttachGate: clickAttachGate,
+        durationGate: engineDurationGate,
       );
       engines.add(engine);
       return engine;
