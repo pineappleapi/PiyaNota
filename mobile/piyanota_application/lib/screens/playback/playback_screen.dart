@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
-import 'package:clock/clock.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -461,6 +461,7 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
               timeline: state.timeline ?? ScoreTimeline.empty,
               display: _display,
               jumps: _jumps,
+              playing: state.playing,
             ),
           ),
           if (state.showReviewBanner)
@@ -952,48 +953,70 @@ class _ReviewBanner extends StatelessWidget {
 }
 
 /// The original page images, fit to width and stacked vertically (FR-8,
-/// AC1), with the indicator band drawn over the page it is on (AC6).
+/// AC1, V2.4), with the indicator band drawn over the page it is on (AC6).
+///
+/// One [InteractiveViewer] is both the zoom and the scroll (V2.3, V2.4
+/// AC5): a scroll view around it fights it for vertical drags and clips
+/// the zoomed stack, so follow and seek move its translation instead.
 class _ScoreView extends StatefulWidget {
   const _ScoreView({
     required this.result,
     required this.timeline,
     required this.display,
     required this.jumps,
+    required this.playing,
   });
 
   final ScoreResult result;
   final ScoreTimeline timeline;
   final ValueListenable<Duration> display;
   final Listenable jumps;
+  final bool playing;
 
   @override
   State<_ScoreView> createState() => _ScoreViewState();
 }
 
-class _ScoreViewState extends State<_ScoreView> {
+class _ScoreViewState extends State<_ScoreView>
+    with SingleTickerProviderStateMixin {
   /// The band's width at the mockup's 412 dp screen width; scales with
   /// the page.
   static const double _bandWidth = 18;
   static const double _referenceWidth = 412;
   static const double _gutter = 12;
   static const double _pageGap = 12;
+  static const double _padTop = 8;
+  static const double _padBottom = 16;
+
+  /// V2.3 AC1, user-approved 2026-10-28.
+  static const double _maxZoom = 4;
 
   /// A page whose size isn't known yet is laid out as A4 portrait.
   static const double _fallbackAspect = 1.414;
 
-  /// Hands-off time after the user scrolls the score themselves.
-  static const Duration _manualScrollGrace = Duration(seconds: 3);
   static const Duration _scrollDuration = Duration(milliseconds: 350);
 
-  /// Where the band's top lands when the view scrolls to it.
+  /// Where the band's top (and, zoomed, its left) lands when the view
+  /// scrolls to it, as a fraction of the view.
   static const double _followAnchor = 0.08;
 
-  final ScrollController _scroll = ScrollController();
+  /// A follow that would move the view less than this is skipped.
+  static const double _followSlack = 0.5;
+
+  final TransformationController _view = TransformationController();
+  late final AnimationController _scroll = AnimationController(
+    vsync: this,
+    duration: _scrollDuration,
+  )..addListener(_animateScroll);
+  Matrix4Tween? _scrollTween;
   final Map<int, Size> _decoded = {};
   final List<(ImageStream, ImageStreamListener)> _streams = [];
-  DateTime? _lastUserScroll;
-  bool _autoScrolling = false;
-  int _scrollAnimation = 0;
+
+  /// The user scrolled, panned or pinched: auto-follow stays off until
+  /// they tap play or seek (V2.4 AC3 [Call]).
+  bool _manual = false;
+  Offset _doubleTapAt = Offset.zero;
+  Size _viewport = Size.zero;
   double _pageWidth = 0;
 
   @override
@@ -1001,6 +1024,14 @@ class _ScoreViewState extends State<_ScoreView> {
     super.initState();
     widget.display.addListener(_follow);
     widget.jumps.addListener(_onJump);
+  }
+
+  @override
+  void didUpdateWidget(_ScoreView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // The display ticks every frame while playing, so the next one
+    // follows; moving the view here, mid-build, would rebuild the viewer.
+    if (widget.playing && !oldWidget.playing) _manual = false;
   }
 
   @override
@@ -1017,6 +1048,7 @@ class _ScoreViewState extends State<_ScoreView> {
       stream.removeListener(listener);
     }
     _scroll.dispose();
+    _view.dispose();
     super.dispose();
   }
 
@@ -1070,68 +1102,91 @@ class _ScoreViewState extends State<_ScoreView> {
   }
 
   double _pageTop(int page) {
-    var top = 0.0;
+    var top = _padTop;
     for (var i = 0; i < page; i++) {
       top += _pageHeight(i) + _pageGap;
     }
     return top;
   }
 
+  double get _contentHeight =>
+      _pageTop(widget.result.scoreImages.length) - _pageGap + _padBottom;
+
+  /// The view's matrix at [zoom], shifted by ([dx], [dy]) but kept inside
+  /// the stack, the same bounds the viewer keeps a pan in.
+  Matrix4 _clamped(double zoom, double dx, double dy) {
+    final minX = _viewport.width * (1 - zoom);
+    final minY = math.min(0.0, _viewport.height - _contentHeight * zoom);
+    return Matrix4.diagonal3Values(zoom, zoom, 1)
+      ..setTranslationRaw(dx.clamp(minX, 0), dy.clamp(minY, 0), 0);
+  }
+
+  void _animateScroll() {
+    final tween = _scrollTween;
+    if (tween == null) return;
+    _view.value = tween.transform(Curves.easeInOut.transform(_scroll.value));
+  }
+
   /// A seek the user asked for wins over a follow animation still running
-  /// (it would otherwise land on the old spot and ignore the jump).
+  /// (it would otherwise land on the old spot and ignore the jump), and
+  /// ends a manual hold (V2.4 AC3, AC4).
   void _onJump() {
-    _lastUserScroll = null;
+    _manual = false;
     _follow(interrupt: true);
   }
 
-  /// Keeps the band on screen while it moves, unless the user scrolled in
-  /// the last few seconds (don't fight them).
+  /// Any pan, scroll or pinch by the user. Never a follow: those set the
+  /// matrix directly, which the viewer doesn't report as an interaction.
+  void _onUserMove(ScaleStartDetails _) {
+    _manual = true;
+    _scroll.stop();
+  }
+
+  /// Back to 1x (V2.3 AC3), keeping the tapped spot of the stack at the
+  /// same height on screen.
+  void _resetZoom() {
+    _scroll.stop();
+    final matrix = _view.value;
+    final zoom = matrix.getMaxScaleOnAxis();
+    final stackY = (_doubleTapAt.dy - matrix.getTranslation().y) / zoom;
+    _view.value = _clamped(1, 0, _doubleTapAt.dy - stackY);
+  }
+
+  /// Keeps the band on screen while it moves, at any zoom, unless the
+  /// user moved the view since the last play or seek (don't fight them).
   void _follow({bool interrupt = false}) {
-    if (!_scroll.hasClients || _pageWidth <= 0) return;
-    if (_autoScrolling && !interrupt) return;
+    if (_manual || _viewport.isEmpty || _pageWidth <= 0) return;
+    if (_scroll.isAnimating && !interrupt) return;
     final position = widget.timeline.positionAt(widget.display.value);
     if (position == null) return;
     if (position.pageIndex >= widget.result.scoreImages.length) return;
     final scale = _scaleFor(position.pageIndex);
     if (scale == 0) return;
-    final userScrolled = _lastUserScroll;
-    if (userScrolled != null &&
-        clock.now().difference(userScrolled) < _manualScrollGrace) {
+    final pageTop = _pageTop(position.pageIndex);
+    final matrix = _view.value;
+    final zoom = matrix.getMaxScaleOnAxis();
+    final shift = matrix.getTranslation();
+    final top = (pageTop + position.top * scale) * zoom + shift.y;
+    final bottom = (pageTop + position.bottom * scale) * zoom + shift.y;
+    final x = (_gutter + position.x * scale) * zoom + shift.x;
+    final fitsY = top >= 0 && bottom <= _viewport.height;
+    final fitsX = x >= 0 && x <= _viewport.width;
+    if (fitsY && fitsX) return;
+    final end = _clamped(
+      zoom,
+      fitsX ? shift.x : shift.x - x + _viewport.width * _followAnchor,
+      fitsY ? shift.y : shift.y - top + _viewport.height * _followAnchor,
+    );
+    // Already as close as it gets: a band taller than the zoomed view, or
+    // one held back by the stack's edge, would otherwise restart this
+    // every frame.
+    final to = end.getTranslation();
+    if ((to.x - shift.x).abs() < _followSlack &&
+        (to.y - shift.y).abs() < _followSlack) {
       return;
     }
-    final pageTop = _pageTop(position.pageIndex);
-    final top = pageTop + position.top * scale;
-    final bottom = pageTop + position.bottom * scale;
-    final metrics = _scroll.position;
-    final viewTop = metrics.pixels;
-    final viewBottom = viewTop + metrics.viewportDimension;
-    if (top >= viewTop && bottom <= viewBottom) return;
-    final target = (top - metrics.viewportDimension * _followAnchor).clamp(
-      metrics.minScrollExtent,
-      metrics.maxScrollExtent,
-    );
-    _autoScrolling = true;
-    final animation = ++_scrollAnimation;
-    unawaited(
-      _scroll
-          .animateTo(target, duration: _scrollDuration, curve: Curves.easeInOut)
-          .whenComplete(() {
-            // An interrupted animation completes too; only the newest one
-            // may clear the flag.
-            if (animation == _scrollAnimation) _autoScrolling = false;
-          }),
-    );
-  }
-
-  bool _onScroll(ScrollNotification notification) {
-    if (notification is ScrollStartNotification &&
-        notification.dragDetails != null) {
-      _lastUserScroll = clock.now();
-    } else if (notification is ScrollUpdateNotification &&
-        notification.dragDetails != null) {
-      _lastUserScroll = clock.now();
-    }
-    return false;
+    _scrollTween = Matrix4Tween(begin: matrix.clone(), end: end);
+    unawaited(_scroll.forward(from: 0));
   }
 
   @override
@@ -1152,32 +1207,50 @@ class _ScoreViewState extends State<_ScoreView> {
     }
     return LayoutBuilder(
       builder: (context, constraints) {
+        _viewport = constraints.biggest;
         _pageWidth = constraints.maxWidth - 2 * _gutter;
         final bandWidth =
             _bandWidth * MediaQuery.sizeOf(context).width / _referenceWidth;
-        return NotificationListener<ScrollNotification>(
-          onNotification: _onScroll,
-          child: SingleChildScrollView(
+        // Nothing in the score is tappable (the band ignores pointers), so
+        // waiting to see a double-tap delays no single tap.
+        return GestureDetector(
+          onDoubleTapDown: (details) => _doubleTapAt = details.localPosition,
+          onDoubleTap: _resetZoom,
+          child: InteractiveViewer(
             key: const ValueKey('score-scroll'),
-            controller: _scroll,
-            padding: const EdgeInsets.fromLTRB(_gutter, 8, _gutter, 16),
-            child: Column(
-              children: [
-                for (var i = 0; i < images.length; i++) ...[
-                  if (i > 0) const SizedBox(height: _pageGap),
-                  _ScorePage(
-                    pageIndex: i,
-                    pageCount: images.length,
-                    image: _imageFor(images[i]),
-                    width: _pageWidth,
-                    height: _pageHeight(i),
-                    scale: _scaleFor(i),
-                    bandWidth: bandWidth,
-                    timeline: widget.timeline,
-                    display: widget.display,
-                  ),
-                ],
-              ],
+            transformationController: _view,
+            constrained: false,
+            maxScale: _maxZoom,
+            onInteractionStart: _onUserMove,
+            child: SizedBox(
+              width: constraints.maxWidth,
+              height: _contentHeight,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  _gutter,
+                  _padTop,
+                  _gutter,
+                  _padBottom,
+                ),
+                child: Column(
+                  children: [
+                    for (var i = 0; i < images.length; i++) ...[
+                      if (i > 0) const SizedBox(height: _pageGap),
+                      _ScorePage(
+                        pageIndex: i,
+                        pageCount: images.length,
+                        image: _imageFor(images[i]),
+                        width: _pageWidth,
+                        height: _pageHeight(i),
+                        scale: _scaleFor(i),
+                        bandWidth: bandWidth,
+                        timeline: widget.timeline,
+                        display: widget.display,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             ),
           ),
         );
@@ -1215,6 +1288,7 @@ class _ScorePage extends StatelessWidget {
   Widget build(BuildContext context) {
     final provider = image;
     return SizedBox(
+      key: ValueKey('score-page-$pageIndex'),
       width: width,
       height: height,
       child: Stack(

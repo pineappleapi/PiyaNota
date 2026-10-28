@@ -369,6 +369,25 @@ List<TimingEvent> testTiming() {
   return events;
 }
 
+/// One system per page at the top, on [pages] pages: the band reaches
+/// page p+1 at (p * 1000 + 500) ms and sweeps it for 1 s.
+List<TimingEvent> pagedTiming(int pages) => [
+  for (var p = 0; p < pages; p++)
+    for (final (ms, x) in [(p * 1000 + 500, 100.0), (p * 1000 + 1000, 900.0)])
+      for (final voice in VoicePart.values)
+        ev(
+          ms,
+          x,
+          200.0 + voice.index * 120,
+          bar: p + 1,
+          voice: voice,
+          systemIndex: 0,
+          top: 160,
+          bottom: 600,
+          page: p,
+        ),
+];
+
 /// The job [testResult] comes from by default.
 const String kJobId = 'job-1';
 
@@ -382,6 +401,7 @@ ScoreResult testResult({
   List<MutedMeasure> mutedMeasures = const [],
   String jobId = kJobId,
   Map<VoicePart, VoiceFailureCause> failedVoiceCauses = const {},
+  int pages = 1,
 }) => ScoreResult(
   scoreId: kScoreId,
   jobId: jobId,
@@ -392,10 +412,12 @@ ScoreResult testResult({
   },
   // No image provider for this scheme: the page lays out from pageSizes
   // without decoding anything in the test.
-  scoreImages: [Uri.parse('test://page1.png')],
+  scoreImages: [
+    for (var i = 1; i <= pages; i++) Uri.parse('test://page$i.png'),
+  ],
   timingMetadataUrl: Uri.parse('https://cdn.test/timing.json'),
   review: ReviewSummary(reviewNeeded: reviewNeeded),
-  pageSizes: const [Size(1000, 1400)],
+  pageSizes: [for (var i = 0; i < pages; i++) const Size(1000, 1400)],
   arranger: arranger,
   tempoBpm: tempoBpm,
   tempoKnown: tempoKnown,

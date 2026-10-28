@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -959,6 +960,309 @@ void main() {
       await tapTooltip(tester, PlaybackMessages.forward5);
       expect(tester.takeException(), isNull);
       expect(find.byKey(const ValueKey('playback-band')), findsOneWidget);
+    });
+  });
+
+  group('zoom and the page stack (PIYA-208-V2.3, V2.4)', () {
+    // Short enough that one page doesn't fit, so the stack must scroll.
+    const small = Size(412, 700);
+    final viewer = find.byKey(const ValueKey('score-scroll'));
+    Matrix4 matrix(WidgetTester tester) => tester
+        .widget<InteractiveViewer>(viewer)
+        .transformationController!
+        .value;
+    double scale(WidgetTester tester) => matrix(tester).getMaxScaleOnAxis();
+    Offset shift(WidgetTester tester) {
+      final t = matrix(tester).getTranslation();
+      return Offset(t.x, t.y);
+    }
+
+    Rect page(WidgetTester tester, int i) =>
+        tester.getRect(find.byKey(ValueKey('score-page-$i')));
+
+    /// Wholly on screen; a band taller than the zoomed view counts once
+    /// its top is.
+    bool inView(WidgetTester tester, Rect rect) {
+      final view = tester.getRect(viewer);
+      return rect.top >= view.top - 0.5 &&
+          rect.top < view.bottom &&
+          (rect.bottom <= view.bottom + 0.5 || rect.height > view.height) &&
+          rect.left >= view.left - 0.5 &&
+          rect.right <= view.right + 0.5;
+    }
+
+    PlaybackHarness paged() => PlaybackHarness(
+      ScriptedScoreResultApi([
+        testResult(pages: 3, reviewNeeded: false),
+      ], timing: pagedTiming(3)),
+    );
+
+    Future<void> pinch(WidgetTester tester, double from, double to) async {
+      final c = tester.getCenter(viewer);
+      final a = await tester.startGesture(c - Offset(from, 0), pointer: 1);
+      final b = await tester.startGesture(c + Offset(from, 0), pointer: 2);
+      await tester.pump();
+      for (var i = 1; i <= 10; i++) {
+        final d = from + (to - from) * i / 10;
+        await a.moveTo(c - Offset(d, 0));
+        await b.moveTo(c + Offset(d, 0));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      // Held still before lifting: no fling afterwards.
+      await tester.pump(const Duration(milliseconds: 200));
+      await a.up();
+      await b.up();
+      await tester.pump();
+    }
+
+    /// Spreads two fingers until the scale reaches [target]. Not a fixed
+    /// path: the recognizer measures the pinch only from where it passes
+    /// its slop, as on a phone.
+    Future<void> pinchTo(WidgetTester tester, double target) async {
+      final c = tester.getCenter(viewer);
+      var d = 40.0;
+      final a = await tester.startGesture(c - Offset(d, 0), pointer: 1);
+      final b = await tester.startGesture(c + Offset(d, 0), pointer: 2);
+      await tester.pump();
+      while (scale(tester) < target - 0.01 && d < 400) {
+        d += 1;
+        await a.moveTo(c - Offset(d, 0));
+        await b.moveTo(c + Offset(d, 0));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await tester.pump(const Duration(milliseconds: 200));
+      await a.up();
+      await b.up();
+      await tester.pump();
+    }
+
+    Future<void> drag(WidgetTester tester, Offset by) async {
+      final g = await tester.startGesture(tester.getCenter(viewer));
+      for (var i = 1; i <= 10; i++) {
+        await g.moveBy(by / 10);
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await tester.pump(const Duration(milliseconds: 200));
+      await g.up();
+      await tester.pump();
+    }
+
+    Future<void> doubleTap(WidgetTester tester) async {
+      await tester.tap(viewer);
+      await tester.pump(kDoubleTapMinTime);
+      await tester.tap(viewer);
+      // Lets the second tap's own min-time timer run out.
+      await tester.pump(kDoubleTapMinTime);
+    }
+
+    /// Frame by frame, as on a phone: one long pump is a single frame, in
+    /// which the band can move on while a follow is still finishing.
+    Future<void> settleFollow(WidgetTester tester) async {
+      for (var i = 0; i < 25; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+    }
+
+    testWidgets('pinch to 2x, then the scale is 2', (tester) async {
+      await pumpPlayback(tester, paged(), size: small);
+      expect(scale(tester), 1);
+      await pinchTo(tester, 2);
+      expect(scale(tester), closeTo(2, 0.05));
+    });
+
+    testWidgets('scale stays clamped to 1-4', (tester) async {
+      await pumpPlayback(tester, paged(), size: small);
+      await pinch(tester, 20, 200);
+      expect(scale(tester), closeTo(4, 0.001));
+      await pinch(tester, 200, 10);
+      expect(scale(tester), closeTo(1, 0.001));
+    });
+
+    testWidgets('the band scales with the page at any zoom (V2.3 AC2)', (
+      tester,
+    ) async {
+      await pumpPlayback(tester, ready(review: false));
+      final before = band(tester);
+      final pageBefore = page(tester, 0);
+      await pinchTo(tester, 2);
+      final after = band(tester);
+      final pageAfter = page(tester, 0);
+      expect(pageAfter.width / pageBefore.width, closeTo(2, 0.02));
+      // Same spot and size on the page, as fractions of the page.
+      Rect onPage(Rect band, Rect page) => Rect.fromLTRB(
+        (band.left - page.left) / page.width,
+        (band.top - page.top) / page.height,
+        (band.right - page.left) / page.width,
+        (band.bottom - page.top) / page.height,
+      );
+      final was = onPage(before, pageBefore);
+      final now = onPage(after, pageAfter);
+      for (final (a, b) in [
+        (now.left, was.left),
+        (now.top, was.top),
+        (now.right, was.right),
+        (now.bottom, was.bottom),
+      ]) {
+        expect(a, closeTo(b, 0.001));
+      }
+    });
+
+    testWidgets('a double-tap resets to 1x', (tester) async {
+      await pumpPlayback(tester, paged(), size: small);
+      await pinchTo(tester, 2.4);
+      expect(scale(tester), greaterThan(2));
+      await doubleTap(tester);
+      expect(scale(tester), 1);
+      expect(shift(tester).dx, 0);
+    });
+
+    testWidgets('reopening the score starts at 1x', (tester) async {
+      final harness = paged();
+      await pumpPlayback(tester, harness, size: small);
+      await pinchTo(tester, 2);
+      expect(scale(tester), greaterThan(1.5));
+      await tester.tap(find.byTooltip(PlaybackMessages.back));
+      await settle(tester);
+      await tester.pump(const Duration(seconds: 1));
+      await reopenPlayback(tester);
+      expect(scale(tester), 1);
+      expect(shift(tester), Offset.zero);
+    });
+
+    testWidgets('at 1x a vertical drag scrolls the stack, sideways does not', (
+      tester,
+    ) async {
+      await pumpPlayback(tester, paged(), size: small);
+      await drag(tester, const Offset(0, -200));
+      expect(shift(tester).dy, lessThan(-150));
+      final y = shift(tester).dy;
+      await drag(tester, const Offset(-80, 0));
+      expect(shift(tester), Offset(0, y));
+    });
+
+    testWidgets('zoomed, one finger pans both ways and reaches page 2', (
+      tester,
+    ) async {
+      await pumpPlayback(tester, paged(), size: small);
+      await pinchTo(tester, 2);
+      final start = shift(tester);
+      await drag(tester, const Offset(-60, -80));
+      final moved = shift(tester);
+      expect(moved.dx, lessThan(start.dx - 30));
+      expect(moved.dy, lessThan(start.dy - 40));
+      // V2.4 AC5: the whole stack is still reachable while zoomed.
+      for (var i = 0; i < 6; i++) {
+        await drag(tester, const Offset(0, -250));
+      }
+      expect(page(tester, 1).top, lessThan(tester.getRect(viewer).bottom));
+      expect(scale(tester), closeTo(2, 0.05));
+    });
+
+    testWidgets('pages are joined top to bottom, in order (V2.4 AC1)', (
+      tester,
+    ) async {
+      await pumpPlayback(tester, paged(), size: small);
+      expect(page(tester, 1).top, closeTo(page(tester, 0).bottom + 12, 0.01));
+      expect(page(tester, 2).top, closeTo(page(tester, 1).bottom + 12, 0.01));
+    });
+
+    testWidgets('a one-page score sits where it did before zoom (V2.4 AC6)', (
+      tester,
+    ) async {
+      await pumpPlayback(tester, ready(review: false));
+      final view = tester.getRect(viewer);
+      final only = page(tester, 0);
+      expect(only.left, view.left + 12);
+      expect(only.top, view.top + 8);
+      expect(only.width, view.width - 24);
+    });
+
+    testWidgets('while playing, the band crossing pages scrolls them in', (
+      tester,
+    ) async {
+      await pumpPlayback(tester, paged(), size: small);
+      await tester.tap(find.byKey(const ValueKey('play-pause')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(inView(tester, band(tester)), isTrue);
+      expect(inView(tester, page(tester, 1)), isFalse);
+
+      await tester.pump(const Duration(milliseconds: 1000));
+      await settleFollow(tester);
+      expect(band(tester).top, greaterThan(page(tester, 1).top));
+      expect(inView(tester, band(tester)), isTrue);
+      // The follow scroll itself is not a manual scroll: page 3 follows.
+      await tester.pump(const Duration(milliseconds: 1000));
+      await settleFollow(tester);
+      expect(band(tester).top, greaterThan(page(tester, 2).top));
+      expect(inView(tester, band(tester)), isTrue);
+    });
+
+    testWidgets('a manual scroll stops auto-follow until play is tapped', (
+      tester,
+    ) async {
+      await pumpPlayback(tester, paged(), size: small);
+      final play = find.byKey(const ValueKey('play-pause'));
+      await tester.tap(play);
+      await tester.pump();
+      await drag(tester, const Offset(0, -60));
+      final held = shift(tester);
+      // Well past the 3 s the old grace allowed, across two page turns.
+      await tester.pump(const Duration(milliseconds: 2400));
+      await settleFollow(tester);
+      expect(band(tester).top, greaterThan(page(tester, 2).top));
+      expect(shift(tester), held);
+      expect(inView(tester, band(tester)), isFalse);
+
+      await tester.tap(play); // pause: still hands off
+      await settleFollow(tester);
+      expect(shift(tester), held);
+      await tester.tap(play);
+      await tester.pump();
+      await settleFollow(tester);
+      expect(inView(tester, band(tester)), isTrue);
+    });
+
+    testWidgets('a pinch stops auto-follow too; a seek brings it back', (
+      tester,
+    ) async {
+      await pumpPlayback(tester, paged(), size: small);
+      await tester.tap(find.byKey(const ValueKey('play-pause')));
+      await tester.pump();
+      await pinchTo(tester, 2);
+      final held = shift(tester);
+      await tester.pump(const Duration(milliseconds: 1500));
+      await settleFollow(tester);
+      expect(shift(tester), held);
+      expect(inView(tester, band(tester)), isFalse);
+
+      // Paused first, so the band holds still for the check: at 2x it
+      // sweeps a page width in half a second while playing.
+      await tester.tap(find.byKey(const ValueKey('play-pause')));
+      await tester.pump();
+      await tapTooltip(tester, PlaybackMessages.toLastBar);
+      await settleFollow(tester);
+      expect(band(tester).top, greaterThan(page(tester, 2).top));
+      expect(inView(tester, band(tester)), isTrue);
+      expect(scale(tester), closeTo(2, 0.05));
+    });
+
+    testWidgets('a seek scrolls to the target page, also while zoomed', (
+      tester,
+    ) async {
+      await pumpPlayback(tester, paged(), size: small);
+      await tapTooltip(tester, PlaybackMessages.toLastBar);
+      await settleFollow(tester);
+      expect(band(tester).top, greaterThan(page(tester, 2).top));
+      expect(inView(tester, band(tester)), isTrue);
+
+      await tapTooltip(tester, PlaybackMessages.toStart);
+      await settleFollow(tester);
+      await pinchTo(tester, 3);
+      await tapTooltip(tester, PlaybackMessages.toLastBar);
+      await settleFollow(tester);
+      expect(inView(tester, band(tester)), isTrue);
+      expect(scale(tester), closeTo(3, 0.1));
     });
   });
 
