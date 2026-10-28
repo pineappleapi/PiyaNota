@@ -99,6 +99,27 @@ void main() {
     expect(_login(api), throwsA(isA<InvalidCredentialsException>()));
   });
 
+  test('login 429 carries retryAfterSeconds', () {
+    final api = _apiWith(
+      _StubAdapter(
+        status: 429,
+        body: {
+          'error': {'code': 'rate_limited', 'retryAfterSeconds': 30},
+        },
+      ),
+    );
+    expect(
+      _login(api),
+      throwsA(
+        isA<AuthRateLimitedException>().having(
+          (e) => e.retryAfterSeconds,
+          'retryAfterSeconds',
+          30,
+        ),
+      ),
+    );
+  });
+
   test('409 maps to EmailAlreadyRegisteredException', () {
     final api = _apiWith(_StubAdapter(status: 409, body: {}));
     expect(

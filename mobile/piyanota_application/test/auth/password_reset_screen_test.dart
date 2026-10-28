@@ -540,6 +540,7 @@ void main() {
       waits.recordWrong(' Maria@Example.com ');
       waits.recordWrong(_email);
       expect(waits.failures(_email), 2);
+      expect(waits.failures('other@example.com'), 0);
 
       await _requestCode(tester);
       expect(waits.failures(_email), 0);
@@ -550,6 +551,44 @@ void main() {
       await tester.pumpAndSettle();
       expect(waits.failures(_email), 0);
     });
+
+    for (final seconds in <int?>[null, 0]) {
+      testWidgets('a 429 with retryAfterSeconds $seconds still shows a wait', (
+        tester,
+      ) async {
+        final announcements = <String>[];
+        tester.binding.defaultBinaryMessenger.setMockDecodedMessageHandler<
+          dynamic
+        >(SystemChannels.accessibility, (message) async {
+          if (message is Map && message['type'] == 'announce') {
+            announcements.add((message['data'] as Map)['message'] as String);
+          }
+          return null;
+        });
+        addTearDown(
+          () => tester.binding.defaultBinaryMessenger
+              .setMockDecodedMessageHandler<dynamic>(
+                SystemChannels.accessibility,
+                null,
+              ),
+        );
+        await pumpAuthScreen(
+          tester,
+          screen: const PasswordResetScreen(),
+          api: wrongApi(
+            failure: () => AuthRateLimitedException(retryAfterSeconds: seconds),
+          ),
+        );
+        await _requestCode(tester);
+        await submitCode(tester, first: true);
+
+        expect(find.text('Try again in 0:30'), findsOneWidget);
+        expect(announcements, contains('Try again in 0:30'));
+        await tester.enterText(_field(0), _code);
+        await tester.pump();
+        expect(isButtonEnabled(tester, _continue), isFalse);
+      });
+    }
 
     testWidgets('AC5: the server 429 retryAfterSeconds wins over our count', (
       tester,

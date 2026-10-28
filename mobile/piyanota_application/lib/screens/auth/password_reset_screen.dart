@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -10,6 +11,7 @@ import '../../config/api_config.dart';
 import '../../routes/app_routes.dart';
 import '../../services/auth_api.dart';
 import '../../services/auth_validators.dart';
+import '../../services/backoff.dart';
 import '../../services/fake_auth_api.dart';
 import '../../state/auth_providers.dart';
 import '../../state/resend_cooldowns.dart';
@@ -374,7 +376,20 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
       if (seconds != null && seconds > 0) {
         waits.recordServerWait(_requestedEmail, Duration(seconds: seconds));
       } else {
+        // A 429 must always show a wait. While the count is still within
+        // the free attempts recordWrong sets none, so use the first step.
         waits.recordWrong(_requestedEmail);
+        if (waits.remaining(_requestedEmail) == Duration.zero) {
+          waits.recordServerWait(
+            _requestedEmail,
+            backoffAfter(
+              math.max(
+                1,
+                waits.failures(_requestedEmail) - resetCodeFreeAttempts,
+              ),
+            ),
+          );
+        }
       }
     } on AuthNetworkException {
       error = AuthMessages.network;
