@@ -192,6 +192,32 @@ void main() {
       );
     });
 
+    test(
+      'request 404 email_not_registered maps to EmailNotRegisteredException',
+      () {
+        final api = _apiWith(
+          _StubAdapter(
+            status: 404,
+            body: {
+              'error': {'code': 'email_not_registered'},
+            },
+          ),
+        );
+        expect(
+          api.requestPasswordReset(email: 'nobody@example.com'),
+          throwsA(isA<EmailNotRegisteredException>()),
+        );
+      },
+    );
+
+    test('request 404 without that code stays a server error', () {
+      final api = _apiWith(_StubAdapter(status: 404, body: {}));
+      expect(
+        api.requestPasswordReset(email: 'nobody@example.com'),
+        throwsA(isA<AuthServerException>()),
+      );
+    });
+
     test('request connection failure maps to AuthNetworkException', () {
       final api = _apiWith(_StubAdapter(connectionFails: true));
       expect(

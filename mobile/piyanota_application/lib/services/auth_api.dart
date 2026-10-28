@@ -45,6 +45,14 @@ class EmailAlreadyRegisteredException extends AuthException {
   const EmailAlreadyRegisteredException();
 }
 
+/// 404 `email_not_registered` from Password Reset Request (PIYA-303 as
+/// changed by backend note B3, PIYA-204-V2.1). Deliberately reveals that no
+/// account exists, which the user accepted, so the UI can offer Sign-Up
+/// instead of pretending a code was sent.
+class EmailNotRegisteredException extends AuthException {
+  const EmailNotRegisteredException();
+}
+
 /// 410 `reset_token_expired_or_invalid` from Password Reset Confirm
 /// (PIYA-304 AC3) — the code is expired, already used, or never existed.
 /// The UI sends the user back to the code step rather than letting them
@@ -52,6 +60,9 @@ class EmailAlreadyRegisteredException extends AuthException {
 class ResetCodeInvalidException extends AuthException {
   const ResetCodeInvalidException();
 }
+
+/// Backend note B3's `error.code` for an unregistered reset email.
+const String emailNotRegisteredCode = 'email_not_registered';
 
 /// PIYA-322 AC4's `error.code` / `error.field` for a new password that
 /// fails the shared Sign-Up strength validator.
@@ -90,8 +101,8 @@ abstract interface class AuthApi {
     required String passwordConfirmation,
   });
 
-  /// PIYA-303. Completes normally whether or not [email] is registered
-  /// (AC2: no account enumeration), so callers must not branch on it.
+  /// PIYA-303 + backend note B3. An unregistered [email] throws
+  /// [EmailNotRegisteredException] and no code is sent.
   Future<void> requestPasswordReset({required String email});
 
   /// PIYA-304. [resetToken] is the code the user received by email.
@@ -125,6 +136,7 @@ class HttpAuthApi implements AuthApi {
   static const int _badRequest = 400;
   static const int _unauthorized = 401;
   static const int _forbidden = 403;
+  static const int _notFound = 404;
   static const int _conflict = 409;
   static const int _gone = 410;
   static const int _tooManyRequests = 429;
@@ -153,8 +165,7 @@ class HttpAuthApi implements AuthApi {
   @override
   Future<void> requestPasswordReset({required String email}) async {
     // The 200 body's `message` is deliberately ignored: the UI owns the
-    // confirmation copy, which must read the same for registered and
-    // unregistered emails (PIYA-204 AC3) whatever the server says.
+    // confirmation copy.
     await _post(ApiConfig.passwordResetRequestPath, {'email': email});
   }
 
@@ -248,6 +259,9 @@ class HttpAuthApi implements AuthApi {
     // code isn't pinned down by PIYA-304 (reconcile in PIYA-214).
     return switch (response?.statusCode) {
       _unauthorized => const InvalidCredentialsException(),
+      // Matched on the code too: a bare proxy 404 is not "unregistered".
+      _notFound when _errorCode(response?.data) == emailNotRegisteredCode =>
+        const EmailNotRegisteredException(),
       _conflict => const EmailAlreadyRegisteredException(),
       _gone => const ResetCodeInvalidException(),
       _badRequest => _validationFailure(response),

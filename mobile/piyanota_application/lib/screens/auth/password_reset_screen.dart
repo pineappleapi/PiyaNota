@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,6 +14,7 @@ import '../../state/auth_providers.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/primary_pill_button.dart';
 import 'auth_messages.dart';
+import 'sign_up_screen.dart';
 import 'widgets/auth_error_banner.dart';
 import 'widgets/auth_scaffold.dart';
 import 'widgets/auth_switch_prompt.dart';
@@ -63,6 +65,13 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
   String? _errorMessage;
   String? _noticeMessage;
 
+  /// PIYA-204-V2.1: set when the server said the email has no account;
+  /// shows the message with the Sign-Up link instead of an error string.
+  bool _emailNotRegistered = false;
+
+  /// Owned here, not built in `build`, so it can be disposed.
+  final TapGestureRecognizer _createAccountTap = TapGestureRecognizer();
+
   /// The email the current code was requested for — fixed at request time
   /// so editing the (hidden) email field can't change what Login receives.
   String _requestedEmail = '';
@@ -98,6 +107,7 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
   @override
   void initState() {
     super.initState();
+    _createAccountTap.onTap = _openSignUp;
     for (final controller in _controllers) {
       _lastTexts[controller] = controller.text;
       controller.addListener(() => _onFieldChanged(controller));
@@ -107,6 +117,7 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
   @override
   void dispose() {
     _resendCooldownTimer?.cancel();
+    _createAccountTap.dispose();
     for (final controller in _controllers) {
       controller.dispose();
     }
@@ -119,7 +130,10 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
     setState(() {
       // The banner described the input as it was at submit time; once the
       // user edits, it's stale and would contradict what they now see.
-      if (textChanged && !_isSubmitting) _errorMessage = null;
+      if (textChanged && !_isSubmitting) {
+        _errorMessage = null;
+        _emailNotRegistered = false;
+      }
     });
   }
 
@@ -193,11 +207,15 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
       _isSubmitting = true;
       _errorMessage = null;
       _noticeMessage = null;
+      _emailNotRegistered = false;
     });
 
     String? error;
+    var unregistered = false;
     try {
       await ref.read(authApiProvider).requestPasswordReset(email: email);
+    } on EmailNotRegisteredException {
+      unregistered = true;
     } on AuthNetworkException {
       error = AuthMessages.network;
     } on AuthValidationException catch (e) {
@@ -213,20 +231,33 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
     if (!mounted) return;
     // Cleared while _isSubmitting is still true, so its change listener
     // doesn't treat this programmatic edit as the user's.
-    if (error == null) _codeController.clear();
+    if (error == null && !unregistered) _codeController.clear();
     setState(() {
       _isSubmitting = false;
+      if (unregistered) {
+        _emailNotRegistered = true;
+        return;
+      }
       if (error != null) {
         _errorMessage = error;
         return;
       }
-      // AC2/AC3: identical outcome for registered and unregistered emails —
-      // nothing here may depend on whether a code was really sent.
       _requestedEmail = email;
       _noticeMessage = AuthMessages.resetCodeSent;
       _step = _ResetStep.code;
       _startResendCooldown();
     });
+  }
+
+  /// Pushed as a typed route (not a named one) so the email travels as a
+  /// constructor argument. Back returns here with the message still shown.
+  void _openSignUp() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            SignUpScreen(initialEmail: _emailController.text.trim()),
+      ),
+    );
   }
 
   void _continueWithCode() {
@@ -385,6 +416,27 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
     return [
       if (notice != null) ...[
         AuthNoticeBanner(message: notice),
+        const SizedBox(height: _fieldGap),
+      ],
+      if (_emailNotRegistered) ...[
+        AuthErrorBanner(
+          message:
+              '${AuthMessages.emailNotRegistered}'
+              '${AuthMessages.createNewAccount}'
+              '${AuthMessages.emailNotRegisteredEnd}',
+          messageSpans: [
+            const TextSpan(text: AuthMessages.emailNotRegistered),
+            TextSpan(
+              text: AuthMessages.createNewAccount,
+              recognizer: _createAccountTap,
+              style: const TextStyle(
+                decoration: TextDecoration.underline,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const TextSpan(text: AuthMessages.emailNotRegisteredEnd),
+          ],
+        ),
         const SizedBox(height: _fieldGap),
       ],
       if (error != null) ...[

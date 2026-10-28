@@ -16,7 +16,10 @@ import 'widgets/auth_text_field.dart';
 
 /// PIYA-203 — Sign-Up UI.
 class SignUpScreen extends ConsumerStatefulWidget {
-  const SignUpScreen({super.key});
+  const SignUpScreen({super.key, this.initialEmail});
+
+  /// PIYA-204-V2.1: Password Reset hands over the unregistered email.
+  final String? initialEmail;
 
   @override
   ConsumerState<SignUpScreen> createState() => _SignUpScreenState();
@@ -41,6 +44,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
   @override
   void initState() {
     super.initState();
+    _emailController.text = widget.initialEmail ?? '';
     for (final controller in _controllers) {
       controller.addListener(_onFieldsChanged);
     }

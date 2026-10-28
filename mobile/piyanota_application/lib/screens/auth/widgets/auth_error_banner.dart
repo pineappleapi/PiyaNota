@@ -10,11 +10,16 @@ class AuthErrorBanner extends StatelessWidget {
   const AuthErrorBanner({
     super.key,
     required this.message,
+    this.messageSpans,
     this.actionLabel,
     this.onAction,
   });
 
   final String message;
+
+  /// Replaces [message] on screen when part of it must be an inline link;
+  /// [message] stays the plain-text form.
+  final List<InlineSpan>? messageSpans;
   final String? actionLabel;
   final VoidCallback? onAction;
 
@@ -26,6 +31,7 @@ class AuthErrorBanner extends StatelessWidget {
       iconColor: AppTheme.errorRed,
       textColor: AppTheme.errorRed,
       fill: AppTheme.errorBannerFill,
+      messageSpans: messageSpans,
       actionLabel: actionLabel,
       onAction: onAction,
     );
@@ -61,6 +67,7 @@ class _AuthBanner extends StatelessWidget {
     required this.iconColor,
     required this.textColor,
     required this.fill,
+    this.messageSpans,
     this.actionLabel,
     this.onAction,
   });
@@ -70,6 +77,7 @@ class _AuthBanner extends StatelessWidget {
   final Color iconColor;
   final Color textColor;
   final Color fill;
+  final List<InlineSpan>? messageSpans;
   final String? actionLabel;
   final VoidCallback? onAction;
 
@@ -81,6 +89,7 @@ class _AuthBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     final action = actionLabel;
+    final spans = messageSpans;
 
     return Semantics(
       liveRegion: true,
@@ -100,10 +109,16 @@ class _AuthBanner extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    message,
-                    style: textTheme.bodyMedium?.copyWith(color: textColor),
-                  ),
+                  if (spans != null)
+                    Text.rich(
+                      TextSpan(children: spans),
+                      style: textTheme.bodyMedium?.copyWith(color: textColor),
+                    )
+                  else
+                    Text(
+                      message,
+                      style: textTheme.bodyMedium?.copyWith(color: textColor),
+                    ),
                   if (action != null)
                     TextButton(
                       onPressed: onAction,

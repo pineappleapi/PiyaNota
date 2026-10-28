@@ -174,10 +174,13 @@ void main() {
     );
 
     test(
-      'unregistered email completes the same way but receives no code',
+      'unregistered email throws EmailNotRegisteredException and gets no code',
       () async {
         final api = _api();
-        await api.requestPasswordReset(email: 'nobody@example.com');
+        await expectLater(
+          api.requestPasswordReset(email: 'nobody@example.com'),
+          throwsA(isA<EmailNotRegisteredException>()),
+        );
         expect(api.demoInboxCodeFor('nobody@example.com'), isNull);
       },
     );

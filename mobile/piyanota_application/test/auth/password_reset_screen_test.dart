@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -9,7 +10,7 @@ import 'package:piyanota_application/routes/app_routes.dart';
 import 'package:piyanota_application/screens/auth/auth_messages.dart';
 import 'package:piyanota_application/screens/auth/login_screen.dart';
 import 'package:piyanota_application/screens/auth/password_reset_screen.dart';
-import 'package:piyanota_application/screens/auth/widgets/auth_error_banner.dart';
+import 'package:piyanota_application/screens/auth/sign_up_screen.dart';
 import 'package:piyanota_application/services/auth_api.dart';
 import 'package:piyanota_application/services/fake_auth_api.dart';
 
@@ -124,25 +125,91 @@ void main() {
     expect(_demoCode(tester), matches(RegExp(r'^\d{6}$')));
   });
 
+  testWidgets('V2.1 AC2: unregistered email shows the link message, no code', (
+    tester,
+  ) async {
+    final api = FakeAuthApi(latency: Duration.zero);
+    await pumpAuthScreen(tester, screen: const PasswordResetScreen(), api: api);
+
+    await _requestCode(tester, email: 'nobody@example.com');
+
+    expect(
+      find.text(
+        'Email has not yet been registered. Create a new account?',
+        findRichText: true,
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Enter Code'), findsNothing);
+    expect(find.text(AuthMessages.resetCodeSent), findsNothing);
+    expect(api.demoInboxCodeFor('nobody@example.com'), isNull);
+    // Only "Create a new account" is underlined.
+    final root = tester
+        .widget<RichText>(
+          find.byWidgetPredicate(
+            (w) =>
+                w is RichText &&
+                w.text.toPlainText().startsWith('Email has not yet'),
+          ),
+        )
+        .text;
+    final underlined = <String>[];
+    root.visitChildren((span) {
+      if (span is TextSpan &&
+          span.style?.decoration == TextDecoration.underline) {
+        underlined.add(span.text!);
+      }
+      return true;
+    });
+    expect(underlined, ['Create a new account']);
+  });
+
   testWidgets(
-    'AC3: unregistered email shows the same confirmation and next step',
+    'V2.1 AC2: tapping the link opens Sign-Up with the email pre-filled; '
+    'a screen reader can activate it',
     (tester) async {
+      final handle = tester.ensureSemantics();
       await pumpAuthScreen(
         tester,
         screen: const PasswordResetScreen(),
         api: FakeAuthApi(latency: Duration.zero),
       );
-
       await _requestCode(tester, email: 'nobody@example.com');
 
-      // Same message, same screen — nothing tells a stranger the email
-      // isn't registered.
-      expect(find.text(AuthMessages.resetCodeSent), findsOneWidget);
-      expect(find.text('Enter Code'), findsOneWidget);
-      expect(find.byType(AuthErrorBanner), findsNothing);
-      expect(find.textContaining(_demoCodePrefix), findsNothing);
+      // TalkBack reaches the link through its own semantics node.
+      final link = find.semantics.byLabel('Create a new account');
+      final data = link.evaluate().single.getSemanticsData();
+      expect(data.hasAction(SemanticsAction.tap), isTrue);
+      expect(data.flagsCollection.isLink, isTrue);
+      tester.semantics.tap(link);
+      await tester.pumpAndSettle();
+      expect(find.byType(SignUpScreen), findsOneWidget);
+      expect(
+        find.widgetWithText(TextFormField, 'nobody@example.com'),
+        findsOneWidget,
+      );
+      handle.dispose();
     },
   );
+
+  testWidgets('V2.1 AC1: registered email shows the exact new message', (
+    tester,
+  ) async {
+    await pumpAuthScreen(
+      tester,
+      screen: const PasswordResetScreen(),
+      api: FakeAuthApi(latency: Duration.zero),
+    );
+    await _requestCode(tester, email: FakeAuthApi.demoEmail);
+
+    expect(
+      find.text(
+        'A reset code has been sent to this email. Please check your inbox.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Enter Code'), findsOneWidget);
+  });
 
   testWidgets(
     'AC4: new password must meet the Sign-Up strength rule and match',

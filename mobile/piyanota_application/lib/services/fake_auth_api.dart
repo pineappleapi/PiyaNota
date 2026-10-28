@@ -125,8 +125,9 @@ class FakeAuthApi implements AuthApi {
     if (!AuthValidators.isValidEmail(normalized)) {
       throw const AuthValidationException('Enter a valid email address');
     }
-    // Unregistered: nothing is "sent", but the caller sees the same success.
-    if (!_passwordsByEmail.containsKey(normalized)) return;
+    if (!_passwordsByEmail.containsKey(normalized)) {
+      throw const EmailNotRegisteredException();
+    }
 
     // PIYA-303 AC5: a new request voids any earlier unused code.
     _grantsByCode.removeWhere((_, grant) => grant.email == normalized);
