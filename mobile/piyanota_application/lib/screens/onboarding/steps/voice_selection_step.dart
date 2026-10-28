@@ -77,6 +77,7 @@ class VoiceSelectionStep extends ConsumerWidget {
                 width: double.infinity,
                 child: Semantics(
                   selected: conductorSelected,
+                  button: true,
                   child: OutlinedButton(
                     onPressed: () {
                       ref.read(selectedVoicePartProvider.notifier).clear();
@@ -130,6 +131,7 @@ class _VoiceCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Semantics(
       selected: isSelected,
+      button: true,
       child: Material(
         color: Colors.transparent,
         child: InkWell(

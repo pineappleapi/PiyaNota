@@ -1,8 +1,7 @@
-import 'package:flutter/material.dart';
-import 'package:flutter/semantics.dart';
-
 import 'dart:ui' show Tristate;
 
+import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -54,30 +53,42 @@ void main() {
       }
     });
 
-    testWidgets('every option exposes a tap action to screen readers', (
-      tester,
-    ) async {
-      final handle = tester.ensureSemantics();
-      await pumpStep(tester);
-      await _tap(tester, 'Alto');
+    testWidgets(
+      'every option is a labelled, tappable button for screen readers',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        try {
+          await pumpStep(tester);
+          await _tap(tester, 'Alto');
 
-      for (final label in [
-        'Soprano',
-        'Alto',
-        'Tenor',
-        'Bass',
-        _conductorLabel,
-      ]) {
-        final data = tester.getSemantics(find.text(label)).getSemanticsData();
-        expect(data.hasAction(SemanticsAction.tap), isTrue, reason: label);
-        expect(
-          data.flagsCollection.isSelected == Tristate.isTrue,
-          label == 'Alto',
-          reason: label,
-        );
-      }
-      handle.dispose();
-    });
+          for (final label in [
+            'Soprano',
+            'Alto',
+            'Tenor',
+            'Bass',
+            _conductorLabel,
+          ]) {
+            final data = tester
+                .getSemantics(find.text(label))
+                .getSemanticsData();
+            expect(data.label, label, reason: label);
+            expect(data.hasAction(SemanticsAction.tap), isTrue, reason: label);
+            expect(
+              data.flagsCollection.isButton,
+              isTrue,
+              reason: '$label button',
+            );
+            expect(
+              data.flagsCollection.isSelected == Tristate.isTrue,
+              label == 'Alto',
+              reason: '$label selected',
+            );
+          }
+        } finally {
+          handle.dispose();
+        }
+      },
+    );
 
     testWidgets('picking Soprano afterwards moves the selection', (
       tester,
