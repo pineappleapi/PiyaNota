@@ -140,6 +140,24 @@ void main() {
       expect(harness.engine.volumes[VoicePart.alto], 1);
     });
 
+    testWidgets(
+      'unmute, mute Tenor, then default fails: rest heard, Tenor not',
+      (tester) async {
+        final harness = ready();
+        await pumpPlayback(tester, harness, defaultVoice: VoicePart.alto);
+        controller(tester)
+          ..setVoiceMuted(VoicePart.tenor, muted: false)
+          ..setVoiceMuted(VoicePart.tenor, muted: true);
+        harness.engine.fail(VoicePart.alto);
+        await tester.pump();
+        await tester.pump();
+
+        expect(harness.engine.volumes[VoicePart.tenor], 0);
+        expect(harness.engine.volumes[VoicePart.soprano], 1);
+        expect(harness.engine.volumes[VoicePart.bass], 1);
+      },
+    );
+
     testWidgets('default voice failing mid-play: hand mute stays, rest heard', (
       tester,
     ) async {
@@ -178,10 +196,7 @@ void main() {
       final soprano = voiceRow(VoicePart.soprano);
       await tapIn(tester, muteIn(soprano));
 
-      expect(
-        controller(tester).state.selected,
-        contains(VoicePart.soprano),
-      );
+      expect(controller(tester).state.selected, contains(VoicePart.soprano));
       final fade = tester.widget<Opacity>(
         find.descendant(
           of: soprano,
@@ -196,14 +211,19 @@ void main() {
     ) async {
       final harness = ready();
       await pumpPlayback(tester, harness, defaultVoice: VoicePart.alto);
-      // User takes over Soprano's mute: unmute, then mute again by hand.
-      controller(tester)
-        ..setVoiceMuted(VoicePart.soprano, muted: false)
-        ..setVoiceMuted(VoicePart.soprano, muted: true);
+      // Hand mute on a chip-off voice (clears the default-mix tag).
+      controller(tester).setVoiceMuted(VoicePart.soprano, muted: true);
+      expect(
+        controller(tester).state.selected,
+        isNot(contains(VoicePart.soprano)),
+      );
       await tapIn(tester, chipOf(VoicePart.soprano));
 
+      final state = controller(tester).state;
+      expect(state.selected, contains(VoicePart.soprano));
+      expect(state.muted, contains(VoicePart.soprano));
+      expect(state.voiceGain(VoicePart.soprano), 0);
       expect(harness.engine.volumes[VoicePart.soprano], 0);
-      expect(controller(tester).state.muted, contains(VoicePart.soprano));
     });
   });
 

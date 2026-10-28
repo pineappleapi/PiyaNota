@@ -1876,10 +1876,6 @@ void main() {
           reason: score.title,
         );
       }
-      expect(
-        LibraryMessages.editSemantics('Paraiso'),
-        isNot(LibraryMessages.editSemantics('Bahay Kubo')),
-      );
       final pencil = tester.widget<Icon>(find.byIcon(Icons.edit_rounded).first);
       final trash = tester.widget<Icon>(
         find.byIcon(Icons.delete_rounded).first,

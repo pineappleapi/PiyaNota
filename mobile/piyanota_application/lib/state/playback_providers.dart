@@ -655,7 +655,8 @@ class PlaybackController extends Notifier<PlaybackState> {
     }
     var selected = state.selected.difference({failure.voice});
     var muted = state.muted;
-    if (selected.isEmpty) {
+    // Nothing audible (a hand-muted lone chip counts) must fall back too.
+    if (selected.difference(muted).isEmpty) {
       // V2.2 AC3: the fallback turns the rest on and unmutes them.
       selected = remaining;
       muted = muted.difference(_mixMuted);
