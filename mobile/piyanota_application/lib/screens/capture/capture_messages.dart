@@ -139,8 +139,7 @@ class CaptureMessages {
   static const String replacePdfWithPhotosBody =
       'A score can be photos or one PDF, not both. Remove the PDF and use '
       'photos instead?';
-  static const String replacePdfWithPdfBody =
-      'A score can have only one PDF. Use the new PDF instead?';
+  static const String onePdfOnly = 'Only one PDF can be added per score.';
   static String replacePhotosTitle(int n) => 'Replace ${pagesLabel(n)}?';
   static const String replacePhotosBody =
       'A score can be photos or one PDF, not both. Remove your photos and '

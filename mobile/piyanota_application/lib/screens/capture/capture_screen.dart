@@ -344,6 +344,12 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
 
   Future<void> _pickPdf() async {
     if (!_canAct) return;
+    // V2.5 AC1: the control is dimmed but still tappable, so the reason is
+    // given instead of a silent no-op; the picker never opens.
+    if (_session.hasPdf) {
+      _snack(CaptureMessages.onePdfOnly);
+      return;
+    }
     final PickedPdf? picked;
     try {
       picked = await ref.read(pagePickerProvider).pickPdf();
@@ -383,12 +389,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     }
     if (!_session.isEmpty) {
       final replace = await _confirm(
-        title: _session.hasPdf
-            ? CaptureMessages.replacePdfTitle
-            : CaptureMessages.replacePhotosTitle(_session.pageCount),
-        body: _session.hasPdf
-            ? CaptureMessages.replacePdfWithPdfBody
-            : CaptureMessages.replacePhotosBody,
+        title: CaptureMessages.replacePhotosTitle(_session.pageCount),
+        body: CaptureMessages.replacePhotosBody,
         confirm: CaptureMessages.replace,
         cancel: CaptureMessages.keep,
       );
@@ -932,6 +934,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                           onPdf: _canAct && widget.retake == null
                               ? _pickPdf
                               : null,
+                          pdfLimitReached: _session.hasPdf,
                         ),
                         const SizedBox(height: 12),
                         _StripHeading(session: _session, focusId: _focusId),
@@ -1163,11 +1166,15 @@ class _InputRow extends StatelessWidget {
     required this.onGallery,
     required this.onShutter,
     required this.onPdf,
+    this.pdfLimitReached = false,
   });
 
   final VoidCallback? onGallery;
   final VoidCallback? onShutter;
   final VoidCallback? onPdf;
+
+  /// V2.5: dims the PDF input while keeping it tappable for the message.
+  final bool pdfLimitReached;
 
   static const double _shutterSize = 72;
 
@@ -1216,6 +1223,7 @@ class _InputRow extends StatelessWidget {
             icon: Icons.picture_as_pdf_outlined,
             label: CaptureMessages.pdf,
             onTap: onPdf,
+            disabledHint: pdfLimitReached ? CaptureMessages.onePdfOnly : null,
           ),
         ),
       ],
@@ -1228,22 +1236,27 @@ class _LabelledInput extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.onTap,
+    this.disabledHint,
   });
 
   final IconData icon;
   final String label;
   final VoidCallback? onTap;
 
+  /// Dimmed and announced as disabled with this reason, yet still tappable.
+  final String? disabledHint;
+
   @override
   Widget build(BuildContext context) {
     return Semantics(
       button: true,
-      enabled: onTap != null,
+      enabled: onTap != null && disabledHint == null,
       label: label,
+      hint: disabledHint,
       excludeSemantics: true,
       onTap: onTap,
       child: Opacity(
-        opacity: onTap == null ? 0.5 : 1,
+        opacity: onTap == null || disabledHint != null ? 0.5 : 1,
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
           onTap: onTap,

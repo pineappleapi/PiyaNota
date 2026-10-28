@@ -329,6 +329,43 @@ void main() {
       await _shoot(tester);
       expect(find.text(CaptureMessages.replacePdfTitle), findsOneWidget);
     });
+
+    // PIYA-206-V2.5 AC1, AC3.
+    testWidgets('a second PDF is refused: dimmed, message, no picker', (
+      tester,
+    ) async {
+      final h = CaptureHarness();
+      await pumpCapture(tester, h);
+      h.picker.pdf = const PickedPdf(path: 'x.pdf', name: 'x.pdf');
+      await _pickPdf(tester);
+      expect(h.picker.pdfPicks, 1);
+
+      final dim = find.ancestor(
+        of: find.text(CaptureMessages.pdf),
+        matching: find.byType(Opacity),
+      );
+      expect(tester.widget<Opacity>(dim.first).opacity, lessThan(1));
+      final node = tester.getSemantics(_label(CaptureMessages.pdf));
+      expect(node.hint, CaptureMessages.onePdfOnly);
+      expect(
+        node,
+        isSemantics(isEnabled: false, hasEnabledState: true),
+      );
+
+      await tester.tap(find.text(CaptureMessages.pdf));
+      await tester.pumpAndSettle();
+      expect(find.text(CaptureMessages.onePdfOnly), findsOneWidget);
+      expect(find.text(CaptureMessages.replacePdfTitle), findsNothing);
+      expect(h.picker.pdfPicks, 1);
+
+      // AC3: removing the PDF enables the option again.
+      await tester.tap(_label(CaptureMessages.removePdf));
+      await tester.pumpAndSettle();
+      expect(tester.widget<Opacity>(dim.first).opacity, 1);
+      await tester.tap(find.text(CaptureMessages.pdf));
+      await tester.pumpAndSettle();
+      expect(h.picker.pdfPicks, 2);
+    });
   });
 
   group('strip: reorder, remove, undo, arrows (AC4, AC5)', () {

@@ -121,8 +121,12 @@ class FakePagePicker implements PagePicker {
   @override
   Future<List<String>> pickGalleryImages() async => gallery;
 
+  /// How many times the PDF picker was opened.
+  int pdfPicks = 0;
+
   @override
   Future<PickedPdf?> pickPdf() async {
+    pdfPicks++;
     if (notAPdf) throw const NotAPdfException();
     return pdf;
   }
