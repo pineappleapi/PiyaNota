@@ -1,6 +1,6 @@
 import 'package:permission_handler/permission_handler.dart';
 
-import '../../splash_gate.dart';
+import '../leaving_app.dart';
 import 'device_channel.dart';
 
 /// Result of asking for a permission, collapsed to what the screen shows.

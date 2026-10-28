@@ -36,16 +36,16 @@ class _PiyaNotaAppState extends State<PiyaNotaApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'PiyaNota',
-      theme: AppTheme.light,
-      navigatorKey: _navigatorKey,
-      navigatorObservers: [_routes],
-      // SplashGate is outermost so it covers the scan toast too, and sits
-      // above the Navigator so a resume splash keeps every route's state
-      // (PIYA-201-V2.2 AC2).
-      builder: (context, child) => SplashGate(
-        child: ScanBackgroundHost(
+    // SplashGate wraps the whole app: it covers the scan toast too, keeps
+    // every route's state under a resume splash, and sees Android back
+    // before the Navigator does (PIYA-201-V2.2 AC2).
+    return SplashGate(
+      child: MaterialApp(
+        title: 'PiyaNota',
+        theme: AppTheme.light,
+        navigatorKey: _navigatorKey,
+        navigatorObservers: [_routes],
+        builder: (context, child) => ScanBackgroundHost(
           navigatorKey: _navigatorKey,
           child: ScanToastHost(
             navigatorKey: _navigatorKey,
@@ -53,74 +53,74 @@ class _PiyaNotaAppState extends State<PiyaNotaApp> {
             child: child ?? const SizedBox.shrink(),
           ),
         ),
+        home: const _AppEntryPoint(),
+        routes: {
+          AppRoutes.login: (context) {
+            final arguments = ModalRoute.of(context)?.settings.arguments;
+            return LoginScreen(
+              passwordReset: arguments is PasswordResetSucceeded
+                  ? arguments
+                  : null,
+            );
+          },
+          AppRoutes.signUp: (_) => const SignUpScreen(),
+          AppRoutes.passwordReset: (_) => const PasswordResetScreen(),
+          AppRoutes.scoreLibrary: (_) => const ScoreLibraryScreen(),
+          AppRoutes.playback: (context) {
+            final arguments = ModalRoute.of(context)?.settings.arguments;
+            if (arguments is! PlaybackArguments) {
+              // Only reachable from the library and Processing, which always
+              // pass these.
+              return const ScoreLibraryScreen();
+            }
+            return PlaybackScreen(
+              scoreId: arguments.scoreId,
+              title: arguments.title,
+            );
+          },
+          AppRoutes.capture: (context) {
+            final arguments = ModalRoute.of(context)?.settings.arguments;
+            return ScoreDetailsScreen(
+              wholeRetake: arguments is WholeRetakeArguments ? arguments : null,
+            );
+          },
+          AppRoutes.capturePages: (context) {
+            final arguments = ModalRoute.of(context)?.settings.arguments;
+            if (arguments is! CapturePagesArguments) {
+              // Only reachable through Details, which always passes these.
+              return const ScoreDetailsScreen();
+            }
+            return CaptureScreen(
+              details: arguments.details,
+              wholeRetake: arguments.wholeRetake,
+            );
+          },
+          AppRoutes.processing: (context) {
+            final arguments = ModalRoute.of(context)?.settings.arguments;
+            if (arguments is! ProcessingArguments) {
+              // Only reachable from Capture, which always passes these.
+              return const ScoreLibraryScreen();
+            }
+            return ProcessingScreen(
+              jobId: arguments.jobId,
+              title: arguments.title,
+            );
+          },
+          AppRoutes.captureRetake: (context) {
+            final arguments = ModalRoute.of(context)?.settings.arguments;
+            if (arguments is! CaptureRetakeArguments) {
+              // Only reachable from Processing, which always passes these.
+              return const ScoreLibraryScreen();
+            }
+            return CaptureScreen(
+              details: ScoreDetails(title: arguments.title),
+              retake: arguments,
+            );
+          },
+          // PIYA-212 AC5: the gate sends an expired session to Login.
+          AppRoutes.settings: (_) => const SettingsGate(),
+        },
       ),
-      home: const _AppEntryPoint(),
-      routes: {
-        AppRoutes.login: (context) {
-          final arguments = ModalRoute.of(context)?.settings.arguments;
-          return LoginScreen(
-            passwordReset: arguments is PasswordResetSucceeded
-                ? arguments
-                : null,
-          );
-        },
-        AppRoutes.signUp: (_) => const SignUpScreen(),
-        AppRoutes.passwordReset: (_) => const PasswordResetScreen(),
-        AppRoutes.scoreLibrary: (_) => const ScoreLibraryScreen(),
-        AppRoutes.playback: (context) {
-          final arguments = ModalRoute.of(context)?.settings.arguments;
-          if (arguments is! PlaybackArguments) {
-            // Only reachable from the library and Processing, which always
-            // pass these.
-            return const ScoreLibraryScreen();
-          }
-          return PlaybackScreen(
-            scoreId: arguments.scoreId,
-            title: arguments.title,
-          );
-        },
-        AppRoutes.capture: (context) {
-          final arguments = ModalRoute.of(context)?.settings.arguments;
-          return ScoreDetailsScreen(
-            wholeRetake: arguments is WholeRetakeArguments ? arguments : null,
-          );
-        },
-        AppRoutes.capturePages: (context) {
-          final arguments = ModalRoute.of(context)?.settings.arguments;
-          if (arguments is! CapturePagesArguments) {
-            // Only reachable through Details, which always passes these.
-            return const ScoreDetailsScreen();
-          }
-          return CaptureScreen(
-            details: arguments.details,
-            wholeRetake: arguments.wholeRetake,
-          );
-        },
-        AppRoutes.processing: (context) {
-          final arguments = ModalRoute.of(context)?.settings.arguments;
-          if (arguments is! ProcessingArguments) {
-            // Only reachable from Capture, which always passes these.
-            return const ScoreLibraryScreen();
-          }
-          return ProcessingScreen(
-            jobId: arguments.jobId,
-            title: arguments.title,
-          );
-        },
-        AppRoutes.captureRetake: (context) {
-          final arguments = ModalRoute.of(context)?.settings.arguments;
-          if (arguments is! CaptureRetakeArguments) {
-            // Only reachable from Processing, which always passes these.
-            return const ScoreLibraryScreen();
-          }
-          return CaptureScreen(
-            details: ScoreDetails(title: arguments.title),
-            retake: arguments,
-          );
-        },
-        // PIYA-212 AC5: the gate sends an expired session to Login.
-        AppRoutes.settings: (_) => const SettingsGate(),
-      },
     );
   }
 }

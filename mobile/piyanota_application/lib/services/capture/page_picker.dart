@@ -4,7 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 
-import '../../splash_gate.dart';
+import '../leaving_app.dart';
 
 /// A PDF the user chose, copied into app storage so it stays readable.
 @immutable

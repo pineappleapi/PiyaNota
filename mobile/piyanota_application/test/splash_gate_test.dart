@@ -9,11 +9,14 @@ import 'package:piyanota_application/app.dart';
 import 'package:piyanota_application/screens/auth/login_screen.dart';
 import 'package:piyanota_application/screens/onboarding/onboarding_flow_screen.dart';
 import 'package:piyanota_application/screens/onboarding/widgets/splash_overlay.dart';
+import 'package:piyanota_application/services/leaving_app.dart';
 import 'package:piyanota_application/splash_gate.dart';
 
 /// PIYA-201-V2.2: the splash plays on every cold start and warm resume,
 /// except when the app itself sent the user out.
 void main() {
+  setUp(resetLeavingApp);
+
   final splash = find.byType(SplashOverlay);
   const logo = AssetImage('assets/branding/Piyanota_App_Logo.png');
 
@@ -39,18 +42,19 @@ void main() {
     }
   }
 
-  /// A screen under the gate the way PiyaNotaApp mounts it: in the
-  /// MaterialApp builder, above the Navigator.
+  /// A screen under the gate the way PiyaNotaApp mounts it: the gate
+  /// wraps MaterialApp, so it is above the Navigator.
   Future<void> pumpGated(WidgetTester tester, {VoidCallback? onTap}) async {
     await tester.pumpWidget(
-      MaterialApp(
-        builder: (context, child) => SplashGate(child: child!),
-        home: Scaffold(
-          body: Column(
-            children: [
-              const TextField(),
-              ElevatedButton(onPressed: onTap, child: const Text('Tap me')),
-            ],
+      SplashGate(
+        child: MaterialApp(
+          home: Scaffold(
+            body: Column(
+              children: [
+                const TextField(),
+                ElevatedButton(onPressed: onTap, child: const Text('Tap me')),
+              ],
+            ),
           ),
         ),
       ),
@@ -152,6 +156,75 @@ void main() {
     await tester.pump();
 
     expect(splash, findsNothing);
+  });
+
+  testWidgets('AC3: a fire-and-forget launch (returns before paused) '
+      'still skips', (tester) async {
+    await pumpGated(tester);
+    await pumpPastSplash(tester);
+
+    // openAppSettings / openFolder: startActivity, then the future ends.
+    expect(await withoutSplash(() async => true), isTrue);
+    background(tester);
+    foreground(tester);
+    await tester.pump();
+
+    expect(splash, findsNothing);
+  });
+
+  testWidgets('AC3: a launch that opened nothing (false) leaves the next '
+      'real background replaying', (tester) async {
+    await pumpGated(tester);
+    await pumpPastSplash(tester);
+
+    expect(await withoutSplash(() async => false), isFalse);
+    background(tester);
+    foreground(tester);
+    await tester.pump();
+
+    expect(splash, findsOneWidget);
+  });
+
+  testWidgets('AC3: a launch that never paused the app stops counting after '
+      'leaveAppGrace', (tester) async {
+    await pumpGated(tester);
+    await pumpPastSplash(tester);
+
+    await withoutSplash(() async => true);
+    await tester.pump(leaveAppGrace);
+    background(tester);
+    foreground(tester);
+    await tester.pump();
+
+    expect(splash, findsOneWidget);
+  });
+
+  testWidgets('AC2: Android back during the splash does not pop the screen '
+      'beneath it', (tester) async {
+    await pumpGated(tester);
+    await pumpPastSplash(tester);
+    final navigator = tester.state<NavigatorState>(find.byType(Navigator));
+    navigator.push(
+      MaterialPageRoute<void>(
+        builder: (_) => const Scaffold(body: Text('Pushed page')),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    background(tester);
+    foreground(tester);
+    await tester.pump();
+    expect(splash, findsOneWidget);
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('Pushed page'), findsOneWidget);
+    expect(splash, findsNothing); // pumpAndSettle ran it out
+
+    // Once the splash is gone, back works again.
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('Pushed page'), findsNothing);
   });
 
   testWidgets('AC4: lasts no longer than the onboarding intro and a tap '

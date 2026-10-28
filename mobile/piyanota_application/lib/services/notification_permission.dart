@@ -4,7 +4,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'capture/device_channel.dart';
-import '../splash_gate.dart';
+import 'leaving_app.dart';
 
 /// Android 13+'s POST_NOTIFICATIONS, asked once, the first time the app
 /// has something to show in the notification shade (an export, PIYA-211,

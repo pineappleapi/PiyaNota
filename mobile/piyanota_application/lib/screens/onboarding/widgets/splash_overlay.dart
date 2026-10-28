@@ -3,6 +3,7 @@ import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
 
 import '../../../theme/app_theme.dart';
+import '../onboarding_messages.dart';
 
 /// How long one splash play lasts. Same as the onboarding intro it was
 /// taken from (PIYA-201-V2.2 AC4: no longer than that intro).
@@ -90,7 +91,7 @@ class _SplashOverlayState extends State<SplashOverlay>
     final groupCenter = Offset(size.width / 2, logoAnchorY);
 
     return Semantics(
-      label: 'PiyaNota',
+      label: OnboardingMessages.splashLabel,
       child: AnimatedBuilder(
         animation: _controller,
         builder: (context, _) {

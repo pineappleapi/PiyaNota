@@ -6,7 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../models/export_selection.dart';
-import '../splash_gate.dart';
+import 'leaving_app.dart';
 
 /// One track in the export mix: a voice (or the click) and the gain the
 /// Voice Mixer plays it at.
