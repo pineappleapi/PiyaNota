@@ -1,10 +1,15 @@
+import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:piyanota_application/models/measure_table.dart';
 import 'package:piyanota_application/models/score_result.dart';
+import 'package:piyanota_application/models/voice_part.dart';
+import 'package:piyanota_application/screens/playback/playback_messages.dart';
 import 'package:piyanota_application/services/metronome_click.dart';
+import 'package:piyanota_application/state/playback_providers.dart';
 
 import 'playback_fakes.dart';
 
@@ -649,6 +654,150 @@ void main() {
       );
       final last = (0.04 * clickSampleRate).round() - 1;
       expect(data.getInt16(44 + last * 2, Endian.little).abs(), lessThan(10));
+    });
+  });
+
+  group('turning the metronome on mid-play (PIYA-209-V2.3)', () {
+    PlaybackHarness ready({Completer<bool>? clickAttachGate}) =>
+        PlaybackHarness(
+          ScriptedScoreResultApi([testResult()], timing: testTiming()),
+          // Long enough that the test never reaches the end.
+          engineDuration: const Duration(minutes: 5),
+          clickAttachGate: clickAttachGate,
+        );
+    PlaybackController controller(WidgetTester tester) =>
+        appContainer(tester)
+            .read(playbackControllerProvider(kScoreId).notifier);
+    final mixerSwitch = find.byKey(const ValueKey('mixer-metronome-switch'));
+    final speedBox = find.byKey(const ValueKey('metronome-toggle'));
+
+    /// Plays, then snapshots the transport calls so a later pause, seek or
+    /// restart of the voices shows up as a difference.
+    Future<({int plays, int pauses, int seeks})> startPlaying(
+      WidgetTester tester,
+      PlaybackHarness harness,
+    ) async {
+      await controller(tester).play();
+      await tester.pump(const Duration(milliseconds: 300));
+      final engine = harness.engine;
+      expect(engine.playing, isTrue);
+      return (
+        plays: engine.playCalls,
+        pauses: engine.pauseCalls,
+        seeks: engine.seeks.length,
+      );
+    }
+
+    void expectTransportUntouched(
+      PlaybackHarness harness,
+      ({int plays, int pauses, int seeks}) before,
+    ) {
+      final engine = harness.engine;
+      expect(engine.playing, isTrue);
+      expect(engine.playCalls, before.plays, reason: 'no restart');
+      expect(engine.pauseCalls, before.pauses, reason: 'no pause');
+      expect(engine.seeks.length, before.seeks, reason: 'no seek');
+    }
+
+    Future<void> openSheet(WidgetTester tester, String label) async {
+      await tester.tap(find.bySemanticsLabel(label));
+      await settle(tester);
+    }
+
+    // AC1, both entry points.
+    for (final (name, label, finder) in [
+      ('Mixer switch', PlaybackMessages.voiceMixer, mixerSwitch),
+      ('Speed checkbox', PlaybackMessages.speed, speedBox),
+    ]) {
+      testWidgets('$name: heard at the next frame, transport untouched', (
+        tester,
+      ) async {
+        final harness = ready();
+        await pumpPlayback(tester, harness);
+        await openSheet(tester, label);
+        final before = await startPlaying(tester, harness);
+        expect(harness.engine.clickVolume, 0);
+
+        await tester.tap(finder);
+        await tester.pump();
+        expect(harness.engine.clickVolume, 1);
+        expectTransportUntouched(harness, before);
+
+        // AC3: off is silent at once.
+        await tester.tap(finder);
+        await tester.pump();
+        expect(harness.engine.clickVolume, 0);
+        expectTransportUntouched(harness, before);
+      });
+    }
+
+    testWidgets('with a default voice (V2.2 default mix) the click row is '
+        'not muted, so on is heard', (tester) async {
+      final harness = ready();
+      await pumpPlayback(tester, harness, defaultVoice: VoicePart.alto);
+      final c = controller(tester);
+      expect(c.state.muted, isNotEmpty, reason: 'the default mix applied');
+      expect(c.state.clickMuted, isFalse);
+      final before = await startPlaying(tester, harness);
+      c.setMetronomeOn(on: true);
+      expect(harness.engine.clickVolume, 1);
+      expectTransportUntouched(harness, before);
+    });
+
+    testWidgets('AC2: muted row stays silent and stays muted', (tester) async {
+      final harness = ready();
+      await pumpPlayback(tester, harness);
+      final c = controller(tester)..setClickMuted(muted: true);
+      await startPlaying(tester, harness);
+      c.setMetronomeOn(on: true);
+      expect(harness.engine.clickVolume, 0);
+      expect(c.state.clickMuted, isTrue);
+      expect(c.state.clickVolume, 1);
+    });
+
+    testWidgets('AC2: row at 0 stays silent and keeps its level', (
+      tester,
+    ) async {
+      final harness = ready();
+      await pumpPlayback(tester, harness);
+      final c = controller(tester)..setClickVolume(0);
+      await startPlaying(tester, harness);
+      c.setMetronomeOn(on: true);
+      expect(harness.engine.clickVolume, 0);
+      expect(c.state.clickVolume, 0);
+      expect(c.state.clickMuted, isFalse);
+    });
+
+    testWidgets('AC2: another row soloed keeps the click silent', (
+      tester,
+    ) async {
+      final harness = ready();
+      await pumpPlayback(tester, harness);
+      final c = controller(tester)
+        ..setVoiceSoloed(VoicePart.soprano, soloed: true);
+      await startPlaying(tester, harness);
+      c.setMetronomeOn(on: true);
+      expect(harness.engine.clickVolume, 0);
+      expect(c.state.clickMuted, isFalse);
+      expect(c.state.clickVolume, 1);
+    });
+
+    testWidgets('on while the click is still preparing: heard the moment it '
+        'is ready, transport untouched', (tester) async {
+      final gate = Completer<bool>();
+      final harness = ready(clickAttachGate: gate);
+      await pumpPlayback(tester, harness);
+      final c = controller(tester);
+      expect(c.state.clickStatus, ClickStatus.preparing);
+      final before = await startPlaying(tester, harness);
+      c.setMetronomeOn(on: true);
+      expect(harness.engine.clickVolume, 0);
+
+      gate.complete(true);
+      await tester.pump();
+      expect(c.state.clickStatus, ClickStatus.ready);
+      expect(harness.engine.clickVolume, 1);
+      expectTransportUntouched(harness, before);
     });
   });
 }

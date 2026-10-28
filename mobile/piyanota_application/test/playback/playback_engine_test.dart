@@ -888,6 +888,44 @@ void main() {
       });
     });
 
+    test('PIYA-209-V2.3: a silent click attached before play runs with the '
+        'voices, so raising its level mid-play is heard at once with no '
+        'pause, seek or restart of any player', () {
+      fakeAsync((async) {
+        final r = rig();
+        unawaited(r.engine.load(tracks()));
+        async.flushMicrotasks();
+        // Metronome off at load: the controller sends 0 before attaching.
+        unawaited(r.engine.setClickVolume(0));
+        unawaited(r.engine.attachClick(_clickUri));
+        async.flushMicrotasks();
+        unawaited(r.engine.play());
+        async.elapse(const Duration(seconds: 2));
+        expect(r.click.playing, isTrue);
+        expect(r.click.volumeSet, 0);
+        final all = [...r.players.values, r.click];
+        final before = [
+          for (final p in all) (p.playCalls, p.pauseCalls, p.seeks.length),
+        ];
+
+        unawaited(r.engine.setClickVolume(1));
+        async.flushMicrotasks();
+        expect(r.click.volumeSet, 1);
+        expect(r.click.playing, isTrue);
+        expect(
+          (r.click.position - r.players[VoicePart.soprano]!.position).abs(),
+          lessThanOrEqualTo(JustAudioPlaybackEngine.inStepTolerance),
+        );
+        expect([
+          for (final p in all) (p.playCalls, p.pauseCalls, p.seeks.length),
+        ], before);
+
+        unawaited(r.engine.setClickVolume(0));
+        async.flushMicrotasks();
+        expect(r.click.volumeSet, 0);
+      });
+    });
+
     test('attached while paused: placed at the position, not started', () {
       fakeAsync((async) {
         final r = rig();
