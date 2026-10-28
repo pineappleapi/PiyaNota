@@ -3,7 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart' show ProviderContainer, ProviderScope;
+import 'package:flutter_riverpod/flutter_riverpod.dart'
+    show ProviderContainer, ProviderScope;
 import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -353,6 +354,51 @@ void main() {
     expect(api.lastEmail, _email);
     expect(find.text(AuthMessages.resetCodeInvalid), findsNothing);
     expect(find.text(AuthMessages.resetCodeSent), findsOneWidget);
+  });
+
+  group('PIYA-204 reset request rate limit (B3)', () {
+    testWidgets('a 429 on Send Code shows the wait, not the server error', (
+      tester,
+    ) async {
+      final clock = _TestClock();
+      final api = FakeAuthApi(latency: Duration.zero, clock: () => clock.now);
+      // Each counts, registered or not (B3.1), so the next one is a 429.
+      // Real async: the fake's delay would never fire under FakeAsync.
+      await tester.runAsync(() async {
+        for (var i = 0; i < FakeAuthApi.resetRequestMaxPerEmail; i++) {
+          await api
+              .requestPasswordReset(email: _email)
+              .then((_) {}, onError: (_) {});
+        }
+      });
+      await pumpAuthScreen(
+        tester,
+        screen: const PasswordResetScreen(),
+        api: api,
+        extraOverrides: [clock.override],
+      );
+      await _requestCode(tester);
+
+      expect(find.text('Try again in 60:00'), findsOneWidget);
+      expect(find.text(AuthMessages.serverError), findsNothing);
+      expect(find.text('Enter Code'), findsNothing);
+    });
+
+    testWidgets('a 429 without a usable wait still says to wait', (
+      tester,
+    ) async {
+      await pumpAuthScreen(
+        tester,
+        screen: const PasswordResetScreen(),
+        api: ScriptedAuthApi(
+          onRequestReset: () async => throw const AuthRateLimitedException(),
+        ),
+      );
+      await _requestCode(tester);
+
+      expect(find.text(AuthMessages.tooManyAttempts), findsOneWidget);
+      expect(find.text(AuthMessages.serverError), findsNothing);
+    });
   });
 
   group('PIYA-204-V2.4 wrong code and wait', () {

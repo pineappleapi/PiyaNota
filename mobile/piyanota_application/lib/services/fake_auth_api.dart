@@ -37,6 +37,11 @@ class FakeAuthApi implements AuthApi {
   static const int changePasswordMaxFailures = 5;
   static const Duration changePasswordFailureWindow = Duration(minutes: 15);
 
+  /// Backend note B3.1's starting value: reset requests per email per hour,
+  /// whether the email is registered or not.
+  static const int resetRequestMaxPerEmail = 5;
+  static const Duration resetRequestWindow = Duration(hours: 1);
+
   static const Duration _sessionLifetime = Duration(days: 30);
   static const String _defaultRole = 'choir_member';
   static const int _resetCodeSpace = 1000000;
@@ -90,6 +95,10 @@ class FakeAuthApi implements AuthApi {
   /// when the current wait ends.
   final Map<String, int> _wrongCodes = {};
   final Map<String, DateTime> _wrongCodeBlockedUntil = {};
+
+  /// B3.1: when each recent reset request was made, per email, for the
+  /// sliding hour. A request refused with 429 is not recorded.
+  final Map<String, List<DateTime>> _resetRequests = {};
 
   @override
   Future<AuthSession> login({
@@ -145,6 +154,17 @@ class FakeAuthApi implements AuthApi {
     if (!AuthValidators.isValidEmail(normalized)) {
       throw const AuthValidationException('Enter a valid email address');
     }
+    // B3.2: checked before the lookup, so a limited caller learns nothing.
+    final now = _now();
+    final requests = _resetRequests.putIfAbsent(normalized, () => [])
+      ..removeWhere((at) => !now.isBefore(at.add(resetRequestWindow)));
+    if (requests.length >= resetRequestMaxPerEmail) {
+      final freesAt = requests.first.add(resetRequestWindow);
+      throw AuthRateLimitedException(
+        retryAfterSeconds: freesAt.difference(now).inSeconds,
+      );
+    }
+    requests.add(now);
     if (!_passwordsByEmail.containsKey(normalized)) {
       throw const EmailNotRegisteredException();
     }
@@ -152,7 +172,7 @@ class FakeAuthApi implements AuthApi {
     // PIYA-303 AC5: replacing the entry voids any earlier unused code.
     _grantsByEmail[normalized] = _ResetGrant(
       code: _newCode(),
-      expiresAt: _now().add(resetCodeLifetime),
+      expiresAt: now.add(resetCodeLifetime),
     );
   }
 

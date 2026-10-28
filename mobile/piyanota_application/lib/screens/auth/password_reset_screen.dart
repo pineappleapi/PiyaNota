@@ -276,6 +276,13 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
       await ref.read(authApiProvider).requestPasswordReset(email: email);
     } on EmailNotRegisteredException {
       unregistered = true;
+    } on AuthRateLimitedException catch (e) {
+      // B3.2: too many requests for this email. Not the code-step wait,
+      // which would lock Continue for a limit on sending, not on codes.
+      final seconds = e.retryAfterSeconds;
+      error = seconds != null && seconds > 0
+          ? AuthMessages.tryAgainIn(Duration(seconds: seconds))
+          : AuthMessages.tooManyAttempts;
     } on AuthNetworkException {
       error = AuthMessages.network;
     } on AuthValidationException catch (e) {

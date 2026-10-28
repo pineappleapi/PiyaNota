@@ -203,6 +203,33 @@ void main() {
       },
     );
 
+    test(
+      'requests are limited to 5 per email per hour, 404s too (B3)',
+      () async {
+        var now = DateTime.utc(2026, 10, 28, 9);
+        final api = FakeAuthApi(latency: Duration.zero, clock: () => now);
+        for (var i = 0; i < FakeAuthApi.resetRequestMaxPerEmail; i++) {
+          await expectLater(
+            api.requestPasswordReset(email: 'nobody@example.com'),
+            throwsA(isA<EmailNotRegisteredException>()),
+          );
+          now = now.add(const Duration(minutes: 1));
+        }
+        // Checked before the lookup, so the limited caller learns nothing.
+        await expectLater(
+          api.requestPasswordReset(email: ' Nobody@Example.com '),
+          rateLimited(55 * 60),
+        );
+        // Another email has its own count.
+        await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
+        now = now.add(const Duration(minutes: 56));
+        await expectLater(
+          api.requestPasswordReset(email: 'nobody@example.com'),
+          throwsA(isA<EmailNotRegisteredException>()),
+        );
+      },
+    );
+
     test('malformed email is a 400; offline domain is a network failure', () {
       final api = _api();
       expect(

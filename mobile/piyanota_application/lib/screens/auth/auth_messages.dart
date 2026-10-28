@@ -24,6 +24,9 @@ class AuthMessages {
     return 'Try again in ${seconds ~/ 60}:$rest';
   }
 
+  /// A 429 that gave no usable wait (backend note B3.2).
+  static const String tooManyAttempts = 'Too many attempts. Try again later.';
+
   /// Spoken when the wait ends; there is nothing visible to prompt it.
   static const String canTryAgain = 'You can try again now';
 
