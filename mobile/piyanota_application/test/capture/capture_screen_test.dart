@@ -347,12 +347,9 @@ void main() {
       expect(tester.widget<Opacity>(dim.first).opacity, lessThan(1));
       final node = tester.getSemantics(_label(CaptureMessages.pdf));
       expect(node.hint, CaptureMessages.onePdfOnly);
-      expect(
-        node,
-        isSemantics(isEnabled: false, hasEnabledState: true),
-      );
 
-      await tester.tap(find.text(CaptureMessages.pdf));
+      // TalkBack double-tap arrives as a semantics tap action.
+      node.owner!.performAction(node.id, SemanticsAction.tap);
       await tester.pumpAndSettle();
       expect(find.text(CaptureMessages.onePdfOnly), findsOneWidget);
       expect(find.text(CaptureMessages.replacePdfTitle), findsNothing);

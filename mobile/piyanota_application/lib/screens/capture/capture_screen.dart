@@ -1223,7 +1223,9 @@ class _InputRow extends StatelessWidget {
             icon: Icons.picture_as_pdf_outlined,
             label: CaptureMessages.pdf,
             onTap: onPdf,
-            disabledHint: pdfLimitReached ? CaptureMessages.onePdfOnly : null,
+            disabledHint: pdfLimitReached && onPdf != null
+                ? CaptureMessages.onePdfOnly
+                : null,
           ),
         ),
       ],
@@ -1250,7 +1252,9 @@ class _LabelledInput extends StatelessWidget {
   Widget build(BuildContext context) {
     return Semantics(
       button: true,
-      enabled: onTap != null && disabledHint == null,
+      // Dimmed but still enabled: a disabled node may drop TalkBack's
+      // double-tap, and the hint is how the reason gets heard.
+      enabled: onTap != null,
       label: label,
       hint: disabledHint,
       excludeSemantics: true,
