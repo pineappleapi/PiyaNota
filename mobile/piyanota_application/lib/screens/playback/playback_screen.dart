@@ -1003,6 +1003,10 @@ class _ScoreViewState extends State<_ScoreView>
   /// A follow that would move the view less than this is skipped.
   static const double _followSlack = 0.5;
 
+  /// How far one TalkBack scroll moves, as a fraction of the view, so a
+  /// line of the last screen stays in sight.
+  static const double _semanticScroll = 0.8;
+
   final TransformationController _view = TransformationController();
   late final AnimationController _scroll = AnimationController(
     vsync: this,
@@ -1018,6 +1022,7 @@ class _ScoreViewState extends State<_ScoreView>
   Offset _doubleTapAt = Offset.zero;
   Size _viewport = Size.zero;
   double _pageWidth = 0;
+  double _bandPx = 0;
 
   @override
   void initState() {
@@ -1121,6 +1126,56 @@ class _ScoreViewState extends State<_ScoreView>
       ..setTranslationRaw(dx.clamp(minX, 0), dy.clamp(minY, 0), 0);
   }
 
+  /// A screen size change (rotation, split screen) can leave the old
+  /// translation past the stack's new end, showing blank space.
+  void _reclamp() {
+    if (!mounted) return;
+    final matrix = _view.value;
+    final shift = matrix.getTranslation();
+    _view.value = _clamped(matrix.getMaxScaleOnAxis(), shift.x, shift.y);
+  }
+
+  /// A TalkBack scroll (V2.4 AC3): manual, like a drag. [dx] and [dy] move
+  /// the stack on screen, so negative shows what is below or right.
+  void _scrollBy(double dx, double dy) {
+    _manual = true;
+    _scroll.stop();
+    final matrix = _view.value;
+    final shift = matrix.getTranslation();
+    _view.value = _clamped(
+      matrix.getMaxScaleOnAxis(),
+      shift.x + dx,
+      shift.y + dy,
+    );
+  }
+
+  /// The scroll actions SingleChildScrollView gave TalkBack, offered only
+  /// where the stack can still move that way.
+  Widget _withScrollActions(
+    BuildContext context,
+    Matrix4 matrix,
+    Widget? child,
+  ) {
+    final zoom = matrix.getMaxScaleOnAxis();
+    final shift = matrix.getTranslation();
+    final minX = _viewport.width * (1 - zoom);
+    final minY = math.min(0.0, _viewport.height - _contentHeight * zoom);
+    final stepX = _viewport.width * _semanticScroll;
+    final stepY = _viewport.height * _semanticScroll;
+    return Semantics(
+      container: true,
+      onScrollUp: shift.y > minY + _followSlack
+          ? () => _scrollBy(0, -stepY)
+          : null,
+      onScrollDown: shift.y < -_followSlack ? () => _scrollBy(0, stepY) : null,
+      onScrollLeft: shift.x > minX + _followSlack
+          ? () => _scrollBy(-stepX, 0)
+          : null,
+      onScrollRight: shift.x < -_followSlack ? () => _scrollBy(stepX, 0) : null,
+      child: child,
+    );
+  }
+
   void _animateScroll() {
     final tween = _scrollTween;
     if (tween == null) return;
@@ -1169,8 +1224,9 @@ class _ScoreViewState extends State<_ScoreView>
     final top = (pageTop + position.top * scale) * zoom + shift.y;
     final bottom = (pageTop + position.bottom * scale) * zoom + shift.y;
     final x = (_gutter + position.x * scale) * zoom + shift.x;
+    final halfBand = _bandPx / 2 * zoom;
     final fitsY = top >= 0 && bottom <= _viewport.height;
-    final fitsX = x >= 0 && x <= _viewport.width;
+    final fitsX = x - halfBand >= 0 && x + halfBand <= _viewport.width;
     if (fitsY && fitsX) return;
     final end = _clamped(
       zoom,
@@ -1207,48 +1263,56 @@ class _ScoreViewState extends State<_ScoreView>
     }
     return LayoutBuilder(
       builder: (context, constraints) {
+        if (constraints.biggest != _viewport) {
+          // After this layout, so the stack's new height is known.
+          WidgetsBinding.instance.addPostFrameCallback((_) => _reclamp());
+        }
         _viewport = constraints.biggest;
         _pageWidth = constraints.maxWidth - 2 * _gutter;
-        final bandWidth =
+        final bandWidth = _bandPx =
             _bandWidth * MediaQuery.sizeOf(context).width / _referenceWidth;
         // Nothing in the score is tappable (the band ignores pointers), so
         // waiting to see a double-tap delays no single tap.
-        return GestureDetector(
-          onDoubleTapDown: (details) => _doubleTapAt = details.localPosition,
-          onDoubleTap: _resetZoom,
-          child: InteractiveViewer(
-            key: const ValueKey('score-scroll'),
-            transformationController: _view,
-            constrained: false,
-            maxScale: _maxZoom,
-            onInteractionStart: _onUserMove,
-            child: SizedBox(
-              width: constraints.maxWidth,
-              height: _contentHeight,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  _gutter,
-                  _padTop,
-                  _gutter,
-                  _padBottom,
-                ),
-                child: Column(
-                  children: [
-                    for (var i = 0; i < images.length; i++) ...[
-                      if (i > 0) const SizedBox(height: _pageGap),
-                      _ScorePage(
-                        pageIndex: i,
-                        pageCount: images.length,
-                        image: _imageFor(images[i]),
-                        width: _pageWidth,
-                        height: _pageHeight(i),
-                        scale: _scaleFor(i),
-                        bandWidth: bandWidth,
-                        timeline: widget.timeline,
-                        display: widget.display,
-                      ),
+        return ValueListenableBuilder<Matrix4>(
+          valueListenable: _view,
+          builder: _withScrollActions,
+          child: GestureDetector(
+            onDoubleTapDown: (details) => _doubleTapAt = details.localPosition,
+            onDoubleTap: _resetZoom,
+            child: InteractiveViewer(
+              key: const ValueKey('score-scroll'),
+              transformationController: _view,
+              constrained: false,
+              maxScale: _maxZoom,
+              onInteractionStart: _onUserMove,
+              child: SizedBox(
+                width: constraints.maxWidth,
+                height: _contentHeight,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    _gutter,
+                    _padTop,
+                    _gutter,
+                    _padBottom,
+                  ),
+                  child: Column(
+                    children: [
+                      for (var i = 0; i < images.length; i++) ...[
+                        if (i > 0) const SizedBox(height: _pageGap),
+                        _ScorePage(
+                          pageIndex: i,
+                          pageCount: images.length,
+                          image: _imageFor(images[i]),
+                          width: _pageWidth,
+                          height: _pageHeight(i),
+                          scale: _scaleFor(i),
+                          bandWidth: bandWidth,
+                          timeline: widget.timeline,
+                          display: widget.display,
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
               ),
             ),

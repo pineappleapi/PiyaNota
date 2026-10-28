@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:piyanota_application/models/score_result.dart';
@@ -1114,6 +1115,82 @@ void main() {
       await doubleTap(tester);
       expect(scale(tester), 1);
       expect(shift(tester).dx, 0);
+      // Still inside the stack, the bottom page edge not above the view's.
+      final view = tester.getRect(viewer);
+      expect(shift(tester).dy, lessThanOrEqualTo(0));
+      expect(page(tester, 2).bottom + 16, greaterThan(view.bottom - 0.5));
+    });
+
+    testWidgets('a drag past either end stays inside the stack', (
+      tester,
+    ) async {
+      await pumpPlayback(tester, paged(), size: small);
+      await pinchTo(tester, 2);
+      await drag(tester, const Offset(0, 3000));
+      expect(shift(tester).dy, 0);
+      for (var i = 0; i < 12; i++) {
+        await drag(tester, const Offset(0, -600));
+      }
+      final view = tester.getRect(viewer);
+      // At the bottom: the last page's padding ends on the view's edge.
+      expect(page(tester, 2).bottom + 16 * 2, closeTo(view.bottom, 0.5));
+    });
+
+    testWidgets('a taller screen after scrolling to the bottom leaves no gap', (
+      tester,
+    ) async {
+      await pumpPlayback(tester, paged(), size: small);
+      for (var i = 0; i < 8; i++) {
+        await drag(tester, const Offset(0, -600));
+      }
+      tester.view.physicalSize = const Size(412, 1100);
+      await tester.pump();
+      await tester.pump();
+      final view = tester.getRect(viewer);
+      expect(shift(tester).dy, lessThanOrEqualTo(0));
+      expect(page(tester, 2).bottom + 16, closeTo(view.bottom, 0.5));
+    });
+
+    testWidgets('TalkBack can scroll the stack, and that holds follow', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await pumpPlayback(tester, paged(), size: small);
+      final scrollable = find.semantics.byAction(SemanticsAction.scrollUp);
+      expect(scrollable, findsOne);
+      final node = scrollable.evaluate().single;
+      bool has(SemanticsAction action) =>
+          node.getSemanticsData().hasAction(action);
+      // At the top, at 1x: only down the stack.
+      expect(has(SemanticsAction.scrollDown), isFalse);
+      expect(has(SemanticsAction.scrollLeft), isFalse);
+
+      await tester.tap(find.byKey(const ValueKey('play-pause')));
+      await tester.pump();
+      final viewHeight = tester.getRect(viewer).height;
+      tester.semantics.scrollUp(scrollable: scrollable);
+      await tester.pump();
+      expect(shift(tester).dy, closeTo(-0.8 * viewHeight, 0.5));
+      final held = shift(tester);
+      await tester.pump(const Duration(milliseconds: 1500));
+      await settleFollow(tester);
+      expect(shift(tester), held);
+
+      tester.semantics.scrollDown(scrollable: scrollable);
+      await tester.pump();
+      expect(shift(tester).dy, 0);
+
+      await pinchTo(tester, 2);
+      final zoomed = scrollable.evaluate().single;
+      expect(
+        zoomed.getSemanticsData().hasAction(SemanticsAction.scrollLeft),
+        isTrue,
+      );
+      final x = shift(tester).dx;
+      tester.semantics.scrollLeft(scrollable: scrollable);
+      await tester.pump();
+      expect(shift(tester).dx, lessThan(x - 50));
+      handle.dispose();
     });
 
     testWidgets('reopening the score starts at 1x', (tester) async {
