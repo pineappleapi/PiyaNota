@@ -15,6 +15,7 @@ import 'screens/processing/processing_screen.dart';
 import 'screens/scan_status/scan_background_host.dart';
 import 'screens/scan_status/scan_toast_host.dart';
 import 'screens/settings/settings_screen.dart';
+import 'splash_gate.dart';
 import 'state/onboarding_providers.dart';
 import 'theme/app_theme.dart';
 
@@ -40,12 +41,17 @@ class _PiyaNotaAppState extends State<PiyaNotaApp> {
       theme: AppTheme.light,
       navigatorKey: _navigatorKey,
       navigatorObservers: [_routes],
-      builder: (context, child) => ScanBackgroundHost(
-        navigatorKey: _navigatorKey,
-        child: ScanToastHost(
+      // SplashGate is outermost so it covers the scan toast too, and sits
+      // above the Navigator so a resume splash keeps every route's state
+      // (PIYA-201-V2.2 AC2).
+      builder: (context, child) => SplashGate(
+        child: ScanBackgroundHost(
           navigatorKey: _navigatorKey,
-          routes: _routes,
-          child: child ?? const SizedBox.shrink(),
+          child: ScanToastHost(
+            navigatorKey: _navigatorKey,
+            routes: _routes,
+            child: child ?? const SizedBox.shrink(),
+          ),
         ),
       ),
       home: const _AppEntryPoint(),

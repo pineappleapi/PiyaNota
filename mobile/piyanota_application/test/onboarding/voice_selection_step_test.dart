@@ -117,7 +117,7 @@ void main() {
         ),
       ),
     );
-    await tester.pump(const Duration(seconds: 5)); // intro animation
+    await tester.pump();
     await _tap(tester, 'Next');
     await tester.pump(const Duration(milliseconds: 400));
     await _tap(tester, 'Next');

@@ -4,6 +4,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'capture/device_channel.dart';
+import '../splash_gate.dart';
 
 /// Android 13+'s POST_NOTIFICATIONS, asked once, the first time the app
 /// has something to show in the notification shade (an export, PIYA-211,
@@ -64,7 +65,7 @@ class PluginNotificationPermission implements NotificationPermission {
   @override
   Future<void> request() async {
     try {
-      await Permission.notification.request();
+      await withoutSplash(Permission.notification.request);
     } on PlatformException catch (e) {
       debugPrint('Notifications: permission request failed: $e');
     } on MissingPluginException catch (e) {

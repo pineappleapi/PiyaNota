@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:piyanota_application/app.dart';
 import 'package:piyanota_application/models/voice_part.dart';
+import 'package:piyanota_application/screens/onboarding/widgets/splash_overlay.dart';
 import 'package:piyanota_application/services/demo/playback_demo.dart';
 import 'package:piyanota_application/services/fake_auth_api.dart';
 import 'package:piyanota_application/services/fake_score_library_api.dart';
@@ -72,6 +73,8 @@ void main() {
       ),
     );
     await tester.pump();
+    // The cold-start splash (PIYA-201-V2.2) blocks taps until it ends.
+    await tester.pump(splashIntroDuration);
     await tester.pump(settle);
   }
 

@@ -4,6 +4,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../splash_gate.dart';
+
 /// A PDF the user chose, copied into app storage so it stays readable.
 @immutable
 class PickedPdf {
@@ -64,15 +66,19 @@ class PluginPagePicker implements PagePicker {
   Future<List<String>> pickGalleryImages() async {
     // Full metadata off: on Android 13+ this keeps the permission-less
     // system photo picker (AC3); orientation is still read from the file.
-    final files = await _imagePicker.pickMultiImage(requestFullMetadata: false);
+    final files = await withoutSplash(
+      () => _imagePicker.pickMultiImage(requestFullMetadata: false),
+    );
     return [for (final file in files) file.path];
   }
 
   @override
   Future<PickedPdf?> pickPdf() async {
-    final file = await FilePicker.pickFile(
-      type: FileType.custom,
-      allowedExtensions: const ['pdf'],
+    final file = await withoutSplash(
+      () => FilePicker.pickFile(
+        type: FileType.custom,
+        allowedExtensions: const ['pdf'],
+      ),
     );
     if (file == null) return null;
     final bytes = await file.readAsBytes();

@@ -1,5 +1,6 @@
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../splash_gate.dart';
 import 'device_channel.dart';
 
 /// Result of asking for a permission, collapsed to what the screen shows.
@@ -55,10 +56,10 @@ class PluginCapturePermissions implements CapturePermissions {
   }
 
   @override
-  Future<bool> openSettings() => openAppSettings();
+  Future<bool> openSettings() => withoutSplash(openAppSettings);
 
   Future<PermissionOutcome> _request(Permission permission) async {
-    final status = await permission.request();
+    final status = await withoutSplash(permission.request);
     return switch (status) {
       // provisional is iOS-only; listed so the switch stays exhaustive.
       PermissionStatus.granted ||
