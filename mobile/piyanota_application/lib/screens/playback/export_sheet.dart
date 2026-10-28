@@ -230,7 +230,7 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
       title: ExportMessages.title,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(10, 4, 8, 12),
+          padding: const EdgeInsets.fromLTRB(10, 0, 8, 4),
           child: Text.rich(
             key: const ValueKey('export-explanation'),
             TextSpan(
@@ -243,7 +243,7 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
                 const TextSpan(text: ExportMessages.explanationAfter),
               ],
             ),
-            style: Theme.of(context).textTheme.bodyMedium
+            style: Theme.of(context).textTheme.bodySmall
                 ?.copyWith(color: AppTheme.sheetText),
           ),
         ),

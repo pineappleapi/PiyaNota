@@ -1278,6 +1278,19 @@ void main() {
       handle.dispose();
     });
 
+    testWidgets('AC2: text scale 1.3 shows no overflow', (tester) async {
+      await pumpPlayback(
+        tester,
+        harness(FakeExportService()),
+        size: const Size(360, 800),
+        textScale: 1.3,
+      );
+      await openExport(tester, clear: false);
+      await tester.ensureVisible(download);
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+    });
+
     for (final height in [640.0, 800.0]) {
       testWidgets('AC2: 360x$height keeps Download reachable, no overflow', (
         tester,
@@ -1289,6 +1302,11 @@ void main() {
         );
         await openExport(tester, clear: false);
 
+        // Measured before any scroll. Without the note Download's bottom
+        // was 624 (640 tall) and 784 (800 tall); with the first, roomier
+        // note padding it was 675 at 640 (pushed off), so the note uses
+        // bodySmall and tight padding to keep both fully on-screen.
+        expect(tester.getRect(download).bottom, lessThanOrEqualTo(height));
         await tester.ensureVisible(download);
         await tester.pump();
         final rect = tester.getRect(download);
