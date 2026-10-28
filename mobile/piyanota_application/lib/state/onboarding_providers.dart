@@ -22,7 +22,24 @@ class SelectedVoicePart extends Notifier<VoicePart?> {
   VoicePart? build() => null;
 
   void select(VoicePart part) => state = part;
+
+  void clear() => state = null;
 }
 
 final selectedVoicePartProvider =
     NotifierProvider<SelectedVoicePart, VoicePart?>(SelectedVoicePart.new);
+
+/// PIYA-201-V2.1: "I'm a Conductor / I'm not sure yet" is a fifth choice on
+/// the voice step. It is kept apart from [selectedVoicePartProvider] because
+/// it must not be a [VoicePart]; the step keeps the two mutually exclusive.
+/// Saving it means no default voice, i.e. all voices.
+class ConductorSelected extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void set(bool value) => state = value;
+}
+
+final conductorSelectedProvider = NotifierProvider<ConductorSelected, bool>(
+  ConductorSelected.new,
+);

@@ -164,7 +164,7 @@ class _OnboardingFlowScreenState extends ConsumerState<OnboardingFlowScreen>
                       children: [
                         const PurposeStep(),
                         const WorkflowStep(),
-                        VoiceSelectionStep(onConductorTap: _skip),
+                        const VoiceSelectionStep(),
                       ],
                     ),
                   ),
