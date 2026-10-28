@@ -872,6 +872,41 @@ void main() {
       );
     });
 
+    testWidgets('card title and details line have a visible gap (V2.2)', (
+      tester,
+    ) async {
+      await _pumpLibrary(tester, _apiReturning(_scores));
+      await tester.pumpAndSettle();
+
+      // Reference: title baseline y=416, details baseline y=437 (21 dp
+      // apart); the card's own line boxes give 15.9 dp with no gap, so the
+      // gap is the 5 dp difference.
+      final title = tester.getRect(find.text('Bituin Walang Ningning'));
+      final details = tester.getRect(find.textContaining('Robert Delgado'));
+      expect(details.top - title.bottom, ScoreCard.titleToDetailsGap);
+      expect(ScoreCard.titleToDetailsGap, 5);
+    });
+
+    testWidgets('a 2-line title keeps the same gap and the card grows (V2.2)', (
+      tester,
+    ) async {
+      const longTitle = 'Bituin Walang Ningning Bituin Walang Ningning';
+      final long = ScoreSummary(
+        scoreId: 201,
+        title: longTitle,
+        lastActivityAt: DateTime(2026, 10, 3, 12),
+        arranger: 'Robert Delgado',
+        pageCount: 10,
+      );
+      await _pumpLibrary(tester, _apiReturning([long]));
+      await tester.pumpAndSettle();
+
+      final title = tester.getRect(find.text(longTitle));
+      final details = tester.getRect(find.textContaining('Robert Delgado'));
+      expect(title.height, greaterThan(2 * 18 * 1.15 - 1));
+      expect(details.top - title.bottom, ScoreCard.titleToDetailsGap);
+    });
+
     testWidgets('bell sits at the far top-right of the header (V2.1)', (
       tester,
     ) async {

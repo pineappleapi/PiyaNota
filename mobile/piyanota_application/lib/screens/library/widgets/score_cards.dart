@@ -204,6 +204,12 @@ class ScoreCard extends StatelessWidget {
   // 12 sp (was the mockup's 13) per the user's "smaller, modern" request;
   // #575757 on the card fill is ~5.2:1, still WCAG AA for small text.
   static const double _subtitleSize = 12;
+
+  /// PIYA-205-V2.2: space between the title's and the details line's boxes.
+  /// Reference (PIYA205_HomePage_Version2.png, 1 px = 1 dp): title baseline
+  /// to details baseline is 21 dp; with Plus Jakarta Sans line boxes
+  /// (18 x 1.15, 12 x 1.3) that is 15.9 dp with no gap, so 21 - 15.9 = 5.
+  static const double titleToDetailsGap = 5;
   static const double _chevronSize = 18;
   static const double _chevronInset = 8;
   static const double _trashSize = 16;
@@ -302,6 +308,10 @@ class ScoreCard extends StatelessWidget {
                   color: AppTheme.libraryCardTitle,
                 ),
               ),
+              // Also under a failed card's red line; skipped when there are
+              // no details at all so the title isn't followed by dead space.
+              if (scanFailed || subtitle.isNotEmpty)
+                const SizedBox(height: titleToDetailsGap),
               if (scanFailed)
                 Text(
                   ScanStatusMessages.failedCard,
