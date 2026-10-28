@@ -667,6 +667,8 @@ class _VoiceChips extends StatelessWidget {
   final ValueChanged<VoicePart> onToggle;
   final ValueChanged<VoicePart> onUnreadable;
 
+  static const double _chipGap = 4;
+
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
@@ -683,8 +685,10 @@ class _VoiceChips extends StatelessWidget {
                 color: AppTheme.playbackSubtle,
               ),
             ),
+            // A Wrap, not a Row: at 360 dp and text scale 1.0 it is one line
+            // (the chips are compact); large text wraps rather than clip (NFR-10).
             Wrap(
-              spacing: 8,
+              spacing: _chipGap,
               children: [
                 for (final voice in VoicePart.values)
                   _VoiceChip(
@@ -726,6 +730,21 @@ class _VoiceChip extends StatelessWidget {
 
   static const double _unavailableAlpha = 0.45;
 
+  /// Sized so four selected chips (tick included) fit 360 dp minus the
+  /// 16 dp gutters at text scale 1.0 (PIYA-208-V2.5 AC1).
+  static const double _labelSize = 13;
+  static const double _chipPadding = 4;
+  static const double _labelPadding = 2;
+
+  /// Each voice's own colour, shared with the Voice Mixer; white on all
+  /// four is >= 4.5:1 (see AppTheme.mixerSoprano).
+  static const _voiceFill = {
+    VoicePart.soprano: AppTheme.mixerSoprano,
+    VoicePart.alto: AppTheme.mixerAlto,
+    VoicePart.tenor: AppTheme.mixerTenor,
+    VoicePart.bass: AppTheme.mixerBass,
+  };
+
   @override
   Widget build(BuildContext context) {
     final on = selected && available;
@@ -736,12 +755,15 @@ class _VoiceChip extends StatelessWidget {
       onSelected: available ? (_) => onToggle(voice) : null,
       showCheckmark: true,
       checkmarkColor: Colors.white,
-      selectedColor: AppTheme.playbackChipSelectedFill,
+      selectedColor: _voiceFill[voice],
+      padding: const EdgeInsets.all(_chipPadding),
+      labelPadding: const EdgeInsets.symmetric(horizontal: _labelPadding),
       backgroundColor: AppTheme.playbackChipFill,
       disabledColor: AppTheme.playbackChipFill.withValues(
         alpha: _unavailableAlpha,
       ),
       labelStyle: TextStyle(
+        fontSize: _labelSize,
         fontWeight: FontWeight.w600,
         color: on
             ? Colors.white

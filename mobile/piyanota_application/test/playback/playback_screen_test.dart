@@ -1,8 +1,11 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:piyanota_application/models/score_result.dart';
@@ -11,6 +14,7 @@ import 'package:piyanota_application/screens/playback/playback_messages.dart';
 import 'package:piyanota_application/screens/playback/playback_screen.dart';
 import 'package:piyanota_application/services/score_result_api.dart';
 import 'package:piyanota_application/state/playback_providers.dart';
+import 'package:piyanota_application/theme/app_theme.dart';
 
 import 'playback_fakes.dart';
 
@@ -1399,6 +1403,98 @@ void main() {
       await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
       await expectLater(tester, meetsGuideline(textContrastGuideline));
       handle.dispose();
+    });
+  });
+
+  group('voice chips (PIYA-208-V2.5)', () {
+    const fills = {
+      VoicePart.soprano: AppTheme.mixerSoprano,
+      VoicePart.alto: AppTheme.mixerAlto,
+      VoicePart.tenor: AppTheme.mixerTenor,
+      VoicePart.bass: AppTheme.mixerBass,
+    };
+    setUpAll(() async {
+      // The test font is Ahem (1 em per glyph); load the SDK's Roboto so
+      // chip widths are realistic.
+      final root = Platform.environment['FLUTTER_ROOT']!;
+      final loader = FontLoader('Roboto');
+      for (final f in ['regular', 'bold', 'medium']) {
+        final bytes = File(
+          '$root/bin/cache/artifacts/material_fonts/roboto-$f.ttf',
+        ).readAsBytesSync();
+        loader.addFont(Future.value(ByteData.sublistView(bytes)));
+      }
+      await loader.load();
+    });
+
+    double ratio(Color a, Color b) {
+      final hi = a.computeLuminance(), lo = b.computeLuminance();
+      return (math.max(hi, lo) + 0.05) / (math.min(hi, lo) + 0.05);
+    }
+
+    testWidgets('AC1: all four fit on one line at 360 dp, scale 1.0', (
+      tester,
+    ) async {
+      await pumpPlayback(tester, ready(), size: const Size(360, 800));
+      final tops = [
+        for (final v in VoicePart.values) tester.getTopLeft(chip(v)).dy,
+      ];
+      expect(tops.toSet(), hasLength(1), reason: '$tops');
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('AC1: large text wraps instead of overflowing', (tester) async {
+      await pumpPlayback(
+        tester,
+        ready(),
+        size: const Size(360, 800),
+        textScale: 2,
+      );
+      expect(tester.takeException(), isNull);
+      for (final v in VoicePart.values) {
+        expect(tester.getRect(chip(v)).right, lessThanOrEqualTo(360));
+      }
+    });
+
+    testWidgets('AC2/AC3: selected fill is the mixer colour, label and tick '
+        'pass 4.5:1', (tester) async {
+      await pumpPlayback(tester, ready(), size: const Size(360, 800));
+      for (final MapEntry(:key, :value) in fills.entries) {
+        final c = tester.widget<FilterChip>(chip(key));
+        expect(c.selectedColor, value, reason: key.name);
+        expect(c.labelStyle!.color, Colors.white, reason: key.name);
+        expect(c.checkmarkColor, Colors.white, reason: key.name);
+        final r = ratio(c.labelStyle!.color!, value);
+        // ignore: avoid_print
+        print('contrast ${key.name}: ${r.toStringAsFixed(2)}');
+        expect(r, greaterThanOrEqualTo(4.5), reason: key.name);
+      }
+    });
+
+    testWidgets('AC4: unselected and disabled chips keep their look', (
+      tester,
+    ) async {
+      await pumpPlayback(
+        tester,
+        ready(voices: {VoicePart.soprano, VoicePart.alto}, review: false),
+        size: const Size(360, 800),
+      );
+      tester.widget<FilterChip>(chip(VoicePart.alto)).onSelected!(false);
+      await tester.pump();
+      final off = tester.widget<FilterChip>(chip(VoicePart.alto));
+      expect(off.selected, isFalse);
+      expect(off.backgroundColor, AppTheme.playbackChipFill);
+      expect(off.labelStyle!.color, AppTheme.playbackChipText);
+      final gone = tester.widget<FilterChip>(chip(VoicePart.bass));
+      expect(
+        gone.disabledColor,
+        AppTheme.playbackChipFill.withValues(alpha: 0.45),
+      );
+      expect(
+        gone.labelStyle!.color,
+        AppTheme.playbackChipText.withValues(alpha: 0.45),
+      );
+      expect(gone.labelStyle!.decoration, TextDecoration.lineThrough);
     });
   });
 }
