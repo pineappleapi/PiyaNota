@@ -60,7 +60,18 @@ class FakeAuthApi implements AuthApi {
   /// account, so a stay-signed-in launch (PIYA-202-V2.2) can be demoed.
   final int _createdMicros = DateTime.now().microsecondsSinceEpoch;
   static final RegExp _tokenPattern = RegExp(r'^fake_sess_\d+_(\d+)_(.+)$');
-  int _nextUserId = 1;
+
+  /// Fixed, so the demo account's own stored work survives a restart the
+  /// way a real account's does (startSession compares owner ids).
+  static const int demoUserId = 1;
+
+  /// Seeded from this run's start: the device keeps an earlier run's owner
+  /// id (WorkOwnerStore), so restarting at 1 let a new account inherit the
+  /// demo's stored scans (PIYA-205-V2.3). One id per account, like the
+  /// server, so a second login of the same account in a run keeps its work.
+  late int _nextUserId = _createdMicros;
+  final Map<String, int> _userIdsByEmail = {demoEmail: demoUserId};
+  int _issuedSessions = 1;
 
   /// When each recent wrong current password happened, per account, for
   /// the PIYA-322 AC5 sliding window.
@@ -302,9 +313,12 @@ class FakeAuthApi implements AuthApi {
   String _normalize(String email) => email.trim().toLowerCase();
 
   AuthSession _issueSession(String email) {
-    final userId = _nextUserId++;
+    final userId = _userIdsByEmail.putIfAbsent(email, () => _nextUserId++);
+    // The serial, not the userId, keeps two sessions of one account apart
+    // when they are issued in the same microsecond.
     final token =
-        'fake_sess_${userId}_${DateTime.now().microsecondsSinceEpoch}_$email';
+        'fake_sess_${_issuedSessions++}_'
+        '${DateTime.now().microsecondsSinceEpoch}_$email';
     _emailsByToken[token] = email;
     return AuthSession(
       userId: userId,
