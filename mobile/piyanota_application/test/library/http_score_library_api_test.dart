@@ -272,11 +272,25 @@ void main() {
       },
     );
 
-    test('404 maps to ScoreNotFoundException', () async {
-      final adapter = _StubAdapter(status: 404, body: {'message': 'nope'});
+    test('404 score_not_found maps to ScoreNotFoundException', () async {
+      final adapter = _StubAdapter(
+        status: 404,
+        body: {
+          'error': {'code': 'score_not_found'},
+        },
+      );
       await expectLater(
         _apiWith(adapter).updateScore(999, title: 'x'),
         throwsA(isA<ScoreNotFoundException>()),
+      );
+    });
+
+    // A proxy's bare 404 must not make the screen delete the card.
+    test('a bare 404 is a server failure, so the card is kept', () async {
+      final adapter = _StubAdapter(status: 404, body: {'message': 'nope'});
+      await expectLater(
+        _apiWith(adapter).updateScore(999, title: 'x'),
+        throwsA(isA<ScoreLibraryServerException>()),
       );
     });
 

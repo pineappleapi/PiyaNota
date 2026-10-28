@@ -74,6 +74,9 @@ class HttpScoreLibraryApi implements ScoreLibraryApi {
   static const int _unauthorized = 401;
   static const int _notFound = 404;
 
+  /// Backend note B5's `error.code` for a missing or someone else's score.
+  static const String _scoreNotFoundCode = 'score_not_found';
+
   @override
   Future<List<ScoreSummary>> fetchLibrary({String? query}) async {
     final trimmed = query?.trim() ?? '';
@@ -151,6 +154,8 @@ class HttpScoreLibraryApi implements ScoreLibraryApi {
         data: {'title': title, 'arranger': arranger},
         options: options,
       ),
+      // A PATCH 404 removes the card, so a proxy's bare 404 must not count.
+      notFoundNeedsCode: true,
     );
     final data = response.data?['data'];
     if (data is! Map<String, dynamic>) {
@@ -164,8 +169,9 @@ class HttpScoreLibraryApi implements ScoreLibraryApi {
   }
 
   Future<Response<Map<String, dynamic>>> _send(
-    Future<Response<Map<String, dynamic>>> Function(Options options) request,
-  ) async {
+    Future<Response<Map<String, dynamic>>> Function(Options options) request, {
+    bool notFoundNeedsCode = false,
+  }) async {
     final token = await _sessionStorage.readToken();
     // Without a token the server can only answer 401, so skip the round
     // trip and report the same thing.
@@ -175,11 +181,14 @@ class HttpScoreLibraryApi implements ScoreLibraryApi {
         Options(headers: {'Authorization': 'Bearer $token'}),
       );
     } on DioException catch (e) {
-      throw _mapDioError(e);
+      throw _mapDioError(e, notFoundNeedsCode: notFoundNeedsCode);
     }
   }
 
-  ScoreLibraryException _mapDioError(DioException e) {
+  ScoreLibraryException _mapDioError(
+    DioException e, {
+    required bool notFoundNeedsCode,
+  }) {
     switch (e.type) {
       case DioExceptionType.connectionTimeout:
       case DioExceptionType.sendTimeout:
@@ -189,7 +198,10 @@ class HttpScoreLibraryApi implements ScoreLibraryApi {
       case DioExceptionType.badResponse:
         return switch (e.response?.statusCode) {
           _unauthorized => const SessionExpiredException(),
-          _notFound => const ScoreNotFoundException(),
+          _notFound
+              when !notFoundNeedsCode ||
+                  _errorCode(e.response?.data) == _scoreNotFoundCode =>
+            const ScoreNotFoundException(),
           _ => const ScoreLibraryServerException(),
         };
       // A response arrived but was unusable — the network worked, so this
@@ -200,5 +212,15 @@ class HttpScoreLibraryApi implements ScoreLibraryApi {
       case DioExceptionType.unknown:
         return const ScoreLibraryServerException();
     }
+  }
+
+  /// Same envelope reading as HttpAuthApi: `error.code` or a bare string.
+  static String? _errorCode(Object? body) {
+    if (body is! Map<String, dynamic>) return null;
+    return switch (body['error']) {
+      {'code': final String code} => code,
+      final String code => code,
+      _ => null,
+    };
   }
 }
