@@ -291,9 +291,10 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// does that); one that changes it re-plans (PIYA-210 "Speed changes").
   Set<int>? _plannedSubdivisions;
 
-  /// A click plan is being written or attached (see [_prepareClick]).
   /// Voices muted only by the default mix (V2.2); a hand-set mute leaves it.
   Set<VoicePart> _mixMuted = {};
+
+  /// A click plan is being written or attached (see [_prepareClick]).
   bool _clickBusy = false;
 
   /// A slider release arrived while [_clickBusy]; re-checked after.
@@ -405,7 +406,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       arranger: result.arranger ?? _libraryArranger(),
       selected: selected,
       volumes: volumes,
-      muted: _mixMuted,
+      muted: {..._mixMuted},
       duration: engine.duration,
       timingUnavailable: timingFailed,
       failedVoices: failedVoices,
@@ -795,7 +796,8 @@ class PlaybackController extends Notifier<PlaybackState> {
       selected.add(voice);
       // Chip on must be heard: lift only the default mix's own mute, never
       // one the user set.
-      if (_mixMuted.remove(voice)) {
+      if (_mixMuted.contains(voice)) {
+        _mixMuted = _mixMuted.difference({voice});
         state = state.copyWith(muted: state.muted.difference({voice}));
       }
     }
@@ -820,7 +822,7 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// unmuting plays at that level, 0% included (user decision 2026-10-22).
   void setVoiceMuted(VoicePart voice, {required bool muted}) {
     if (!state.available.contains(voice)) return;
-    _mixMuted.remove(voice);
+    _mixMuted = _mixMuted.difference({voice});
     state = state.copyWith(
       muted: muted ? {...state.muted, voice} : state.muted.difference({voice}),
     );

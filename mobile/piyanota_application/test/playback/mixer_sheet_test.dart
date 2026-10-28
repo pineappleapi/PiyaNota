@@ -125,6 +125,38 @@ void main() {
       expect(controller(tester).state.muted, {VoicePart.tenor, VoicePart.bass});
     });
 
+    testWidgets('default voice absent from the score: nothing muted', (
+      tester,
+    ) async {
+      final harness = PlaybackHarness(
+        ScriptedScoreResultApi([
+          testResult(
+            voices: {VoicePart.soprano, VoicePart.alto, VoicePart.bass},
+          ),
+        ], timing: testTiming()),
+      );
+      await pumpPlayback(tester, harness, defaultVoice: VoicePart.tenor);
+      expect(controller(tester).state.muted, isEmpty);
+      expect(harness.engine.volumes[VoicePart.alto], 1);
+    });
+
+    testWidgets('default voice failing mid-play: hand mute stays, rest heard', (
+      tester,
+    ) async {
+      final harness = ready();
+      await pumpPlayback(tester, harness, defaultVoice: VoicePart.alto);
+      controller(tester)
+        ..setVoiceMuted(VoicePart.tenor, muted: false)
+        ..setVoiceMuted(VoicePart.tenor, muted: true);
+      harness.engine.fail(VoicePart.alto);
+      await tester.pump();
+      await tester.pump();
+
+      expect(harness.engine.volumes[VoicePart.tenor], 0);
+      expect(harness.engine.volumes[VoicePart.soprano], 1);
+      expect(harness.engine.volumes[VoicePart.bass], 1);
+    });
+
     testWidgets('a voice the user muted stays muted when its chip goes on', (
       tester,
     ) async {
