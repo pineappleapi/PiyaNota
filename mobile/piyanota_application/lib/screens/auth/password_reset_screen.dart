@@ -11,6 +11,7 @@ import '../../services/auth_api.dart';
 import '../../services/auth_validators.dart';
 import '../../services/fake_auth_api.dart';
 import '../../state/auth_providers.dart';
+import '../../state/resend_cooldowns.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/primary_pill_button.dart';
 import 'auth_messages.dart';
@@ -83,18 +84,17 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
   /// and miss that edit.
   final Map<TextEditingController, String> _lastTexts = {};
 
-  /// Seconds until "Resend code" unlocks again; 0 means available.
-  int _resendCooldownLeft = 0;
+  /// Only repaints once a second; the time itself lives in
+  /// [resendCooldownsProvider], keyed by email (PIYA-204-V2.2).
   Timer? _resendCooldownTimer;
 
   static const double _fieldGap = 16;
   static const double _sectionGap = 24;
 
-  /// Each send invalidates the previous code (PIYA-303 AC5), so rapid
-  /// resends let an older email arrive last and carry a dead code. The
-  /// cooldown also stops one device spamming reset emails; server-side
-  /// rate limiting is still needed (BUG-049).
-  static const int _resendCooldownSeconds = 30;
+  // Each send invalidates the previous code (PIYA-303 AC5), so rapid
+  // resends let an older email arrive last and carry a dead code. The
+  // cooldown also stops one device spamming reset emails; server-side
+  // rate limiting is still needed (BUG-049).
   static const Duration _cooldownTick = Duration(seconds: 1);
 
   List<TextEditingController> get _controllers => [
@@ -137,24 +137,25 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
     });
   }
 
-  void _startResendCooldown() {
+  /// Seconds until "Resend code" unlocks again; 0 means available.
+  int get _resendCooldownLeft =>
+      ref.read(resendCooldownsProvider.notifier).secondsLeft(_requestedEmail);
+
+  /// Repaints each second until the stored deadline passes.
+  void _tickResendCooldown() {
     _resendCooldownTimer?.cancel();
-    _resendCooldownLeft = _resendCooldownSeconds;
+    if (_resendCooldownLeft <= 0) return;
     _resendCooldownTimer = Timer.periodic(_cooldownTick, (timer) {
       if (!mounted) return;
       setState(() {
-        _resendCooldownLeft--;
-        if (_resendCooldownLeft <= 0) {
-          _resendCooldownLeft = 0;
-          timer.cancel();
-        }
+        if (_resendCooldownLeft <= 0) timer.cancel();
       });
     });
   }
 
   void _stopResendCooldown() {
     _resendCooldownTimer?.cancel();
-    _resendCooldownLeft = 0;
+    ref.read(resendCooldownsProvider.notifier).clear(_requestedEmail);
   }
 
   String get _code => _codeController.text.trim();
@@ -203,6 +204,20 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
         ? _emailController.text.trim()
         : _requestedEmail;
     if (_isSubmitting || !AuthValidators.isValidEmail(email)) return;
+    // V2.2: a code for this email is still cooling down, so it is still the
+    // live one; going back and resubmitting must not send another.
+    if (_step == _ResetStep.email &&
+        ref.read(resendCooldownsProvider.notifier).secondsLeft(email) > 0) {
+      setState(() {
+        _requestedEmail = email;
+        _errorMessage = null;
+        _emailNotRegistered = false;
+        _noticeMessage = AuthMessages.resetCodeSent;
+        _step = _ResetStep.code;
+        _tickResendCooldown();
+      });
+      return;
+    }
     setState(() {
       _isSubmitting = true;
       _errorMessage = null;
@@ -245,7 +260,10 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
       _requestedEmail = email;
       _noticeMessage = AuthMessages.resetCodeSent;
       _step = _ResetStep.code;
-      _startResendCooldown();
+      // Only a real send starts a cooldown: an unregistered email returned
+      // above sends no code.
+      ref.read(resendCooldownsProvider.notifier).recordSent(email);
+      _tickResendCooldown();
     });
   }
 
@@ -307,6 +325,8 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
 
     if (!mounted) return;
     if (error == null) {
+      // The code is spent, so a later reset for this email must send anew.
+      _stopResendCooldown();
       _finish();
       return;
     }

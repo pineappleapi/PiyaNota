@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
+import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -13,6 +14,7 @@ import 'package:piyanota_application/screens/auth/password_reset_screen.dart';
 import 'package:piyanota_application/screens/auth/sign_up_screen.dart';
 import 'package:piyanota_application/services/auth_api.dart';
 import 'package:piyanota_application/services/fake_auth_api.dart';
+import 'package:piyanota_application/state/resend_cooldowns.dart';
 
 import 'auth_test_harness.dart';
 
@@ -66,6 +68,18 @@ ScriptedAuthApi _happyApi() =>
 String _demoCode(WidgetTester tester) {
   final text = tester.widget<Text>(find.textContaining(_demoCodePrefix)).data!;
   return text.substring(_demoCodePrefix.length);
+}
+
+/// Moves the cooldown clock together with the widget tree's timers.
+class _TestClock {
+  DateTime now = DateTime(2026, 10, 28, 12);
+
+  Override get override => resendClockProvider.overrideWithValue(() => now);
+
+  Future<void> advance(WidgetTester tester, Duration by) async {
+    now = now.add(by);
+    await tester.pump(by);
+  }
 }
 
 void main() {
@@ -340,7 +354,13 @@ void main() {
     tester,
   ) async {
     final api = _happyApi();
-    await pumpAuthScreen(tester, screen: const PasswordResetScreen(), api: api);
+    final clock = _TestClock();
+    await pumpAuthScreen(
+      tester,
+      screen: const PasswordResetScreen(),
+      api: api,
+      extraOverrides: [clock.override],
+    );
     await _requestCode(tester);
 
     Finder resend() => find.widgetWithText(TextButton, 'Resend code');
@@ -354,11 +374,11 @@ void main() {
     expect(find.text('Resend code (30s)'), findsOneWidget);
     expect(lockedButton().onPressed, isNull);
 
-    await tester.pump(const Duration(seconds: 29));
+    await clock.advance(tester, const Duration(seconds: 29));
     expect(find.text('Resend code (1s)'), findsOneWidget);
     expect(lockedButton().onPressed, isNull);
 
-    await tester.pump(const Duration(seconds: 1));
+    await clock.advance(tester, const Duration(seconds: 1));
     expect(tester.widget<TextButton>(resend()).onPressed, isNotNull);
 
     await tester.ensureVisible(resend());
@@ -367,6 +387,106 @@ void main() {
     await tester.pump();
     expect(api.requestResetCalls, 2);
     expect(find.text('Resend code (30s)'), findsOneWidget);
+  });
+
+  group('PIYA-204-V2.2 resend countdown keyed by email', () {
+    Future<void> goBackToEmail(WidgetTester tester) async {
+      await tester.ensureVisible(find.text('Change email'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Change email'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('AC1: same email again keeps remaining time, sends nothing', (
+      tester,
+    ) async {
+      final api = _happyApi();
+      final clock = _TestClock();
+      await pumpAuthScreen(
+        tester,
+        screen: const PasswordResetScreen(),
+        api: api,
+        extraOverrides: [clock.override],
+      );
+      await _requestCode(tester);
+      await clock.advance(tester, const Duration(seconds: 12));
+      await goBackToEmail(tester);
+
+      // Case and padding must not make it a "different" email.
+      await _requestCode(tester, email: '  Maria@Example.com ');
+
+      expect(api.requestResetCalls, 1);
+      expect(find.text('Enter Code'), findsOneWidget);
+      expect(find.text('Resend code (18s)'), findsOneWidget);
+    });
+
+    testWidgets('AC2: a different email gets a fresh send and its own 30 s', (
+      tester,
+    ) async {
+      final api = _happyApi();
+      final clock = _TestClock();
+      await pumpAuthScreen(
+        tester,
+        screen: const PasswordResetScreen(),
+        api: api,
+        extraOverrides: [clock.override],
+      );
+      await _requestCode(tester);
+      await clock.advance(tester, const Duration(seconds: 12));
+      await goBackToEmail(tester);
+
+      await _requestCode(tester, email: 'bea@example.com');
+
+      expect(api.requestResetCalls, 2);
+      expect(api.lastEmail, 'bea@example.com');
+      expect(find.text('Resend code (30s)'), findsOneWidget);
+    });
+
+    testWidgets('AC3: countdown survives leaving and reopening the screen', (
+      tester,
+    ) async {
+      final api = _happyApi();
+      final clock = _TestClock();
+      await pumpAuthScreen(
+        tester,
+        screen: const PasswordResetScreen(),
+        api: api,
+        extraOverrides: [clock.override],
+      );
+      await _requestCode(tester);
+      await clock.advance(tester, const Duration(seconds: 10));
+
+      // Same ProviderScope, new screen instance: the app is still open.
+      tester
+          .state<NavigatorState>(find.byType(Navigator))
+          .pushReplacement(
+            MaterialPageRoute<void>(
+              builder: (_) => const PasswordResetScreen(),
+            ),
+          );
+      await tester.pumpAndSettle();
+      await _requestCode(tester);
+
+      expect(api.requestResetCalls, 1);
+      expect(find.text('Resend code (20s)'), findsOneWidget);
+    });
+
+    testWidgets('unregistered email starts no cooldown', (tester) async {
+      final api = ScriptedAuthApi(
+        onRequestReset: () async => throw const EmailNotRegisteredException(),
+      );
+      final clock = _TestClock();
+      await pumpAuthScreen(
+        tester,
+        screen: const PasswordResetScreen(),
+        api: api,
+        extraOverrides: [clock.override],
+      );
+      await _requestCode(tester);
+      await _requestCode(tester);
+
+      expect(api.requestResetCalls, 2);
+    });
   });
 
   testWidgets('server rejection of the new password keeps the user on it', (
