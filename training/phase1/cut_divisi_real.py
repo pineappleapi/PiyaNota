@@ -1,7 +1,7 @@
 """Real-engraving divisi training strips: PDF renders and camera photos of `data/chords_dataset` (PIYA-106 A7-data).
 
 Why the deployment path: ml-cv-lead (2026-10-30) ruled that digital training strips must go through Stage 1 (grey
-`strip_source`, `paper_fill`) and Stage 2's own box rules and crop, like camera pages and the eval_prelim digital path;
+`strip_source`, `paper_fill`) and Stage 2's own box rules and crop (stage2_boxes), like camera pages and the eval_prelim digital path;
 a custom crop would train on strips deployment never produces. The vector staff finder only aligns labels.
 
 Two steps, because PyMuPDF and the pipeline (torch, ultralytics) live in different environments:
@@ -86,6 +86,20 @@ def page_slots(spec: dict, page: int, recs: list[dict]) -> list[dict | None]:
     return slots
 
 
+def stage2_boxes(s2, image_bgr, model, page_index: int) -> list[dict]:  # noqa: ANN001 - stage modules, lazy imports
+    """Stage 2's staff boxes (detect_staff_regions Rules 1-3.55), before its 4-staves-per-system grouping.
+
+    Repeated here from Stage 2's own helpers and constants rather than refactored out of stage2_detection.py, whose
+    source is pinned by the train = serve freeze (cut_corpus refuses a changed Stage 1/2). Keep in step with it.
+    """
+    results = model(image_bgr, conf=s2.CONF_THRESHOLD, iou=s2.NMS_THRESHOLD, verbose=False)
+    boxes = [b for b in s2._extract_boxes(results) if b["conf"] >= s2.CONF_THRESHOLD]
+    if len(boxes) > s2.MAX_BOXES_PER_PAGE:
+        boxes = sorted(boxes, key=lambda b: b["conf"], reverse=True)[:s2.MAX_BOXES_PER_PAGE]
+    boxes = s2._remove_duplicates(sorted(boxes, key=lambda b: b["cy"]), min_cy_gap=30)
+    return s2._reconcile_with_classical(boxes, image_bgr, page_index)
+
+
 def frame_ratio(tokens: list[str], width_px: int) -> float:
     repeats = sum(a == b for a, b in zip(tokens, tokens[1:]))   # CTC needs a blank frame between equal tokens
     return (len(tokens) + repeats) / max(1, width_px // CNN_WIDTH_STRIDE)
@@ -96,6 +110,8 @@ def eligibility(r: dict, forms: dict) -> list[str]:
     check = r.get("check", "")
     if check != "match" and check != RASTER_OK:
         reasons.append(f"head check: {check or 'missing'}")
+    if str(r.get("accid_check", "")).startswith("mismatch"):   # accid_check.py: PDF accidental glyphs differ
+        reasons.append(f"accidental check: pdf {r.get('pdf_accidentals')} label {r.get('label_accidentals')}")
     form = forms.get(r["piece"], {}).get("-".join(r["parts"]), {})
     for bar, flags in r.get("bar_flags", {}).items():
         if "chord_merge" in flags and bar not in form.get("chord", []):
@@ -138,7 +154,7 @@ def cut(args: argparse.Namespace) -> None:
                     continue
                 pre = s1.preprocess_score_page(str(image))
                 page_bgr = cv2.cvtColor(pre.detect, cv2.COLOR_GRAY2BGR) if pre.detect.ndim == 2 else pre.detect
-                boxes = s2.page_boxes(page_bgr, model, page_no)
+                boxes = stage2_boxes(s2, page_bgr, model, page_no)
                 slots = page_slots(maps[piece], page_no, recs)
                 if len(boxes) != len(slots):
                     log.append(f"{piece} {source} p{page_no}: skipped, {len(boxes)} boxes vs {len(slots)} printed staves")

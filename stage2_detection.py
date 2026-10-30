@@ -87,7 +87,28 @@ def detect_staff_regions(
             image_bgr = image.copy()
 
         img_h, img_w = image_bgr.shape[:2]
-        boxes = page_boxes(image_bgr, model, page_index)
+
+        # ── Single model call per page ────────────────────────────────────
+        results = model(image_bgr, conf=CONF_THRESHOLD, iou=NMS_THRESHOLD, verbose=False)
+
+
+        boxes   = _extract_boxes(results)
+
+        # Rule 1: Filter out low-confidence detections before grouping
+        boxes = [b for b in boxes if b["conf"] >= CONF_THRESHOLD]
+
+        # Rule 2: cap at 16 (4 systems × 4 voices max)
+        if len(boxes) > 16:
+            boxes = sorted(boxes, key=lambda b: b["conf"], reverse=True)[:16]
+
+        # Rule 3: sort top-to-bottom for correct SATB grouping
+        boxes = sorted(boxes, key=lambda b: b["cy"])
+
+        # Rule 3.5: remove duplicate detections on the same staff
+        boxes = _remove_duplicates(boxes, min_cy_gap=30)
+
+        # Rule 3.55: cross-check against the classical staff tracker (BUG-001).
+        boxes = _reconcile_with_classical(boxes, image_bgr, page_index)
 
         # Rule 3.6: staff-count validation — open-score enforcement (PIYA-105 #4)
         if len(boxes) != 0 and len(boxes) % 4 != 0:
@@ -146,33 +167,6 @@ def detect_staff_regions(
         Path(manifest_path).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     _report(voice_sequences)
     return voice_sequences
-
-def page_boxes(image_bgr: np.ndarray, model: YOLO, page_index: int) -> list[dict]:
-    """Staff boxes of one preprocessed page, top to bottom (Rules 1-3.55), before the SATB grouping.
-
-    Shared with `training/phase1/cut_divisi_real.py` so real training strips are cut exactly as deployment cuts.
-    """
-    # ── Single model call per page ────────────────────────────────────
-    results = model(image_bgr, conf=CONF_THRESHOLD, iou=NMS_THRESHOLD, verbose=False)
-
-    boxes   = _extract_boxes(results)
-
-    # Rule 1: Filter out low-confidence detections before grouping
-    boxes = [b for b in boxes if b["conf"] >= CONF_THRESHOLD]
-
-    # Rule 2: cap at 16 (4 systems × 4 voices max)
-    if len(boxes) > 16:
-        boxes = sorted(boxes, key=lambda b: b["conf"], reverse=True)[:16]
-
-    # Rule 3: sort top-to-bottom for correct SATB grouping
-    boxes = sorted(boxes, key=lambda b: b["cy"])
-
-    # Rule 3.5: remove duplicate detections on the same staff
-    boxes = _remove_duplicates(boxes, min_cy_gap=30)
-
-    # Rule 3.55: cross-check against the classical staff tracker (BUG-001).
-    return _reconcile_with_classical(boxes, image_bgr, page_index)
-
 
 def _classical_boxes(image_bgr: np.ndarray) -> tuple[list[dict], list[StaffCurve]]:
     """Finds staves by line tracking and returns one full-width box per staff.

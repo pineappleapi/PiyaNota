@@ -1,0 +1,16 @@
+{
+ "source": "D:/PiyaNota/datasets/divisi_a6_build_v2/build/corpus/*.plan.json, split train",
+ "pieces": 339,
+ "class_counts": {
+  "2nd_down": 890,
+  "2nd_none": 281,
+  "2nd_up": 939,
+  "3rd": 2858,
+  "4th": 2079,
+  "5th": 2128,
+  "6th": 2099,
+  "7th": 911,
+  "8ve": 2718,
+  "triad": 2597
+ }
+}

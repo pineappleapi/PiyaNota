@@ -12,10 +12,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
 import fitz  # pymupdf
+
+sys.path.insert(0, str(Path(__file__).parent))  # python -I does not add the script dir
+import accid_check  # noqa: E402
 
 # Notehead glyphs by font. Maestro/Helsinki use MacRoman positions (0xCF black = U+0153, 0xFA half = U+02D9,
 # 0xBB whole = U+03D6), read from a glyph contact sheet of For Good.
@@ -113,11 +117,41 @@ def band_counts(staves: list[list[float]], members: list[int], ys: list[float]) 
     return [sum(lo <= y < hi for y in ys) for lo, hi in zip(edges, edges[1:])]
 
 
+def _check_accidentals(r: dict, staves: list[list[float]], members: list[int], pts: list[tuple[float, float]],
+                       vs: list[tuple[float, float, float]]) -> None:
+    """Fill the accid_* fields of one strip: PDF vs label accidental count (header included on both sides), per bar
+    when the PDF barlines give the same bar count as the label, else the strip total only."""
+    lo_hi = _band_edges(staves, members)[r["staff"]]
+    xs = [x for x, y in pts if lo_hi[0] <= y < lo_hi[1]]
+    label_bars = accid_check.label_bar_counts(r["tokens"])
+    r["pdf_accidentals"], r["label_accidentals"] = len(xs), sum(label_bars)
+    r["accid_check"] = "match" if len(xs) == sum(label_bars) else "mismatch"
+    bl = accid_check.consensus_barlines([accid_check.staff_barlines(vs, staves[i]) for i in members])
+    r["accid_bars_mismatch"] = None
+    if len(bl) >= 2:
+        bad = accid_check.compare_bars(label_bars, accid_check.pdf_bar_counts(xs, bl, bl[0], bl[-1]))
+        if bad is not None:
+            first = int(r["bars"][0]) if str(r["bars"][0]).lstrip("-").isdigit() else 1
+            r["accid_bars_mismatch"] = [first + i for i in bad]
+            if bad and r["accid_check"] == "match":
+                r["accid_check"] = "mismatch"   # totals agree but a bar differs: a glyph moved between bars
+
+
+def _band_edges(staves: list[list[float]], members: list[int]) -> list[tuple[float, float]]:
+    """(top, bottom) y of the band each staff owns, as in band_counts."""
+    edges = [staves[members[0]][0] - END_BAND]
+    edges += [(staves[a][4] + staves[b][0]) / 2 for a, b in zip(members, members[1:])]
+    edges.append(staves[members[-1]][4] + END_BAND)
+    return list(zip(edges, edges[1:]))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--labels", type=Path, required=True, help="labels.jsonl from merge_divisi_parts.py")
     parser.add_argument("--pdf-root", type=Path, required=True, help="data/chords_dataset (one PDF per piece folder)")
     parser.add_argument("--maps", type=Path, default=Path(__file__).with_name("divisi_score_maps.json"))
+    parser.add_argument("--accid", action="store_true", help="also count accidental glyphs per strip and bar")
+    parser.add_argument("--out", type=Path, default=None, help="output file (default: labels_checked.jsonl next to labels)")
     args = parser.parse_args()
     records = [json.loads(line) for line in args.labels.read_text(encoding="utf-8").splitlines()]
     maps = json.loads(args.maps.read_text(encoding="utf-8"))
@@ -150,22 +184,33 @@ def main() -> None:
             systems_by_no = dict(zip(sorted(per_sys), systems))
         else:
             systems_by_no = {k + 1: m for k, m in enumerate(systems)}
+        acc_pts = accid_check.accidental_points(page) if args.accid else None
+        acc_vs = accid_check.vertical_segments(page) if args.accid else []
         page_status = ("unverified: raster or unknown font" if ys is None
                        else f"unverified: {len(systems)} PDF systems vs {n_map} mapped" if len(systems) != n_map
                        else "")
         for r in recs:
             r["pdf_heads"] = None
+            if args.accid:
+                r.update(pdf_accidentals=None, label_accidentals=None, accid_check="unverified: no accidental glyphs known",
+                         accid_bars_mismatch=None)
             if page_status:
                 r["check"] = page_status
+                if args.accid:
+                    r["accid_check"] = page_status
                 continue
             members = systems_by_no[r["sys"]]
             n_strips = sum(1 for x in recs if x["sys"] == r["sys"])
             if len(members) != n_strips:
                 r["check"] = f"unverified: {len(members)} PDF staves vs {n_strips} strips"
+                if args.accid:
+                    r["accid_check"] = r["check"]
                 continue
+            if args.accid and acc_pts is not None and r["tokens"] is not None:
+                _check_accidentals(r, staves, members, acc_pts, acc_vs)
             r["pdf_heads"] = band_counts(staves, members, ys)[r["staff"]]
             r["check"] = "match" if r["pdf_heads"] == r["heads"] else "mismatch"
-    out = args.labels.with_name("labels_checked.jsonl")
+    out = args.out or args.labels.with_name("labels_checked.jsonl")
     out.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
     for piece in sorted({r["piece"] for r in records}):
         kept = [r for r in records if r["piece"] == piece and r["tokens"] is not None]

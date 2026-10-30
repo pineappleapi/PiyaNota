@@ -164,7 +164,7 @@ A7_ARM: str | None = None                       # "C" (chords) or "CL" (chords +
 P_TRIAD_A7 = 0.30
 # ml-cv-lead 2026-10-30 (ruling 2): the design's .15 is out of reach at the conductor sites, so A7 keeps A6 v2's realised
 # 2+ ledger exposure (.045) as a floor; ledger-site members are exempt from MAX_CROSSING under their own cap.
-LEDGER2_MEMBER_TARGET_A7 = 0.08               # steering target (20-piece smoke: .06 realised .039); floor .045
+LEDGER2_MEMBER_TARGET_A7 = 0.10               # steering target (20-piece smoke: .08 realised .0435); floor .045
 LEDGER2_FLOOR_A7 = 0.045
 LEDGER2_MEMBER_CAP_A7 = 0.08
 LEDGER_CROSS_CAP = 0.05                         # chord columns whose crossing member is a ledger-site member
@@ -1066,7 +1066,7 @@ def _draw_members(base: music21.pitch.Pitch, mi: int, offset: float, t: float, t
             ledger_p = (_ledger_site_pitch(base, generic, vi, cadence, in_force, fifths)
                         if prefer_ledger and not members else None)
             if ledger_p is not None and fits(ledger_p, generic, members):
-                p, src = ledger_p, "free"
+                p, src = ledger_p, "ledger"          # its own source: not in the free/copied mix (P_FREE_MEMBER)
             elif fitting:
                 chromatic_fit = [q for q in fitting if _chromatic(q, fifths)]
                 p = drng.choice(chromatic_fit if prefer_chromatic and not members and chromatic_fit else fitting)
@@ -1344,7 +1344,8 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                 of_cls = [s for s in of_cls if s.kind != "merge"] or of_cls     # real notes before merged ones
                 pending = [p for r in records for p in r["members"]]  # type: ignore[attr-defined]
                 l2_done = scalars["ledger2_members"] + sum(_is_ledger2(_drawn_position(p, vi)) for p in pending)
-                m_done = scalars["free"] + scalars["copied"] + scalars["template"] + len(pending)   # committed + strip
+                m_done = (scalars["free"] + scalars["copied"] + scalars["template"] + scalars["ledger"]
+                          + len(pending))   # committed + this strip's, once
                 site = drng.choices(of_cls, weights=[
                     (ACCIDENTAL_SITE_BOOST if boost and s.chromatic else 1.0)
                     * _ledger2_boost(voice, (A7_ARM is not None and _ledger_reachable(s.heads[0][1].pitch, vi))
