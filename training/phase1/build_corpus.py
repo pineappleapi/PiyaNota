@@ -1684,9 +1684,11 @@ def _add_layer(parts: list[music21.stream.Part], measures: list[list[music21.str
     events = [(float(donor.elementOffset(n)), n) for n in donor.notesAndRests]
     rest_until = 0
     if lrng.random() < LAYER_MID_ENTRY:
-        # Cut only where no beam runs on, so layer 2's remaining beams stay whole.
+        # Cut only where no beam runs on, so layer 2's remaining beams stay whole. A music21 Rest has no beams at
+        # all, so a cut right after a rest is always clean (reading .beams on it crashed the A7 CL build).
         cuts = [k for k in range(1, len(events)) if events[k][0] <= bar_ql / 2
-                and not any(b.type in ("start", "continue") for b in events[k - 1][1].beams.beamsList)]
+                and (events[k - 1][1].isRest
+                     or not any(b.type in ("start", "continue") for b in events[k - 1][1].beams.beamsList))]
         if cuts:
             rest_until = lrng.choice(cuts)
     layer1 = [(float(m.elementOffset(n)), n) for n in m.notesAndRests]

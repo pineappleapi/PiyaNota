@@ -64,3 +64,47 @@ def test_real_staging_copies_exactly_referenced(tmp_path: Path) -> None:
     got = sorted(p.name for p in (out / "strips").rglob("*.png"))
     assert got == ["a.png", "b.png"]
     assert json.loads((out / "dataset-metadata.json").read_text(encoding="utf-8"))["id"] == stage.REAL_ID
+
+
+pre = _load("a7_pre_gpu", "pre_gpu_check.py")
+pre.tp.use_ext_vocab(pre.tp.VOCAB_EXT_A7)
+
+
+def _fake_build(root: Path, layered: bool, n_train: int = 3, oov: bool = False) -> Path:
+    (root / "build" / "manifest").mkdir(parents=True)
+    (root / "build" / "corpus").mkdir(parents=True)
+    (root / "kernel_status.json").write_text(json.dumps({"status": "ok"}), encoding="utf-8")
+    (root / "a7_gates.json").write_text(json.dumps({"ok": True, "gates": []}), encoding="utf-8")
+    (root / "halves.json").write_text("{}", encoding="utf-8")
+    toks = ["clef.G-L2", "note.quarter-L2"] + (["layer.split"] if layered else []) + (["bogus.tok"] if oov else [])
+    rows = [{"split": "train", "font": f, "tokens": toks} for f in ["Bravura"] * n_train + ["Gootville"]]
+    (root / "build" / "manifest" / "phase2_manifest.jsonl").write_text(
+        "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    (root / "build" / "corpus" / "p.plan.json").write_text(
+        json.dumps({"split": "train", "divisi": {"class": {"S:3rd": 10, "A:3rd": 5, "T:triad": 4}}}), encoding="utf-8")
+    return root
+
+
+def test_pre_gpu_check_arm(tmp_path: Path) -> None:
+    info, errs = pre.check_arm("CL", _fake_build(tmp_path / "cl", layered=True), 3, "Gootville")
+    assert errs == [] and info["train_pool_without_holdout"] == 3 and len(info["manifest_sha256"]) == 64
+    assert pre.chord_train_counts(tmp_path / "cl") == {"3rd": 15, "triad": 4}
+    _, errs = pre.check_arm("C", _fake_build(tmp_path / "c", layered=True), 3, "Gootville")
+    assert any("not an arm C build" in e for e in errs)
+    _, errs = pre.check_arm("C", _fake_build(tmp_path / "c2", layered=False, oov=True), 4, "Gootville")
+    assert any("outside VOCAB_EXT_A7" in e for e in errs) and any("< 4 per epoch" in e for e in errs)
+
+
+def test_pre_gpu_real_simulation_caps_and_drops_layered_for_c() -> None:
+    rows = [{"piece": p, "page": 1, "sys": s, "staff": 0, "train_ok": True, "split": "train", "layered": s == 0}
+            for p in ("A", "B") for s in range(3)]
+    cl = pre.simulate_real("CL", rows, n_real_epoch=100, n_divisi_epoch=900, cap=8, epochs=4, seed=1)
+    assert cl["staff_systems"] == 6 and cl["at_cap_end"] == 6 and cl["views_total"] == 48
+    assert cl["realised_share_by_epoch"] == [round(12 / 912, 4)] * 4   # 6 groups x 2 per epoch: the cap binds
+    c = pre.simulate_real("C", rows, n_real_epoch=100, n_divisi_epoch=900, cap=8, epochs=4, seed=1)
+    assert c["strips"] == 4 and c["layered"] == 0
+
+
+def test_pin_line_matches_template_once() -> None:
+    text = (KDIR / "phase2_divisi_a7_kernel.py").read_text(encoding="utf-8")
+    assert len(pre.PIN_LINE.findall(text)) == 1
