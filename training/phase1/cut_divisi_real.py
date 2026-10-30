@@ -32,6 +32,8 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from vocab_guard import oov_tokens  # noqa: E402 - imports stage3 (torch) only when first called
 MAPS = Path(__file__).with_name("divisi_score_maps.json")
 DIGITAL_DPI = 300              # = data/eval_prelim/inputs.py DIGITAL_DPI (the digital eval path)
 CNN_WIDTH_STRIDE = 4           # = stage3_transcription.CNN_WIDTH_STRIDE: one CTC frame per 4 px of strip width
@@ -110,6 +112,10 @@ def eligibility(r: dict, forms: dict) -> list[str]:
     check = r.get("check", "")
     if check != "match" and check != RASTER_OK:
         reasons.append(f"head check: {check or 'missing'}")
+    tokens = list(r.get("tokens") or [])
+    oov = oov_tokens(tokens, "a7") if tokens else []           # the CRNN could never emit these (vocab_guard)
+    if oov:
+        reasons.append(f"oov: {oov[0]}")
     if str(r.get("accid_check", "")).startswith("mismatch"):   # accid_check.py: PDF accidental glyphs differ
         reasons.append(f"accidental check: pdf {r.get('pdf_accidentals')} label {r.get('label_accidentals')}")
     form = forms.get(r["piece"], {}).get("-".join(r["parts"]), {})

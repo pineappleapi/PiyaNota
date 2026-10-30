@@ -166,6 +166,10 @@ P_TRIAD_A7 = 0.30
 # 2+ ledger exposure (.045) as a floor; ledger-site members are exempt from MAX_CROSSING under their own cap.
 LEDGER2_MEMBER_TARGET_A7 = 0.10               # steering target (20-piece smoke: .08 realised .0435); floor .045
 LEDGER2_FLOOR_A7 = 0.045
+LEDGER2_SITE_BOOST_A7 = 6.0                    # design 3.1: raised because the 20-piece smoke fell short (.0417 at 3.0)
+# Steering target for the free-member share (gate stays .60 +-.03): the 20-piece smoke realised .630 steering at .60,
+# as A6 steered 2nds at .33 to realise >= .30.
+P_FREE_MEMBER_A7 = 0.57
 LEDGER2_MEMBER_CAP_A7 = 0.08
 LEDGER_CROSS_CAP = 0.05                         # chord columns whose crossing member is a ledger-site member
 # Raised floor so every dyad bucket's train count stays >= .95 of A6 build v2 with triads at .30 (corpus gate 5.4):
@@ -173,7 +177,7 @@ LEDGER_CROSS_CAP = 0.05                         # chord columns whose crossing m
 CHORD_DENSITY_A7 = (0.32, 0.60)
 # Template triads (choral-conductor shapes, 3.1): chance a drawn triad uses a template, per site duration class. The
 # realised mix is about 50/50 with >= .70 of templates on whole/half/dotted notes and <= .05 beamed (design 3.1).
-TEMPLATE_P_BY_CLASS: dict[str, float] = {"whole": 1.0, "half": 1.0, "dotted": 1.0, "quarter": .5, "beamed": .05}
+TEMPLATE_P_BY_CLASS: dict[str, float] = {"whole": 1.0, "half": 1.0, "dotted": 1.0, "quarter": .6, "beamed": .05}
 TEMPLATE_VOICE_FACTOR: dict[str, float] = {"Soprano": 1.2, "Alto": .5, "Tenor": .8, "Bass": 1.2}
 TEMPLATE_CADENCE_FACTOR = 1.5                   # a fermata note or the final bar
 TEMPLATE_RANGES: dict[str, tuple[str, str]] = {"Tenor": ("C3", "G4"), "Alto": ("G3", "C5")}
@@ -198,7 +202,8 @@ LAYER2_INTERVAL_WEIGHTS: dict[int, float] = {0: .5, 3: 2.0, 4: 2.0, 7: 1.0, 8: 1
 
 def apply_a7(arm: str) -> None:
     """Switch the shared A6 constants to their A7 values (design section 3)."""
-    global A7_ARM, P_TRIAD_A6, LEDGER2_MEMBER_TARGET, LEDGER2_MEMBER_CAP, CHORD_DENSITY
+    global A7_ARM, P_TRIAD_A6, LEDGER2_MEMBER_TARGET, LEDGER2_MEMBER_CAP, CHORD_DENSITY, LEDGER2_SITE_BOOST
+    global P_FREE_MEMBER
     if arm not in ("C", "CL"):
         raise ValueError(f"A7 arm {arm!r}")
     A7_ARM = arm
@@ -206,6 +211,8 @@ def apply_a7(arm: str) -> None:
     LEDGER2_MEMBER_TARGET = LEDGER2_MEMBER_TARGET_A7
     LEDGER2_MEMBER_CAP = LEDGER2_MEMBER_CAP_A7
     CHORD_DENSITY = CHORD_DENSITY_A7
+    LEDGER2_SITE_BOOST = LEDGER2_SITE_BOOST_A7
+    P_FREE_MEMBER = P_FREE_MEMBER_A7
 
 
 @dataclass
@@ -1064,7 +1071,7 @@ def _draw_members(base: music21.pitch.Pitch, mi: int, offset: float, t: float, t
             p: music21.pitch.Pitch | None = None
             src = "copied"
             ledger_p = (_ledger_site_pitch(base, generic, vi, cadence, in_force, fifths)
-                        if prefer_ledger and not members else None)
+                        if prefer_ledger and not any(_is_ledger2(_drawn_position(m, vi)) for m in members) else None)
             if ledger_p is not None and fits(ledger_p, generic, members):
                 p, src = ledger_p, "ledger"          # its own source: not in the free/copied mix (P_FREE_MEMBER)
             elif fitting:
@@ -1089,8 +1096,9 @@ def _draw_members(base: music21.pitch.Pitch, mi: int, offset: float, t: float, t
             sources.append(src)
         if len(members) != len(classes) or not member_ok([base] + members, vi):
             continue
-        # Below the .045 floor a plain dyad may also use A6's any-position ledger member (ruling 2 fallback).
-        if not _ledger_sites_ok(base, members, vi, cadence) and not (prefer_ledger and not triad):
+        # Below the .045 floor a random (non-template) dyad or triad may also use A6's any-position ledger member
+        # (ruling 2 fallback, extended to random triads 2026-10-30); template triads always keep the conductor sites.
+        if not _ledger_sites_ok(base, members, vi, cadence) and not prefer_ledger:
             continue
         if any(q.step == p.step and q.octave == p.octave and q.alter != p.alter
                for p, src in zip(members, sources) if check_cross_relation or src == "copied" for q in span_others):
@@ -1378,7 +1386,9 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                 class_w = _deficit_weights(bucket_targets, [bucket_done[b] for b in bucket_names], done)
                 strip_sources = [src for r in records for src in r["sources"]]  # type: ignore[attr-defined]
                 copied_done = scalars["copied"] + strip_sources.count("copied")
-                members_done = scalars["free"] + scalars["copied"] + len(strip_sources)
+                # Free/copied only on both sides: A7's template and ledger members are outside this mix (A6: identical).
+                members_done = (scalars["free"] + scalars["copied"] + strip_sources.count("free")
+                                + strip_sources.count("copied"))
                 prefer_copied = copied_done < (1 - P_FREE_MEMBER) * (members_done + 1)
                 cadence = _is_cadence(base_note, mi, len(measures))
                 template_p = 0.0 if A7_ARM is None else min(1.0, TEMPLATE_P_BY_CLASS.get(site.cls, 0.0)

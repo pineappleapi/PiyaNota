@@ -9,7 +9,7 @@ kernel (`../divisi_a6/piyanota_divisi_a6.py`) with these changes (design piya-10
 Train renders use 2 of the 4 non-Gootville fonts, val renders all 5, so Gootville stays a held-out font.
 The kernel always exits 0 once WORK exists and writes kernel_status.json with status ok | gate_fail | kernel_error.
 
-Outputs under /kaggle/working: build/ (corpus, out/ cut strips, manifest/, divisi_summary.json), render summaries,
+Outputs under /kaggle/working: build/ (corpus, out/ cut strips, manifest/, divisi_summary.json), halves.json, render summaries,
 xorder_report.json, column_gate.json, a7_gates.json, renders_svg.tar.gz, logs, kernel_status.json.
 
 Local dry run: `--dry-run --work W --scratch S --code-dir D --limit N --cut-pages N --commit-override SHA`.
@@ -190,7 +190,23 @@ def run(args: argparse.Namespace) -> str:  # noqa: C901 (a linear kernel; stages
     val = sorted(p for p, s in split_of.items() if s == "val")
     if args.limit:
         train, val = train[:args.limit], val[:args.limit]
-    status["pieces"] = {"train": len(train), "val": len(val)}
+    # Tune-group halves, as the A6 kernel froze them (ml-cv-lead 2026-10-30, change 1): train_phase2 needs halves.json
+    # so per-epoch divisi val scores the tuning half only; the synthetic test half (Gootville included) never touches
+    # selection and carries the layer / 2+ ledger buckets the real 10-piece set cannot power.
+    import divisi_halves  # noqa: PLC0415
+    pieces_all = sorted(p for p, sp in split_of.items() if sp in ("train", "val"))
+    sources = divisi_halves.bach_sources()
+    unknown = [p for p in pieces_all if p not in sources]
+    if unknown:
+        abort(f"{len(unknown)} manifest pieces have no music21 source (first: {unknown[:3]}); cannot group tunes")
+    intervals, titles = divisi_halves.source_features(sources, pieces_all)
+    groups = divisi_halves.tune_groups(pieces_all, intervals, titles)
+    halves = divisi_halves.halves_report(groups, split_of)
+    halves["melodyless_pieces"] = sorted(p for p in pieces_all if not intervals.get(p))
+    (WORK / "halves.json").write_text(json.dumps(halves, indent=1), encoding="utf-8")
+    status["halves"] = halves["counts"]
+    status["pieces"] = {"train": len(train), "val": len(val),
+                        "test_half": sum(1 for p in val if divisi_halves.is_test_half(p, groups))}
     save_status()
 
     # 4. Build once (one summary for the gates), then render each split into its own folder.

@@ -20,6 +20,13 @@ Usage (Kaggle GPU, via training/phase2/kaggle/phase2_kernel.py, or locally):
 Divisi arm (docs/decisions/piya-106-divisi-arm-freeze.md): --vocab-ext --divisi-recut-out <dir> --select-last; its
 control: --control-rows N --select-last; head-only arm (amendment A2): add --head-only --lr 1e-3. With none of these
 flags a run is Phase 2 unchanged.
+
+Divisi A7 (docs/decisions/piya-106-divisi-a7-design.md, 14.1 and 14.5): --vocab-a7 --arm C|CL, the A7 divisi corpus as
+--divisi-recut-out with --divisi-share, plus the real engraving stream --real-manifest (cut_divisi_real.py) at a fixed
+--real-share of divisi samples. Real strips are drawn per epoch under a cap of --real-cap views per printed
+staff-system over the whole run (the PDF strip and every camera strip of a staff share one budget, ruling 4); a
+binding cap lowers the realised share, which is reported, never raised. Arm C gets no layered strip. Real strips are
+never in val or selection.
 """
 from __future__ import annotations
 
@@ -46,10 +53,12 @@ sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.append(str(Path(__file__).resolve().parents[1] / "phase1"))   # divisi_halves; appended so phase1/kaggle cannot shadow the kaggle package
 from build_manifest import FORBIDDEN_CLASS, WATCH_CLASSES, build, token_class  # noqa: E402
-from stage3_transcription import (BLANK_IDX, CRNN, IDX_TO_SYM, SYM_TO_IDX, VOCAB, VOCAB_EXT_CHORD_TUPLET,  # noqa: E402
-                                  VOCAB_SIZE, _greedy_ctc_decode, compute_ser)
+from stage3_transcription import (BLANK_IDX, CRNN, IDX_TO_SYM, LAYER_SPLIT_TOKEN, SYM_TO_IDX, VOCAB,  # noqa: E402
+                                  VOCAB_EXT_A7, VOCAB_EXT_CHORD_TUPLET, VOCAB_SIZE, _greedy_ctc_decode, compute_ser)
 
 BASE_VOCAB_SIZE = VOCAB_SIZE   # before use_ext_vocab() rebinds the tables
+REAL_SHARE = 0.05              # A7.1 14.1 (user): real strips / (divisi + real) per epoch, frozen before the build
+REAL_VIEW_CAP = 32             # ml-cv-lead ruling 4: views per printed staff-system over the whole run
 IMG_HEIGHT = 64
 BATCH_SIZE = 16
 CANARY_FRACTION = 0.1
@@ -64,6 +73,7 @@ WEIGHT_DECAY = 1e-4
 GATE_MODE = "soft_diagnostic_hard_cap_v1"
 SMOKE_N = 32
 SMOKE_STEPS = 2
+SMOKE_REAL = 4
 # Divisi arm head expansion (docs/decisions/piya-106-divisi-arm-freeze.md section 2).
 NEW_HEAD_WEIGHT_STD = 0.01
 NEW_HEAD_BIAS_STEP = 1.0
@@ -212,6 +222,48 @@ def tuning_half_rows(rows: list[dict[str, object]], groups: dict[str, str]) -> l
     return kept
 
 
+class RealDraw:
+    """Per-epoch draw of real strips (A7.1 14.1) under a view budget per printed staff-system (ml-cv-lead ruling 4).
+
+    Why per staff-system: the PDF strip and every camera photo of one staff are near-duplicates, and none of the real
+    pieces is held out, so memorisation is bounded where the duplicates are made. A group is drawn uniformly among the
+    groups with budget left (at most `per_epoch` views this epoch and `total` over the run), then one of its strips.
+    """
+
+    def __init__(self, groups: list[list[int]], per_epoch: int, total: int, pieces: list[str] | None = None) -> None:
+        self.groups, self.per_epoch, self.total = groups, per_epoch, total
+        self.pieces = pieces or [""] * len(groups)
+        self.views = [0] * len(groups)
+        self.last_epoch = 0
+
+    def draw(self, n: int, generator: torch.Generator) -> list[int]:
+        epoch_views = [0] * len(self.groups)
+        out: list[int] = []
+        for _ in range(n):
+            open_ = [g for g in range(len(self.groups))
+                     if epoch_views[g] < self.per_epoch and self.views[g] < self.total]
+            if not open_:
+                break                                    # the cap binds: fewer real strips this epoch
+            g = open_[int(torch.randint(len(open_), (1,), generator=generator))]
+            members = self.groups[g]
+            out.append(members[int(torch.randint(len(members), (1,), generator=generator))])
+            epoch_views[g] += 1
+            self.views[g] += 1
+        self.last_epoch = len(out)
+        return out
+
+    def at_cap(self) -> int:
+        return sum(v >= self.total for v in self.views)
+
+    def views_by_piece(self) -> dict[str, float]:
+        """Share of all real views so far per piece (concentration check: one piece holds ~26% of the strips)."""
+        total = sum(self.views) or 1
+        out: dict[str, int] = defaultdict(int)
+        for piece, v in zip(self.pieces, self.views):
+            out[piece] += v
+        return {k: round(v / total, 4) for k, v in sorted(out.items())}
+
+
 class ReplaySampler(Sampler[int]):
     """Per epoch: every synthetic index once plus a fresh draw of CPM indices, shuffled together. The generator is
     reseeded by run() exactly like the notebook reseeds the train loader, so a seed fixes the whole order.
@@ -222,14 +274,16 @@ class ReplaySampler(Sampler[int]):
     before and keeps its order for a given seed."""
 
     def __init__(self, n_synth: int, n_cpm_pool: int, n_cpm_per_epoch: int, generator: torch.Generator,
-                 n_divisi_pool: int = 0, n_divisi_per_epoch: int = 0) -> None:
+                 n_divisi_pool: int = 0, n_divisi_per_epoch: int = 0, real: RealDraw | None = None,
+                 n_real_per_epoch: int = 0) -> None:
         self.n_synth, self.n_pool, self.n_cpm = n_synth, n_cpm_pool, min(n_cpm_per_epoch, n_cpm_pool)
         self.n_divisi_pool, self.n_divisi = n_divisi_pool, min(n_divisi_per_epoch, n_divisi_pool)
+        self.real, self.n_real = real, n_real_per_epoch
         self.generator = generator
         self.last_epoch_divisi = 0   # divisi indices in the most recent epoch's draw, for divisi_share_realised
 
     def __len__(self) -> int:
-        return self.n_synth + self.n_cpm + self.n_divisi
+        return self.n_synth + self.n_cpm + self.n_divisi + self.n_real
 
     def __iter__(self) -> Iterator[int]:
         cpm = (torch.randperm(self.n_pool, generator=self.generator)[:self.n_cpm] + self.n_synth).tolist()
@@ -237,8 +291,11 @@ class ReplaySampler(Sampler[int]):
         if self.n_divisi:
             base = self.n_synth + self.n_pool
             idx += (torch.randperm(self.n_divisi_pool, generator=self.generator)[:self.n_divisi] + base).tolist()
+        if self.real is not None and self.n_real:   # A7 only: earlier runs draw exactly as before
+            idx += self.real.draw(self.n_real, self.generator)
         order = [idx[i] for i in torch.randperm(len(idx), generator=self.generator).tolist()]
-        self.last_epoch_divisi = sum(i >= self.n_synth + self.n_pool for i in order)
+        self.last_epoch_divisi = sum(self.n_synth + self.n_pool <= i < self.n_synth + self.n_pool + self.n_divisi_pool
+                                     for i in order)
         return iter(order)
 
 
@@ -326,11 +383,11 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def use_ext_vocab() -> None:
-    """Divisi arm: switch this module's token tables to VOCAB_EXT_CHORD_TUPLET. The old VOCAB is its prefix, so every
-    old index keeps its meaning and CPM/Phase 1 labels encode exactly as before."""
+def use_ext_vocab(table: list[str] = VOCAB_EXT_CHORD_TUPLET) -> None:
+    """Divisi arm: switch this module's token tables to VOCAB_EXT_CHORD_TUPLET (A7: VOCAB_EXT_A7). The old VOCAB is
+    its prefix, so every old index keeps its meaning and CPM/Phase 1 labels encode exactly as before."""
     global VOCAB, VOCAB_SIZE, SYM_TO_IDX, IDX_TO_SYM
-    VOCAB = list(VOCAB_EXT_CHORD_TUPLET)
+    VOCAB = list(table)
     VOCAB_SIZE = len(VOCAB)
     SYM_TO_IDX = {s: i for i, s in enumerate(VOCAB)}
     IDX_TO_SYM = dict(enumerate(VOCAB))
@@ -472,7 +529,21 @@ def main() -> int:
     ap.add_argument("--select-last", action="store_true", help="no patience; the last epoch is always selected")
     ap.add_argument("--head-only", action="store_true",
                     help="freeze the backbone and old head rows; train only the new chordnote rows (amendment A2)")
+    # Divisi A7 (design 14.1, 14.5).
+    ap.add_argument("--vocab-a7", action="store_true", help="train on VOCAB_EXT_A7 (layer tokens; implies --vocab-ext)")
+    ap.add_argument("--arm", choices=("C", "CL"), default=None, help="A7 arm: C gets no layered strip")
+    ap.add_argument("--real-manifest", type=Path, default=None, help="cut_divisi_real.py manifest.jsonl")
+    ap.add_argument("--real-share", type=float, default=REAL_SHARE, help="real strips / (divisi + real) per epoch")
+    ap.add_argument("--real-cap", type=int, default=REAL_VIEW_CAP, help="views per printed staff-system per run")
     a = ap.parse_args()
+    if a.vocab_a7:
+        a.vocab_ext = True
+        if a.arm is None:
+            raise ValueError("--vocab-a7 needs --arm C|CL")
+    if a.real_manifest is not None and (a.arm is None or a.divisi_share is None):
+        raise ValueError("--real-manifest needs --arm and --divisi-share (the real share is of divisi samples)")
+    if not 0.0 < a.real_share < 1.0:
+        raise ValueError("--real-share must be in (0, 1)")
     if a.head_only and not a.vocab_ext:
         raise ValueError("--head-only needs --vocab-ext")
     if not 0.0 <= a.replay_ratio < 1.0:
@@ -486,7 +557,7 @@ def main() -> int:
     if a.divisi_share is not None and not 0.0 < a.divisi_share < 1.0:
         raise ValueError("--divisi-share must be in (0, 1)")
     if a.vocab_ext:
-        use_ext_vocab()
+        use_ext_vocab(VOCAB_EXT_A7 if a.vocab_a7 else VOCAB_EXT_CHORD_TUPLET)
 
     random.seed(a.seed)
     np.random.seed(a.seed)
@@ -541,6 +612,10 @@ def main() -> int:
                                 "divisi_train_dropped_for_holdout": before - len(dtrain)})
             print(f"[holdout] {a.holdout_chord_font}: dropped {before - len(dtrain)} of {before} divisi train rows, "
                   f"{len(dtrain)} remain, 0 of the held-out font", flush=True)
+        if a.arm == "C":   # arm C is built without layers; a layer token here means the wrong corpus was attached
+            bad = [r["path"] for r in dtrain + divisi_val if LAYER_SPLIT_TOKEN in r["tokens"]]  # type: ignore[operator]
+            if bad:
+                raise SystemExit(f"arm C: {len(bad)} divisi strips carry layers, e.g. {bad[:2]}")
         divisi_info["divisi_train_strips"] = len(dtrain)
         if a.divisi_share is not None:
             divisi_info["divisi_share"] = a.divisi_share
@@ -552,6 +627,23 @@ def main() -> int:
 
     def synth(rs: list[dict[str, object]]) -> list[tuple[str, str | None, list[int]]]:
         return [(str(a.recut_out / str(r["path"])), None, [SYM_TO_IDX[t] for t in r["tokens"]]) for r in rs]  # type: ignore[union-attr]
+
+    real_rows: list[dict[str, object]] = []
+    if a.real_manifest is not None:
+        all_real = [json.loads(x) for x in a.real_manifest.read_text(encoding="utf-8").splitlines() if x.strip()]
+        # A camera strip must share its printed staff's budget, never open a group of its own (ruling 4).
+        pdf_keys = {(r["piece"], r["page"], r["sys"], r["staff"]) for r in all_real if r["source"] == "pdf"}
+        orphans = [r["file"] for r in all_real if (r["piece"], r["page"], r["sys"], r["staff"]) not in pdf_keys]
+        if orphans:
+            raise SystemExit(f"{len(orphans)} real strips have no PDF staff-system group, e.g. {orphans[:2]}")
+        real_rows = [r for r in all_real if r["train_ok"] and r["split"] == "train"
+                     and not (a.arm == "C" and r["layered"])]
+        assert all(r["split"] == "train" for r in real_rows), "a real strip outside train (never in val/selection)"
+        for r in real_rows:   # absolute, so synth()'s recut_out join leaves it alone
+            r["path"] = str(a.real_manifest.parent.resolve() / str(r["file"]))
+        oov = sorted({t for r in real_rows for t in r["tokens"] if t not in SYM_TO_IDX})  # type: ignore[union-attr]
+        if oov:
+            raise SystemExit(f"real strips carry tokens outside the active vocab: {oov[:5]}")
 
     # Canary: notebook cell 8, first 10% of the sorted CPM glob.
     cpm = cpm_samples(a.cpm_root)
@@ -569,6 +661,7 @@ def main() -> int:
         train_rows = train_rows[:SMOKE_N // 2] + train_rows[-(SMOKE_N // 2):]
         val_rows, divisi_val = val_rows[:SMOKE_N], divisi_val[:SMOKE_N]
         dtrain = dtrain[:SMOKE_N]
+        real_rows = real_rows[:SMOKE_N]
         canary, cpm_train = canary[:SMOKE_N], cpm_train[:SMOKE_N]
         a.max_epochs = 1
     assert not canary_stems & {Path(s[0]).stem for s in cpm_train}, "canary stem leaked into the replay pool"
@@ -581,16 +674,38 @@ def main() -> int:
         if n_divisi_epoch > len(dtrain):
             raise SystemExit(f"divisi pool {len(dtrain)} < {n_divisi_epoch} strips needed per epoch for share "
                              f"{a.divisi_share} of {len(train_rows)} Phase 1 strips")
-    n_cpm_epoch = round((len(train_rows) + n_divisi_epoch) * a.replay_ratio / (1.0 - a.replay_ratio))
+    real_draw: RealDraw | None = None
+    n_real_epoch = 0
+    real_info: dict[str, object] = {}
+    if real_rows:
+        groups: dict[tuple[object, ...], list[int]] = defaultdict(list)
+        base = len(train_rows) + len(cpm_train) + len(dtrain)   # real strips sit after the divisi pool
+        for k, r in enumerate(real_rows):
+            groups[(r["piece"], r["page"], r["sys"], r["staff"])].append(base + k)
+        n_real_epoch = round(a.real_share * n_divisi_epoch / (1.0 - a.real_share))
+        if a.smoke:
+            n_real_epoch = max(n_real_epoch, SMOKE_REAL)   # the share rounds to 0 at smoke size; exercise the path
+        per_epoch = max(1, a.real_cap // a.max_epochs)
+        real_draw = RealDraw(list(groups.values()), per_epoch, a.real_cap, [str(k[0]) for k in groups])
+        real_info = {"real_manifest_sha256": sha256_file(a.real_manifest), "real_strips": len(real_rows),
+                     "real_staff_systems": len(groups), "real_layered": sum(bool(r["layered"]) for r in real_rows),
+                     "real_per_epoch_target": n_real_epoch, "real_share_target": a.real_share,
+                     "real_cap_total": a.real_cap, "real_cap_per_epoch": per_epoch,
+                     "real_expected_views_per_group": round(n_real_epoch * a.max_epochs / len(groups), 2)}
+        print(f"[real] {real_info}", flush=True)
+    n_cpm_epoch = round((len(train_rows) + n_divisi_epoch + n_real_epoch) * a.replay_ratio / (1.0 - a.replay_ratio))
     train_parts = [StripDataset(synth(train_rows), augment=a.augment_synth),
                    StripDataset(cpm_train, augment=True, distorted_prob=0.5)]
     if a.divisi_share is not None:
         train_parts.append(StripDataset(synth(dtrain), augment=a.augment_synth))
+    if real_rows:
+        train_parts.append(StripDataset(synth(real_rows), augment=a.augment_synth))
     train_ds = ConcatDataset(train_parts)
     gen = torch.Generator()
     gen.manual_seed(a.seed)
     sampler = ReplaySampler(len(train_rows), len(cpm_train), n_cpm_epoch, gen,
-                            n_divisi_pool=len(dtrain), n_divisi_per_epoch=n_divisi_epoch)
+                            n_divisi_pool=len(dtrain), n_divisi_per_epoch=n_divisi_epoch,
+                            real=real_draw, n_real_per_epoch=n_real_epoch)
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, collate_fn=ctc_collate, num_workers=0, sampler=sampler)
     eval_kw = {"batch_size": BATCH_SIZE, "shuffle": False, "collate_fn": ctc_collate, "num_workers": 0}
     val_loader = DataLoader(StripDataset(synth(val_rows)), **eval_kw)
@@ -618,6 +733,7 @@ def main() -> int:
         "stack": {"device": torch.cuda.get_device_name(0) if device.type == "cuda" else "cpu",
                   "torch": torch.__version__, "cuda": torch.version.cuda, "cudnn": torch.backends.cudnn.version()},
         "gate_mode": GATE_MODE, "vocab_size": VOCAB_SIZE, "head_bias_drop": head_bias_drop, **divisi_info,
+        **real_info, **({"arm": a.arm} if a.arm else {}),
     }
     (a.out / "run_info.json").write_text(json.dumps(run_info, indent=1), encoding="utf-8")
     print(f"[run] seed={a.seed} manifest={manifest_sha[:12]} train={len(train_rows)}+{run_info['cpm_per_epoch']} cpm "
@@ -692,6 +808,11 @@ def main() -> int:
         n_synth_epoch = len(train_rows) + sampler.last_epoch_divisi
         share_extra = ({"divisi_share_realised": sampler.last_epoch_divisi / n_synth_epoch}
                        if a.divisi_share is not None else {})
+        if real_draw is not None:
+            share_extra["real_share_realised"] = real_draw.last_epoch / max(1, real_draw.last_epoch
+                                                                            + sampler.last_epoch_divisi)
+            share_extra["real_groups_at_cap"] = real_draw.at_cap()
+            share_extra["real_views_by_piece"] = real_draw.views_by_piece()
         rec = {"epoch": epoch, **share_extra, "train_loss": float(np.mean(losses)) if losses else float("nan"), **vm,
                "zeroed_by_zero_infinity": zeroed, **({"chord": chord} if chord else {}),
                "canary_clean_ser": c_clean, "canary_distorted_ser": c_dist,

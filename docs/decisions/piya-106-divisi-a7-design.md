@@ -498,7 +498,33 @@ PDF form checks 2026-10-30 (rounds 4-6). Needs ml-cv-lead sign-off before the do
 - The 7-seed synthetic test-render plan (14.6) is replaced: the A7 gates are scored on the 10-piece test set (ground
   truth from its MuseScore scores, built blind; Ama_Namin, Bahay_Kubo, Pangarap done, the other 7 to follow; camera
   photos after training). The build kernel renders no synthetic test seeds.
-- Real stream after all checks: 1,102 train-eligible strips, 569 staff-systems, 148 layered.
+- Real stream after all checks: 982 train-eligible strips, 508 staff-systems, 148 layered (the vocab guard drops 120
+  strips whose labels the CRNN cannot emit, mostly the meter digits `digit.5-L4` / `digit.7-L4` of 5/4 and 7/4, 86 of
+  them Vinea's; ml-cv-lead: keep them out of A7, odd meters need synthetic examples first). Nandemonaiya holds ~29% of
+  the eligible strips; per-piece real-view shares are reported every epoch (`real_views_by_piece`).
+
+### 14.7 ml-cv-lead sign-off conditions (2026-10-30)
+- **Freeze:** GO with 14.3a and the conditions below. **Build:** after the kernel writes `halves.json` (A6 stage
+  ported), the copied-share denominator counts free + copied only, and the 20-piece builds of both arms pass every
+  summary gate at the launch commit (dyad train counts are judged on the full build).
+- **Generator steering (compensation, not target changes):** free-member steering .57 so the realised share lands at
+  the .60 +-.03 gate (20-piece: .611); template attempt probability on quarters .6 (whole/half/dotted 1.0). 2+ ledger:
+  A6's any-position fallback also for random (non-template) triads while below .045 (template triads keep the
+  conductor sites), site boost 6.0. 20-piece builds, both arms identical: triads .297, templates .314, 2+ ledger .062,
+  free .611, ledger crossings .014, crossing .089.
+- **Real-set reading (pre-registered here, before any A7 checkpoint runs):** all 10 test GT files, their PDF
+  chord/split form calls and `accid_check` noise rate are frozen and hashed in a PREREG file first; a piece without GT
+  at that point is out. Per-bucket n floors carry over (layer bars 600; 2+ ledger and template heads 300); a bucket
+  under its floor is "underpowered, report only". A bucket passes only when its Wilson 95% lower bound clears its 7.x
+  threshold at its own n, reported per piece too. C vs CL is a paired comparison on the same strips (non-overlapping
+  paired CI for a layer win). Real PDFs test engraving/layout shift, not font shift (MuseScore prints use Leland);
+  font claims come only from the synthetic test half (Gootville). Scored once per arm on the final checkpoint.
+  Test pieces with 5/4 or 7/4 meters are listed before the PREREG freeze and their meter bars handled by a rule
+  written then.
+- **Before GPU:** Stage 2 parity of `cut_divisi_real.stage2_boxes` vs `detect_staff_regions` (done: 5 real pages,
+  12 boxes each, identical); per-arm realised real share, groups at cap and per-piece shares; C vs CL per-bucket chord
+  train counts within 10% (else reported as a confound); a confidence check (confident-right vs confident-wrong) on
+  the synthetic test half for both runs; CPM clean/distorted SER and one-voice dev metrics per arm, never blended.
 
 ### 14.4 Token details
 - **Rest suffix on layer 2 (ruling A):** kept, at the fixed nominal position per duration, as in layer 1 (e.g.
