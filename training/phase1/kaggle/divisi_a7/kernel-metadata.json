@@ -1,0 +1,16 @@
+{
+  "id": "piamac/piyanota-divisi-a7-cl",
+  "title": "piyanota-divisi-a7-cl",
+  "code_file": "piyanota_divisi_a7.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": "true",
+  "enable_gpu": "false",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": ["piamac/piyanota-divisi-a7-code"],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": [],
+  "docker_image_pinning_type": "original"
+}

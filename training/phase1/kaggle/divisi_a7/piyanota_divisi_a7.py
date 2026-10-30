@@ -29,7 +29,7 @@ import traceback
 from pathlib import Path
 
 ARM = "CL"
-COMMIT = "PLACEHOLDER"   # full sha of the reviewed commit, filled by the controller; anything else refuses to run
+COMMIT = "121dffff63074c2d52e3904eb100cddbd13fabe5"   # full sha of the reviewed commit, filled by the controller; anything else refuses to run
 BRANCH = "piya106/stroke-calibration"
 COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
 WORKERS = 4
