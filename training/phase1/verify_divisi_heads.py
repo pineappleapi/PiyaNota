@@ -135,7 +135,16 @@ def main() -> None:
         # Every system of the page is labelled and the staff total agrees: assign staves top-down by strip count
         # (the system-barline grouping misses systems in several engravings).
         per_sys = Counter(r["sys"] for r in recs)
-        if len(per_sys) == n_map and sum(per_sys.values()) == len(staves):
+        extra = maps[piece].get("extra_staves_below", 0)   # unlabelled (piano) staves under every system
+        if extra and n_map * extra + sum(per_sys.values()) == len(staves):
+            it = iter(range(len(staves)))
+            systems_by_no = {}
+            for s in range(1, n_map + 1):
+                systems_by_no[s] = [next(it) for _ in range(per_sys.get(s, 0))]
+                for _ in range(extra):
+                    next(it)
+            systems = list(systems_by_no.values())
+        elif len(per_sys) == n_map and sum(per_sys.values()) == len(staves):
             it = iter(range(len(staves)))
             systems = [[next(it) for _ in range(per_sys[s])] for s in sorted(per_sys)]
             systems_by_no = dict(zip(sorted(per_sys), systems))

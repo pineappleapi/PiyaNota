@@ -9,18 +9,22 @@ Merge rule per bar, over the parts that have a note in it (a part resting the wh
 - one part: its bar as written;
 - 2+ parts with the same rhythm: one note or chord per slot, beams from the first of those parts; the same pitch in
   two parts is one head (its tie / fermata ids are remapped to the kept head);
-- anything else (different rhythms, a rest against a note, a unison with two spellings, more than MAX_CHORD_NOTES
-  heads) is a layered or unlabelable bar. It gets a placeholder and its system's strip is dropped with the reason,
-  because the converter has no 2-layer labels yet (A7-CL).
-A bar the converter cannot read (tuplet, two layers in one part, an unknown element) is dropped the same way, and so is
-a bar whose tie partner was dropped, since the drawn curve would lose one end.
+- exactly 2 singing parts with different rhythms (a rest against a note included): two layers, upper part = layer 1
+  (A7-CL, converter gate G1c), flagged `layered` (+ `layered_partial_rest` when a layer holds a rest);
+- a single part with two voices in the score: those two voices as layers (`part_two_voices`);
+- same-rhythm bars the PDF draws with split stems (`--split-bars`, from the PDF form check): two layers, as A6.9
+  rules; until checked, same-rhythm chords are flagged `chord_merge`;
+- anything else (3+ different-rhythm parts, a unison with two spellings, more than MAX_CHORD_NOTES heads, a voice
+  inside a merged part) is unlabelable. It gets a placeholder and its system's strip is dropped with the reason.
+A bar the converter cannot read (tuplet, an unknown element) is dropped the same way, and so is a bar whose tie
+partner was dropped, since the drawn curve would lose one end.
 
-Known label risks (verification by notehead count, or the user's spot check on raster PDFs, must catch them):
+Known label risks (ml-cv-lead 2026-10-30; the PDF form check in `verify_divisi_heads.py`, or dropping on raster PDFs,
+must catch them before training):
 - Verovio's @accid is per source part, so a merged bar can show an accidental twice where the PDF shows it once.
-- A part resting part of a bar inside a merge drops the bar, but a part resting a whole bar is ignored, while some
+- A layer-2 rest from a merged part may not be drawn in the PDF; a part resting a whole bar is ignored, while some
   engravers still draw its rest as a second layer.
-- Same-rhythm split stems (A7 counts these as layers) are labelled as chords: the score cannot say how the PDF drew
-  them.
+- Same-rhythm parts are chords until the PDF check says the bar is drawn with split stems.
 """
 from __future__ import annotations
 
@@ -60,6 +64,30 @@ class BadBar(Exception):
     """A bar whose merged staff the converter cannot label."""
 
 
+class Layered(BadBar):
+    """Parts that do not share one rhythm; `active` are the indices of the parts that sing in the bar."""
+
+    def __init__(self, active: list[int]) -> None:
+        super().__init__("different rhythms (layered)")
+        self.active = active
+
+
+def draws(layer: ET.Element) -> bool:
+    return any(local(el.tag) in ("note", "chord", "rest", "mRest") for el in layer.iter())
+
+
+def two_layers(upper: ET.Element, lower: ET.Element) -> list[ET.Element]:
+    """Copies of two parts' layers as layer 1 (upper part, stems up) and layer 2 of one staff."""
+    out = [copy.deepcopy(upper), copy.deepcopy(lower)]
+    for n, layer in enumerate(out, start=1):
+        layer.set("n", str(n))
+    return out
+
+
+def has_rest(layer: ET.Element) -> bool:
+    return any(local(el.tag) in ("rest", "mRest") for el in layer.iter())
+
+
 def events(layer: ET.Element) -> list[tuple[ET.Element, ET.Element]]:
     """(parent, event) pairs in drawn order, beams entered, other non-events skipped."""
     out: list[tuple[ET.Element, ET.Element]] = []
@@ -91,15 +119,18 @@ def sounding_alter(n: ET.Element) -> str:
     return src.get("accid.ges", src.get("accid", ""))
 
 
-def merge_bar(layers: list[ET.Element], remap: dict[str, str]) -> tuple[ET.Element, int]:
-    """Merged layer for one bar and the number of parts that sing in it. Raises BadBar."""
+def merge_bar(layers: list[ET.Element], remap: dict[str, str]) -> tuple[ET.Element, int, bool]:
+    """Merged layer for one bar, the number of parts that sing in it, and whether a chord was formed.
+
+    Raises Layered for different rhythms, BadBar for anything else unlabelable."""
     seqs = [events(layer) for layer in layers]
     active = [i for i, seq in enumerate(seqs) if any(slot_key(e)[0] == "n" for _, e in seq)]
     if len(active) <= 1:
-        return copy.deepcopy(layers[active[0] if active else 0]), len(active)
+        return copy.deepcopy(layers[active[0] if active else 0]), len(active), False
+    chorded = False
     keys = [[slot_key(e) for _, e in seqs[i]] for i in active]
     if any(k != keys[0] for k in keys[1:]):
-        raise BadBar("different rhythms (layered)")
+        raise Layered(active)
     template = copy.deepcopy(layers[active[0]])
     for slot, (parent, el) in enumerate(events(template)):
         key = keys[0][slot]
@@ -127,10 +158,11 @@ def merge_bar(layers: list[ET.Element], remap: dict[str, str]) -> tuple[ET.Eleme
             new = ET.Element(q("chord"), {a: el.attrib[a] for a in ("dur", "dots", "stem.dir") if a in el.attrib})
             new.set(XML_ID, f"merged_{members[0].attrib.get(XML_ID, slot)}")
             new.extend(members)
+            chorded = True
         idx = list(parent).index(el)
         parent.remove(el)
         parent.insert(idx, new)
-    return template, len(active)
+    return template, len(active), chorded
 
 
 def placeholder() -> ET.Element:
@@ -139,8 +171,16 @@ def placeholder() -> ET.Element:
     return layer
 
 
-def build_group(mei: Path, group: list[str], out: Path) -> tuple[dict[str, str], dict[str, list[str]]]:
-    """Write an MEI copy whose staff `group[0]` holds the merged group; return bad bars and per-bar flags by @n."""
+def build_group(mei: Path, group: list[str], out: Path, split_bars: frozenset[str] = frozenset(),
+                drop_bars: dict[str, str] | None = None
+                ) -> tuple[dict[str, str], dict[str, list[str]]]:
+    """Write an MEI copy whose staff `group[0]` holds the merged group; return bad bars and per-bar flags by @n.
+
+    Two singing parts with different rhythms become two layers (upper part = layer 1). Bars in `split_bars` (the
+    PDF draws them with split stems) become two layers even when the rhythms agree. Per-bar flags:
+    `chord_merge` (same-rhythm parts drawn as one stem, to be checked against the PDF), `layered`,
+    `layered_partial_rest` (a merged layered bar with a rest the PDF may not draw), `part_two_voices`. Bars in
+    `drop_bars` (the PDF form check found the label does not match the drawing) are dropped with that reason."""
     tree = ET.parse(mei)
     score = tree.getroot().find(f".//{q('score')}")
     assert score is not None, mei
@@ -157,16 +197,43 @@ def build_group(mei: Path, group: list[str], out: Path) -> tuple[dict[str, str],
                 bar_of[note.attrib.get(XML_ID, "")] = n
         target = staves[group[0]]
         targets[n] = target
+        bar_flags = flags.setdefault(n, [])
         try:
-            layer_sets = [staves[s].findall(q("layer")) for s in group]
-            if any(len(ls) != 1 for ls in layer_sets):
-                raise BadBar("2+ layers in a source part")
-            merged, singing = merge_bar([ls[0] for ls in layer_sets], remap)
-            if singing >= 3:
-                flags.setdefault(n, []).append("3+ parts on one staff")
+            if n in (drop_bars or {}):
+                raise BadBar(f"PDF form check: {drop_bars[n]}")
+            layer_sets = [[ly for ly in staves[s].findall(q("layer")) if draws(ly)] or staves[s].findall(q("layer"))[:1]
+                          for s in group]
+            if any(len(ls) > 2 for ls in layer_sets):
+                raise BadBar("3+ layers in a source part")
+            if len(group) == 1 and len(layer_sets[0]) == 2:
+                new_layers = two_layers(*layer_sets[0])     # the part's own two voices, as the score writes them
+                bar_flags += ["layered", "part_two_voices"]
+            elif any(len(ls) != 1 for ls in layer_sets):
+                raise BadBar("2+ layers in a source part of a merged staff")
+            else:
+                parts = [ls[0] for ls in layer_sets]
+                try:
+                    if n in split_bars:
+                        active = [i for i, p in enumerate(parts) if any(slot_key(e)[0] == "n" for _, e in events(p))]
+                        raise Layered(active)
+                    merged, singing, chorded = merge_bar(parts, remap)
+                    new_layers = [merged]
+                    if singing >= 3:
+                        bar_flags.append("3+ parts on one staff")
+                    if chorded:
+                        bar_flags.append("chord_merge")
+                except Layered as lay:
+                    if len(lay.active) != 2:
+                        raise BadBar(f"{len(lay.active)} different-rhythm parts on one staff") from lay
+                    new_layers = two_layers(*(parts[i] for i in lay.active))
+                    bar_flags.append("layered")
+                    if any(has_rest(ly) for ly in new_layers):
+                        bar_flags.append("layered_partial_rest")
         except BadBar as exc:
             bad[n] = str(exc)
-            merged = placeholder()
+            new_layers = [placeholder()]
+        if not bar_flags:
+            del flags[n]
         if measure.attrib.get("right", "single") not in BARLINES_WRITTEN | {"invis"}:
             bad.setdefault(n, f"barline {measure.attrib['right']!r}")
             measure.set("right", "single")
@@ -174,8 +241,9 @@ def build_group(mei: Path, group: list[str], out: Path) -> tuple[dict[str, str],
             flags.setdefault(n, []).append("repeat dots unlabelled")
         for old in target.findall(q("layer")):
             target.remove(old)
-        merged.set("n", "1")
-        target.append(merged)
+        if len(new_layers) == 1:
+            new_layers[0].set("n", "1")
+        target.extend(new_layers)
     for el in score.iter():
         for attr in ID_REF_ATTRS:
             ref = el.attrib.get(attr, "").lstrip("#")
@@ -244,7 +312,10 @@ def has_note(score: ET.Element, staff: str, bars: set[str]) -> bool:
                for m in score.iter(q("measure")) if m.attrib["n"] in bars for s in m.findall(q("staff")))
 
 
-def label_piece(piece: str, spec: dict, mei: Path, work: Path) -> list[dict]:
+def label_piece(piece: str, spec: dict, mei: Path, work: Path, split: dict[str, list[str]] | None = None
+                ) -> list[dict]:
+    """One record per (PDF system, PDF staff). `split` maps a group key ('1-2') to the PDF form check result,
+    {"split": [bar @n drawn with split stems], "drop": {bar @n: reason}}."""
     score = ET.parse(mei).getroot().find(f".//{q('score')}")
     assert score is not None, mei
     order = [m.attrib["n"] for m in score.iter(q("measure"))]
@@ -265,7 +336,8 @@ def label_piece(piece: str, spec: dict, mei: Path, work: Path) -> list[dict]:
             key = tuple(group)
             if key not in cache:
                 path = work / f"{piece}__{'-'.join(group)}.mei"
-                bad, flags = build_group(mei, group, path)
+                forms = (split or {}).get("-".join(group), {})
+                bad, flags = build_group(mei, group, path, frozenset(forms.get("split", [])), forms.get("drop", {}))
                 measures = convert_robust(path, group[0], bad)
                 start_set = set(starts)
                 for i, m in enumerate(measures):
@@ -279,6 +351,7 @@ def label_piece(piece: str, spec: dict, mei: Path, work: Path) -> list[dict]:
                 "bars": [bars[0], bars[-1]], "tokens": None if drop else tokens,
                 "heads": sum(t.startswith(HEAD_PREFIXES) for t in tokens), "drop": drop,
                 "flags": sorted({f for b in bars for f in flags.get(b, [])} | ({"merged"} if len(group) > 1 else set())),
+                "bar_flags": {b: flags[b] for b in bars if b in flags},
             })
     return records
 
@@ -291,17 +364,17 @@ def self_check() -> None:
             ET.SubElement(el, q("note"), {"pname": pname, "oct": octave, "dur": dur, XML_ID: nid})
         return el
     remap: dict[str, str] = {}
-    merged, singing = merge_bar([layer(("e", "5", "2", "a1"), ("c", "5", "2", "a2")),
+    merged, singing, chorded = merge_bar([layer(("e", "5", "2", "a1"), ("c", "5", "2", "a2")),
                                  layer(("c", "5", "2", "b1"), ("c", "5", "2", "b2"))], remap)
     first, second = list(merged)
-    assert singing == 2 and local(first.tag) == "chord" and len(first) == 2, ET.tostring(merged)
+    assert singing == 2 and chorded and local(first.tag) == "chord" and len(first) == 2, ET.tostring(merged)
     assert local(second.tag) == "note" and remap == {"b2": "a2"}, (ET.tostring(merged), remap)
     try:
         merge_bar([layer(("c", "5", "1", "x")), layer(("c", "4", "2", "y"), ("d", "4", "2", "z"))], {})
-    except BadBar:
-        pass
+    except Layered as lay:
+        assert lay.active == [0, 1], lay.active
     else:
-        raise AssertionError("different rhythms must be rejected")
+        raise AssertionError("different rhythms must be reported as layered")
 
 
 def main() -> None:
@@ -309,21 +382,24 @@ def main() -> None:
     parser.add_argument("--mei-dir", type=Path, required=True, help="<piece>.mei per piece (Verovio from MusicXML)")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--piece", action="append", help="only these pieces (default: all in the map)")
+    parser.add_argument("--split-bars", type=Path, help="PDF form check JSON {piece: {group key: {\"split\": [bar @n], \"drop\": {bar @n: reason}}}}")
     args = parser.parse_args()
     self_check()
     maps = {k: v for k, v in json.loads(MAPS.read_text(encoding="utf-8")).items() if not k.startswith("_")}
+    split = json.loads(args.split_bars.read_text(encoding="utf-8")) if args.split_bars else {}
     work = args.out / "merged_mei"
     work.mkdir(parents=True, exist_ok=True)
     with (args.out / "labels.jsonl").open("w", encoding="utf-8") as fh:
         for piece in args.piece or sorted(maps):
-            records = label_piece(piece, maps[piece], args.mei_dir / f"{piece}.mei", work)
+            records = label_piece(piece, maps[piece], args.mei_dir / f"{piece}.mei", work, split.get(piece))
             for r in records:
                 fh.write(json.dumps(r) + "\n")
             reasons = Counter(d.split(": ", 1)[1].split(" (")[0] for r in records for d in r["drop"][:1])
             kept = [r for r in records if r["tokens"] is not None]
             chords = sum(t.startswith("chordnote-") for r in kept for t in r["tokens"])
+            splits = sum(t == "layer.split" for r in kept for t in r["tokens"])
             print(f"{piece}: strips {len(records)}, kept {len(kept)}, chordnotes kept {chords}, "
-                  f"first drop reason {dict(reasons)}")
+                  f"layer bars kept {splits}, first drop reason {dict(reasons)}")
 
 
 if __name__ == "__main__":
