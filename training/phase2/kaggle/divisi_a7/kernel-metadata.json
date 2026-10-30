@@ -1,0 +1,16 @@
+{
+  "id": "piamac/piyanota-divisi-a7-train-cl-s1",
+  "title": "piyanota-divisi-a7-train-cl-s1",
+  "code_file": "phase2_divisi_a7_kernel.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": "true",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": ["piamac/piyanota-divisi-a7-train-code", "piamac/piyanota-divisi-a7-real", "piamac/cameraprimus", "piamac/cpm-font-augmented2"],
+  "competition_sources": [],
+  "kernel_sources": ["piamac/piyanota-recut-full-1", "piamac/piyanota-divisi-a7-cl"],
+  "model_sources": [],
+  "docker_image_pinning_type": "original"
+}
