@@ -157,6 +157,51 @@ OCTAVE_SEMITONES = 12
 DEFICIT_FLOOR = 0.05
 DIVISI_SUFFIX = "__divisi"
 
+# Divisi A7 (docs/decisions/piya-106-divisi-a7-design.md section 3), only with --a7; without it every A6 path is
+# unchanged. `apply_a7` swaps the shared constants above; the rest are A7-only.
+A7_ARM: str | None = None                       # "C" (chords) or "CL" (chords + layers)
+P_TRIAD_A7 = 0.30
+LEDGER2_MEMBER_TARGET_A7 = 0.15
+LEDGER2_MEMBER_CAP_A7 = 0.20
+# Raised floor so every dyad bucket's train count stays >= .95 of A6 build v2 with triads at .30 (corpus gate 5.4):
+# A6 v2 had 16152 dyads in 18972 chords, so A7 needs about +16% chords; uniform(.32, .60) lifts the mean from .40 to .46.
+CHORD_DENSITY_A7 = (0.32, 0.60)
+# Template triads (choral-conductor shapes, 3.1): chance a drawn triad uses a template, per site duration class. The
+# realised mix is about 50/50 with >= .70 of templates on whole/half/dotted notes and <= .05 beamed (design 3.1).
+TEMPLATE_P_BY_CLASS: dict[str, float] = {"whole": 1.0, "half": 1.0, "dotted": 1.0, "quarter": .5, "beamed": .05}
+TEMPLATE_VOICE_FACTOR: dict[str, float] = {"Soprano": 1.2, "Alto": .5, "Tenor": .8, "Bass": 1.2}
+TEMPLATE_CADENCE_FACTOR = 1.5                   # a fermata note or the final bar
+TEMPLATE_RANGES: dict[str, tuple[str, str]] = {"Tenor": ("C3", "G4"), "Alto": ("G3", "C5")}
+SOPRANO_TEMPLATE_TOP = ("G5", "A5")             # usual top of a soprano template triad (weighted, not forced)
+SOPRANO_TOP_WEIGHT = 3.0
+ALTO_TEMPLATE_MAX_SPAN = 9                      # semitones: a 6th
+BASS_LOW_THIRD_FLOOR = "E3"                     # no 3rd or 2nd whose lower note is below this
+# Conductor ledger sites (3.1): a member 2+ ledger lines out is allowed only here.
+LEDGER_SITE_SOPRANO_TOP = "C6"
+LEDGER_SITE_ALTO_LOW_INTERVALS = frozenset({7, 8, 9, 12})       # 5th, 6th, octave above the low alto member
+LEDGER_SITE_BASS_LOW = "C2"
+LEDGER_SITE_BASS_HIGH = "E4"
+LEDGER_SITE_BASS_HIGH_INTERVALS = frozenset({3, 4, 8, 9})       # 3rd or 6th below the high bass member
+# Layers (arm CL, 3.2). The layer RNG is separate from the chord RNG, so arms C and CL get identical chords.
+LAYER_BAR_SHARE = 0.08
+LAYER_SAME_RHYTHM = 0.15
+LAYER_MID_ENTRY = 0.20
+LAYER_TIE_TARGET = 0.05                         # share of layer bars whose last layer-2 note ties over the barline
+LAYER_TIE_CAP = 0.08
+LAYER2_INTERVAL_WEIGHTS: dict[int, float] = {0: .5, 3: 2.0, 4: 2.0, 7: 1.0, 8: 1.5, 9: 1.5, 12: 1.0}
+
+
+def apply_a7(arm: str) -> None:
+    """Switch the shared A6 constants to their A7 values (design section 3)."""
+    global A7_ARM, P_TRIAD_A6, LEDGER2_MEMBER_TARGET, LEDGER2_MEMBER_CAP, CHORD_DENSITY
+    if arm not in ("C", "CL"):
+        raise ValueError(f"A7 arm {arm!r}")
+    A7_ARM = arm
+    P_TRIAD_A6 = P_TRIAD_A7
+    LEDGER2_MEMBER_TARGET = LEDGER2_MEMBER_TARGET_A7
+    LEDGER2_MEMBER_CAP = LEDGER2_MEMBER_CAP_A7
+    CHORD_DENSITY = CHORD_DENSITY_A7
+
 
 @dataclass
 class PiecePlan:
@@ -556,6 +601,152 @@ def _stem_direction(pitches: list[music21.pitch.Pitch], voice_index: int, drng: 
     return "down" if positions[-1] - MIDDLE_LINE_POSITION >= MIDDLE_LINE_POSITION - positions[0] else "up"
 
 
+def _ps(name: str) -> float:
+    return music21.pitch.Pitch(name).ps
+
+
+def _is_cadence(note: music21.note.GeneralNote, mi: int, n_measures: int) -> bool:
+    """A fermata note (Bach marks phrase-end cadences with one) or the final bar."""
+    return mi == n_measures - 1 or any(isinstance(e, music21.expressions.Fermata) for e in note.expressions)
+
+
+def _ledger_sites_ok(base: music21.pitch.Pitch, members: list[music21.pitch.Pitch], vi: int, cadence: bool) -> bool:
+    """A7 conductor ledger sites (design 3.1): a member 2+ ledger lines out only where a choir writes one. Always True
+    outside A7, so A6 draws are unchanged."""
+    if A7_ARM is None:
+        return True
+    heads = sorted([base] + members, key=lambda p: p.ps)
+    voice = VOICES[vi]
+    for p in members:
+        if not _is_ledger2(_drawn_position(p, vi)):
+            continue
+        i = next(k for k, h in enumerate(heads) if h is p)
+        if voice == "Soprano":
+            ok = p.nameWithOctave == LEDGER_SITE_SOPRANO_TOP and i == len(heads) - 1
+        elif voice == "Alto":
+            ok = (cadence and i == 0 and _drawn_position(p, vi) <= LEDGER2_STEPS[0]
+                  and int(heads[1].ps - p.ps) in LEDGER_SITE_ALTO_LOW_INTERVALS)
+        elif voice == "Bass":
+            ok = ((p.nameWithOctave == LEDGER_SITE_BASS_LOW and i == 0 and heads[1].ps - p.ps == OCTAVE_SEMITONES)
+                  or (p.nameWithOctave == LEDGER_SITE_BASS_HIGH and i == len(heads) - 1
+                      and int(p.ps - heads[-2].ps) in LEDGER_SITE_BASS_HIGH_INTERVALS))
+        else:
+            ok = False                                        # no tenor 2+ ledger members
+        if not ok:
+            return False
+    return True
+
+
+# Conductor ledger sites per voice: (pitch, member must sit above the base note, cadence only).
+LEDGER_SITES: dict[str, tuple[tuple[str, bool, bool], ...]] = {
+    "Soprano": ((LEDGER_SITE_SOPRANO_TOP, True, False),),
+    "Alto": (("A3", False, True), ("G3", False, True)),
+    "Bass": ((LEDGER_SITE_BASS_LOW, False, False), (LEDGER_SITE_BASS_HIGH, True, False)),
+    "Tenor": (),
+}
+
+
+def _ledger_site_pitch(base: music21.pitch.Pitch, generic: int, vi: int, cadence: bool, in_force: dict[str, int],
+                       fifths: int) -> music21.pitch.Pitch | None:
+    """A conductor ledger-site pitch `generic` steps from `base`, natural and in force in the bar, or None (A7 3.1:
+    directed draw, since a random member almost never lands on one of these few sites)."""
+    for name, above, cadence_only in LEDGER_SITES[VOICES[vi]]:
+        q = music21.pitch.Pitch(name)
+        if (cadence_only and not cadence) or (q.ps > base.ps) != above:
+            continue
+        if in_force.get(f"{q.step}{q.octave}", _key_alter(fifths, q.step)) != 0:
+            continue
+        if music21.interval.Interval(base, q).generic.undirected == generic:
+            return q
+    return None
+
+
+def _ledger_reachable(base: music21.pitch.Pitch, vi: int) -> bool:
+    """A ledger site lies within an octave of the base note on the right side (A7 replacement for NEAR_EDGE_STEPS)."""
+    return any(0 < (q.ps - base.ps if above else base.ps - q.ps) <= OCTAVE_SEMITONES
+               for name, above, _ in LEDGER_SITES[VOICES[vi]] for q in [music21.pitch.Pitch(name)])
+
+
+def _close_position(heads: list[music21.pitch.Pitch]) -> bool:
+    """Three heads stacked in 3rds/4ths within an octave (3+3, 3+4, 4+3 and their inversions)."""
+    gaps = [b.ps - a.ps for a, b in zip(heads, heads[1:])]
+    return all(3 <= g <= 5 for g in gaps) and heads[-1].ps - heads[0].ps < OCTAVE_SEMITONES
+
+
+def _template_shape_ok(heads: list[music21.pitch.Pitch], base: music21.pitch.Pitch, voice: str, root_pc: int,
+                       third_pc: int, fifth_pc: int) -> bool:
+    """Choral-conductor template shapes per voice (design 3.1)."""
+    lo, mid, hi = heads
+    if voice in ("Soprano", "Tenor", "Alto"):
+        root_third_octave = (lo.pitchClass == root_pc and mid.pitchClass == third_pc
+                             and hi.ps - lo.ps == OCTAVE_SEMITONES)
+        if voice == "Soprano":
+            return _close_position(heads) or root_third_octave
+        rng = TEMPLATE_RANGES[voice]
+        if not all(_ps(rng[0]) <= h.ps <= _ps(rng[1]) for h in heads):
+            return False
+        if voice == "Alto":
+            return _close_position(heads) and hi.ps - lo.ps <= ALTO_TEMPLATE_MAX_SPAN
+        return _close_position(heads)
+    # Bass: open only, the sung note is the root at the bottom: root-5th-octave, or root-octave plus a 3rd.
+    if lo.nameWithOctave != base.nameWithOctave or lo.pitchClass != root_pc or hi.ps - lo.ps < OCTAVE_SEMITONES:
+        return False
+    if any(b.ps - a.ps <= 4 and a.ps < _ps(BASS_LOW_THIRD_FLOOR) for a, b in zip(heads, heads[1:])):
+        return False
+    fifth_shape = mid.pitchClass == fifth_pc and mid.ps - lo.ps == 7 and hi.ps - lo.ps == OCTAVE_SEMITONES
+    third_shape = {mid.pitchClass, hi.pitchClass} == {root_pc, third_pc} and OCTAVE_SEMITONES in (
+        mid.ps - lo.ps, hi.ps - lo.ps)
+    return fifth_shape or third_shape
+
+
+def _template_members(base: music21.pitch.Pitch, vi: int, t: float, fifths: int,
+                      sounding: list[list[tuple[float, float, music21.pitch.Pitch]]], drng: random.Random,
+                      accept: Callable[[list[music21.pitch.Pitch]], bool] = lambda _: True
+                      ) -> list[music21.pitch.Pitch] | None:
+    """Two members forming a conductor template triad with `base`, from the triad the other voices sound at `t`.
+
+    Members are spelled as the texture spells them, so they add no accidental the bar does not already sound. Three
+    pitch classes, or the root doubled; never a doubled 3rd or leading tone. None when the texture at `t` is not a
+    plain triad or no shape passing `accept` (the caller's range, crossing and cross-relation checks) fits the voice;
+    the caller then draws a random triad."""
+    others = [p for vj, spans in enumerate(sounding) if vj != vi for s, e, p in spans if s <= t < e]
+    spelled: dict[int, music21.pitch.Pitch] = {base.pitchClass: base}
+    for p in others:
+        spelled.setdefault(p.pitchClass, p)
+    if len(spelled) != 3:
+        return None
+    triad = music21.chord.Chord(list(spelled.values()))
+    if not triad.isTriad():
+        return None
+    root_pc, third_pc, fifth_pc = triad.root().pitchClass, triad.third.pitchClass, triad.fifth.pitchClass
+    leading_pc = (music21.key.KeySignature(fifths).asKey("major").tonic.pitchClass - 1) % 12
+    cands: list[music21.pitch.Pitch] = []
+    for pc, p in spelled.items():
+        for octave in range(base.octave - 2, base.octave + 3):
+            q = music21.pitch.Pitch(p.name + str(octave))
+            if abs(q.ps - base.ps) <= OCTAVE_SEMITONES and q.nameWithOctave != base.nameWithOctave:
+                cands.append(q)
+    options: list[tuple[list[music21.pitch.Pitch], float]] = []
+    voice = VOICES[vi]
+    for a_i, a in enumerate(cands):
+        for b in cands[a_i + 1:]:
+            if a.nameWithOctave == b.nameWithOctave:
+                continue
+            heads = sorted([base, a, b], key=lambda p: p.ps)
+            pcs = collections.Counter(h.pitchClass for h in heads)
+            if len(pcs) == 2 and (max(pcs, key=pcs.get) != root_pc or root_pc == leading_pc):
+                continue                           # only the root may double, never a leading-tone root
+            if len(pcs) == 1 or not _template_shape_ok(heads, base, voice, root_pc, third_pc, fifth_pc):
+                continue
+            if not accept([a, b]):
+                continue
+            top_ok = _ps(SOPRANO_TEMPLATE_TOP[0]) <= heads[-1].ps <= _ps(SOPRANO_TEMPLATE_TOP[1])
+            options.append(([a, b], SOPRANO_TOP_WEIGHT if voice == "Soprano" and top_ok else 1.0))
+    if not options:
+        return None
+    return drng.choices([o for o, _ in options], weights=[w for _, w in options])[0]
+
+
 @dataclass(eq=False)
 class _Site:
     """One place a chord can go: a note, a run of notes merged into one longer note, or a tied note pair.
@@ -775,7 +966,10 @@ def _strip_sites(measures: list[music21.stream.Measure], meters: list[str | None
 def _draw_members(base: music21.pitch.Pitch, mi: int, offset: float, t: float, t_end: float, vi: int,
                   parts: list[music21.stream.Part], sounding: list[list[tuple[float, float, music21.pitch.Pitch]]],
                   fifths: int, drng: random.Random, class_weights: list[float], prefer_copied: bool,
-                  prefer_chromatic: bool, crossing: int, done: int, check_cross_relation: bool
+                  prefer_chromatic: bool, crossing: int, done: int, check_cross_relation: bool,
+                  template_p: float = 0.0, cadence: bool = False,
+                  texture: list[list[tuple[float, float, music21.pitch.Pitch]]] | None = None,
+                  prefer_ledger: bool = False
                   ) -> tuple[list[music21.pitch.Pitch], list[str], str, bool] | str:
     """Members for a chord on `base` sounding over [t, t_end): (members, sources, bucket, crosses).
 
@@ -818,6 +1012,19 @@ def _draw_members(base: music21.pitch.Pitch, mi: int, offset: float, t: float, t
     dyad = drng.choices(range(len(A6_INTERVALS) + 1), weights=class_weights)[0]
     triad = dyad == len(A6_INTERVALS)
     bucket = "triad" if triad else A6_INTERVALS[dyad][0]
+    # A7 template triad (template_p is 0 outside A7, so no extra draw happens there); random triad if none fits.
+    if triad and template_p > 0 and drng.random() < template_p:
+        def template_ok(tm: list[music21.pitch.Pitch]) -> bool:
+            crosses = any((above and p.ps > min(above)) or (below and p.ps < max(below)) for p in tm)
+            return (member_ok([base] + tm, vi) and _ledger_sites_ok(base, tm, vi, cadence)
+                    and not (crosses and crossing + 1 > MAX_CROSSING * (done + 1))
+                    and not any(q.step == p.step and q.octave == p.octave and q.alter != p.alter
+                                for p in tm for q in span_others))
+
+        tm = _template_members(base, vi, t, fifths, texture or sounding, drng, template_ok)
+        if tm is not None:
+            cross = any((above and p.ps > min(above)) or (below and p.ps < max(below)) for p in tm)
+            return tm, ["template", "template"], "triad_template", cross
     for attempt in range(MAX_REDRAWS):
         classes = drng.choices(range(len(A6_INTERVALS)), weights=weights, k=2) if triad else [dyad]
         members: list[music21.pitch.Pitch] = []
@@ -836,7 +1043,11 @@ def _draw_members(base: music21.pitch.Pitch, mi: int, offset: float, t: float, t
             chromatic = [p for p in copied if _chromatic(p, fifths)]
             p: music21.pitch.Pitch | None = None
             src = "copied"
-            if fitting:
+            ledger_p = (_ledger_site_pitch(base, generic, vi, cadence, in_force, fifths)
+                        if prefer_ledger and not members else None)
+            if ledger_p is not None and fits(ledger_p, generic, members):
+                p, src = ledger_p, "free"
+            elif fitting:
                 chromatic_fit = [q for q in fitting if _chromatic(q, fifths)]
                 p = drng.choice(chromatic_fit if prefer_chromatic and not members and chromatic_fit else fitting)
             elif prefer_chromatic and attempt == 0 and not members and chromatic and not prefer_copied:
@@ -857,6 +1068,8 @@ def _draw_members(base: music21.pitch.Pitch, mi: int, offset: float, t: float, t
             members.append(p)
             sources.append(src)
         if len(members) != len(classes) or not member_ok([base] + members, vi):
+            continue
+        if not _ledger_sites_ok(base, members, vi, cadence):
             continue
         if any(q.step == p.step and q.octave == p.octave and q.alter != p.alter
                for p, src in zip(members, sources) if check_cross_relation or src == "copied" for q in span_others):
@@ -995,6 +1208,8 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
     seconds_done = seconds_down = 0  # committed stemmed 2nds and how many are stems down (STEMS_DOWN_2ND_TARGET)
     free_placed: list[tuple[int, float, music21.pitch.Pitch, int]] = []   # committed free members, for merges
     baseline = [_accidental_display(part, fresh=True) for part in parts]
+    # The harmony a template triad completes is the original four-part texture, not chords injected earlier.
+    texture = _sounding(parts) if A7_ARM is not None else None
     audit: list[tuple[int, music21.stream.Measure, music21.chord.Chord, list[music21.pitch.Pitch], list[str],
                       int]] = []
 
@@ -1007,7 +1222,9 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
     per_voice: list[tuple[list[music21.stream.Measure], list[int], list[tuple[list[_Site], int]]]] = []
     dur_names = list(A6_DURATIONS)
     bucket_names = [c for c, _, _ in A6_INTERVALS] + ["triad"]
-    bucket_targets = [w for _, _, w in A6_INTERVALS] + [P_TRIAD_A6]
+    # Dyads renormalise over 1 - triad share (A7 3.1). A6 keeps exactly 1, not a float ratio that could flip a draw.
+    dyad_scale = 1.0 if A7_ARM is None else (1 - P_TRIAD_A6) / sum(w for _, _, w in A6_INTERVALS)
+    bucket_targets = [w * dyad_scale for _, _, w in A6_INTERVALS] + [P_TRIAD_A6]
     for vi, part in enumerate(parts):
         measures = list(part.getElementsByClass(music21.stream.Measure))
         meters: list[str | None] = []
@@ -1106,10 +1323,11 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                 of_cls = [s for s in of_cls if s.kind != "merge"] or of_cls     # real notes before merged ones
                 pending = [p for r in records for p in r["members"]]  # type: ignore[attr-defined]
                 l2_done = scalars["ledger2_members"] + sum(_is_ledger2(_drawn_position(p, vi)) for p in pending)
-                m_done = scalars["free"] + scalars["copied"] + len(pending)   # committed + this strip's, once
+                m_done = scalars["free"] + scalars["copied"] + scalars["template"] + len(pending)   # committed + strip
                 site = drng.choices(of_cls, weights=[
                     (ACCIDENTAL_SITE_BOOST if boost and s.chromatic else 1.0)
-                    * _ledger2_boost(voice, not NEAR_EDGE_STEPS[0] < _drawn_position(s.heads[0][1].pitch, vi)
+                    * _ledger2_boost(voice, _ledger_reachable(s.heads[0][1].pitch, vi) if A7_ARM is not None
+                                     else not NEAR_EDGE_STEPS[0] < _drawn_position(s.heads[0][1].pitch, vi)
                                      < NEAR_EDGE_STEPS[1], l2_done, m_done)
                     for s in of_cls])[0]
                 pool.remove(site)
@@ -1140,8 +1358,14 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                 copied_done = scalars["copied"] + strip_sources.count("copied")
                 members_done = scalars["free"] + scalars["copied"] + len(strip_sources)
                 prefer_copied = copied_done < (1 - P_FREE_MEMBER) * (members_done + 1)
+                cadence = _is_cadence(base_note, mi, len(measures))
+                template_p = 0.0 if A7_ARM is None else min(1.0, TEMPLATE_P_BY_CLASS.get(site.cls, 0.0)
+                                                             * TEMPLATE_VOICE_FACTOR[voice]
+                                                             * (TEMPLATE_CADENCE_FACTOR if cadence else 1.0))
                 drawn = _draw_members(base_note.pitch, mi, offset, t, t_end, vi, parts, sounding, fifths[mi], drng,
-                                      class_w, prefer_copied, boost, crossing, done, site.kind == "merge")
+                                      class_w, prefer_copied, boost, crossing, done, site.kind == "merge",
+                                      template_p, cadence, texture,
+                                      A7_ARM is not None and l2_done < LEDGER2_MEMBER_TARGET * (m_done + 1))
                 if isinstance(drawn, str):
                     stats["shortfall"][drawn] += 1
                     tries[id(site)] += 1
@@ -1276,6 +1500,225 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                chord_free_keys=sorted(chord_free_keys),
                density_short_keys=sorted(density_short_keys))
     return out
+
+
+def _bar_ql(measure: music21.stream.Measure, meter: str | None) -> float | None:
+    return float(music21.meter.TimeSignature(meter).barDuration.quarterLength) if meter else None
+
+
+def _layerable(measure: music21.stream.Measure, bar_ql: float | None) -> bool:
+    """One plain layer that fills the bar: no tuplet, grace note, existing voice, or chord stemmed down (a layered
+    bar draws layer 1 stems up; a down-stemmed injected chord would change the stem the chord stats logged)."""
+    items = list(measure.notesAndRests)
+    if bar_ql is None or not items or measure.getElementsByClass(music21.stream.Voice):
+        return False
+    if any(n.duration.isGrace or n.duration.tuplets for n in items):
+        return False
+    if any(isinstance(n, music21.chord.Chord) and n.stemDirection == "down" for n in items):
+        return False
+    return abs(sum(float(n.quarterLength) for n in items) - bar_ql) < 1e-9
+
+
+def _rhythm(measure: music21.stream.Measure) -> list[tuple[float, float, bool]]:
+    return [(float(measure.elementOffset(n)), float(n.quarterLength), n.isRest) for n in measure.notesAndRests]
+
+
+def _layer2_pitch(l1: music21.pitch.Pitch, mi: int, offset: float, t: float, t_end: float, vi: int,
+                  parts: list[music21.stream.Part], sounding: list[list[tuple[float, float, music21.pitch.Pitch]]],
+                  fifths: int, lrng: random.Random) -> music21.pitch.Pitch | None:
+    """A layer-2 pitch at or below layer 1 and not below the next voice, from the pitches the texture sounds over
+    [t, t_end), moved by octaves.
+
+    Within the voice's divisi limits and the A1 drawn band; no cross-relation with another voice in the span, and no
+    accidental the bar does not already have in force at that height (as free members)."""
+    in_force = bar_accidentals(mi, offset, parts)
+    span = _span_pitches(sounding, vi, t, t_end)
+    lo_ps, hi_ps = (_ps(p) for p in DIVISI_MEMBER_LIMITS[VOICES[vi]])
+    # Layer 2 never crosses below the next voice down (a soprano 2 under the alto reads as a different part).
+    below = [p.ps for s, e, p in sounding[vi + 1] if s < t_end and e > t] if vi + 1 < len(sounding) else []
+    lo_ps = max([lo_ps] + below)
+    options: dict[str, tuple[music21.pitch.Pitch, float]] = {}
+    for q in span + [l1]:
+        for octave in range(q.octave - 2, q.octave + 3):
+            c = music21.pitch.Pitch(q.name + str(octave))
+            w = LAYER2_INTERVAL_WEIGHTS.get(int(round(l1.ps - c.ps)))
+            if w is None or abs(c.alter) > 1 or not lo_ps <= c.ps <= hi_ps:
+                continue
+            if not DIVISI_MEMBER_POSITIONS[0] <= _drawn_position(c, vi) <= DIVISI_MEMBER_POSITIONS[1]:
+                continue
+            if any(o.step == c.step and o.octave == c.octave and o.alter != c.alter for o in span):
+                continue
+            key_alter = _key_alter(fifths, c.step)
+            if int(c.alter) != in_force.get(f"{c.step}{c.octave}", key_alter) and not any(
+                    o.nameWithOctave == c.nameWithOctave for o in span):
+                continue
+            options.setdefault(c.nameWithOctave, (c, w))
+    if not options:
+        return None
+    keys = sorted(options)
+    return options[lrng.choices(keys, weights=[options[k][1] for k in keys])[0]][0]
+
+
+def inject_layers(parts: list[music21.stream.Part], systems: list[list[int]], lrng: random.Random,
+                  chord_stats: dict[str, object]) -> dict[str, int]:
+    """A7 arm CL (design 3.2): a second layer in about LAYER_BAR_SHARE of the bars of chord-bearing strips.
+
+    Layer 2 takes another SATB voice's rhythm in the same bar (or, LAYER_SAME_RHYTHM of the time, the voice's own
+    rhythm: same-rhythm split stems), with pitches at or below layer 1 from the sounding texture. Layer 1 stems up,
+    layer 2 down. LAYER_MID_ENTRY of layer bars start layer 2 with rests (entry mid-bar). Chord-free canary strips
+    get no layers. Synthetic barline ties on layer-2 notes stay in their layer, or tie into a one-layer bar at the
+    same pitch ("unis."), up to LAYER_TIE_TARGET of layer bars (never past LAYER_TIE_CAP). Runs after
+    `inject_divisi` on its own RNG, so the chords are the ones arm C gets.
+    """
+    stats: collections.Counter[str] = collections.Counter({k: 0 for k in (
+        "layer_bars", "layer_same_rhythm", "layer_mid_entry", "layer2_notes", "layer2_rests", "layer_chord_bars",
+        "layer_ties_in_layer", "layer_ties_unis", "layer_attempts")})
+    plain_strips = set(chord_stats.get("chord_free_keys", [])) | set(chord_stats.get("density_short_keys", []))  # type: ignore[arg-type]
+    sounding = _sounding(parts)
+    measures = [list(p.getElementsByClass(music21.stream.Measure)) for p in parts]
+    meters: list[str | None] = []
+    fifths: list[int] = []
+    meter: str | None = None
+    key_fifths = 0
+    for m in measures[0]:
+        if m.timeSignature is not None:
+            meter = m.timeSignature.ratioString
+        for ks in m.getElementsByClass(music21.key.KeySignature):
+            key_fifths = ks.sharps
+        meters.append(meter)
+        fifths.append(key_fifths)
+    layered: list[tuple[int, int, int]] = []           # (voice, system, measure index)
+    for vi in range(len(parts)):
+        for si, system in enumerate(systems):
+            if f"{VOICES[vi]}|{si}" in plain_strips:
+                continue
+            # A quota per strip, filled from its bars in random order: a bar that cannot take a layer (tuplet, a
+            # chord stemmed down, no donor) passes its turn to another bar instead of lowering the share.
+            quota = int(LAYER_BAR_SHARE * len(system) + lrng.random())
+            bars = list(system)
+            lrng.shuffle(bars)
+            for mi in bars:
+                if quota == 0:
+                    break
+                stats["layer_attempts"] += 1
+                reason = _add_layer(parts, measures, vi, mi, meters[mi], fifths[mi], sounding, lrng, stats)
+                if reason:
+                    stats[f"skip_{reason}"] += 1
+                else:
+                    layered.append((vi, si, mi))
+                    quota -= 1
+    want = min(int(LAYER_TIE_TARGET * len(layered) + lrng.random()), int(LAYER_TIE_CAP * len(layered)))
+    order = list(layered)
+    lrng.shuffle(order)
+    for vi, si, mi in order:
+        if stats["layer_ties_in_layer"] + stats["layer_ties_unis"] >= want:
+            break
+        system = systems[si]
+        if mi == system[-1] or fifths[mi] != fifths[mi + 1]:
+            continue
+        kind = _layer_tie(measures[vi][mi], measures[vi][mi + 1], vi, mi, parts, sounding, fifths[mi])
+        if kind:
+            stats[f"layer_ties_{kind}"] += 1
+    return dict(stats)
+
+
+def _add_layer(parts: list[music21.stream.Part], measures: list[list[music21.stream.Measure]], vi: int, mi: int,
+               meter: str | None, fifths: int, sounding: list[list[tuple[float, float, music21.pitch.Pitch]]],
+               lrng: random.Random, stats: collections.Counter[str]) -> str:
+    """Add layer 2 to one bar; returns "" or why the bar stayed one layer."""
+    m = measures[vi][mi]
+    bar_ql = _bar_ql(m, meter)
+    if not _layerable(m, bar_ql):
+        return "not_layerable"
+    same = lrng.random() < LAYER_SAME_RHYTHM
+    if same:
+        donor = m
+    else:
+        own = _rhythm(m)
+        donors = [measures[vj][mi] for vj in range(len(parts)) if vj != vi
+                  and _layerable(measures[vj][mi], bar_ql) and _rhythm(measures[vj][mi]) != own]
+        if not donors:
+            return "no_donor"
+        donor = lrng.choice(donors)
+    events = [(float(donor.elementOffset(n)), n) for n in donor.notesAndRests]
+    rest_until = 0
+    if lrng.random() < LAYER_MID_ENTRY:
+        # Cut only where no beam runs on, so layer 2's remaining beams stay whole.
+        cuts = [k for k in range(1, len(events)) if events[k][0] <= bar_ql / 2
+                and not any(b.type in ("start", "continue") for b in events[k - 1][1].beams.beamsList)]
+        if cuts:
+            rest_until = lrng.choice(cuts)
+    layer1 = [(float(m.elementOffset(n)), n) for n in m.notesAndRests]
+    new: list[tuple[float, music21.note.GeneralNote]] = []
+    for k, (off, src) in enumerate(events):
+        ql = float(src.quarterLength)
+        if src.isRest or k < rest_until:
+            new.append((off, music21.note.Rest(quarterLength=ql)))
+            continue
+        over = [n for o, n in layer1 if o <= off < o + float(n.quarterLength) and not n.isRest]
+        if not over:
+            return "layer1_rest"                         # no layer-1 pitch to sit under
+        l1 = min(over[0].pitches, key=lambda p: p.ps)
+        t = float(m.offset) + off
+        p = _layer2_pitch(l1, mi, off, t, t + ql, vi, parts, sounding, fifths, lrng)
+        if p is None:
+            return "no_pitch"
+        n = music21.note.Note(p, quarterLength=ql)
+        n.beams = copy.deepcopy(src.beams) if k >= rest_until else music21.beam.Beams()
+        n.stemDirection = "down"
+        new.append((off, n))
+    if not any(isinstance(n, music21.note.Note) for _, n in new):
+        return "no_layer2_note"
+    v1, v2 = music21.stream.Voice(id="1"), music21.stream.Voice(id="2")
+    for off, n in layer1:
+        m.remove(n)
+        if not n.isRest:
+            n.stemDirection = "up"
+        v1.insert(off, n)
+    for off, n in new:
+        v2.insert(off, n)
+    m.insert(0, v1)
+    m.insert(0, v2)
+    stats["layer_bars"] += 1
+    stats["layer_same_rhythm"] += int(same)
+    stats["layer_mid_entry"] += int(rest_until > 0)
+    stats["layer2_notes"] += sum(isinstance(n, music21.note.Note) for _, n in new)
+    stats["layer2_rests"] += sum(n.isRest for _, n in new)
+    stats["layer_chord_bars"] += int(any(isinstance(n, music21.chord.Chord) for _, n in layer1))
+    return ""
+
+
+def _layer_tie(m: music21.stream.Measure, nxt: music21.stream.Measure, vi: int, mi: int,
+               parts: list[music21.stream.Part], sounding: list[list[tuple[float, float, music21.pitch.Pitch]]],
+               fifths: int) -> str:
+    """Tie a layered bar's last layer-2 note over the barline: into the next bar's layer 2 (the note there takes the
+    pitch), or into a one-layer bar whose first note has the same pitch ("unis."). Returns the kind or ""."""
+    voices = {v.id: v for v in m.getElementsByClass(music21.stream.Voice)}
+    last = list(voices["2"].notesAndRests) if "2" in voices else []
+    if not last or not isinstance(last[-1], music21.note.Note) or last[-1].tie is not None:
+        return ""
+    end = last[-1]
+    nvoices = {v.id: v for v in nxt.getElementsByClass(music21.stream.Voice)}
+    if "2" in nvoices:
+        first = list(nvoices["2"].notesAndRests)
+        if not first or not isinstance(first[0], music21.note.Note) or first[0].tie is not None or first[0].offset:
+            return ""
+        over = [n for n in nvoices["1"].notesAndRests if n.offset == 0 and not n.isRest]
+        if not over or end.pitch.ps > min(p.ps for p in over[0].pitches):
+            return ""
+        t = float(nxt.offset)
+        if any(o.step == end.pitch.step and o.octave == end.pitch.octave and o.alter != end.pitch.alter
+               for o in _span_pitches(sounding, vi, t, t + float(first[0].quarterLength))):
+            return ""
+        first[0].pitch = copy.deepcopy(end.pitch)
+        end.tie, first[0].tie = music21.tie.Tie("start"), music21.tie.Tie("stop")
+        return "in_layer"
+    heads = list(nxt.notesAndRests)
+    if (heads and isinstance(heads[0], music21.note.Note) and heads[0].tie is None and nxt.elementOffset(heads[0]) == 0
+            and _plain(heads[0]) and heads[0].pitch.nameWithOctave == end.pitch.nameWithOctave):
+        end.tie, heads[0].tie = music21.tie.Tie("start"), music21.tie.Tie("stop")
+        return "unis"
+    return ""
 
 
 def build_piece(path: Path, composer: str, rng: random.Random, work_dir: Path,
@@ -1426,8 +1869,13 @@ def build_divisi(path: Path, composer: str, work_dir: Path, inject_seed: str = "
     systems = [[rank[i] for i in sys_ if i in rank] for sys_ in base.systems]
     drng = random.Random(f"{inject_seed}:{piece_id}")
     stats: dict[str, object] = {}
-    plan, mei_text = build_piece(path, composer, random.Random(f"phase1:{piece_id}"), work_dir,
-                                 lambda parts: stats.update(inject_divisi(parts, systems, drng)))
+
+    def inject(parts: list[music21.stream.Part]) -> None:
+        stats.update(inject_divisi(parts, systems, drng))
+        if A7_ARM == "CL":   # own RNG: arm C and arm CL get the same chords
+            stats["layers"] = inject_layers(parts, systems, random.Random(f"{inject_seed}-layers:{piece_id}"), stats)
+
+    plan, mei_text = build_piece(path, composer, random.Random(f"phase1:{piece_id}"), work_dir, inject)
     if (plan.systems, plan.pages, plan.measure_n) != (base.systems, base.pages, base.measure_n):
         raise RuntimeError(f"{piece_id}: divisi pass 2 layout differs from pass 1")
     plan.piece_id = piece_id + DIVISI_SUFFIX
@@ -1475,9 +1923,15 @@ def main() -> None:
                         "renders: divisi-t1..t3); the layout never depends on it")
     parser.add_argument("--ties", action="store_true", help="sample builds only: chord tied notes (TIES_ENABLED); the "
                         "committed default stays off until G1b passes the tied-chord case")
+    parser.add_argument("--a7", choices=("C", "CL"), help="divisi A7 arm (design section 3): C = chords, CL = chords + "
+                        "layers; needs --divisi and a divisi-a7* seed (A6 seeds are not reused, design 12)")
     args = parser.parse_args()
     global TIES_ENABLED
     TIES_ENABLED = TIES_ENABLED or args.ties
+    if args.a7:
+        if args.divisi is None or not args.divisi_seed.startswith("divisi-a7"):
+            raise SystemExit("--a7 needs --divisi and a --divisi-seed starting with divisi-a7")
+        apply_a7(args.a7)
     corpus_dir = args.out / "corpus"
     work_dir = args.out / "work"
     corpus_dir.mkdir(parents=True, exist_ok=True)

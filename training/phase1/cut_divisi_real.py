@@ -19,7 +19,8 @@ Train eligibility (`train_ok`, else `exclude` says why), per strip:
 - every `chord_merge` bar is confirmed `chord` and every `layered_partial_rest` bar `rests_ok` in the PDF form check
   (`--forms`); unchecked bars exclude the strip (ml-cv-lead changes 3-4);
 - `layered` strips (with `layer.split`) are for arm CL only; the training loader keeps them out of arm C (ruling F).
-The split is by piece (ruling D): the `--holdout` piece is report-only and never used for selection.
+The split is by piece (ruling D). User 2026-10-30: all 9 chords_dataset pieces train; the held-out pieces are
+separate test pieces (their own map, `--split test`), cut by the same code.
 """
 from __future__ import annotations
 
@@ -37,10 +38,6 @@ CNN_WIDTH_STRIDE = 4           # = stage3_transcription.CNN_WIDTH_STRIDE: one CT
 FRAME_BUDGET = 0.8             # A7 design 5.3: (tokens + repeats) / frames
 YOLO_WEIGHTS = "D:/PiyaNota/staff_detector_files/weights/best.pt"
 CAMERA_NAME = re.compile(r"^p(\d+)(?:_([a-z]))?$", re.IGNORECASE)
-# Pieces whose photos are not named pNN: sorted file order = page order (user to confirm; IMG_5098 is absent).
-CAMERA_PAGE_ORDER: dict[str, list[str]] = {
-    "Vinea_mea_electa": ["IMG_5095", "IMG_5096", "IMG_5097", "IMG_5099"],
-}
 RASTER_OK = "unverified: raster or unknown font"
 
 
@@ -58,10 +55,6 @@ def render(pdf_root: Path, out: Path, pieces: list[str]) -> None:
 def camera_pages(piece_dir: Path) -> dict[int, Path]:
     """Page number -> photo. Multi-shot pages (p03_a, p03_b) are skipped: which systems each shot holds is unknown."""
     photos = sorted(p for p in (piece_dir / "camera").glob("*") if p.suffix.lower() in (".jpg", ".jpeg", ".png"))
-    order = CAMERA_PAGE_ORDER.get(piece_dir.name)
-    if order is not None:
-        by_stem = {p.stem: p for p in photos}
-        return {i: by_stem[s] for i, s in enumerate(order, start=1) if s in by_stem}
     pages: dict[int, Path] = {}
     for p in photos:
         m = CAMERA_NAME.match(p.stem)
@@ -119,8 +112,8 @@ def cut(args: argparse.Namespace) -> None:
     import stage2_detection as s2  # noqa: PLC0415
     from ultralytics import YOLO  # noqa: PLC0415
 
-    maps = {k: v for k, v in json.loads(MAPS.read_text(encoding="utf-8")).items() if not k.startswith("_")}
-    assert args.holdout in maps, f"--holdout {args.holdout!r} is not a mapped piece"
+    maps = {k: v for k, v in json.loads(args.maps.read_text(encoding="utf-8")).items() if not k.startswith("_")}
+    assert args.holdout is None or args.holdout in maps, f"--holdout {args.holdout!r} is not a mapped piece"
     records = [json.loads(line) for line in args.labels.read_text(encoding="utf-8").splitlines()]
     forms = json.loads(args.forms.read_text(encoding="utf-8")) if args.forms else {}
     by_page: dict[tuple[str, int], list[dict]] = defaultdict(list)
@@ -168,7 +161,7 @@ def cut(args: argparse.Namespace) -> None:
                     rows.append({
                         "file": f"strips/{piece}/{name}", "piece": piece, "page": page_no, "sys": r["sys"],
                         "staff": r["staff"], "parts": r["parts"], "source": source, "photo": image.name,
-                        "split": "holdout" if piece == args.holdout else "train", "tokens": r["tokens"],
+                        "split": "holdout" if piece == args.holdout else args.split, "tokens": r["tokens"],
                         "layered": "layer.split" in r["tokens"], "flags": r["flags"], "check": r.get("check"),
                         "frame_ratio": round(ratio, 3), "strip_source": "native" if pre.strip_source is not None
                         else "fallback", "train_ok": not reasons, "exclude": reasons,
@@ -206,14 +199,17 @@ def main() -> None:
         p.add_argument("--pdf-root", type=Path, required=True)
         p.add_argument("--out", type=Path, required=True)
         p.add_argument("--piece", action="append")
+        p.add_argument("--maps", type=Path, default=MAPS)
     cp.add_argument("--labels", type=Path, required=True, help="labels_checked.jsonl (verify_divisi_heads.py)")
     cp.add_argument("--forms", type=Path, help="PDF form check JSON (see merge_divisi_parts.py --split-bars)")
-    cp.add_argument("--holdout", required=True, help="the one report-only piece (ml-cv-lead ruling D)")
+    cp.add_argument("--holdout", help="a report-only piece among the mapped ones (none: user 2026-10-30, all 9 "
+                    "chords_dataset pieces train; the held-out pieces are separate test pieces)")
+    cp.add_argument("--split", default="train", choices=("train", "test"), help="split of every other piece")
     cp.add_argument("--weights", default=YOLO_WEIGHTS)
     args = parser.parse_args()
     self_check()
     if args.step == "render":
-        maps = [k for k in json.loads(MAPS.read_text(encoding="utf-8")) if not k.startswith("_")]
+        maps = [k for k in json.loads(args.maps.read_text(encoding="utf-8")) if not k.startswith("_")]
         render(args.pdf_root, args.out, args.piece or maps)
     else:
         cut(args)

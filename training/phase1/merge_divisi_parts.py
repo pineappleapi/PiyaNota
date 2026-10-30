@@ -382,10 +382,12 @@ def main() -> None:
     parser.add_argument("--mei-dir", type=Path, required=True, help="<piece>.mei per piece (Verovio from MusicXML)")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--piece", action="append", help="only these pieces (default: all in the map)")
+    parser.add_argument("--maps", type=Path, default=MAPS, help="system/staff map JSON (test pieces keep their own, "
+                        "outside the training map)")
     parser.add_argument("--split-bars", type=Path, help="PDF form check JSON {piece: {group key: {\"split\": [bar @n], \"drop\": {bar @n: reason}}}}")
     args = parser.parse_args()
     self_check()
-    maps = {k: v for k, v in json.loads(MAPS.read_text(encoding="utf-8")).items() if not k.startswith("_")}
+    maps = {k: v for k, v in json.loads(args.maps.read_text(encoding="utf-8")).items() if not k.startswith("_")}
     split = json.loads(args.split_bars.read_text(encoding="utf-8")) if args.split_bars else {}
     work = args.out / "merged_mei"
     work.mkdir(parents=True, exist_ok=True)
