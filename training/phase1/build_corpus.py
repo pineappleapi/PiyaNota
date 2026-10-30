@@ -1370,11 +1370,20 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                 offset = float(m.elementOffset(base_note))
                 t = float(m.offset) + offset
                 t_end = t + sum(float(n.quarterLength) for _, n in site.heads)
+                kept = base_note                 # the head whose pitch the merged note holds
                 if site.kind == "merge" and _base_conflicts(base_note.pitch, vi, t, t_end, sounding):
-                    stats["skipped"]["merge_base_conflict"] += 1
-                    continue
+                    # A7 (design 14.8): a whole-bar merge may hold another of the bar's pitches. Whole-note supply
+                    # comes almost only from merges, and dropping every conflicting bar left 2nd_none short.
+                    alts = [n for _, n in site.heads[1:] if n.pitch.nameWithOctave != base_note.pitch.nameWithOctave
+                            and not _base_conflicts(n.pitch, vi, t, t_end, sounding)
+                            ] if A7_ARM is not None and site.merge == "whole" else []
+                    if not alts:
+                        stats["skipped"]["merge_base_conflict"] += 1
+                        continue
+                    kept = alts[0]
+                base_pitch = kept.pitch
                 if site.kind == "merge":
-                    removed = [(float(m.elementOffset(n)), n.pitch) for _, n in site.heads[1:]]
+                    removed = [(float(m.elementOffset(n)), n.pitch) for _, n in site.heads if n is not kept]
                     if _merge_drops_relied_accidental(removed, mi, free_placed + [
                             r_free for r in records for r_free in _free_members_of(r)]):
                         stats["skipped"]["merge_accidental_relied_on"] += 1
@@ -1394,7 +1403,7 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                 template_p = 0.0 if A7_ARM is None else min(1.0, TEMPLATE_P_BY_CLASS.get(site.cls, 0.0)
                                                              * TEMPLATE_VOICE_FACTOR[voice]
                                                              * (TEMPLATE_CADENCE_FACTOR if cadence else 1.0))
-                drawn = _draw_members(base_note.pitch, mi, offset, t, t_end, vi, parts, sounding, fifths[mi], drng,
+                drawn = _draw_members(base_pitch, mi, offset, t, t_end, vi, parts, sounding, fifths[mi], drng,
                                       class_w, prefer_copied, boost, crossing, done, site.kind == "merge",
                                       template_p, cadence, texture,
                                       A7_ARM is not None and l2_done < LEDGER2_MEMBER_TARGET * (m_done + 1),
@@ -1408,11 +1417,13 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                 members, sources, bucket, cross, lcross = drawn
                 placements = [(mi, offset)] if site.kind == "merge" else [
                     (hmi, float(measures[hmi].elementOffset(n))) for hmi, n in site.heads]
-                if _member_overrides_relied_accidental(members, placements, free_placed + [
+                # A moved base pitch now sounds from beat 1, so it is checked like a member.
+                if _member_overrides_relied_accidental(members + ([base_pitch] if kept is not base_note else []),
+                                                       placements, free_placed + [
                         r_free for r in records for r_free in _free_members_of(r)]):
                     stats["skipped"]["member_overrides_relied_accidental"] += 1
                     continue
-                pitches = [base_note.pitch] + members
+                pitches = [base_pitch] + members
                 strip_2nds = [r["stem"] for r in records if r["second"]]
                 seconds_n = seconds_done + len(strip_2nds)
                 down_n = seconds_down + strip_2nds.count("down")
@@ -1452,7 +1463,7 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                             m.insert(off, n)
                     undo.append(_undo_merge)
                     records.append({**common, "t": t, "cls": site.cls, "chord": chord, "merge": site.merge,
-                                    "mi": mi, "measure": m})
+                                    "mi": mi, "measure": m, "alt_base": kept is not base_note})
                 else:
                     for k, (hmi, n) in enumerate(site.heads):
                         hm = measures[hmi]
@@ -1505,6 +1516,8 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                 scalars["synth_ties"] += int(bool(r["synth_tie"]))
                 if r["merge"]:
                     stats["merged"][str(r["merge"])] += 1
+                    if r.get("alt_base"):           # A6 summaries keep their keys
+                        stats["merged"]["whole_alt_base"] += 1
                     scalars["merged_whole"] += int(r["merge"] == "whole")
                 est_accidental_cols += int(bool(r["est_acc"]))
                 injected.append(r["chord"])  # type: ignore[arg-type]

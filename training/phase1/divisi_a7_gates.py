@@ -30,6 +30,10 @@ LEDGER2_FLOOR = 0.045                   # of members (ruling 2)
 LEDGER_CROSS_MAX = 0.05                 # of chord columns (ruling 2)
 DYAD_KEEP = 0.95                        # of the A6 v2 train count, per dyad bucket (3.1)
 A6V2_REFERENCE = Path(__file__).with_name("a6v2_train_class_counts.json")
+# Design 14.8 deviation (ml-cv-lead 2026-10-31): stemless 2nds are capped by whole-note site supply; after the one
+# permitted generator change the full build gives 257/281. Waived at exactly this count, so a build that drifts (or
+# arms that stop matching) still fails.
+DYAD_WAIVED: dict[str, int] = {"2nd_none": 257}
 
 
 def a7_summary_gates(s: Mapping[str, object]) -> list[dict[str, object]]:
@@ -87,8 +91,17 @@ def dyad_train_gates(build: Path) -> list[dict[str, object]]:
         if plan.get("split") == "train":
             for k, v in plan["divisi"]["class"].items():
                 got[k.split(":")[1]] += v
-    return [a6.gate(f"dyad_train.{b}", f"{got[b]}/{n}", f">= {DYAD_KEEP:.2f} of A6 v2", got[b] >= DYAD_KEEP * n)
-            for b, n in sorted(ref.items()) if not b.startswith("triad")]
+    out = []
+    for b, n in sorted(ref.items()):
+        if b.startswith("triad"):
+            continue
+        if b in DYAD_WAIVED:      # recorded deviation: the build must reproduce the reviewed count exactly
+            want = DYAD_WAIVED[b]
+            out.append(a6.gate(f"dyad_train.{b}", f"{got[b]}/{n}", f"waived (14.8): == {want}", got[b] == want,
+                               a6.WARN if got[b] == want else a6.FAIL))
+            continue
+        out.append(a6.gate(f"dyad_train.{b}", f"{got[b]}/{n}", f">= {DYAD_KEEP:.2f} of A6 v2", got[b] >= DYAD_KEEP * n))
+    return out
 
 
 def render_gates(paths: Sequence[Path]) -> list[dict[str, object]]:

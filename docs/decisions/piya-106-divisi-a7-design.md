@@ -573,3 +573,32 @@ Smoke: 3 Bach chorales, seed `divisi-a7`. Rulings replace the matching lines of 
   layer bars per seed, so 7 seeds (`divisi-a7-t1`..`t7`) for >= 300 Gootville / >= 600 in-font layer bars; the same
   7 seeds give about 1400 in-font 2+ ledger heads and about 1000 in-font template heads per seed. Layer ties stay
   under any useful n (report only). To be confirmed against the actual test-half pieces before the build.
+
+### 14.8 Deviation: `dyad_train.2nd_none` (2026-10-31; ml-cv-lead rulings, user chose more whole-note 2nd exposure)
+- **Failure.** Full Kaggle build arm C (121dfff): `gate_fail`, only `dyad_train.2nd_none` 232/281 (.826, gate .95).
+  The CL build crashed first (`kernel_error`: `_add_layer` read `.beams` on a Rest; fixed in f3ae38c); a local rerun
+  of its build step gave the same 232.
+- **Cause.** A 2nd is `2nd_none` (stemless) only on a whole-note site, and whole-note sites come almost only from
+  whole-bar merges. A7's denser chords cannot add whole-note sites, and the dyad share fell from .85 to .70, so
+  281 x .70/.85 = 231 was predictable. 3.1's "exposure kept" holds for stemmed dyads only.
+- **The one change (fixed before the rerun).** A7 only, whole-bar merges only: when the merged note's first pitch
+  conflicts with another voice (`_base_conflicts`), the bar's other distinct pitches are tried in bar order and the
+  first that does not conflict is held (`build_corpus.py`, `kept`). The removed heads and the accidental checks follow
+  the kept note. Class weights are not tilted (that would take stemmed 2nds; `2nd_down` has 20 to spare).
+- **Result (full local build, both arms, same pieces/seed as Kaggle).** Base conflicts 1381 -> 812, 292 merges kept
+  on another pitch, whole merges 1960 -> 2104, `duration.whole` .093 -> .0996; `2nd_none` 232 -> **257/281 (.915)**.
+  Arms C and CL identical on every chord count. All other gates pass (`2nd_down` 866/890, `2nd_up` 948/939, 3rd
+  2764/2858, ...). CL layer bars 1095 -> 1099.
+- **Ruling: deviation recorded, no fallback** (none was fixed before the rerun; picking one after seeing 257 would be
+  tuning to the gate). `DYAD_KEEP` stays .95 for every other bucket. `divisi_a7_gates.DYAD_WAIVED = {"2nd_none": 257}`:
+  the gate is a WARN only at exactly 257, so a Kaggle build that does not reproduce the local count, or arms that
+  diverge, still fail.
+- **7.1 clarified.** ".80 for each 2nd bucket" means `2nd_up` and `2nd_down` (as in A6; stemless 2nds had no floor).
+- **At test.** `2nd_none` recall is report-only, with n and a Wilson interval, never a pass. A6 vs A7 `2nd_none` recall
+  is compared descriptively; a lower A7 with non-overlapping intervals is "possibly the lower exposure", credited to
+  no other change.
+- **Template placement on long notes** fell .633 -> .609 (whole 250 -> 238 template triads). Not a gate (3.1's .70
+  was already missed and reported only); reported next to triad recall, not fixed in this iteration.
+- **Builds.** The arm C build at 121dfff is superseded; both arms are rebuilt from one commit with the same seeds.
+- **Later.** If whole-note 2nds matter on real choral pages, add whole-note supply in a later build (more merge
+  sites), not class steering.
