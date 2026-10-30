@@ -617,6 +617,14 @@ CHORDNOTE_POSITIONS = range(-6, 17)
 VOCAB_EXT_CHORD_TUPLET = VOCAB + [
     f"chordnote-L{p // 2 + 1}" if p % 2 == 0 else f"chordnote-S{(p - 1) // 2 + 1}" for p in CHORDNOTE_POSITIONS]
 
+# Divisi A7 (docs/decisions/piya-106-divisi-a7-design.md section 4, ml-cv-lead 2026-10-30): a new constant with the A6
+# table as its exact prefix, so A6 checkpoints still load and can be scored on A7 renders. `layer.split` opens a
+# two-layer bar; a layer-2 head or rest is its layer-1 token with `.l2` fused before the position. Both A7 arms use it.
+LAYER_SPLIT_TOKEN = "layer.split"
+LAYER2_TAG = ".l2"
+VOCAB_EXT_A7 = VOCAB_EXT_CHORD_TUPLET + [LAYER_SPLIT_TOKEN] + [
+    t.replace("-", LAYER2_TAG + "-", 1) for t in VOCAB if t.startswith(("note.", "rest."))]
+
 BLANK_IDX  = 0
 VOCAB_SIZE = len(VOCAB)
 SYM_TO_IDX = {s: i for i, s in enumerate(VOCAB)}
@@ -624,7 +632,7 @@ IDX_TO_SYM = {i: s for i, s in enumerate(VOCAB)}
 
 # The vocabularies a checkpoint may carry. Decoding with the wrong one maps every index past VOCAB to "<unk>" (or,
 # for a reordered list, to the wrong token), so anything else is refused rather than guessed.
-KNOWN_VOCABS: tuple[list[str], ...] = (VOCAB, VOCAB_EXT_CHORD_TUPLET)
+KNOWN_VOCABS: tuple[list[str], ...] = (VOCAB, VOCAB_EXT_CHORD_TUPLET, VOCAB_EXT_A7)
 # _vocab_for_head picks a table by head size alone, so no two known vocabularies may share a length.
 assert len({len(v) for v in KNOWN_VOCABS}) == len(KNOWN_VOCABS), "known vocabularies must differ in length"
 
@@ -632,7 +640,7 @@ assert len({len(v) for v in KNOWN_VOCABS}) == len(KNOWN_VOCABS), "known vocabula
 def _vocab_for_checkpoint(ckpt: dict[str, Any]) -> list[str]:
     """The token table a checkpoint was trained with.
 
-    A stored ``vocab`` must equal VOCAB or VOCAB_EXT_CHORD_TUPLET exactly; with none stored (pre-arm checkpoints)
+    A stored ``vocab`` must equal one of KNOWN_VOCABS exactly; with none stored (pre-arm checkpoints)
     it is VOCAB. Either way its length must equal the head's output rows.
 
     Raises:
@@ -645,7 +653,7 @@ def _vocab_for_checkpoint(ckpt: dict[str, Any]) -> list[str]:
     else:
         match = [v for v in KNOWN_VOCABS if list(stored) == v]
         if not match:
-            raise ValueError(f"checkpoint vocab ({len(stored)} tokens) is neither VOCAB nor VOCAB_EXT_CHORD_TUPLET")
+            raise ValueError(f"checkpoint vocab ({len(stored)} tokens) is not a known vocabulary (KNOWN_VOCABS)")
         vocab = match[0]
     if len(vocab) != rows:
         raise ValueError(f"checkpoint vocab has {len(vocab)} tokens but the head has {rows} outputs")

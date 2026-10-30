@@ -21,6 +21,11 @@ PrIMuS's own engine wrote those labels, so they are CPM conventions, not general
 
 Same-stem chords (divisi arm, Verovio dialect only) follow `_Reader.chord`: the lowest head is a normal `note.*`
 token and each higher head a `chordnote-<pos>`; CPM has no chords, so G1 does not cover this rule (G1b does).
+
+Two-layer bars (divisi A7, Verovio dialect only, gate G1c in `tests/test_g1c_layers.py`): the bar body opens with
+`layer.split`, events of both layers follow in onset order (layer 1 first at a shared onset), and a layer-2 head or
+rest takes the fused `.l2` class (`note.eighth.l2-L2`, `rest.quarter.l2-L3`, nominal rest positions as in layer 1).
+A layer of invisible spacers only is not a layer; three drawn layers are refused.
 """
 
 from __future__ import annotations
@@ -291,6 +296,37 @@ class _Reader:
     tie_ends: set[int] = field(default_factory=set)
     fermatas: set[int] = field(default_factory=set)
     out: list[str] = field(default_factory=list)
+    # Two-layer bar (A7): each event's tokens go to `chunks` as (onset, layer, seq, tokens) instead of `out`, so the
+    # caller can interleave both layers by onset. None: single-layer reading, tokens straight to `out`.
+    layer: int = 1
+    chunks: list[tuple[Fraction, int, int, list[str]]] | None = None
+    time: Fraction = Fraction(0)
+
+    def _length(self, el: ET.Element) -> Fraction:
+        """Duration in whole notes of one layer event (grace notes take none)."""
+        tag = _local(el.tag)
+        if tag in ("mRest", "mSpace"):
+            if self.state.bar_wholes is None:
+                raise ConversionError(f"whole-bar event under meter {self.state.meter}")
+            return self.state.bar_wholes
+        if "grace" in el.attrib:
+            return Fraction(0)
+        dur = el.attrib.get("dur", "4")
+        if dur not in DUR_NAME:
+            raise ConversionError(f"{tag} dur {dur!r}")
+        base = Fraction(2) if dur == "breve" else Fraction(1, int(dur))
+        dots = int(el.attrib.get("dots", "0"))
+        return base * (2 - Fraction(1, 2 ** dots))
+
+    def _close_event(self, el: ET.Element, start: int) -> None:
+        if self.chunks is None:
+            return
+        chunk = self.out[start:]
+        del self.out[start:]
+        if self.layer == 2:
+            chunk = [_layer2_token(t) for t in chunk]
+        self.chunks.append((self.time, self.layer, len(self.chunks), chunk))
+        self.time += self._length(el)
 
     def _has_fermata(self, el: ET.Element) -> bool:
         return el.attrib.get("fermata") == "above" or id(el) in self.fermatas
@@ -431,6 +467,7 @@ class _Reader:
     def walk(self, parent: ET.Element, beam_notes: list[ET.Element] | None = None) -> None:
         for el in parent:
             tag = _local(el.tag)
+            start = len(self.out)
             if tag in ("note", "chord"):
                 role = None
                 if beam_notes and len(beam_notes) > 1 and el in beam_notes:
@@ -440,12 +477,21 @@ class _Reader:
                     self.chord(el, role)
                 else:
                     self.note(el, role)
+                self._close_event(el, start)
             elif tag == "rest":
                 self.rest(el)
+                self._close_event(el, start)
             elif tag == "multiRest":
+                if self.chunks is not None:
+                    raise ConversionError("multirest in a two-layer bar")
                 self.multirest(el)
             elif tag == "mRest":
                 self.mrest()
+                self._close_event(el, start)
+            elif tag in ("space", "mSpace") and self.chunks is not None:
+                self.time += self._length(el)   # an invisible gap still moves the layer's onset
+            elif tag in ("clef", "meterSig", "keySig") and self.chunks is not None:
+                raise ConversionError(f"<{tag}> inside a two-layer bar")
             elif tag == "beam":
                 # A chord is one beam event; its member notes are not.
                 in_chord = {id(n) for c in el.iter(f"{{{MEI_NS}}}chord") for n in c.iter(f"{{{MEI_NS}}}note")}
@@ -466,6 +512,25 @@ class _Reader:
 
 # Drawn nothing the vocabulary can name (lyrics, articulation) or nothing at all (invisible spacers).
 LAYER_IGNORED: frozenset[str] = frozenset({"accid", "dot", "verse", "syl", "artic", "space", "mSpace"})
+DRAWN_EVENT_TAGS: frozenset[str] = frozenset({"note", "chord", "rest", "mRest", "multiRest"})
+
+# = stage3_transcription.LAYER_SPLIT_TOKEN / LAYER2_TAG (not imported: stage3 pulls in torch; a test pins them equal).
+LAYER_SPLIT = "layer.split"
+LAYER2_TAG = ".l2"
+
+
+def _layer2_token(token: str) -> str:
+    """Layer-2 form of a token: heads and rests get the fused `.l2` class; chordnotes, dots, accidentals and slurs
+    stay as they are and belong to the head they follow (A7 design section 4)."""
+    if token.startswith("gracenote."):
+        raise ConversionError("grace note in layer 2")
+    if token.startswith(("note.", "rest.")):
+        return token.replace("-", LAYER2_TAG + "-", 1)
+    return token
+
+
+def _draws(layer: ET.Element) -> bool:
+    return any(_local(el.tag) in DRAWN_EVENT_TAGS for el in layer.iter())
 
 
 def _apply_def(state: StaffState, el: ET.Element) -> tuple[bool, bool]:
@@ -586,14 +651,25 @@ def convert_staff(mei_path: Path, staff_n: str = "1", dialect: Dialect = "primus
             if staff is None:
                 raise ConversionError(f"measure without staff {staff_n}")
             layers = staff.findall(f"{{{MEI_NS}}}layer")
-            if len(layers) != 1:
-                raise ConversionError(f"{len(layers)} layers in a measure")
+            # PrIMuS never has two layers; in Verovio MEI a layer of invisible spacers only draws nothing.
+            drawn = layers if dialect == "primus" else [layer for layer in layers if _draws(layer)] or layers[:1]
+            if len(drawn) != 1 and (dialect == "primus" or len(drawn) != 2):
+                raise ConversionError(f"{len(drawn)} layers in a measure")
             state_before = StaffState(**vars(state))
             body: list[str] = []
             # A tie across the barline keeps its alteration; everything else the bar established is forgotten.
-            reader = _Reader(state=state, dialect=dialect, tie_alter=tie_carry, tie_starts=tie_starts,
-                             tie_ends=tie_ends, fermatas=fermatas, out=body)
-            reader.walk(layers[0])
+            if len(drawn) == 1:
+                reader = _Reader(state=state, dialect=dialect, tie_alter=tie_carry, tie_starts=tie_starts,
+                                 tie_ends=tie_ends, fermatas=fermatas, out=body)
+                reader.walk(drawn[0])
+            else:
+                # Two-layer bar (A7 G1c): events in drawn-x order = onset order, layer 1 first at a shared onset.
+                chunks: list[tuple[Fraction, int, int, list[str]]] = []
+                for k, layer in enumerate(sorted(drawn, key=lambda ly: int(ly.attrib.get("n", "1"))), start=1):
+                    _Reader(state=state, dialect=dialect, tie_alter=tie_carry, tie_starts=tie_starts,
+                            tie_ends=tie_ends, fermatas=fermatas, layer=k, chunks=chunks).walk(layer)
+                body.append(LAYER_SPLIT)
+                body += [t for *_, chunk in sorted(chunks, key=lambda c: c[:3]) for t in chunk]
             right = el.attrib.get("right", "single")
             if right in BARLINES_WRITTEN:
                 body.append(f"barline-{position_suffix(BARLINE_POSITION)}")
