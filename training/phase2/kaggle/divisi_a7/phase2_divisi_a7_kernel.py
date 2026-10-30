@@ -40,7 +40,7 @@ SESSION_BUDGET_MIN = 11 * 60        # Kaggle GPU sessions stop at 12 h and a kil
 INIT_SHA256 = {1: "5c444ad395179dfe6751b8de032d7a34b4a3ccfccebdd7fc28e2404c624eaf93",
                2: "f79892acbcb3a410f8a55c2b4f7289354111a29a7ed439c2990cfd755cbdaed4"}
 EXPECT_MANIFEST_SHA = "78165b43251f67751afc91500e812a3ce7fa06d8980a275ddadd7014d8782824"   # Phase 1
-EXPECT_DIVISI_MANIFEST_SHA = {"C": "PLACEHOLDER", "CL": "PLACEHOLDER"}   # sha256 of each build's phase2_manifest.jsonl rebuild
+EXPECT_DIVISI_MANIFEST_SHA = {"C": "fe7be1e330ab75a1c7627f16f1357e87a4544332f6e21761f54fc7dbadc39389", "CL": "98a74e2899fd27e93f807a199320a987474e6572096faf9d3123056c985c07a0"}   # sha256 of each build's phase2_manifest.jsonl rebuild
 EXPECT_REAL_MANIFEST_SHA = "ae7d6ae4acc0de46a5184b136506b75793c2ddd4b52ca8ad0464a34f08b1f91f"
 LAYER_TOKEN_JSON = '"layer.split"'   # JSON-quoted so a longer token cannot match
 RUN_NAME = f"a7_{ARM.lower()}_s{SEED}"
