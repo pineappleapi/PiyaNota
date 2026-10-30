@@ -488,6 +488,18 @@ PDF form checks 2026-10-30 (rounds 4-6). Needs ml-cv-lead sign-off before the do
   - The Pangarap and Gaano PDFs were under a "do not open" rule for this author; the user lifted it for Pangarap's
     ground truth (built by a Sonnet agent).
 
+### 14.3a User rulings on 14.3 (2026-10-30)
+- `ama_namin` and `Gaano_Ko_Ikaw_Kamahal` may be A7 test pieces: the A7 test only checks that the chord / layer reader
+  classifies chords correctly, so it does not reuse them as Phase 4 evidence or as the 7.3 dev pool.
+- The real check set is `D:/PiyaNota/data/piyanota_dataset/10piece_test_set` (all 10 pieces), used as the user directs.
+- The layered-real-bar spot check is done (user). Automated label-noise measure on the vector PDFs: accidental glyph
+  counts per bar (`accid_check.py`) mismatch on 4 of 439 strips (0.9%), all For Good p5 s2 (a 6-flat courtesy key
+  signature labelled with 3 flats); those strips are excluded. Raster pieces (146 strips) are not machine-checked.
+- The 7-seed synthetic test-render plan (14.6) is replaced: the A7 gates are scored on the 10-piece test set (ground
+  truth from its MuseScore scores, built blind; Ama_Namin, Bahay_Kubo, Pangarap done, the other 7 to follow; camera
+  photos after training). The build kernel renders no synthetic test seeds.
+- Real stream after all checks: 1,102 train-eligible strips, 569 staff-systems, 148 layered.
+
 ### 14.4 Token details
 - **Rest suffix on layer 2 (ruling A):** kept, at the fixed nominal position per duration, as in layer 1 (e.g.
   `rest.quarter.l2-L3`). It carries no information; layer-2 rest position is never scored.
