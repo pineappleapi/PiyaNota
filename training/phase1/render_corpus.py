@@ -38,7 +38,7 @@ import verovio
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from music_to_agnostic import ConversionError, convert_staff, split_systems  # noqa: E402
-from svg_check import compare, index_mei, label_view, read_page  # noqa: E402
+from svg_check import LAYER_AUDIT, compare, index_mei, label_view, read_page  # noqa: E402
 from vocab_guard import apply_guard  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
@@ -109,6 +109,7 @@ def check_render(mei_path: Path, plan: dict[str, object], options: dict[str, obj
     """
     labels = labels_for(mei_path)
     mei = index_mei(mei_path)
+    LAYER_AUDIT.clear()
     plan_systems: list[list[int]] = plan["systems"]  # type: ignore[assignment]
     failures: list[dict[str, object]] = []
     label_rows: list[dict[str, object]] = []
@@ -162,10 +163,11 @@ def check_render(mei_path: Path, plan: dict[str, object], options: dict[str, obj
             "page_systems": plan["pages"], "measure_n": plan["measure_n"],
             "constructed": {k: plan[k] for k in ("key_change", "meter_change", "multirest")},
             "staff_boxes_px": boxes_px, "check_pass": passed,
-            "strips": len(label_rows), "oov_strips": oov_strips, "oov_token_counts": dict(oov_counts)}
+            "strips": len(label_rows), "oov_strips": oov_strips, "oov_token_counts": dict(oov_counts),
+            "layer_order_audit": dict(LAYER_AUDIT)}
     (out_dir / "meta.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
     return {"pass": passed, "failures": failures, "strips": len(label_rows), "oov_strips": len(oov_strips),
-            "oov_token_counts": dict(oov_counts)}
+            "oov_token_counts": dict(oov_counts), "layer_order_audit": dict(LAYER_AUDIT)}
 
 
 def oov_summary(results: list[dict[str, object]]) -> dict[str, object]:
@@ -179,7 +181,10 @@ def oov_summary(results: list[dict[str, object]]) -> dict[str, object]:
         f["strips"] += int(r.get("strips", 0))  # type: ignore[arg-type]
         f["oov_strips"] += int(r.get("oov_strips", 0))  # type: ignore[arg-type]
         tokens.update(r.get("oov_token_counts", {}))  # type: ignore[arg-type]
-    return {"per_font": per_font, "token_counts": dict(tokens)}
+    audit: collections.Counter[str] = collections.Counter()
+    for r in results:
+        audit.update(r.get("layer_order_audit", {}))  # type: ignore[arg-type]
+    return {"per_font": per_font, "token_counts": dict(tokens), "layer_order_audit": dict(audit)}
 
 
 def main() -> None:
@@ -248,7 +253,8 @@ def main() -> None:
                 results.append({"piece_id": plan["piece_id"], "composer": composer, "font": font, "scale": scale,
                                 "pass": res["pass"], "n_failures": len(res["failures"]),
                                 "strips": res.get("strips", 0), "oov_strips": res.get("oov_strips", 0),
-                                "oov_token_counts": res.get("oov_token_counts", {})})
+                                "oov_token_counts": res.get("oov_token_counts", {}),
+                                "layer_order_audit": res.get("layer_order_audit", {})})
                 del res
                 gc.collect()   # a Verovio toolkit holds the whole laid-out score; free it before the next font
             if i % 10 == 0:

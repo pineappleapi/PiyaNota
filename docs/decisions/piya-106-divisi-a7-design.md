@@ -497,3 +497,41 @@ PDF form checks 2026-10-30 (rounds 4-6). Needs ml-cv-lead sign-off before the do
 - **Vocab (ruling C):** `stage3_transcription.VOCAB_EXT_A7` = `VOCAB_EXT_CHORD_TUPLET` + `layer.split` + the `.l2`
   form of every `note.*` / `rest.*` token. Both arms train on it; A6 checkpoints still load.
 - **G1c:** `tests/test_g1c_layers.py` (14 cases incl. an accidental in one layer only); G1 (CPM) unchanged at 99.557%.
+
+### 14.5 ml-cv-lead rulings on the generator smoke (2026-10-30)
+Smoke: 3 Bach chorales, seed `divisi-a7`. Rulings replace the matching lines of 3.1 and 3.3.
+1. **Template triads:** the realised share is reported, must be >= .30, and is broken down by voice and duration
+   class with its placement mix (design: >= .70 whole/half/dotted, <= .05 beamed). No bass inversions and no
+   crossing relief for templates. The template row's test-render n is reported; below 300 in-font heads it is
+   underpowered. (Smoke: .34; placement .65 long, 0 beamed.)
+2. **2+ ledger members:** the .15 target and the >= .12 corpus gate are dropped. Ledger-site members are exempt
+   from MAX_CROSSING and cross under their own cap (LEDGER_CROSS_CAP .05 of chord columns, reported). The corpus
+   floor is A6 v2's realised .045; below it a plain dyad may use A6's any-position ledger draw. The 7.1 ledger gate
+   (non-triad heads, 1+ ledgers) is unchanged; 2+ ledger heads stay report-only at n >= 300.
+3. **Layer x-order check:** layer 1 goes first when both layers have an event at the same MEI onset; each render
+   reports swaps, swaps drawn far apart, and different-onset cross-layer pairs drawn within 2 head widths
+   (`meta.json` `layer_order_audit`, summed in `render_summary.json`).
+4. **Real-stream view cap:** 32 views over 8 epochs per printed staff-system (the PDF strip and every camera strip
+   of that staff share one budget), not per strip image. Before training, report the unique staff-systems
+   (A7-data: 573 train-eligible), the realised real share and how many groups hit the cap.
+5. **Freeze blockers (open):** the 14.3 conflicts and a pre-registered real check set; the measured label-noise rate
+   (14.2 spot check); the test-render counts for layer bars (600 in-font / 300 Gootville), same-rhythm split bars,
+   layer ties and 2+ ledger heads, planned before training (3.3 forbids adding renders after).
+6. **Attribution:** A7 differs from A6 in triad share, density, templates, ledger sites, ties and the real stream at
+   once. A7 vs A6 is a ship comparison only; arm C vs CL stays a clean comparison for layers.
+
+### 14.6 20-piece smoke after the rulings (2026-10-30, first 20 Bach train pieces, seed `divisi-a7`, arm CL)
+- Builds 20/20; renders 100/100 pass (5 fonts), 0 OOV. A6 on the same pieces: 1034 chords, 879 dyads, 2+ ledger .046.
+- Chords 1281, triad share .293, dyads 906 (1.03 of A6 overall; small 2nd buckets swing +-15% at n ~50, so the
+  per-bucket .95 gate is judged on the full build only).
+- Templates .317 of triads (S 49/95, A 23/97, T 35/85, B 12/98); placement whole 22, half 33, dotted 25, quarter 38,
+  beamed 1 (.67 long; design .70: reported, not forced).
+- 2+ ledger members .043 (floor .045, steering target .08); ledger-site crossings .009 of chords (cap .05).
+- Layers: 68 bars (3.4 per piece), same-rhythm 11, mid-bar entries 12, layer-2 rests 18, layer-1 chords in 58;
+  layer ties 1 (1.5% of layer bars against 5%: underpowered, reported).
+- x-order audit: 340 two-layer measures, 159 same-onset swaps (5 drawn more than 2 heads apart), 0 swaps without an
+  MEI onset, 1 different-onset pair drawn within 2 heads.
+- **Test-render plan (estimate from these rates, 14 test-half pieces, 5 fonts):** about 48 Gootville and 190 in-font
+  layer bars per seed, so 7 seeds (`divisi-a7-t1`..`t7`) for >= 300 Gootville / >= 600 in-font layer bars; the same
+  7 seeds give about 1400 in-font 2+ ledger heads and about 1000 in-font template heads per seed. Layer ties stay
+  under any useful n (report only). To be confirmed against the actual test-half pieces before the build.

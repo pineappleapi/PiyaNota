@@ -16,7 +16,8 @@
               [5, ["52", "57", "61"]], [6, ["65", "69", "74"]]]
   },
   "It_Is_Not_Death_to_Die": {
-    "_note": "Only the 4-vocal-staff systems from p8 s2; earlier pages combine S/A on one staff, p14-15 is the cello part.",
+    "_note": "Only the 4-vocal-staff systems from p8 s2; earlier pages combine S/A on one staff, p14-15 is the cello part. Each system prints cello + 2 piano staves under the voices (extra_staves_below).",
+    "extra_staves_below": 3,
     "staves": [["1"], ["2"], ["3"], ["4"]],
     "pages": [[0, [{"first": "0", "staves": null}]], [8, [{"first": "60", "sys": 2}]], [9, ["63", "66"]],
               [10, ["69", "73"]], [11, ["76", "79"]], [12, ["82", "86"]], [13, ["90", "95"]]]

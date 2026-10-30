@@ -28,6 +28,7 @@ import argparse
 import collections
 import copy
 import json
+import math
 import random
 import statistics
 import sys
@@ -161,8 +162,12 @@ DIVISI_SUFFIX = "__divisi"
 # unchanged. `apply_a7` swaps the shared constants above; the rest are A7-only.
 A7_ARM: str | None = None                       # "C" (chords) or "CL" (chords + layers)
 P_TRIAD_A7 = 0.30
-LEDGER2_MEMBER_TARGET_A7 = 0.15
-LEDGER2_MEMBER_CAP_A7 = 0.20
+# ml-cv-lead 2026-10-30 (ruling 2): the design's .15 is out of reach at the conductor sites, so A7 keeps A6 v2's realised
+# 2+ ledger exposure (.045) as a floor; ledger-site members are exempt from MAX_CROSSING under their own cap.
+LEDGER2_MEMBER_TARGET_A7 = 0.08               # steering target (20-piece smoke: .06 realised .039); floor .045
+LEDGER2_FLOOR_A7 = 0.045
+LEDGER2_MEMBER_CAP_A7 = 0.08
+LEDGER_CROSS_CAP = 0.05                         # chord columns whose crossing member is a ledger-site member
 # Raised floor so every dyad bucket's train count stays >= .95 of A6 build v2 with triads at .30 (corpus gate 5.4):
 # A6 v2 had 16152 dyads in 18972 chords, so A7 needs about +16% chords; uniform(.32, .60) lifts the mean from .40 to .46.
 CHORD_DENSITY_A7 = (0.32, 0.60)
@@ -722,8 +727,11 @@ def _template_members(base: music21.pitch.Pitch, vi: int, t: float, fifths: int,
     leading_pc = (music21.key.KeySignature(fifths).asKey("major").tonic.pitchClass - 1) % 12
     cands: list[music21.pitch.Pitch] = []
     for pc, p in spelled.items():
+        if p.accidental is not None and p.accidental.alter not in (-1, 0, 1):
+            continue                                       # no double or microtonal accidental members
         for octave in range(base.octave - 2, base.octave + 3):
-            q = music21.pitch.Pitch(p.name + str(octave))
+            q = copy.deepcopy(p)                           # a name round-trip breaks on odd spellings (bwv121.6)
+            q.octave = octave
             if abs(q.ps - base.ps) <= OCTAVE_SEMITONES and q.nameWithOctave != base.nameWithOctave:
                 cands.append(q)
     options: list[tuple[list[music21.pitch.Pitch], float]] = []
@@ -969,8 +977,8 @@ def _draw_members(base: music21.pitch.Pitch, mi: int, offset: float, t: float, t
                   prefer_chromatic: bool, crossing: int, done: int, check_cross_relation: bool,
                   template_p: float = 0.0, cadence: bool = False,
                   texture: list[list[tuple[float, float, music21.pitch.Pitch]]] | None = None,
-                  prefer_ledger: bool = False
-                  ) -> tuple[list[music21.pitch.Pitch], list[str], str, bool] | str:
+                  prefer_ledger: bool = False, ledger_crossing: int = 0
+                  ) -> tuple[list[music21.pitch.Pitch], list[str], str, bool, bool] | str:
     """Members for a chord on `base` sounding over [t, t_end): (members, sources, bucket, crosses).
 
     `class_weights` cover A6_INTERVALS then the triad. Returns the bucket name instead when MAX_REDRAWS attempts all
@@ -992,6 +1000,21 @@ def _draw_members(base: music21.pitch.Pitch, mi: int, offset: float, t: float, t
     below = [p.ps for s, e, p in sounding[vi + 1] if s < t_end and e > t] if vi + 1 < len(sounding) else []
     weights = [w for _, _, w in A6_INTERVALS]
 
+    def crossing_ok(ms: list[music21.pitch.Pitch]) -> tuple[bool, bool, bool]:
+        """(within budget, a plain member crosses, a ledger-site member crosses). A7 ledger-site members cross under
+        LEDGER_CROSS_CAP instead of MAX_CROSSING (ml-cv-lead ruling 2); outside A7 this is the plain budget."""
+        def crosses(q: music21.pitch.Pitch) -> bool:
+            return bool((above and q.ps > min(above)) or (below and q.ps < max(below)))
+
+        def exempt(q: music21.pitch.Pitch) -> bool:
+            return (A7_ARM is not None and _is_ledger2(_drawn_position(q, vi))
+                    and _ledger_sites_ok(base, [q], vi, cadence))
+        plain = any(crosses(q) and not exempt(q) for q in ms)
+        ledger = any(crosses(q) and exempt(q) for q in ms)
+        ok = not (plain and crossing + 1 > MAX_CROSSING * (done + 1)) and not (
+            ledger and ledger_crossing + 1 > LEDGER_CROSS_CAP * (done + 1))
+        return ok, plain, ledger
+
     def fits(q: music21.pitch.Pitch, generic: int, chosen: list[music21.pitch.Pitch]) -> bool:
         semis = abs(q.ps - base.ps)
         if abs(q.alter) > 1 or (generic == 8 and semis != OCTAVE_SEMITONES) or (
@@ -1001,8 +1024,7 @@ def _draw_members(base: music21.pitch.Pitch, mi: int, offset: float, t: float, t
             return False
         if any(o.step == q.step and o.octave == q.octave and o.alter != q.alter for o in span_others):
             return False
-        crosses = bool((above and q.ps > min(above)) or (below and q.ps < max(below)))
-        return not (crosses and crossing + 1 > MAX_CROSSING * (done + 1))
+        return crossing_ok([q])[0]
 
     def copied_fits(ci: int, chosen: list[music21.pitch.Pitch]) -> list[music21.pitch.Pitch]:
         generic = A6_INTERVALS[ci][1]
@@ -1015,16 +1037,14 @@ def _draw_members(base: music21.pitch.Pitch, mi: int, offset: float, t: float, t
     # A7 template triad (template_p is 0 outside A7, so no extra draw happens there); random triad if none fits.
     if triad and template_p > 0 and drng.random() < template_p:
         def template_ok(tm: list[music21.pitch.Pitch]) -> bool:
-            crosses = any((above and p.ps > min(above)) or (below and p.ps < max(below)) for p in tm)
-            return (member_ok([base] + tm, vi) and _ledger_sites_ok(base, tm, vi, cadence)
-                    and not (crosses and crossing + 1 > MAX_CROSSING * (done + 1))
+            return (member_ok([base] + tm, vi) and _ledger_sites_ok(base, tm, vi, cadence) and crossing_ok(tm)[0]
                     and not any(q.step == p.step and q.octave == p.octave and q.alter != p.alter
                                 for p in tm for q in span_others))
 
         tm = _template_members(base, vi, t, fifths, texture or sounding, drng, template_ok)
         if tm is not None:
-            cross = any((above and p.ps > min(above)) or (below and p.ps < max(below)) for p in tm)
-            return tm, ["template", "template"], "triad_template", cross
+            _, cross, lcross = crossing_ok(tm)
+            return tm, ["template", "template"], "triad_template", cross, lcross
     for attempt in range(MAX_REDRAWS):
         classes = drng.choices(range(len(A6_INTERVALS)), weights=weights, k=2) if triad else [dyad]
         members: list[music21.pitch.Pitch] = []
@@ -1069,15 +1089,16 @@ def _draw_members(base: music21.pitch.Pitch, mi: int, offset: float, t: float, t
             sources.append(src)
         if len(members) != len(classes) or not member_ok([base] + members, vi):
             continue
-        if not _ledger_sites_ok(base, members, vi, cadence):
+        # Below the .045 floor a plain dyad may also use A6's any-position ledger member (ruling 2 fallback).
+        if not _ledger_sites_ok(base, members, vi, cadence) and not (prefer_ledger and not triad):
             continue
         if any(q.step == p.step and q.octave == p.octave and q.alter != p.alter
                for p, src in zip(members, sources) if check_cross_relation or src == "copied" for q in span_others):
             continue
-        cross = any((above and p.ps > min(above)) or (below and p.ps < max(below)) for p in members)
-        if cross and crossing + 1 > MAX_CROSSING * (done + 1):
+        ok, cross, lcross = crossing_ok(members)
+        if not ok:
             continue
-        return members, sources, bucket, cross
+        return members, sources, bucket, cross, lcross
     return bucket
 
 
@@ -1326,8 +1347,8 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                 m_done = scalars["free"] + scalars["copied"] + scalars["template"] + len(pending)   # committed + strip
                 site = drng.choices(of_cls, weights=[
                     (ACCIDENTAL_SITE_BOOST if boost and s.chromatic else 1.0)
-                    * _ledger2_boost(voice, _ledger_reachable(s.heads[0][1].pitch, vi) if A7_ARM is not None
-                                     else not NEAR_EDGE_STEPS[0] < _drawn_position(s.heads[0][1].pitch, vi)
+                    * _ledger2_boost(voice, (A7_ARM is not None and _ledger_reachable(s.heads[0][1].pitch, vi))
+                                     or not NEAR_EDGE_STEPS[0] < _drawn_position(s.heads[0][1].pitch, vi)
                                      < NEAR_EDGE_STEPS[1], l2_done, m_done)
                     for s in of_cls])[0]
                 pool.remove(site)
@@ -1365,14 +1386,15 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                 drawn = _draw_members(base_note.pitch, mi, offset, t, t_end, vi, parts, sounding, fifths[mi], drng,
                                       class_w, prefer_copied, boost, crossing, done, site.kind == "merge",
                                       template_p, cadence, texture,
-                                      A7_ARM is not None and l2_done < LEDGER2_MEMBER_TARGET * (m_done + 1))
+                                      A7_ARM is not None and l2_done < LEDGER2_MEMBER_TARGET * (m_done + 1),
+                                      scalars["ledger_crossing"] + sum(1 for r in records if r["lcross"]))
                 if isinstance(drawn, str):
                     stats["shortfall"][drawn] += 1
                     tries[id(site)] += 1
                     if tries[id(site)] < MAX_REDRAWS:
                         pool.append(site)          # scarce duration sites get another class, not lost
                     continue
-                members, sources, bucket, cross = drawn
+                members, sources, bucket, cross, lcross = drawn
                 placements = [(mi, offset)] if site.kind == "merge" else [
                     (hmi, float(measures[hmi].elementOffset(n))) for hmi, n in site.heads]
                 if _member_overrides_relied_accidental(members, placements, free_placed + [
@@ -1389,7 +1411,7 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                 stem = STEMLESS if site.cls == "whole" else _stem_direction(pitches, vi, drng, force_down)
                 common: dict[str, object] = {
                     "bucket": f"2nd_{stem}" if bucket == "2nd" else bucket, "stem": stem, "members": members,
-                    "sources": sources, "cross": cross, "fifths": fifths[mi],
+                    "sources": sources, "cross": cross, "lcross": lcross, "fifths": fifths[mi],
                     "est_acc": any(_chromatic(p, fifths[mi]) for p in pitches), "tie": site.kind == "tie",
                     "synth_tie": site.kind == "tie" and id(base_note) in synth_ids,
                     # Dyads only: the gate's 2nd_up/2nd_down buckets; a triad holding a 2nd is a "triad" (A6.3 review).
@@ -1459,11 +1481,15 @@ def inject_divisi(parts: list[music21.stream.Part], systems: list[list[int]], dr
                 sources_r: list[str] = r["sources"]  # type: ignore[assignment]
                 stats["class"][f"{voice}:{r['bucket']}"] += 1
                 stats["duration"][str(r["cls"])] += 1
+                if r["bucket"] == "triad_template":   # placement mix of templates (design 3.1; A7 only)
+                    stats.setdefault("template_duration", collections.Counter())[str(r["cls"])] += 1
                 stats["steps"].update(f"{voice}:{_drawn_position(p, vi)}" for p in members_r)
                 l2 = sum(_is_ledger2(_drawn_position(p, vi)) for p in members_r)
                 scalars["ledger2_members"] += l2
                 scalars.update(sources_r)
                 scalars["crossing"] += int(bool(r["cross"]))
+                if A7_ARM is not None:              # A6 summaries keep their keys
+                    scalars["ledger_crossing"] += int(bool(r["lcross"]))
                 scalars["ties"] += int(bool(r["tie"]))
                 scalars["synth_ties"] += int(bool(r["synth_tie"]))
                 if r["merge"]:
@@ -1539,8 +1565,11 @@ def _layer2_pitch(l1: music21.pitch.Pitch, mi: int, offset: float, t: float, t_e
     lo_ps = max([lo_ps] + below)
     options: dict[str, tuple[music21.pitch.Pitch, float]] = {}
     for q in span + [l1]:
+        if q.accidental is not None and q.accidental.alter not in (-1, 0, 1):
+            continue
         for octave in range(q.octave - 2, q.octave + 3):
-            c = music21.pitch.Pitch(q.name + str(octave))
+            c = copy.deepcopy(q)
+            c.octave = octave
             w = LAYER2_INTERVAL_WEIGHTS.get(int(round(l1.ps - c.ps)))
             if w is None or abs(c.alter) > 1 or not lo_ps <= c.ps <= hi_ps:
                 continue
@@ -1607,7 +1636,8 @@ def inject_layers(parts: list[music21.stream.Part], systems: list[list[int]], lr
                 else:
                     layered.append((vi, si, mi))
                     quota -= 1
-    want = min(int(LAYER_TIE_TARGET * len(layered) + lrng.random()), int(LAYER_TIE_CAP * len(layered)))
+    # Probabilistic rounding on both, so a piece with ~3 layer bars still ties sometimes (int() of the cap was 0).
+    want = min(int(LAYER_TIE_TARGET * len(layered) + lrng.random()), math.ceil(LAYER_TIE_CAP * len(layered)))
     order = list(layered)
     lrng.shuffle(order)
     for vi, si, mi in order:
@@ -1714,11 +1744,24 @@ def _layer_tie(m: music21.stream.Measure, nxt: music21.stream.Measure, vi: int, 
         end.tie, first[0].tie = music21.tie.Tie("start"), music21.tie.Tie("stop")
         return "in_layer"
     heads = list(nxt.notesAndRests)
-    if (heads and isinstance(heads[0], music21.note.Note) and heads[0].tie is None and nxt.elementOffset(heads[0]) == 0
-            and _plain(heads[0]) and heads[0].pitch.nameWithOctave == end.pitch.nameWithOctave):
-        end.tie, heads[0].tie = music21.tie.Tie("start"), music21.tie.Tie("stop")
-        return "unis"
-    return ""
+    if not (heads and isinstance(heads[0], music21.note.Note) and heads[0].tie is None
+            and nxt.elementOffset(heads[0]) == 0 and _plain(heads[0])):
+        return ""
+    # "unis.": layer 2 takes the next bar's first pitch, if that stays under layer 1 and above the voice below.
+    target = heads[0].pitch
+    off = float(voices["2"].elementOffset(end))
+    t, t_end = float(m.offset) + off, float(m.offset) + off + float(end.quarterLength)
+    over = [n for n in voices["1"].notesAndRests if not n.isRest
+            and float(voices["1"].elementOffset(n)) <= off < float(voices["1"].elementOffset(n)) + float(n.quarterLength)]
+    below = [p.ps for s, e, p in sounding[vi + 1] if s < t_end and e > t] if vi + 1 < len(sounding) else []
+    if not over or target.ps > min(p.ps for p in over[0].pitches) or (below and target.ps < max(below)):
+        return ""
+    if any(o.step == target.step and o.octave == target.octave and o.alter != target.alter
+           for o in _span_pitches(sounding, vi, t, t_end)):
+        return ""
+    end.pitch = copy.deepcopy(target)
+    end.tie, heads[0].tie = music21.tie.Tie("start"), music21.tie.Tie("stop")
+    return "unis"
 
 
 def build_piece(path: Path, composer: str, rng: random.Random, work_dir: Path,

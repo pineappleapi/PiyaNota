@@ -20,9 +20,11 @@ Lyrics, staff labels, titles, stems and ledger lines are drawn but carry no toke
 
 from __future__ import annotations
 
+import collections
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
+from fractions import Fraction
 from pathlib import Path
 
 SVG_NS = "{http://www.w3.org/2000/svg}"
@@ -92,6 +94,13 @@ class MeiIndex:
     ties: dict[str, tuple[str, str]]
     fermatas: dict[str, str]
     measure_ids: list[str]
+    onset: dict[str, Fraction] = field(default_factory=dict)   # event id -> onset in its bar (whole notes)
+
+
+# Two-layer x-order audit (ml-cv-lead ruling 3, 2026-10-30), reset and read by the caller per render:
+# swaps = layer-1 events moved ahead of a layer-2 event with the same MEI onset; swaps_far = of those, drawn more than
+# SAME_ONSET_HEADS apart; near_diff_onset = adjacent cross-layer events with different onsets drawn closer than that.
+LAYER_AUDIT: collections.Counter[str] = collections.Counter()
 
 
 def _cls(el: ET.Element) -> str:
@@ -127,7 +136,29 @@ def index_mei(mei_path: Path) -> MeiIndex:
     fermatas = {f.attrib[XML_ID]: f.attrib.get("startid", "").lstrip("#")
                 for f in root.iter(f"{MEI_NS}fermata") if XML_ID in f.attrib}
     measure_ids = [m.attrib.get(XML_ID, "") for m in root.iter(f"{MEI_NS}measure")]
-    return MeiIndex(staff_of=staff_of, ties=ties, fermatas=fermatas, measure_ids=measure_ids)
+    onset: dict[str, Fraction] = {}
+    for layer in root.iter(f"{MEI_NS}layer"):
+        _layer_onsets(layer, Fraction(0), onset)
+    return MeiIndex(staff_of=staff_of, ties=ties, fermatas=fermatas, measure_ids=measure_ids, onset=onset)
+
+
+def _layer_onsets(parent: ET.Element, t: Fraction, out: dict[str, Fraction]) -> Fraction:
+    """Onset of every event in a layer (chord members share the chord's); returns the time after the last one."""
+    for el in parent:
+        tag = el.tag.replace(MEI_NS, "")
+        if tag in ("beam", "tuplet"):
+            t = _layer_onsets(el, t, out)
+            continue
+        if tag not in ("note", "chord", "rest", "mRest", "space", "mSpace"):
+            continue
+        out[el.attrib.get(XML_ID, "")] = t
+        for n in el.iter(f"{MEI_NS}note"):
+            out[n.attrib.get(XML_ID, "")] = t
+        dur = el.attrib.get("dur")
+        if dur and "grace" not in el.attrib and tag not in ("mRest", "mSpace"):
+            base = Fraction(2) if dur == "breve" else Fraction(1, int(dur)) if dur.isdigit() else Fraction(0)
+            t += base * (2 - Fraction(1, 2 ** int(el.attrib.get("dots", "0"))))
+    return t
 
 
 def page_geometry(root: ET.Element) -> PageGeometry:
@@ -154,7 +185,8 @@ def _staff_lines(staff: ET.Element) -> StaffBox:
     return StaffBox(top=min(ys), bottom=max(ys), left=min(xs), right=max(xs))
 
 
-def _read_staff(staff: ET.Element, view: StaffView, drawn_notes: set[str]) -> StaffBox:
+def _read_staff(staff: ET.Element, view: StaffView, drawn_notes: set[str],
+                onset: dict[str, Fraction] | None = None) -> StaffBox:
     box = _staff_lines(staff)
     half = (box.bottom - box.top) / (2 * (STAFF_LINES - 1))
 
@@ -212,7 +244,7 @@ def _read_staff(staff: ET.Element, view: StaffView, drawn_notes: set[str]) -> St
         if len(layers) == 2 and child is layers[1]:
             continue
         if len(layers) == 2 and child is layers[0]:
-            _read_two_layers(layers, visit, view, half)
+            _read_two_layers(layers, visit, view, half, onset or {})
         else:
             visit(child)
     return box
@@ -244,12 +276,15 @@ def _layer_events(layer: ET.Element) -> list[ET.Element]:
     return out
 
 
-def _read_two_layers(layers: list[ET.Element], visit, view: StaffView, half: float) -> None:  # noqa: ANN001
+def _read_two_layers(layers: list[ET.Element], visit, view: StaffView, half: float,  # noqa: ANN001
+                     onset: dict[str, Fraction]) -> None:
     """A two-layer measure (divisi A7): events of both layers in drawn-x order, layer 1 first when the two layers
-    draw an event at the same onset (within SAME_ONSET_HEADS head widths), as the labels order them. Anything else in
-    the layers (beam groups, clef changes) is read as usual; counts do not depend on order."""
+    have an event at the same MEI onset, as the labels order them (Verovio may draw a layer-2 unison or 2nd to the
+    left). Without an MEI onset the x tolerance decides. Anything else in the layers (beam groups, clef changes) is
+    read as usual; counts do not depend on order. Swaps are counted in LAYER_AUDIT."""
     tol = SAME_ONSET_HEADS * 2.4 * half
-    chunks: list[tuple[float, int, int, StaffView]] = []
+    LAYER_AUDIT["two_layer_measures"] += 1
+    chunks: list[tuple[float, int, int, StaffView, Fraction | None]] = []
     for li, layer in enumerate(layers):
         events = _layer_events(layer)
         for el in layer.iter(f"{SVG_NS}g"):
@@ -258,20 +293,27 @@ def _read_two_layers(layers: list[ET.Element], visit, view: StaffView, half: flo
         for k, el in enumerate(events):
             sub = StaffView()
             visit(el, sub)
-            chunks.append((_event_x(el), li, k, sub))
+            chunks.append((_event_x(el), li, k, sub, onset.get(el.attrib.get("data-id", ""))))
         for el in layer:
             if _cls(el) not in LAYER_EVENT_CLASSES and _cls(el) != "beam":
                 visit(el)
     chunks.sort(key=lambda c: c[0])
+    for a, b in zip(chunks, chunks[1:]):
+        if a[1] != b[1] and b[0] - a[0] < tol and a[4] is not None and a[4] != b[4]:
+            LAYER_AUDIT["near_diff_onset"] += 1
     changed = True
-    while changed:   # bubble a layer-1 event ahead of a layer-2 event drawn at the same onset
+    while changed:   # bubble a layer-1 event ahead of a layer-2 event at the same onset
         changed = False
         for i in range(len(chunks) - 1):
             a, b = chunks[i], chunks[i + 1]
-            if a[1] == 1 and b[1] == 0 and b[0] - a[0] < tol:
+            same = a[4] == b[4] if a[4] is not None and b[4] is not None else b[0] - a[0] < tol
+            if a[1] == 1 and b[1] == 0 and same:
                 chunks[i], chunks[i + 1] = b, a
                 changed = True
-    for _, _, _, sub in chunks:
+                LAYER_AUDIT["swaps"] += 1
+                LAYER_AUDIT["swaps_far"] += int(b[0] - a[0] >= tol)
+                LAYER_AUDIT["swaps_no_onset"] += int(a[4] is None or b[4] is None)
+    for *_, sub, _ in chunks:
         view.clefs += sub.clefs
         view.accidentals += sub.accidentals
         view.notes += sub.notes
@@ -295,7 +337,7 @@ def read_page(svg_text: str, mei: MeiIndex) -> tuple[list[DrawnSystem], PageGeom
             for staff in (e for e in measure if _cls(e) == "staff"):
                 n = staff.attrib.get("data-n", "")
                 staff_ns.append(n)
-                box = _read_staff(staff, staves.setdefault(n, StaffView()), drawn_notes)
+                box = _read_staff(staff, staves.setdefault(n, StaffView()), drawn_notes, mei.onset)
                 old = boxes.get(n)
                 boxes[n] = box if old is None else StaffBox(min(old.top, box.top), max(old.bottom, box.bottom),
                                                             min(old.left, box.left), max(old.right, box.right))
