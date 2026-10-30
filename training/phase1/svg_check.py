@@ -161,7 +161,7 @@ def _read_staff(staff: ET.Element, view: StaffView, drawn_notes: set[str]) -> St
     def pos(use: ET.Element) -> int:
         return round((box.bottom - _use_y(use)) / half)
 
-    def visit(el: ET.Element) -> None:
+    def visit(el: ET.Element, view: StaffView = view) -> None:
         c = _cls(el)
         if c == "clef":
             for use in el.findall(f"{SVG_NS}use"):
@@ -198,17 +198,86 @@ def _read_staff(staff: ET.Element, view: StaffView, drawn_notes: set[str]) -> St
             # Verovio draws chord members in MEI order; labels list heads and accidentals bottom to top.
             n_notes, n_accids = len(view.notes), len(view.accidentals)
             for child in el:
-                visit(child)
+                visit(child, view)
             view.notes[n_notes:] = sorted(view.notes[n_notes:])
             view.accidentals[n_accids:] = sorted(view.accidentals[n_accids:], key=lambda a: a[1])
             view.counts["chords"] += 1
             return
         for child in el:
-            visit(child)
+            visit(child, view)
 
+    layers = [c for c in staff if _cls(c) == "layer" and any(
+        _cls(e) in LAYER_EVENT_CLASSES for e in c.iter(f"{SVG_NS}g"))]
     for child in staff:
-        visit(child)
+        if len(layers) == 2 and child is layers[1]:
+            continue
+        if len(layers) == 2 and child is layers[0]:
+            _read_two_layers(layers, visit, view, half)
+        else:
+            visit(child)
     return box
+
+
+LAYER_EVENT_CLASSES: frozenset[str] = frozenset({"note", "chord", "rest", "mRest"})
+SAME_ONSET_HEADS = 2.0      # notehead widths (~2.4 half-spaces each): closer cross-layer events share an onset
+# (Verovio offsets a unison or 2nd between layers by up to ~1.5 heads, a whole note left of a half; smoke 2026-10-30)
+
+
+def _event_x(el: ET.Element) -> float:
+    """x of the notehead (first chord member) or of the rest glyph; an accidental drawn left of it is not used."""
+    head = next((g for g in el.iter(f"{SVG_NS}g") if _cls(g) == "notehead"), None)
+    use = next((head if head is not None else el).iter(f"{SVG_NS}use"), None)
+    m = TRANSLATE_RE.search(use.attrib.get("transform", "")) if use is not None else None
+    if m is None:
+        raise ValueError(f"layer event without a glyph position: {_cls(el)}")
+    return float(m.group(1))
+
+
+def _layer_events(layer: ET.Element) -> list[ET.Element]:
+    """Top-level drawn events of a layer in drawing order, beams opened (a chord is one event)."""
+    out: list[ET.Element] = []
+    for el in layer:
+        if _cls(el) in LAYER_EVENT_CLASSES:
+            out.append(el)
+        elif _cls(el) == "beam":
+            out += _layer_events(el)
+    return out
+
+
+def _read_two_layers(layers: list[ET.Element], visit, view: StaffView, half: float) -> None:  # noqa: ANN001
+    """A two-layer measure (divisi A7): events of both layers in drawn-x order, layer 1 first when the two layers
+    draw an event at the same onset (within SAME_ONSET_HEADS head widths), as the labels order them. Anything else in
+    the layers (beam groups, clef changes) is read as usual; counts do not depend on order."""
+    tol = SAME_ONSET_HEADS * 2.4 * half
+    chunks: list[tuple[float, int, int, StaffView]] = []
+    for li, layer in enumerate(layers):
+        events = _layer_events(layer)
+        for el in layer.iter(f"{SVG_NS}g"):
+            if _cls(el) == "beam":
+                view.counts["beams"] += 1
+        for k, el in enumerate(events):
+            sub = StaffView()
+            visit(el, sub)
+            chunks.append((_event_x(el), li, k, sub))
+        for el in layer:
+            if _cls(el) not in LAYER_EVENT_CLASSES and _cls(el) != "beam":
+                visit(el)
+    chunks.sort(key=lambda c: c[0])
+    changed = True
+    while changed:   # bubble a layer-1 event ahead of a layer-2 event drawn at the same onset
+        changed = False
+        for i in range(len(chunks) - 1):
+            a, b = chunks[i], chunks[i + 1]
+            if a[1] == 1 and b[1] == 0 and b[0] - a[0] < tol:
+                chunks[i], chunks[i + 1] = b, a
+                changed = True
+    for _, _, _, sub in chunks:
+        view.clefs += sub.clefs
+        view.accidentals += sub.accidentals
+        view.notes += sub.notes
+        view.rest_kinds += sub.rest_kinds
+        for k, v in sub.counts.items():
+            view.counts[k] += v
 
 
 def read_page(svg_text: str, mei: MeiIndex) -> tuple[list[DrawnSystem], PageGeometry]:
@@ -259,8 +328,11 @@ def label_view(tokens: list[str]) -> StaffView:
     for tok in tokens:
         m = TOKEN_RE.match(tok)
         if m is None:
+            if tok == "layer.split":     # opens a two-layer bar (A7); draws nothing
+                continue
             raise ValueError(f"token without a position suffix: {tok}")
         name, suffix = m.group(1), m.group(2)
+        name = name.replace(".l2", "") if name.startswith(("note.", "rest.")) else name   # layer-2 class draws the same
         if tok.startswith("clef."):
             view.clefs.append(2 * (int(tok.split("-L")[1]) - 1))
         elif name.startswith("accidental."):

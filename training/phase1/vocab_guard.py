@@ -21,22 +21,23 @@ OOV_PREFIX = "oov:"
 
 
 @functools.cache
-def crnn_vocab(vocab_ext: bool = False) -> frozenset[str]:
-    """The CRNN output tokens; with vocab_ext, the divisi arm's VOCAB_EXT_CHORD_TUPLET. Imported lazily because
-    stage3 pulls in torch (about 8 s)."""
+def crnn_vocab(vocab_ext: bool | str = False) -> frozenset[str]:
+    """The CRNN output tokens; with vocab_ext, the divisi arm's VOCAB_EXT_CHORD_TUPLET, or with "a7" the divisi A7
+    VOCAB_EXT_A7 (layer tokens). Imported lazily because stage3 pulls in torch (about 8 s)."""
     if str(REPO) not in sys.path:
         sys.path.insert(0, str(REPO))
-    from stage3_transcription import VOCAB, VOCAB_EXT_CHORD_TUPLET  # noqa: PLC0415 - deferred heavy import
-    return frozenset(VOCAB_EXT_CHORD_TUPLET if vocab_ext else VOCAB) - CTC_SPECIAL_TOKENS
+    from stage3_transcription import VOCAB, VOCAB_EXT_A7, VOCAB_EXT_CHORD_TUPLET  # noqa: PLC0415 - heavy import
+    table = VOCAB_EXT_A7 if vocab_ext == "a7" else VOCAB_EXT_CHORD_TUPLET if vocab_ext else VOCAB
+    return frozenset(table) - CTC_SPECIAL_TOKENS
 
 
-def oov_tokens(tokens: list[str], vocab_ext: bool = False) -> list[str]:
+def oov_tokens(tokens: list[str], vocab_ext: bool | str = False) -> list[str]:
     """Distinct out-of-vocabulary tokens in label order."""
     vocab = crnn_vocab(vocab_ext)
     return list(dict.fromkeys(t for t in tokens if t not in vocab))
 
 
-def apply_guard(label_rows: list[dict[str, object]], vocab_ext: bool = False) -> collections.Counter[str]:
+def apply_guard(label_rows: list[dict[str, object]], vocab_ext: bool | str = False) -> collections.Counter[str]:
     """Mark each label row usable or quarantined in place; return OOV token occurrence counts.
 
     A row gets `oov` (its distinct OOV tokens) and `quarantine` ("oov:<first OOV token>" or None).

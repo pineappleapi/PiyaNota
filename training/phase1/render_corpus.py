@@ -82,7 +82,7 @@ def labels_for(mei_path: Path) -> list[list[list[str]]]:
 
 
 def render_one(mei_path: Path, plan: dict[str, object], font: str, scale: int, out_dir: Path,
-               prov: dict[str, object], vocab_ext: bool = False) -> dict[str, object]:
+               prov: dict[str, object], vocab_ext: bool | str = False) -> dict[str, object]:
     """Render, label and check one (piece, font). Returns the check summary; writes everything to out_dir."""
     out_dir.mkdir(parents=True, exist_ok=True)
     options = {**BASE_OPTIONS, "font": font, "scale": scale}
@@ -101,7 +101,7 @@ def render_one(mei_path: Path, plan: dict[str, object], font: str, scale: int, o
 
 
 def check_render(mei_path: Path, plan: dict[str, object], options: dict[str, object], svgs: list[str],
-                 out_dir: Path, prov: dict[str, object], vocab_ext: bool = False) -> dict[str, object]:
+                 out_dir: Path, prov: dict[str, object], vocab_ext: bool | str = False) -> dict[str, object]:
     """Label the drawn pages, run the SVG check and the vocabulary guard, and write labels/check/meta.
 
     Split from `render_one` so `recheck_renders.py` can re-check existing SVGs against the current converter and
@@ -199,7 +199,11 @@ def main() -> None:
     parser.add_argument("--summary-name", default="render_summary.json")
     parser.add_argument("--vocab-ext", action="store_true",
                         help="divisi arm: guard against VOCAB_EXT_CHORD_TUPLET (chordnote tokens are in vocabulary)")
+    parser.add_argument("--vocab-a7", action="store_true",
+                        help="divisi A7: guard against VOCAB_EXT_A7 (layer.split and .l2 tokens are in vocabulary)")
     args = parser.parse_args()
+    if args.vocab_a7:
+        args.vocab_ext = "a7"
     pool = tuple(f for f in FONTS if f not in args.exclude_font)
     if args.fonts_per_piece > len(pool):
         parser.error(f"--fonts-per-piece {args.fonts_per_piece} exceeds the {len(pool)} fonts left after --exclude-font")
