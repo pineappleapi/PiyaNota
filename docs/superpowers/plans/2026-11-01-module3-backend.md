@@ -112,6 +112,13 @@ Expected: container id printed; `docker exec piya-pg-test pg_isready` → "accep
 - [ ] **Step 5: Run** `pytest backend/tests -v` → all PASS.
 - [ ] **Step 6: Commit** `PIYA-318: backend scaffold, config, JSON error envelope, test harness`.
 
+
+**Amendments — backend-lead review 2026-11-01 (binding; override the text above where they differ):**
+- Settings changes: `argon2_time_cost = 2`, `argon2_memory_kib = 19456`; `background_interval_s = 600`; add `signup_ip_limit = 10` per 3600 s; add `media_url_ttl_seconds = 21600` (audio, page images, timing) while `signed_url_ttl_seconds = 3600` stays for thumbnails (PIYA-308 AC9); add `db_pool_max_size = 6`; add `db_prepare_threshold: int | None = None`.
+- `db.init_pool`: `ConnectionPool(url, min_size=0, max_size=db_pool_max_size, max_idle=240, check=ConnectionPool.check_connection, kwargs={"prepare_threshold": db_prepare_threshold})`. Use Neon's **direct (unpooled)** URL; `prepare_threshold=None` keeps it safe if a pooled URL is ever used (PgBouncer transaction mode).
+- `/healthz` never touches the database (UptimeRobot pings it every 5 min; Neon must be allowed to scale to zero).
+- `iso_z(dt)` lives here in `envelope.py` (moved from Task 5) and always converts with `.astimezone(timezone.utc)`.
+- Never log `str(exc)` of a psycopg integrity error (it contains `Key (email)=(...)`); the 500 handler logs `type(exc).__name__` and, for psycopg errors, only `exc.diag.constraint_name`. Add `test_integrity_error_not_logged_verbatim`.
 ---
 
 ### Task 3: Migrations runner + initial schema
@@ -140,6 +147,11 @@ Expected: container id printed; `docker exec piya-pg-test pg_isready` → "accep
 - [ ] **Step 4: Run** → PASS. Also `python -m backend.migrate status` against `TEST_DATABASE_URL` prints both columns.
 - [ ] **Step 5: Commit** `PIYA-311: initial schema migration and PIYA-312 migration runner`.
 
+
+**Amendments — backend-lead review 2026-11-01 (binding; override the text above where they differ):**
+- The ERD (`docs/backend/erd.md`) wins on names: the throttle column is `subject_key`, not `key`.
+- Add a partial unique index `password_reset_tokens (user_id) WHERE used_at IS NULL` (at most one live reset code per user) to the migration **and** to `docs/backend/erd.md`, plus test `test_one_live_reset_code_per_user`.
+- Add a **Lock order** note to `docs/backend/erd.md`: any transaction that locks both a score and its jobs locks `scores ... FOR UPDATE` first, then `jobs ... FOR UPDATE`, then re-checks job status (PIYA-309 delete, V2 B5 PATCH, PIYA-321 completion, PIYA-114 cancel).
 ---
 
 ### Task 4: Security core — hashing, sessions, auth decorator, validators, throttle
@@ -180,6 +192,10 @@ Expected: container id printed; `docker exec piya-pg-test pg_isready` → "accep
 - [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS.
 - [ ] **Step 5: Commit** `PIYA-313: argon2 hashing, PIYA-314 sessions, auth decorator and durable throttles`.
 
+
+**Amendments — backend-lead review 2026-11-01 (binding; override the text above where they differ):**
+- Add a process-wide `security.HASH_SEMAPHORE = threading.BoundedSemaphore(2)` held around every argon2 hash/verify (512 MB instance).
+- Add `security.verify_dummy() -> None`: runs `verify_password` against a fixed module-level hash, for unknown-email logins (equal timing).
 ---
 
 ### Task 5: Sign-up and login (PIYA-301, PIYA-302, V2 B1)
@@ -207,6 +223,11 @@ Behaviour (codes the app depends on): signup 201 "Account created"; 400 `missing
 - [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS.
 - [ ] **Step 5: Commit** `PIYA-301: sign-up and PIYA-302 login with V2 login wait`.
 
+
+**Amendments — backend-lead review 2026-11-01 (binding; override the text above where they differ):**
+- **Unknown email (V2 B1.1):** an unknown email also gets `record_failure(scope="login_email")`, the `login_ip` hit, and `security.verify_dummy()`, then the same generic 401. Add `test_login_unknown_email_also_backs_off` (unknown email: second attempt gives 429, same as a known one).
+- **Sign-up limit:** per-IP window `signup_ip` (`signup_ip_limit` per 3600 s) checked before hashing, giving 429 `rate_limited`; every sign-up attempt records a hit. Add `test_signup_ip_limit`.
+- Never log the exception text of the `UniqueViolation` caught for the 409 (it contains the email).
 ---
 
 ### Task 6: Password reset by emailed code (PIYA-303, PIYA-304, V2 B3/B4)
@@ -231,6 +252,13 @@ Behaviour: **request** — 400 `missing_field`/`invalid_email`; then throttle (w
 - [ ] **Step 2–4:** run → FAIL, implement, run → PASS.
 - [ ] **Step 5: Commit** `PIYA-303: reset code request and PIYA-304 confirm with V2 limits`.
 
+
+**Amendments — backend-lead review 2026-11-01 (binding; override the text above where they differ):**
+- Reset request and confirm treat a user with `deleted_at` set exactly like an unregistered email (404 `email_not_registered` / 410).
+- Lock the user row (`SELECT ... FROM users WHERE id = %s FOR UPDATE`) before invalidating old codes and inserting the new one (with the Task 3 partial unique index this guarantees one live code).
+- Record `reset_code_ip` hits on **wrong codes only** (V2 B4.8), not on every confirm.
+- `MailError` messages never include the recipient address; logs use `keyed_hash(email)`.
+- Task 14 sends one test reset code to a Gmail inbox and a Yahoo inbox; if either lands in spam, `docs/backend/deploy.md` tells testers to check spam.
 ---
 
 ### Task 7: Logout, account info, change password, delete account (PIYA-305/306/307/322)
@@ -250,6 +278,9 @@ Behaviour: **logout** `POST /api/auth/logout` — `require_auth`; set `revoked_a
 - [ ] **Step 2–4:** FAIL → implement → PASS.
 - [ ] **Step 5: Commit** `PIYA-305: logout, PIYA-306 account info, PIYA-322 change password, PIYA-307 delete account`.
 
+
+**Amendments — backend-lead review 2026-11-01 (binding; override the text above where they differ):**
+- `DELETE /api/account`: wrong passwords use the same `change_pw` window (5 per user per 900 s), giving 429 `rate_limited` with `Retry-After`. Add `test_delete_account_rate_limit`.
 ---
 
 ### Task 8: Storage, deletion queue, account purge (PIYA-309 AC3, PIYA-319)
@@ -271,6 +302,12 @@ Behaviour: **logout** `POST /api/auth/logout` — `require_auth`; set `revoked_a
 - [ ] **Step 2–4:** FAIL → implement → PASS.
 - [ ] **Step 5: Commit** `PIYA-319: storage layer, durable deletion queue and account purge`.
 
+
+**Amendments — backend-lead review 2026-11-01 (binding; override the text above where they differ):**
+- `signed_url(key: str, *, ttl_seconds: int | None = None)`; default is `signed_url_ttl_seconds`. The B2 client gets `region_name` parsed from the endpoint (`s3.<region>.backblazeb2.com`), required for s3v4 presigning.
+- Background loop interval = `background_interval_s` (600 s). PIYA-309 AC3 only needs deletions *queued* within 60 s (the row insert does that); PIYA-319 allows 24 h.
+- `background.run_prune(conn) -> int` (also called by the loop): deletes `throttle_hits` older than 3600 s, `sessions` expired or revoked more than 1 day ago, `password_reset_tokens` expired or used more than 1 day ago, `throttle_backoff` rows idle more than 24 h. Add `test_prune_old_rows`.
+- `background.reserve_keys(keys: Iterable[str]) -> None`: commits `storage_deletions` rows for keys about to be uploaded with `next_attempt_at = now() + interval '1 hour'`; `background.release_keys(conn, keys: Iterable[str]) -> None` deletes those rows inside the transaction that makes the keys referenced. A crash between upload and commit then self-heals through the queue. Add `test_reserved_keys_self_heal`.
 ---
 
 ### Task 9: Upload intake — standardization, PDF rasterization, job creation (PIYA-101, 310, 320, 323)
@@ -311,6 +348,16 @@ Error precedence (PIYA-101 AC9, implement in this order): 401 → 429 `rate_limi
 - [ ] **Step 3: Run** → FAIL. **Step 4: Implement.** **Step 5: Run** → PASS.
 - [ ] **Step 6: Commit** `PIYA-101: upload intake with PIYA-320 standardization, PIYA-310 PDF and PIYA-323 tempo`.
 
+
+**Amendments — backend-lead review 2026-11-01 (binding; override the text above where they differ):**
+- **Concurrency/memory (Render free, about 0.1 CPU and 512 MB):** one process-wide `standardize.INTAKE_SEMAPHORE = threading.BoundedSemaphore(1)` held around all decoding, standardization and rasterization (also serializes pdfium, which is not thread-safe).
+- JPEG decode: `img.draft("RGB", (standard_max_side_px, standard_max_side_px))` before `load()`; set `Image.MAX_IMAGE_PIXELS = settings.max_image_pixels` and turn `DecompressionBombError`/`DecompressionBombWarning` into 413 `image_pixels_too_large`.
+- `rasterize_pdf` becomes `iter_pdf_pages(data: bytes) -> Iterator[PIL.Image.Image]` (page count checked first, giving 400 `too_many_pages`), rendering each page at a scale capped so the long side is at most `standard_max_side_px` (no PNG round-trip, no list in memory). `standardize_image` gets a sibling `standardize_pil(img: PIL.Image.Image, page_index: int) -> StandardPage`.
+- 422-before-`too_many_pages` precedence: for more than 20 image parts, the 422 check uses header-only `Image.open(...).verify()`, not a full decode (list as a deviation in the Task 14 contract notes if behaviour differs).
+- `replacesJobId` is the app's string ref `"job_<n>"` (`score_upload_api.dart:152`): parse with `routes_jobs.parse_job_ref`; malformed or unknown gives 404 `job_not_found`; echo back as the `"job_<n>"` string. `ScoreMetadata.replaces_job_id` stays `int | None` (the parsed id). Add `test_retake_ref_string` (`replacesJobId=job_<id>` gives 202) and `test_retake_ref_malformed_404` (`replacesJobId=abc` gives 404).
+- Orphan safety: `create_job` calls `background.reserve_keys(keys)` before the first `put`, and `background.release_keys` inside the job-creation transaction.
+- **Benchmark gate (new step, after `standardize.py` passes its tests, before the routes):** `backend/scripts/bench_intake.py` times standardization of 20 generated 12 MP JPEGs and a generated 20-page PDF; run it in `docker run --cpus 0.1 --memory 512m` (python:3.12-slim with backend/requirements.txt). Record worst-case seconds and peak RSS in the task report. **If 20 images take more than 15 s, STOP and report BLOCKED with the numbers**; the controller asks the user (raise the app's image-submit `receiveTimeout` via frontend-lead, or a paid instance). Record the result against PIYA-101 AC4 and PIYA-310 AC6.
+- `queue_capacity = 50` counts all queued jobs and nothing drains them without the worker; Task 14 documents this in `deploy.md` (operator must complete or cancel jobs).
 ---
 
 ### Task 10: Job status and cancel (PIYA-102, PIYA-114)
@@ -326,6 +373,10 @@ Behaviour: `GET /api/jobs/<ref>` — malformed ref → 404 `job_not_found`; read
 - [ ] **Step 2–4:** FAIL → implement → PASS.
 - [ ] **Step 5: Commit** `PIYA-102: job status and PIYA-114 cancel with central record scoping`.
 
+
+**Amendments — backend-lead review 2026-11-01 (binding; override the text above where they differ):**
+- Cancel uses `owned_job(conn, id, for_update=True)` and follows the ERD lock order (lock the job's score first if it has one).
+- Preflight ruling carried: the retake ownership check written inline in Task 9 is switched here to `access.owned_job`.
 ---
 
 ### Task 11: Job completion (PIYA-321) + operator CLI
@@ -343,6 +394,11 @@ Behaviour: `GET /api/jobs/<ref>` — malformed ref → 404 `job_not_found`; read
 - [ ] **Step 2–4:** FAIL → implement → PASS.
 - [ ] **Step 5: Commit** `PIYA-321: atomic job completion and operator jobs CLI`.
 
+
+**Amendments — backend-lead review 2026-11-01 (binding; override the text above where they differ):**
+- Lock order (ERD): read the job without a lock to find any old score, then `scores ... FOR UPDATE`, then `jobs ... FOR UPDATE` (new job, then old job), then re-check status. A job that no longer exists (account purged) is treated like `cancelled` (return None).
+- CLI `complete` adds `--report FILE` (JSON from `stage5_synthesis.run_full_pipeline_with_report()`) supplying `review`, `mutedMeasures`, `failedVoices`, `failedVoiceCauses`; without it `review` defaults to `{"reviewNeeded": true, "reasons": ["clef_key_unvalidated"], "items": [], "truncated": false}`. It rejects `.mid` files (audio must be `.mp3`). Uploads use `reserve_keys`/`release_keys`.
+- Coordinate space: `fetch-pages` downloads the standardized pages; the CLI help text and `docs/backend/deploy.md` state that the timing file's x/y must be measured on those same pixels.
 ---
 
 ### Task 12: Score endpoints — library, result, edit, delete (PIYA-308, 103-by-score, B5, 309)
@@ -359,6 +415,11 @@ Behaviour: **GET /api/scores** — `search` optional: blank = none, > 100 chars 
 - [ ] **Step 2–4:** FAIL → implement → PASS.
 - [ ] **Step 5: Commit** `PIYA-308: score library, results by score, V2 edit and PIYA-309 delete`.
 
+
+**Amendments — backend-lead review 2026-11-01 (binding; override the text above where they differ):**
+- PATCH and DELETE follow the ERD lock order (score `FOR UPDATE` first, then its jobs). PATCH's `UPDATE jobs ... WHERE score_id = %s AND user_id = %s` includes `user_id`.
+- Result URLs for audio, page images and timing use `media_url_ttl_seconds`; thumbnails keep `signed_url_ttl_seconds`.
+- A queued retake blocks PATCH with 409 `retake_in_progress` until it is completed or cancelled (no worker); documented in Task 14 `deploy.md`.
 ---
 
 ### Task 13: Hardening — cross-user test, HTTPS enforcement, secrets check (PIYA-315 AC3/AC4, 317, 318)
@@ -373,6 +434,10 @@ Behaviour: when `require_https`, every request except `/healthz` whose scheme (a
 - [ ] **Step 2–4:** FAIL → implement → PASS. Run the whole suite: `pytest backend/tests -v` → all PASS.
 - [ ] **Step 5: Commit** `PIYA-315: cross-user denial test, PIYA-317 HTTPS check, PIYA-318 secrets check`.
 
+
+**Amendments — backend-lead review 2026-11-01 (binding; override the text above where they differ):**
+- Add `GET /api/scores` (list contains only the caller's scores) to the cross-user test (PIYA-308 AC2).
+- `check_secrets.py` also flags Backblaze key patterns (`K00` followed by 20+ base64 characters) and Brevo API keys (`xkeysib-`).
 ---
 
 ### Task 14: Deploy to Render + live contract smoke (NEEDS USER for accounts)
@@ -389,6 +454,12 @@ Behaviour: when `require_https`, every request except `/healthz` whose scheme (a
 - [ ] **Step 4: Phone check with the real app** (user): `flutter build apk --release --dart-define=API_BASE_URL=https://<service>.onrender.com --dart-define=USE_FAKE_AUTH=false`; verify sign-up, login, reset code email, change password, capture upload (job shows "queued"), library after `jobs_cli complete` of that job, playback, edit, delete. Record results in the commit message / execution report.
 - [ ] **Step 5: Commit** `PIYA-401: Render deploy, live contract smoke, implemented-contract notes`.
 
+
+**Amendments — backend-lead review 2026-11-01 (binding; override the text above where they differ):**
+- Pin the Docker base image to an exact patch tag (e.g. `python:3.12.x-slim`, chosen at build time) (NFR-11).
+- **Proxy/IP:** a temporary debug endpoint, enabled only by env `PIYA_DEBUG_HEADERS=1` and removed afterwards, lets the smoke script print the `X-Forwarded-For` / `True-Client-IP` / `CF-Connecting-IP` headers the deployed app sees. Set `trusted_proxy_count` (or a trusted client-IP header) from that so per-IP limits see each tester's real IP; record the result in `deploy.md`.
+- `deploy.md` verify-at-signup list adds: Render free CPU share; Neon compute-hour allowance (loop every 10 min, pool `min_size=0`); B2 Class B daily transaction cap (about 2,500/day free; set caps/alerts in the B2 console; every presigned GET and audio range request counts); Brevo free-mail sender deliverability.
+- `deploy.md` documents operator duties: complete or cancel queued jobs (global `queue_capacity`); queued retakes block score edits.
 ---
 
 ### Task 15: Whole-branch review
