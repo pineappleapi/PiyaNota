@@ -12,7 +12,7 @@ from flask.testing import FlaskClient
 
 from backend import db
 from backend.config import Settings, load_settings
-from backend.envelope import iso_z
+from backend.envelope import ApiError, iso_z, ok
 from backend.validation import json_body
 
 
@@ -40,6 +40,50 @@ def test_method_not_allowed_json(client: FlaskClient) -> None:
     response = client.post("/healthz")
     assert response.status_code == 405
     assert response.get_json()["error"]["code"] == "method_not_allowed"
+    assert "GET" in response.headers["Allow"]
+
+
+def test_success_envelope_keys(app: Flask) -> None:
+    @app.get("/_probe/ok")
+    def probe_ok() -> tuple[object, int]:
+        return ok({"x": 1}, 201, "made")
+
+    response = app.test_client().get("/_probe/ok")
+    assert response.status_code == 201
+    assert response.get_json() == {"data": {"x": 1}, "success": True, "status": 201, "message": "made"}
+
+
+def test_error_envelope_keys(app: Flask) -> None:
+    @app.get("/_probe/err")
+    def probe_err() -> None:
+        raise ApiError(409, "conflict", "nope", field="email", page_index=2, retry_after=30)
+
+    response = app.test_client().get("/_probe/err")
+    assert response.status_code == 409
+    assert response.headers["Retry-After"] == "30"
+    assert response.get_json() == {
+        "data": None,
+        "success": False,
+        "status": 409,
+        "message": "nope",
+        "error": {
+            "code": "conflict",
+            "field": "email",
+            "pageIndex": 2,
+            "retryAfterSeconds": 30,
+        },
+    }
+
+
+def test_request_too_large_json_413(app: Flask) -> None:
+    _add_json_probe(app)
+    app.config["MAX_CONTENT_LENGTH"] = 64
+    response = app.test_client().post(
+        "/_probe/json", data='{"pad": "' + "x" * 200 + '"}', content_type="application/json"
+    )
+    assert response.status_code == 413
+    assert response.is_json
+    assert response.get_json()["error"]["code"] == "request_too_large"
 
 
 @pytest.mark.parametrize("payload", ["[]", "null", '"x"', "{bad"])
@@ -157,14 +201,16 @@ def test_dev_secrets_have_defaults() -> None:
 
 
 def test_pool_recovers_after_backend_terminated(app: Flask, settings: Settings) -> None:
-    with pytest.raises(psycopg.OperationalError):
-        with db.transaction() as conn:
-            with psycopg.connect(settings.database_url, autocommit=True) as admin:
-                admin.execute(
-                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                    "WHERE datname = current_database() AND pid <> pg_backend_pid()"
-                )
-            conn.execute("SELECT 1")
+    # max_size=1 forces the same physical connection to be reused, so the terminated backend is
+    # the one the pool hands out next.
+    db.init_pool(settings.database_url, max_size=1, prepare_threshold=None)
+    with db.transaction() as conn:
+        pid = conn.execute("SELECT pg_backend_pid() AS pid").fetchone()["pid"]
+
+    with psycopg.connect(settings.database_url, autocommit=True) as admin:
+        # The 5000 ms timeout waits until the backend has actually exited; without it the
+        # next checkout could race a dying connection.
+        admin.execute("SELECT pg_terminate_backend(%s, 5000)", (pid,))
 
     with db.transaction() as conn:
         row = conn.execute("SELECT 1 AS one").fetchone()

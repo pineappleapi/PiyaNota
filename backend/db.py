@@ -18,7 +18,7 @@ _MAX_IDLE_S = 240
 _pool: ConnectionPool[psycopg.Connection[dict[str, Any]]] | None = None
 
 
-def init_pool(url: str, *, max_size: int, prepare_threshold: int | None) -> None:
+def init_pool(url: str, *, max_size: int = 6, prepare_threshold: int | None = None) -> None:
     """Create the module pool, closing any pool created by an earlier app factory call.
 
     Args:

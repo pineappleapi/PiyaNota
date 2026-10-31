@@ -7,7 +7,7 @@ import traceback
 
 import psycopg
 from flask import Flask, Response
-from werkzeug.exceptions import HTTPException
+from werkzeug.exceptions import HTTPException, MethodNotAllowed
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from backend import db
@@ -60,7 +60,11 @@ def create_app(settings: Settings | None = None) -> Flask:
         if isinstance(exc, HTTPException):
             status = exc.code or 500
             code = _HTTP_ERROR_CODES.get(status, "http_error")
-            return error_response(ApiError(status, code, exc.name))
+            response, _ = error_response(ApiError(status, code, exc.name))
+            # RFC 9110 requires Allow on 405; werkzeug knows the valid methods.
+            if isinstance(exc, MethodNotAllowed) and exc.valid_methods:
+                response.headers["Allow"] = ", ".join(exc.valid_methods)
+            return response, status
         _log_unhandled(exc)
         return error_response(ApiError(500, "internal_error", _INTERNAL_MESSAGE))
 

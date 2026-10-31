@@ -5,10 +5,10 @@ from __future__ import annotations
 import os
 from collections.abc import Iterator
 
-from psycopg import sql
 import pytest
 from flask import Flask
 from flask.testing import FlaskClient
+from psycopg import sql
 
 from backend import db
 from backend.app import create_app

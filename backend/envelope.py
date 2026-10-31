@@ -33,20 +33,28 @@ class ApiError(Exception):
 
 
 def ok(data: object, status: int, message: str) -> tuple[Response, int]:
-    """Build a success envelope: ``{"success": true, "data": ..., "message": ...}``."""
-    return jsonify({"success": True, "data": data, "message": message}), status
+    """Build a success envelope with the four contract keys: data, success, status, message."""
+    return jsonify({"data": data, "success": True, "status": status, "message": message}), status
 
 
 def error_response(exc: ApiError) -> tuple[Response, int]:
-    """Build an error envelope; optional detail keys appear only when set."""
-    detail: dict[str, object] = {"code": exc.code, "message": exc.message}
+    """Build an error envelope. ``error`` has no message key; optional keys appear only when set."""
+    detail: dict[str, object] = {"code": exc.code}
     if exc.field is not None:
         detail["field"] = exc.field
     if exc.page_index is not None:
-        detail["page_index"] = exc.page_index
+        detail["pageIndex"] = exc.page_index
     if exc.retry_after is not None:
-        detail["retry_after"] = exc.retry_after
-    response = jsonify({"success": False, "message": exc.message, "error": detail})
+        detail["retryAfterSeconds"] = exc.retry_after
+    response = jsonify(
+        {
+            "data": None,
+            "success": False,
+            "status": exc.status,
+            "message": exc.message,
+            "error": detail,
+        }
+    )
     if exc.retry_after is not None:
         response.headers["Retry-After"] = str(exc.retry_after)
     return response, exc.status
