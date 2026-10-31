@@ -80,11 +80,11 @@ erDiagram
     throttle_hits {
         bigint id PK
         text bucket
-        text key
+        text subject_key
     }
     throttle_backoff {
         text scope PK
-        text key PK
+        text subject_key PK
         int failures
     }
     storage_deletions {
@@ -105,6 +105,19 @@ erDiagram
 `throttle_*`, `storage_deletions`, `purge_log` and `schema_migrations` have no foreign keys.
 That is on purpose: they must outlive the rows they refer to and must hold no PII.
 
+The migration (Task 3) chooses all constraint and index names; the names in this file are suggestions.
+
+The `jobs` self-references (`replaces_job_id`, `superseded_by_job_id`) are shown as attributes, not drawn as relationship lines.
+
+## Timestamps
+
+Every table with `updated_at` gets it maintained by one shared trigger function `set_updated_at()`, run BEFORE UPDATE. Tables with `updated_at`: users, sessions, password_reset_tokens, jobs, scores, throttle_backoff, storage_deletions.
+
+Insert-only tables have no `updated_at`:
+
+- `throttle_hits`, `purge_log`, `schema_migrations`: append-only logs; rows are never updated.
+- `audio_tracks`, `timing_metadata`, `job_pages`: rows are never updated; a change replaces them by delete + insert.
+
 ## Shared CHECK values
 
 - **title:** `char_length(title) BETWEEN 1 AND 120`. **arranger:** NULL or `char_length BETWEEN 1 AND 120`.
@@ -119,12 +132,14 @@ That is on purpose: they must outlive the rows they refer to and must hold no PI
 | Column | Type | Null | Default | Constraint | Ticket |
 |---|---|---|---|---|---|
 | id | bigserial | no | | PK | PIYA-311 AC1 |
-| email | text | no | | UNIQUE; stored normalized (trimmed, lower-case) | PIYA-311 AC1 |
+| email | text | no | | UNIQUE; CHECK (`email = lower(btrim(email))`) | PIYA-311 AC1 |
 | password_hash | text | no | | | PIYA-311 AC1 |
 | role | text | no | `'choir_member'` | CHECK IN (`'choir_member'`,`'choir_director'`) | PIYA-311 AC1 |
 | deleted_at | timestamptz | yes | | | PIYA-319 |
 | created_at | timestamptz | no | `now()` | | |
 | updated_at | timestamptz | no | `now()` | | |
+
+A soft-deleted user (`deleted_at` set) keeps the UNIQUE email until purge. Re-signup with that email returns 409 until the PIYA-319 purge completes (PIYA-307 AC5).
 
 ### sessions
 
@@ -136,6 +151,9 @@ That is on purpose: they must outlive the rows they refer to and must hold no PI
 | expires_at | timestamptz | no | | | |
 | revoked_at | timestamptz | yes | | | |
 | created_at | timestamptz | no | `now()` | | |
+| updated_at | timestamptz | no | `now()` | | |
+
+Index: `sessions_user_idx` on `(user_id)`.
 
 Why SHA-256 only: session tokens are long random values, so a fast hash is enough and allows lookup by hash.
 
@@ -149,6 +167,9 @@ Why SHA-256 only: session tokens are long random values, so a fast hash is enoug
 | expires_at | timestamptz | no | | | |
 | used_at | timestamptz | yes | | | |
 | created_at | timestamptz | no | `now()` | | |
+| updated_at | timestamptz | no | `now()` | | |
+
+Index: `password_reset_tokens_user_idx` on `(user_id)`.
 
 Why HMAC: a 6-digit code has only 10^6 values. A plain hash can be brute-forced from a leaked row. The HMAC key stays outside the database.
 
@@ -158,8 +179,8 @@ Why HMAC: a 6-digit code has only 10^6 values. A plain hash can be brute-forced 
 |---|---|---|---|---|---|
 | id | bigserial | no | | PK | |
 | user_id | bigint | no | | FK users(id) ON DELETE CASCADE | |
-| score_id | bigint | yes | NULL until complete | FK scores(id) ON DELETE SET NULL | PIYA-311 AC7 |
-| status | text | no | | CHECK IN (`queued`,`preprocessing`,`detecting_staff`,`transcribing`,`reconstructing`,`synthesizing`,`complete`,`failed`,`cancelled`) | PIYA-311 AC7 |
+| score_id | bigint | yes | NULL until complete | FK scores(id) ON DELETE SET NULL | PIYA-311 AC1 |
+| status | text | no | | CHECK IN (`queued`,`preprocessing`,`detecting_staff`,`transcribing`,`reconstructing`,`synthesizing`,`complete`,`failed`,`cancelled`) | PIYA-311 AC1 |
 | source | text | no | | CHECK IN (`images`,`pdf`) | |
 | page_count | smallint | no | | CHECK BETWEEN 1 AND 20 | |
 | title | text | no | | title CHECK | PIYA-311 AC7 |
@@ -182,8 +203,11 @@ Why HMAC: a 6-digit code has only 10^6 values. A plain hash can be brute-forced 
 
 Indexes:
 
+- CHECK `(replaces_job_id <> id)` and CHECK `(superseded_by_job_id <> id)`: a job never points at itself.
 - `jobs_one_retake_in_flight`: UNIQUE on `(replaces_job_id) WHERE status NOT IN ('complete','failed','cancelled')`. At most one active retake per job (PIYA-311 AC8).
 - `jobs_user_status_idx`: `(user_id, status)`.
+- `jobs_score_idx`: `(score_id)`.
+- `jobs_superseded_by_idx`: `(superseded_by_job_id)`.
 
 ### job_pages
 
@@ -250,17 +274,17 @@ UNIQUE `(score_id, voice)`.
 |---|---|---|---|---|
 | id | bigserial | no | | PK |
 | bucket | text | no | | |
-| key | text | no | | HMAC of email, IP or user id. Never the raw value. |
+| subject_key | text | no | | HMAC of email, IP or user id. Never the raw value. Lowercase hex HMAC-SHA256 string, 64 chars. |
 | created_at | timestamptz | no | `now()` | |
 
-Index: `(bucket, key, created_at)`. No FK, so rows survive account deletion without holding PII.
+Index: `(bucket, subject_key, created_at)`. It also serves expiry cleanup by `created_at` within a bucket. No FK, so rows survive account deletion without holding PII.
 
 ### throttle_backoff
 
 | Column | Type | Null | Default | Constraint |
 |---|---|---|---|---|
 | scope | text | no | | PK part 1 |
-| key | text | no | | PK part 2. HMAC, never raw. |
+| subject_key | text | no | | PK part 2. Lowercase hex HMAC-SHA256 string (64 chars), never raw. |
 | failures | int | no | `0` | |
 | last_failure_at | timestamptz | no | | |
 | wait_until | timestamptz | yes | | |
@@ -279,6 +303,8 @@ Index: `(bucket, key, created_at)`. No FK, so rows survive account deletion with
 | created_at | timestamptz | no | `now()` | |
 | updated_at | timestamptz | no | `now()` | |
 
+Index: `storage_deletions_next_attempt_idx` on `(next_attempt_at)`.
+
 A retry queue for B2 deletes. A crash after a DB commit leaves a row here instead of an orphaned file.
 
 ### purge_log
@@ -289,6 +315,8 @@ A retry queue for B2 deletes. A crash after a DB commit leaves a row here instea
 | user_ref | bigint | no | | former `users.id`; no FK, no PII | |
 | completed_at | timestamptz | no | | | |
 | created_at | timestamptz | no | `now()` | | |
+
+Before the `users` row is deleted (cascade), the purge job queues every page, thumbnail, audio and timing object key of that user in `storage_deletions`, in the same transaction (PIYA-319).
 
 ### schema_migrations
 
