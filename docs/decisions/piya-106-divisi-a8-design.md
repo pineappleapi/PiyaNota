@@ -116,4 +116,4 @@ A Stage 4 repair for chords the model still emits as successive notes, flagged, 
 
 ## 8. Meanwhile
 A7 section 8 path 4 applies to v1: chords stay off, every detected chord column is flagged, Soprano and Tenor play
-the top note (user to confirm).
+the top note. **Confirmed by the user 2026-11-01.**
