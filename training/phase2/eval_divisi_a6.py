@@ -29,7 +29,7 @@ import random
 import re
 import sys
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(REPO), str(REPO / "training" / "phase1")]
@@ -456,7 +456,8 @@ def dedup_columns(sc: dict[str, Any], row: Mapping[str, Any], seen: set[tuple[ob
 
 
 def evaluate(model: Any, build: Path, rows: Sequence[Mapping[str, Any]],
-             stems: Mapping[str, Sequence[str]] | None) -> dict[str, Any]:
+             stems: Mapping[str, Sequence[str]] | None,
+             extra: Callable[[Sequence[str], Sequence[str]], dict[str, Any]] | None = None) -> dict[str, Any]:
     """Scores every row; returns totals, per-piece bucket counters and per-font-group totals.
 
     A row may carry `_build`, `_stems` and `_phase` (several test folders in one run); otherwise `build`, `stems` and
@@ -479,6 +480,8 @@ def evaluate(model: Any, build: Path, rows: Sequence[Mapping[str, Any]],
             missing_keys.append(key)
             strip_stems = [""] * n_chord      # unknown stem: 2nd_unknown, outside the 2nd gates
         sc = head_scores(pred, r["tokens"], strip_stems, conf, (r.get("_ties") or {}).get(key))
+        if extra is not None:   # A7: more counters from the same decode (they add up in merge_scores)
+            sc.update(extra(pred, r["tokens"]))
         columns += len(sc["cols"])
         duplicates += dedup_columns(sc, r, seen)
         all_parts.append(sc)
