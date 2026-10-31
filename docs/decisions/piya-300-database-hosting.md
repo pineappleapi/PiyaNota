@@ -1,5 +1,7 @@
 # PIYA-300 — Database & Hosting Technology Selection
 
+> Superseded in part by `piya-300-amendment-free-hosting.md` (2026-11-01): hosting, GPU and email choices changed. The Neon decision stands.
+
 **Status:** Decided 2026-09-09 (originally due as the Sep 4 action item; carried into Sprint 6).
 **Decides for:** `docs/tickets/module3-backend.md` PIYA-300, PIYA-311 (schema), PIYA-401
 (provisioning), PIYA-407 (performance validation baseline).
