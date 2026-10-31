@@ -107,7 +107,7 @@ That is on purpose: they must outlive the rows they refer to and must hold no PI
 
 The migration (Task 3) chooses all constraint and index names; the names in this file are suggestions.
 
-The `jobs` self-references (`replaces_job_id`, `superseded_by_job_id`) are shown as attributes, not drawn as relationship lines.
+Only `replaces_job_id` is drawn as a relationship line (the `replaces` line). `superseded_by_job_id` appears as an attribute only.
 
 ## Timestamps
 
@@ -201,9 +201,10 @@ Why HMAC: a 6-digit code has only 10^6 values. A plain hash can be brute-forced 
 | created_at | timestamptz | no | `now()` | | |
 | updated_at | timestamptz | no | `now()` | | |
 
+Checks: `CHECK (replaces_job_id <> id)` and `CHECK (superseded_by_job_id <> id)`, so a job never points at itself.
+
 Indexes:
 
-- CHECK `(replaces_job_id <> id)` and CHECK `(superseded_by_job_id <> id)`: a job never points at itself.
 - `jobs_one_retake_in_flight`: UNIQUE on `(replaces_job_id) WHERE status NOT IN ('complete','failed','cancelled')`. At most one active retake per job (PIYA-311 AC8).
 - `jobs_user_status_idx`: `(user_id, status)`.
 - `jobs_score_idx`: `(score_id)`.
