@@ -33,7 +33,7 @@ from pathlib import Path
 
 ARM = "CL"                          # "C" (chords only) or "CL" (chords + layers); with SEED, the only lines that differ per kernel
 SEED = 1                            # 1 or 2
-COMMIT = "PLACEHOLDER"              # full 40-hex sha of the reviewed commit; the kernel refuses to train on anything else
+COMMIT = "5461a8cbc95b925f304c184ae70fb4b018be45c4"              # full 40-hex sha of the reviewed commit; the kernel refuses to train on anything else
 BRANCH = "piya106/stroke-calibration"
 COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
 SESSION_BUDGET_MIN = 11 * 60        # Kaggle GPU sessions stop at 12 h and a killed session keeps no output

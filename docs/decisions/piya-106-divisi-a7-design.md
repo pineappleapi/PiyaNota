@@ -602,3 +602,8 @@ Smoke: 3 Bach chorales, seed `divisi-a7`. Rulings replace the matching lines of 
 - **Builds.** The arm C build at 121dfff is superseded; both arms are rebuilt from one commit with the same seeds.
 - **Later.** If whole-note 2nds matter on real choral pages, add whole-note supply in a later build (more merge
   sites), not class steering.
+- **User rulings (2026-10-31).** The `2nd_none` waiver at 257 is confirmed. GPU training starts now; the 10-piece
+  PREREG (14.7) is still frozen before any A7 checkpoint is scored on the real test set, so no inference runs first.
+- **Builds v2 (b15582a, Kaggle):** C 299 min, CL 265 min, both `ok`; 2nd_none 257 reproduced; renders 803/803 each;
+  pre_gpu_check PASS (no C vs CL chord confound, real share .05/epoch, 0 staff-systems at cap, Nandemonaiya .27/.30
+  of real views reported). GPU kernels pinned to 5461a8c.
