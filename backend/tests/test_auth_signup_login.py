@@ -10,7 +10,10 @@ import pytest
 from flask import Flask, g, jsonify
 from flask.testing import FlaskClient
 
+from dataclasses import replace
+
 from backend import db, security, throttle
+from backend.config import SETTINGS_KEY
 
 PASSWORD = "Secret123zz"
 
@@ -123,8 +126,10 @@ def test_concurrent_signup_one_wins(app: Flask) -> None:
     assert sorted(statuses) == [201, 409]
 
 
-def test_signup_ip_limit(client: FlaskClient) -> None:
-    for i in range(10):
+def test_signup_ip_limit(app: Flask, client: FlaskClient) -> None:
+    limit = 3
+    app.config[SETTINGS_KEY] = replace(app.config[SETTINGS_KEY], signup_ip_limit=limit)
+    for i in range(limit):
         assert _signup(client, email=f"u{i}@example.com").status_code == 201
     res = _signup(client, email="u11@example.com")
     assert res.status_code == 429
@@ -220,3 +225,19 @@ def test_password_never_logged(client: FlaskClient, caplog: pytest.LogCaptureFix
         _login(client, password=PASSWORD + "x")
     assert PASSWORD not in caplog.text
     assert "a@example.com" not in caplog.text
+
+
+def test_overlong_password_runs_one_argon2_call(
+    client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _signup(client)
+    calls: list[str] = []
+    monkeypatch.setattr(security, "verify_dummy", lambda: calls.append("dummy"))
+    monkeypatch.setattr(security, "verify_password", lambda p, s: calls.append("verify") or False)
+    res = _login(client, password="a1" * 513)
+    assert res.status_code == 401
+    assert res.get_json()["error"]["code"] == "invalid_credentials"
+    assert len(calls) == 1
+    with db.transaction() as conn:
+        row = conn.execute("SELECT failures FROM throttle_backoff").fetchone()
+    assert row is not None and row["failures"] == 1

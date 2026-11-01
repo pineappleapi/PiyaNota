@@ -69,7 +69,8 @@ class Settings:
     status_reads_per_minute: int = 120
     login_ip_limit: int = 30
     login_ip_window_s: int = 900
-    signup_ip_limit: int = 10
+    # A choir signs up together from one venue Wi-Fi (one public IP) and typos count as attempts.
+    signup_ip_limit: int = 60
     signup_ip_window_s: int = 3600
     reset_request_email_per_hour: int = 5
     reset_request_ip_per_hour: int = 20

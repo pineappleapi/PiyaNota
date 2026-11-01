@@ -127,9 +127,11 @@ def login() -> tuple[Response, int]:
                 (email,),
             ).fetchone()
             valid = False
-            if user is None:
-                security.verify_dummy()  # equalize timing with the known-email path
-            elif len(password) <= MAX_PASSWORD_LENGTH:
+            if user is None or len(password) > MAX_PASSWORD_LENGTH:
+                # Exactly one argon2 call on every failing path, so neither an unknown email nor
+                # an over-long password on a known one is distinguishable by timing.
+                security.verify_dummy()
+            else:
                 valid = security.verify_password(password, user["password_hash"])
             if valid and user is not None:
                 throttle.clear_failures(conn, _LOGIN_EMAIL_SCOPE, email_key)
@@ -149,5 +151,6 @@ def login() -> tuple[Response, int]:
                 failure = _invalid_credentials()
     if failure is not None:
         raise failure
-    assert result is not None
+    if result is None:
+        raise RuntimeError("login finished without a result or an error")
     return ok(session_payload(*result), 200, "Login successful")
