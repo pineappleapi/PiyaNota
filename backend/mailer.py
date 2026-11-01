@@ -50,8 +50,11 @@ class LogMailer:
 class BrevoMailer:
     """Sends through Brevo's transactional API using only the standard library."""
 
-    def __init__(self, api_key: str, sender_email: str, sender_name: str) -> None:
+    def __init__(
+        self, api_key: str, sender_email: str, sender_name: str, ttl_minutes: int
+    ) -> None:
         self._api_key = api_key
+        self._ttl_minutes = ttl_minutes
         self._sender = {"email": sender_email, "name": sender_name}
 
     def send_reset_code(self, to: str, code: str) -> None:
@@ -59,7 +62,10 @@ class BrevoMailer:
             "sender": self._sender,
             "to": [{"email": to}],
             "subject": RESET_SUBJECT,
-            "textContent": f"Your PiyaNota password reset code is {code}. It expires soon.",
+            "textContent": (
+                f"Your PiyaNota password reset code is {code}. "
+                f"It expires in {self._ttl_minutes} minutes."
+            ),
         }
         req = urllib.request.Request(
             BREVO_URL,
@@ -71,6 +77,7 @@ class BrevoMailer:
             with urllib.request.urlopen(req, timeout=BREVO_TIMEOUT_S) as resp:
                 status = resp.status
         except urllib.error.HTTPError as exc:
+            exc.close()
             raise MailError(f"Brevo rejected the message (HTTP {exc.code})") from None
         except (urllib.error.URLError, OSError) as exc:
             # type only: URLError text can echo the request URL or host details.
@@ -82,7 +89,9 @@ class BrevoMailer:
 def build_mailer(cfg: Settings) -> Mailer:
     """Pick the implementation named by ``cfg.mail_backend``."""
     if cfg.mail_backend == "brevo":
-        return BrevoMailer(cfg.brevo_api_key, cfg.mail_from, cfg.mail_from_name)
+        return BrevoMailer(
+            cfg.brevo_api_key, cfg.mail_from, cfg.mail_from_name, cfg.reset_code_ttl_minutes
+        )
     if cfg.mail_backend == "log":
         return LogMailer()
     return MemoryMailer()

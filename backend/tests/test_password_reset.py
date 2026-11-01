@@ -138,6 +138,40 @@ def test_reset_request_rate_limited_before_lookup(client: FlaskClient) -> None:
     assert res.headers["Retry-After"]
 
 
+def test_reset_request_429_not_counted(client: FlaskClient) -> None:
+    for _ in range(5):
+        assert _request(client, "nobody@example.com").status_code == 404
+    for _ in range(3):
+        assert _request(client, "nobody@example.com").status_code == 429
+    with db.transaction() as conn:
+        n = conn.execute("SELECT count(*) AS n FROM throttle_hits").fetchone()
+        assert n is not None and n["n"] == 10  # 5 email + 5 ip, none for the 429s
+        conn.execute("UPDATE throttle_hits SET created_at = now() - interval '2 hours'")
+    assert _request(client, "nobody@example.com").status_code == 404
+
+
+def test_reset_confirm_hashes_only_on_success(
+    client: FlaskClient, mail: MemoryMailer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _signup(client)
+    _request(client)
+    code = mail.sent[0][1]
+    calls: list[int] = []
+    real = security.hash_password
+    monkeypatch.setattr(
+        security, "hash_password", lambda pw: (calls.append(1), real(pw))[1]
+    )
+    assert _confirm(client, "x@x", email="nobody@example.com").status_code == 410
+    for _ in range(3):
+        assert _confirm(client, _wrong(code)).status_code == 400
+    assert _confirm(client, code).status_code == 429
+    assert calls == []
+    with db.transaction() as conn:
+        conn.execute("UPDATE throttle_backoff SET wait_until = now() - interval '1 second'")
+    assert _confirm(client, code).status_code == 200
+    assert calls == [1]
+
+
 def test_reset_request_ip_limit(client: FlaskClient) -> None:
     for i in range(20):
         assert _request(client, f"u{i}@example.com").status_code == 404
@@ -295,7 +329,7 @@ def test_brevo_mailer_request_shape(monkeypatch: pytest.MonkeyPatch) -> None:
         return Resp()
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    BrevoMailer("key-1", "from@x.org", "PiyaNota").send_reset_code("to@x.org", "123456")
+    BrevoMailer("key-1", "from@x.org", "PiyaNota", 30).send_reset_code("to@x.org", "123456")
     assert seen["url"] == "https://api.brevo.com/v3/smtp/email"
     assert seen["headers"]["Api-key"] == "key-1"
     assert seen["timeout"] == 10
@@ -303,7 +337,7 @@ def test_brevo_mailer_request_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["sender"] == {"email": "from@x.org", "name": "PiyaNota"}
     assert body["to"] == [{"email": "to@x.org"}]
     assert body["subject"] == "Your PiyaNota reset code"
-    assert "123456" in body["textContent"]
+    assert "123456" in body["textContent"] and "30 minutes" in body["textContent"]
 
 
 @pytest.mark.parametrize(
@@ -321,7 +355,7 @@ def test_brevo_mailer_failure_raises_mailerror(
 
     monkeypatch.setattr(urllib.request, "urlopen", boom)
     with pytest.raises(MailError) as info:
-        BrevoMailer("k", "f@x.org", "P").send_reset_code("to@x.org", "123456")
+        BrevoMailer("k", "f@x.org", "P", 30).send_reset_code("to@x.org", "123456")
     assert "to@x.org" not in str(info.value)
 
 

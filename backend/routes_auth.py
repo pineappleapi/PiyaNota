@@ -185,8 +185,8 @@ def password_reset_request() -> tuple[Response, int]:
     ip_key = security.keyed_hash(security.client_ip())
 
     failure: ApiError | None = None
-    # Throttle first and record every request (even for unknown emails) so the 404 cannot be
-    # used for unlimited enumeration. Hits commit; the error is raised after the block.
+    # Throttle first and record every admitted request (even for unknown emails) so the 404 cannot
+    # be used for unlimited enumeration. Hits commit; the error is raised after the block.
     with db.transaction() as conn:
         throttle.lock_subject(conn, _RESET_REQ_EMAIL_BUCKET, email_key)
         throttle.lock_subject(conn, _RESET_REQ_IP_BUCKET, ip_key)
@@ -202,12 +202,13 @@ def password_reset_request() -> tuple[Response, int]:
                 conn, _RESET_REQ_IP_BUCKET, ip_key, cfg.reset_request_ip_per_hour, _RESET_WINDOW_S
             ),
         ]
-        throttle.record_hit(conn, _RESET_REQ_EMAIL_BUCKET, email_key)
-        throttle.record_hit(conn, _RESET_REQ_IP_BUCKET, ip_key)
         active = [w for w in waits if w is not None]
         if active:
+            # Requests answered 429 are not counted, so a blocked caller cannot extend the window.
             failure = throttle.too_many(max(active))
         else:
+            throttle.record_hit(conn, _RESET_REQ_EMAIL_BUCKET, email_key)
+            throttle.record_hit(conn, _RESET_REQ_IP_BUCKET, ip_key)
             user = conn.execute(
                 "SELECT id FROM users WHERE email = %s AND deleted_at IS NULL FOR UPDATE",
                 (email,),
@@ -246,18 +247,11 @@ def password_reset_confirm() -> tuple[Response, int]:
     cfg = _settings()
     body = json_body()
     email = normalize_email(body.get("email"))
-    code = require_str(body, "resetToken")
+    code = require_str(body, "resetToken").strip()
     password = require_str(body, "newPassword")
     confirmation = require_str(body, "newPasswordConfirmation")
-    # Password checks come before any code handling so a typo neither consumes nor counts.
-    if password != confirmation:
-        raise ApiError(
-            400, "password_mismatch", "Passwords do not match", field="newPasswordConfirmation"
-        )
-    check_password_policy(password, "newPassword")
     email_key = security.keyed_hash(email)
     ip_key = security.keyed_hash(security.client_ip())
-    new_hash = security.hash_password(password)
 
     failure: ApiError | None = None
     with db.transaction() as conn:
@@ -273,6 +267,16 @@ def password_reset_confirm() -> tuple[Response, int]:
         if active:
             failure = throttle.too_many(max(active))
         else:
+            # After the wait check (a wait always yields 429) but before the code is looked at,
+            # so a typo neither consumes the code nor counts as a wrong guess.
+            if password != confirmation:
+                raise ApiError(
+                    400,
+                    "password_mismatch",
+                    "Passwords do not match",
+                    field="newPasswordConfirmation",
+                )
+            check_password_policy(password, "newPassword")
             row = conn.execute(
                 "SELECT u.id AS user_id, t.id AS token_id, t.token_hash "
                 "FROM users u JOIN password_reset_tokens t ON t.user_id = u.id "
@@ -294,9 +298,10 @@ def password_reset_confirm() -> tuple[Response, int]:
                     400, "reset_code_invalid", "Reset code is incorrect", field="resetToken"
                 )
             else:
+                # Hashed only once the code verified, so unauthenticated callers cannot burn CPU.
                 conn.execute(
                     "UPDATE users SET password_hash = %s, updated_at = now() WHERE id = %s",
-                    (new_hash, row["user_id"]),
+                    (security.hash_password(password), row["user_id"]),
                 )
                 conn.execute(
                     "UPDATE password_reset_tokens SET used_at = now() WHERE id = %s",
