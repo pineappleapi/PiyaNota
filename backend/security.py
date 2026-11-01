@@ -82,6 +82,11 @@ def verify_password(password: str, stored: str) -> bool:
 _dummy_hash: str | None = None
 
 
+def needs_rehash(stored: str) -> bool:
+    """True when ``stored`` was made with weaker params than the current settings."""
+    return _hasher().check_needs_rehash(stored)
+
+
 def verify_dummy() -> None:
     """Burn one argon2 verify so unknown-email logins take as long as real ones."""
     global _dummy_hash

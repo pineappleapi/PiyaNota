@@ -13,6 +13,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from backend import db
 from backend.config import SETTINGS_KEY, Settings, load_settings
 from backend.envelope import ApiError, error_response, ok
+from backend.routes_auth import auth_bp
 
 LOG = logging.getLogger(__name__)
 _HTTP_ERROR_CODES: dict[int, str] = {
@@ -66,6 +67,8 @@ def create_app(settings: Settings | None = None) -> Flask:
             return response, status
         _log_unhandled(exc)
         return error_response(ApiError(500, "internal_error", _INTERNAL_MESSAGE))
+
+    app.register_blueprint(auth_bp)
 
     @app.get("/healthz")
     def healthz() -> tuple[Response, int]:

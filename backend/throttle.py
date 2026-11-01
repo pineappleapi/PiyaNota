@@ -20,6 +20,15 @@ _BACKOFF_MAX_S = 900
 _IDLE_RESET_HOURS = 24
 
 
+def lock_subject(conn: Conn, bucket: str, key: str) -> None:
+    """Serialize check-then-record on one subject for the rest of the transaction.
+
+    Without it two concurrent requests can both read "under the limit" and both record, letting
+    a burst slip past the cap. The lock is released at commit/rollback.
+    """
+    conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"{bucket}:{key}",))
+
+
 def window_retry_after(conn: Conn, bucket: str, key: str, limit: int, window_s: int) -> int | None:
     """Seconds until a slot frees up when ``limit`` hits are already in the window, else None."""
     row = conn.execute(
