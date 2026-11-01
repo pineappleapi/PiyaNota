@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
+import time
 from collections.abc import Iterator
 from typing import Any
 
@@ -163,3 +165,25 @@ def test_password_policy_rejects(pw: str) -> None:
 
 def test_password_policy_accepts() -> None:
     check_password_policy("abcdefg1", "password")
+
+
+def test_normalize_email_long_input_fast() -> None:
+    start = time.perf_counter()
+    with pytest.raises(ApiError) as exc:
+        normalize_email("a@" + "b." * 50000 + "@")
+    assert exc.value.code == "invalid_email"
+    assert time.perf_counter() - start < 0.5
+
+
+def test_password_policy_rejects_too_long() -> None:
+    with pytest.raises(ApiError) as exc:
+        check_password_policy("a1" * 513, "password")
+    assert exc.value.code == "weak_password" and exc.value.field == "password"
+    check_password_policy("a1" * 512, "password")
+
+
+def test_unreadable_hash_logs_warning(app: Flask, caplog: pytest.LogCaptureFixture) -> None:
+    with app.app_context(), caplog.at_level(logging.WARNING, logger="backend.security"):
+        assert not security.verify_password("secret99", "not-a-hash")
+    assert "stored password hash unreadable" in caplog.text
+    assert "secret99" not in caplog.text and "not-a-hash" not in caplog.text

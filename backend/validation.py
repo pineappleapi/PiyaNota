@@ -42,6 +42,9 @@ def require_str(body: Mapping[str, object], field: str) -> str:
 
 _EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _MIN_PASSWORD_LENGTH = 8
+# Bounds work before the regex (quadratic backtracking) and memory held under HASH_SEMAPHORE.
+MAX_EMAIL_LENGTH = 254  # RFC 5321
+MAX_PASSWORD_LENGTH = 1024
 
 
 def normalize_email(raw: object, field: str = "email") -> str:
@@ -53,20 +56,22 @@ def normalize_email(raw: object, field: str = "email") -> str:
     if not isinstance(raw, str) or not raw.strip():
         raise ApiError(400, "missing_field", f"{field} is required", field=field)
     email = raw.strip().lower()
-    if not _EMAIL_PATTERN.match(email):
+    if len(email) > MAX_EMAIL_LENGTH or not _EMAIL_PATTERN.match(email):
         raise ApiError(400, "invalid_email", "Email address is not valid", field=field)
     return email
 
 
 def check_password_policy(password: str, field: str) -> None:
-    """Require at least 8 characters with a letter and a digit.
+    """Require 8-1024 characters with a letter and a digit.
 
     Raises:
         ApiError: 400 ``weak_password`` naming ``field``.
     """
     has_letter = any(ch.isalpha() for ch in password)
     has_digit = any(ch.isdigit() for ch in password)
-    if len(password) < _MIN_PASSWORD_LENGTH or not has_letter or not has_digit:
+    too_short = len(password) < _MIN_PASSWORD_LENGTH
+    too_long = len(password) > MAX_PASSWORD_LENGTH
+    if too_short or too_long or not has_letter or not has_digit:
         raise ApiError(
             400,
             "weak_password",

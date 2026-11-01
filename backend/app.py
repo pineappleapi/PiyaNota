@@ -11,11 +11,10 @@ from werkzeug.exceptions import HTTPException, MethodNotAllowed
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from backend import db
-from backend.config import Settings, load_settings
+from backend.config import SETTINGS_KEY, Settings, load_settings
 from backend.envelope import ApiError, error_response, ok
 
 LOG = logging.getLogger(__name__)
-SETTINGS_KEY = "PIYA_SETTINGS"
 _HTTP_ERROR_CODES: dict[int, str] = {
     404: "not_found",
     405: "method_not_allowed",

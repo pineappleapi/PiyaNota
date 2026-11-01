@@ -5,6 +5,7 @@ from __future__ import annotations
 import functools
 import hashlib
 import hmac
+import logging
 import secrets
 import threading
 from collections.abc import Callable
@@ -18,9 +19,10 @@ from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatc
 from flask import current_app, g, request
 
 from backend import db
-from backend.config import Settings
+from backend.config import SETTINGS_KEY, Settings
 from backend.envelope import ApiError
 
+LOG = logging.getLogger(__name__)
 F = TypeVar("F", bound=Callable[..., Any])
 Conn = psycopg.Connection[dict[str, Any]]
 
@@ -44,9 +46,6 @@ class AuthUser:
 
 
 def _settings() -> Settings:
-    # Imported lazily: backend.app will import blueprints that import this module.
-    from backend.app import SETTINGS_KEY
-
     return cast(Settings, current_app.config[SETTINGS_KEY])
 
 
@@ -72,7 +71,11 @@ def verify_password(password: str, stored: str) -> bool:
     with HASH_SEMAPHORE:
         try:
             return hasher.verify(stored, password)
-        except (VerifyMismatchError, VerificationError, InvalidHashError):
+        except VerifyMismatchError:
+            return False
+        except (VerificationError, InvalidHashError):
+            # Message only: no password, hash or email may reach the logs.
+            LOG.warning("stored password hash unreadable")
             return False
 
 

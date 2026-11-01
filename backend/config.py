@@ -12,6 +12,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass, fields
 from typing import Any, Literal, cast, get_args
 
+# Flask app.config key under which create_app stores the Settings instance.
+SETTINGS_KEY = "PIYA_SETTINGS"
+
 Env = Literal["dev", "test", "prod"]
 StorageBackend = Literal["b2", "memory"]
 MailBackend = Literal["brevo", "memory", "log"]
