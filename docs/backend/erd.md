@@ -169,7 +169,10 @@ Why SHA-256 only: session tokens are long random values, so a fast hash is enoug
 | created_at | timestamptz | no | `now()` | | |
 | updated_at | timestamptz | no | `now()` | | |
 
-Index: `password_reset_tokens_user_idx` on `(user_id)`.
+Indexes:
+
+- `password_reset_tokens_user_idx` on `(user_id)`.
+- `password_reset_tokens_one_live_idx`: UNIQUE on `(user_id) WHERE used_at IS NULL`. At most one live reset code per user.
 
 Why HMAC: a 6-digit code has only 10^6 values. A plain hash can be brute-forced from a leaked row. The HMAC key stays outside the database.
 
@@ -325,6 +328,10 @@ Before the `users` row is deleted (cascade), the purge job queues every page, th
 |---|---|---|---|---|
 | version | text | no | | PK |
 | applied_at | timestamptz | no | `now()` | |
+
+## Lock order
+
+Any transaction that locks both a score and its jobs locks `scores ... FOR UPDATE` first, then `jobs ... FOR UPDATE`, then re-checks job status. This keeps PIYA-309 (delete), V2 B5 (PATCH), PIYA-321 (completion) and PIYA-114 (cancel) deadlock-free.
 
 ## Deviations from PIYA-311 AC1
 

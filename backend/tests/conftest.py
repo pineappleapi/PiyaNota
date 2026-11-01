@@ -8,13 +8,22 @@ from collections.abc import Iterator
 import pytest
 from flask import Flask
 from flask.testing import FlaskClient
+import psycopg
 from psycopg import sql
 
-from backend import db
+from backend import db, migrate
 from backend.app import create_app
 from backend.config import Settings, load_settings
 
 TEST_DATABASE_URL_DEFAULT = "postgresql://piya:piya@localhost:55432/piya_test"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _schema_migrated() -> None:
+    """Apply migrations to the test database once so every test sees the schema."""
+    url = os.environ.get("TEST_DATABASE_URL", TEST_DATABASE_URL_DEFAULT)
+    with psycopg.connect(url, autocommit=True) as conn:
+        migrate.up(conn)
 
 
 @pytest.fixture
@@ -49,12 +58,12 @@ def client(app: Flask) -> FlaskClient:
 def db_clean(app: Flask) -> None:
     """Empty every public table before the test.
 
-    Tables are discovered at run time, so this works before the schema exists and does nothing
-    while there are no tables.
+    Tables are discovered at run time. schema_migrations is kept so the runner still knows what
+    is applied.
     """
     with db.transaction() as conn:
         rows = conn.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public'").fetchall()
-        names = [row["tablename"] for row in rows]
+        names = [row["tablename"] for row in rows if row["tablename"] != "schema_migrations"]
         if names:
             table_list = sql.SQL(", ").join(sql.Identifier(name) for name in names)
             conn.execute(sql.SQL("TRUNCATE {} RESTART IDENTITY CASCADE").format(table_list))
