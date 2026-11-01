@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import logging
-import traceback
 
-import psycopg
 from flask import Flask, Response
 from werkzeug.exceptions import HTTPException, MethodNotAllowed
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -13,6 +11,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from backend import background, db
 from backend.mailer import build_mailer
 from backend.config import SETTINGS_KEY, Settings, load_settings
+from backend.logutil import describe_exception
 from backend.envelope import ApiError, error_response, ok
 from backend.routes_account import account_bp
 from backend.routes_auth import auth_bp
@@ -89,11 +88,5 @@ def create_app(settings: Settings | None = None) -> Flask:
 
 
 def _log_unhandled(exc: Exception) -> None:
-    """Log what is needed to debug an unexpected error without leaking request data.
-
-    Exception messages can echo user input (psycopg's ``Key (email)=(...)``), so only the type,
-    the integrity constraint name and the stack frames are logged, never ``str(exc)``.
-    """
-    constraint = exc.diag.constraint_name if isinstance(exc, psycopg.Error) else None
-    frames = "".join(traceback.format_tb(exc.__traceback__))
-    LOG.error("unhandled %s (constraint=%s)\n%s", type(exc).__name__, constraint, frames)
+    """Log what is needed to debug an unexpected error without leaking request data."""
+    LOG.error("unhandled %s", describe_exception(exc))

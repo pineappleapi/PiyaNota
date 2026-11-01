@@ -16,6 +16,9 @@ from backend.config import Settings
 KeyPrefix = Literal["pages", "thumbs", "audio", "timing"]
 _NOT_FOUND_CODES = frozenset({"NoSuchKey", "404", "NotFound"})
 # B2 S3 endpoints look like https://s3.us-west-004.backblazeb2.com
+B2_CONNECT_TIMEOUT_S = 5
+B2_READ_TIMEOUT_S = 15
+B2_MAX_ATTEMPTS = 2
 _REGION_RE = re.compile(r"s3\.([a-z0-9-]+)\.backblazeb2\.com")
 
 
@@ -70,7 +73,12 @@ class B2Storage:
             region_name=match.group(1),
             aws_access_key_id=settings.b2_key_id,
             aws_secret_access_key=settings.b2_app_key,
-            config=Config(signature_version="s3v4"),
+            config=Config(
+                signature_version="s3v4",
+                connect_timeout=B2_CONNECT_TIMEOUT_S,
+                read_timeout=B2_READ_TIMEOUT_S,
+                retries={"max_attempts": B2_MAX_ATTEMPTS},
+            ),
         )
 
     def put(self, key: str, data: bytes, content_type: str) -> None:

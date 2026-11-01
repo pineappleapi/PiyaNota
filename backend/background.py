@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Callable, Iterable
 from typing import Any
 
@@ -11,7 +12,8 @@ import psycopg
 from flask import Flask
 
 from backend import db
-from backend.config import SETTINGS_KEY
+from backend.config import SETTINGS_KEY, Settings
+from backend.logutil import describe_exception
 from backend.storage import Storage
 
 LOG = logging.getLogger(__name__)
@@ -120,6 +122,14 @@ def run_purges(storage: Storage) -> int:
     for user_id in ids:
         try:
             with db.transaction() as conn:
+                # Lock so two loops (or workers) cannot both purge this user.
+                locked = conn.execute(
+                    "SELECT id FROM users WHERE id = %s AND deleted_at IS NOT NULL "
+                    "FOR UPDATE SKIP LOCKED",
+                    (user_id,),
+                ).fetchone()
+                if locked is None:
+                    continue
                 keys = [r["k"] for r in conn.execute(_USER_KEYS_SQL, {"u": user_id}).fetchall()]
                 queue_deletion(conn, keys)
                 conn.execute("DELETE FROM users WHERE id = %s", (user_id,))
@@ -134,12 +144,17 @@ def run_purges(storage: Storage) -> int:
     return purged
 
 
-def run_prune(conn: Conn) -> int:
-    """Delete expired throttle, session and reset-token rows; returns rows removed."""
+def run_prune(conn: Conn, hit_max_age_s: int = THROTTLE_HIT_MAX_AGE_S) -> int:
+    """Delete expired throttle, session and reset-token rows; returns rows removed.
+
+    Args:
+        conn: Connection inside the caller's transaction.
+        hit_max_age_s: Age past which throttle hits are dead; must cover the longest window.
+    """
     grace = STALE_ROW_GRACE_S
     statements: tuple[tuple[str, int], ...] = (
         ("DELETE FROM throttle_hits WHERE created_at < now() - make_interval(secs => %(s)s)",
-         THROTTLE_HIT_MAX_AGE_S),
+         hit_max_age_s),
         ("DELETE FROM sessions WHERE expires_at < now() - make_interval(secs => %(s)s) "
          "OR revoked_at < now() - make_interval(secs => %(s)s)", grace),
         ("DELETE FROM password_reset_tokens WHERE expires_at < now() - make_interval(secs => %(s)s) "
@@ -152,18 +167,24 @@ def run_prune(conn: Conn) -> int:
 
 def start_loop(app: Flask) -> threading.Thread:
     """Start the daemon thread that runs purge, deletion and prune every interval."""
-    interval: int = app.config[SETTINGS_KEY].background_interval_s
-    stop = threading.Event()
+    cfg: Settings = app.config[SETTINGS_KEY]
+    interval = cfg.background_interval_s
+    hit_max_age_s = max(
+        cfg.login_ip_window_s,
+        cfg.signup_ip_window_s,
+        cfg.change_password_window_s,
+        THROTTLE_HIT_MAX_AGE_S,  # hourly reset buckets
+    )
 
     def _step(name: str, fn: Callable[[], object]) -> None:
         try:
             fn()
         except Exception as exc:  # noqa: BLE001 - the loop must survive any step failure
-            LOG.error("background %s failed (%s)", name, type(exc).__name__, exc_info=True)
+            LOG.error("background %s failed: %s", name, describe_exception(exc))
 
     def _prune() -> None:
         with db.transaction() as conn:
-            run_prune(conn)
+            run_prune(conn, hit_max_age_s)
 
     def _loop() -> None:
         storage: Storage = app.extensions["storage"]
@@ -172,8 +193,7 @@ def start_loop(app: Flask) -> threading.Thread:
                 _step("purges", lambda: run_purges(storage))
                 _step("deletions", lambda: run_deletions(storage))
                 _step("prune", _prune)
-            if stop.wait(interval):
-                return
+            time.sleep(interval)
 
     thread = threading.Thread(target=_loop, name="piya-background", daemon=True)
     thread.start()

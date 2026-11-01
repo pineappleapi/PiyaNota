@@ -240,3 +240,13 @@ def test_reserved_keys_self_heal(app: Flask) -> None:
         conn.execute("UPDATE storage_deletions SET next_attempt_at = now()")
     assert background.run_deletions(storage) == 1
     assert set(storage.objects) == {"pages/kept.jpg"}
+
+
+def test_purge_skips_user_locked_elsewhere(app: Flask) -> None:
+    uid, _ = _seed_user()
+    with db.transaction() as other:
+        other.execute("SELECT id FROM users WHERE id = %s FOR UPDATE", (uid,))
+        assert background.run_purges(MemoryStorage()) == 0
+        assert _count("purge_log") == 0
+    assert background.run_purges(MemoryStorage()) == 1
+    assert _count("purge_log") == 1
