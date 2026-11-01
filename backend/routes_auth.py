@@ -11,12 +11,13 @@ from datetime import datetime, timezone
 from typing import Any, cast
 
 import psycopg
-from flask import Blueprint, Response, current_app
+from flask import Blueprint, Response, current_app, g
 
 from backend import db, security, throttle
 from backend.mailer import MailError, get_mailer
 from backend.config import SETTINGS_KEY, Settings
 from backend.envelope import ApiError, iso_z, ok
+from backend.routes_account import check_current_password
 from backend.validation import (
     MAX_PASSWORD_LENGTH,
     check_password_policy,
@@ -313,3 +314,38 @@ def password_reset_confirm() -> tuple[Response, int]:
     if failure is not None:
         raise failure
     return ok(None, 200, "Password reset successful")
+
+
+@auth_bp.post("/logout")
+@security.require_auth
+def logout() -> tuple[Response, int]:
+    # PIYA-305 AC1 wins over AC4: an expired/revoked token never reaches here, it gets 401.
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE sessions SET revoked_at = now(), updated_at = now() WHERE token_hash = %s",
+            (g.token_hash,),
+        )
+    return ok(None, 200, "Logged out")
+
+
+@auth_bp.post("/change-password")
+@security.require_auth
+def change_password() -> tuple[Response, int]:
+    body = json_body()
+    current = require_str(body, "currentPassword")
+    new = require_str(body, "newPassword")
+    failure: ApiError | None = None
+    with db.transaction() as conn:
+        failure = check_current_password(conn, g.user.id, current)
+        if failure is None:
+            # Policy and hashing only after the current password verified, so a stolen token
+            # cannot burn argon2 CPU; a policy error rolls back (no wrong guess to count).
+            check_password_policy(new, "newPassword")
+            conn.execute(
+                "UPDATE users SET password_hash = %s, updated_at = now() WHERE id = %s",
+                (security.hash_password(new), g.user.id),
+            )
+            security.revoke_user_sessions(conn, g.user.id, keep_token_hash=g.token_hash)
+    if failure is not None:
+        raise failure
+    return ok(None, 200, "Password changed")
