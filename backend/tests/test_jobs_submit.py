@@ -144,6 +144,8 @@ def test_submit_echoes_optional_metadata(client: FlaskClient, headers: dict[str,
         ({"title": "a" * 121}, "title_too_long", "title"),
         ({"title": "a\nb"}, "title_invalid", "title"),
         ({"title": "t", "arranger": "a" * 121}, "arranger_too_long", "arranger"),
+        ({"title": "Title\n"}, "title_invalid", "title"),
+        ({"title": "t", "arranger": "Pia\t"}, "arranger_invalid", "arranger"),
         ({"title": "t", "tempoBpm": "29"}, "invalid_tempo", "tempoBpm"),
         ({"title": "t", "tempoBpm": "٩٠"}, "invalid_tempo", "tempoBpm"),
         ({"title": "t", "fallbackTempoBpm": "241"}, "invalid_tempo", "fallbackTempoBpm"),
@@ -193,6 +195,21 @@ def test_corrupt_beats_too_many_pages(client: FlaskClient, headers: dict[str, st
     _err(_post(client, headers, pages=pages, title="t"), 422, "corrupt_image")
 
 
+def test_pixel_cap_beats_missing_title(make_app: Callable[..., FlaskClient]) -> None:
+    client = make_app(max_image_pixels=100)
+    headers = _signup(client)
+    err = _err(_post(client, headers, pages=[_img("JPEG", (5, 5)), _img("PNG", (20, 20))]), 413, "image_pixels_too_large")
+    assert err["pageIndex"] == 1
+
+
+def test_pixel_cap_checked_beyond_twenty_parts(make_app: Callable[..., FlaskClient]) -> None:
+    client = make_app(max_image_pixels=100)
+    headers = _signup(client)
+    pages = [_img("JPEG", (5, 5))] * MAX_PAGES + [_img("PNG", (20, 20))]
+    err = _err(_post(client, headers, pages=pages, title="t"), 413, "image_pixels_too_large")
+    assert err["pageIndex"] == MAX_PAGES
+
+
 def test_precedence_field_error_beats_415(client: FlaskClient, headers: dict[str, str]) -> None:
     _err(_post(client, headers, pages=[_img("GIF")]), 400, "title_required")
 
@@ -218,6 +235,26 @@ def test_oversize_body_json_413(make_app: Callable[..., FlaskClient]) -> None:
     )
     _err(res, 413, "request_too_large")
     assert res.is_json
+
+
+def test_chunked_oversize_body_413(make_app: Callable[..., FlaskClient]) -> None:
+    """No Content-Length (chunked): the limit trips while reading, not from the header."""
+    limit = 64 * 1024
+    client = make_app(max_content_length=limit)
+    headers = _signup(client)
+    crlf = "\r\n"
+    head = crlf.join([
+        "--bnd", 'Content-Disposition: form-data; name="title"', "", "t",
+        "--bnd", 'Content-Disposition: form-data; name="pages"; filename="a.jpg"',
+        "Content-Type: image/jpeg", "", "",
+    ])
+    body = head.encode() + b"x" * (2 * limit) + f"{crlf}--bnd--{crlf}".encode()
+    res = client.post(
+        "/api/jobs", input_stream=io.BytesIO(body), headers=headers,
+        content_type="multipart/form-data; boundary=bnd",
+    )
+    _err(res, 413, "request_too_large")
+    assert _jobs() == []
 
 
 def test_submit_pdf_202(client: FlaskClient, app: Flask, headers: dict[str, str]) -> None:

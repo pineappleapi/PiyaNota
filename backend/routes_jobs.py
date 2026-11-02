@@ -277,26 +277,27 @@ def _body_too_large() -> bool:
     return length is not None and length > _settings().max_content_length
 
 
-def _early_client_id() -> tuple[uuid.UUID | None, ApiError | None]:
+def _early_client_id() -> tuple[uuid.UUID | None, ApiError | None, bool]:
     """Parse ``clientSubmissionId`` for the replay lookup without letting its errors jump the queue.
 
     A malformed id (or an oversize body, which must lose to 429 in the precedence order) is
-    deferred: the caller raises it at its proper step.
+    deferred: the caller raises it at its proper step. The third item is True when the body is
+    too large; the stream is then consumed, so the caller must not parse it again.
     """
     if _body_too_large():
-        return None, None
+        return None, None, True
     try:
-        return parse_client_submission_id(request.form), None
+        return parse_client_submission_id(request.form), None, False
     except ApiError as exc:
-        return None, exc
+        return None, exc, False
     except RequestEntityTooLarge:
-        return None, None
+        return None, None, True
 
 
 def _submit(source: Source) -> tuple[Response, int]:
     cfg = _settings()
     user_id: int = g.user.id
-    client_id, client_id_error = _early_client_id()
+    client_id, client_id_error, body_too_large = _early_client_id()
     replay = find_replay(user_id, client_id)
     if replay is not None:
         return _accepted(replay)
@@ -309,14 +310,17 @@ def _submit(source: Source) -> tuple[Response, int]:
     if retry is not None:
         raise throttle.too_many(retry)
 
-    if _body_too_large():
+    if body_too_large:
         raise ApiError(413, "request_too_large", "Request Entity Too Large")
-    form = cast("MultiDict[str, str]", request.form)  # chunked bodies may still raise 413 here
+    form = cast("MultiDict[str, str]", request.form)
     image_parts = request.files.getlist("pages")
     pdf_parts = request.files.getlist("file")
     for index, part in enumerate(image_parts):
         if _size(part) > cfg.max_image_bytes:
             raise ApiError(413, "file_too_large", "A page image exceeds the size limit", page_index=index)
+        if standardize.sniff(_head(part)) in ("jpeg", "png"):  # header-only, also beyond 20 parts
+            standardize.check_pixels(part.stream.read(), index, cfg.max_image_pixels)
+            part.stream.seek(0)
     for part in pdf_parts:
         if source == "pdf" and _size(part) > cfg.max_pdf_bytes:
             raise ApiError(413, "file_too_large", "The PDF exceeds the size limit")

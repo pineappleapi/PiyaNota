@@ -50,11 +50,47 @@ def sniff(data: bytes) -> Literal["jpeg", "png", "pdf"] | None:
     return None
 
 
+# Modes Image.reduce() accepts; anything else (P, 1, I;16, CMYK...) is converted per band.
+_REDUCIBLE_MODES = frozenset({"L", "LA", "RGB", "RGBA"})
+_ALPHA_MODES = frozenset({"PA", "RGBa", "La"})
+REDUCE_BAND_OUT_ROWS = 256
+
+
+def _reduce_first(img: Image.Image, max_side_px: int) -> Image.Image:
+    """Box-shrink an oversized image before any mode conversion or alpha flattening.
+
+    A 7000x7000 RGBA PNG otherwise costs a convert copy plus a white canvas at full size before
+    the thumbnail (~730 MB peak, 512 MB instance). Image.reduce() on RGBA/LA also premultiplies
+    a full-size copy internally, so the work is done in horizontal bands: only one band is ever
+    copied. The factor keeps the long side >= max_side_px so the final LANCZOS pass still has
+    detail to work with. The decoder's own full-size buffer cannot be avoided for PNG (no draft).
+    """
+    factor = max(1, max(img.size) // max_side_px)
+    if factor == 1:
+        return img
+    if img.mode in _REDUCIBLE_MODES:
+        mode = img.mode
+    else:
+        has_alpha = img.mode in _ALPHA_MODES or "transparency" in img.info
+        mode = "RGBA" if has_alpha else "RGB"
+    width, height = img.width // factor, img.height // factor
+    reduced = Image.new(mode, (width, height))
+    band_rows = factor * REDUCE_BAND_OUT_ROWS
+    for top in range(0, height * factor, band_rows):
+        band = img.crop((0, top, width * factor, min(top + band_rows, height * factor)))
+        if band.mode != mode:
+            band = band.convert(mode)
+        reduced.paste(band.reduce(factor), (0, top // factor))
+    return reduced
+
+
 def _encode(img: Image.Image, max_side_px: int) -> StandardPage:
-    if img.mode in ("RGBA", "LA", "P"):
-        rgba = img.convert("RGBA")
+    img = _reduce_first(img, max_side_px)
+    if img.mode in ("RGBA", "LA", "P", "PA"):
+        rgba = img if img.mode == "RGBA" else img.convert("RGBA")
         img = Image.new("RGB", rgba.size, "white")  # JPEG has no alpha; white matches paper
         img.paste(rgba, mask=rgba.getchannel("A"))
+        del rgba  # drop the last reference to the RGBA copy before the resample allocates
     elif img.mode != "RGB":
         img = img.convert("RGB")
     img.thumbnail((max_side_px, max_side_px), Image.Resampling.LANCZOS)  # never upscales
@@ -159,3 +195,23 @@ def verify_image(data: bytes, page_index: int) -> None:
             Image.open(io.BytesIO(data)).verify()
         except _DECODE_ERRORS as exc:
             raise ApiError(422, "corrupt_image", "The image could not be decoded", page_index=page_index) from exc
+
+
+def check_pixels(data: bytes, page_index: int, max_pixels: int) -> None:
+    """Header-only 413 check: no pixel data is decoded.
+
+    An unreadable header is left for the later 422 step.
+
+    Raises:
+        ApiError: 413 ``image_pixels_too_large``.
+    """
+    too_big = ApiError(413, "image_pixels_too_large", "The image has too many pixels", page_index=page_index)
+    with INTAKE_SEMAPHORE:
+        try:
+            width, height = Image.open(io.BytesIO(data)).size
+        except Image.DecompressionBombError as exc:
+            raise too_big from exc
+        except _DECODE_ERRORS:
+            return
+    if width * height > max_pixels:
+        raise too_big

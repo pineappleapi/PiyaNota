@@ -125,8 +125,11 @@ def parse_job_ref(ref: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def _single(form: MultiDict[str, str], field: str) -> str | None:
-    """The trimmed single value of ``field``; None when absent or blank.
+def _single(form: MultiDict[str, str], field: str, *, reject_control: bool = False) -> str | None:
+    """The trimmed single value of ``field``; None when absent or whitespace-only.
+
+    With ``reject_control`` the NFC value is checked for Cc characters BEFORE trimming, so
+    a trailing newline is rejected (AC8) while a whitespace-only value is still "absent".
 
     Raises:
         ApiError: 400 ``duplicate_field`` when sent more than once.
@@ -136,18 +139,20 @@ def _single(form: MultiDict[str, str], field: str) -> str | None:
         raise ApiError(400, "duplicate_field", f"{field} was sent more than once", field=field)
     if not values:
         return None
-    text = unicodedata.normalize("NFC", values[0]).strip()
-    return text or None
+    raw = unicodedata.normalize("NFC", values[0])
+    if not raw.strip():
+        return None
+    if reject_control and any(unicodedata.category(ch) == CONTROL_CATEGORY for ch in raw):
+        raise ApiError(400, f"{field}_invalid", f"{field} contains control characters", field=field)
+    return raw.strip()
 
 
 def _text(form: MultiDict[str, str], field: str, *, required: bool) -> str | None:
-    value = _single(form, field)
+    value = _single(form, field, reject_control=True)
     if value is None:
         if required:
             raise ApiError(400, f"{field}_required", f"{field} is required", field=field)
         return None
-    if any(unicodedata.category(ch) == CONTROL_CATEGORY for ch in value):
-        raise ApiError(400, f"{field}_invalid", f"{field} contains control characters", field=field)
     if len(value) > MAX_TEXT_LENGTH:
         raise ApiError(400, f"{field}_too_long", f"{field} is too long", field=field)
     return value
@@ -174,8 +179,8 @@ def _enum(form: MultiDict[str, str], field: str, allowed: frozenset[str], code: 
 def parse_score_metadata(form: MultiDict[str, str]) -> ScoreMetadata:
     """Validate the text parts of a submission (PIYA-101 AC8 and PIYA-323).
 
-    Control characters are checked after trimming, so a stray trailing newline is tolerated but
-    an embedded one is not.
+    Control characters (including newlines and tabs) are rejected before trimming, so
+    a trailing newline gives ``title_invalid``.
 
     Raises:
         ApiError: 400 with the field's code; ``duplicate_field`` for a repeated field or for

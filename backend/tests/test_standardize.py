@@ -6,6 +6,9 @@ All fixtures are generated in code; no binaries are committed.
 from __future__ import annotations
 
 import io
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 from PIL import Image
@@ -134,3 +137,44 @@ def test_intake_semaphore_is_bounded_one() -> None:
         assert not standardize.INTAKE_SEMAPHORE.acquire(blocking=False)
     finally:
         standardize.INTAKE_SEMAPHORE.release()
+
+
+@pytest.mark.parametrize("mode", ["P", "LA", "RGBA", "L", "RGB"])
+def test_reduce_first_handles_every_mode(mode: str) -> None:
+    img = Image.new("RGBA", (400, 300), (0, 0, 0, 0)).convert(mode)
+    data = _encode(img, "PNG", transparency=0) if mode == "P" else _encode(img, "PNG")
+    page = standardize.standardize_image(data, 0, max_side_px=100)
+    assert max(page.width, page.height) == 100
+    out = Image.open(io.BytesIO(page.jpeg))
+    assert out.mode == "RGB"
+    if mode in ("P", "LA", "RGBA"):
+        assert out.getpixel((10, 10))[0] > 240  # transparent area flattened onto white
+
+
+MEMORY_PNG_SIDE = 7000
+# Measured 359 MB (decoder buffer ~196 MB + one reduced copy + resample); the unbounded version
+# peaked at 727 MB. The limit sits between the two with headroom for allocator noise.
+MEMORY_PEAK_LIMIT_MB = 450
+
+_MEMORY_CHILD = """
+import sys
+from backend import standardize
+from backend.scripts.bench_intake import _peak_rss_mb
+page = standardize.standardize_image(open(sys.argv[1], 'rb').read(), 0)
+print(_peak_rss_mb(), page.width, page.height)
+"""
+
+
+def test_large_rgba_png_memory_bounded(tmp_path: Path) -> None:
+    """Pillow's C buffers are invisible to tracemalloc, so measure peak RSS in a fresh process."""
+    png = tmp_path / "big.png"
+    Image.new("RGBA", (MEMORY_PNG_SIDE, MEMORY_PNG_SIDE), (10, 20, 30, 128)).save(png)
+    assert png.stat().st_size < 1024 * 1024  # tiny upload, ~196 MB once decoded
+    repo_root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        [sys.executable, "-c", _MEMORY_CHILD, str(png)],
+        cwd=repo_root, capture_output=True, text=True, check=True, timeout=120,
+    )
+    peak, width, height = result.stdout.split()
+    assert max(int(width), int(height)) <= 3000
+    assert float(peak) < MEMORY_PEAK_LIMIT_MB
