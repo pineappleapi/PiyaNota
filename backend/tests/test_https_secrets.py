@@ -12,16 +12,20 @@ import pytest
 from flask.testing import FlaskClient
 
 from backend.app import create_app
+from backend.scripts import check_secrets
 from backend.config import Settings
 from backend.tests.test_jobs_submit import _err, make_app  # noqa: F401
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_http_rejected_when_https_required(make_app: Callable[..., FlaskClient]) -> None:
+def test_http_rejected_when_https_required(
+    make_app: Callable[..., FlaskClient], settings: Settings
+) -> None:
+    assert settings.trusted_proxy_count >= 1  # else ProxyFix ignores X-Forwarded-Proto
     client = make_app(require_https=True)
     _err(client.get("/api/account", headers={"X-Forwarded-Proto": "http"}), 400, "https_required")
-    # Rejected before auth: a bad token on http is still https_required, not 401.
+    # /healthz is exempt so load-balancer probes work over plain http.
     assert client.get("/healthz", headers={"X-Forwarded-Proto": "http"}).status_code == 200
     _err(client.get("/api/account", headers={"X-Forwarded-Proto": "https"}), 401, "unauthorized")
 
@@ -33,6 +37,37 @@ def test_http_allowed_when_not_required(make_app: Callable[..., FlaskClient]) ->
 def test_prod_requires_https_flag(settings: Settings) -> None:
     with pytest.raises(RuntimeError, match="HTTPS"):
         create_app(replace(settings, env="prod", require_https=False))
+
+
+@pytest.mark.parametrize(
+    "planted",
+    [
+        "k = AK" + "IA1234567890ABCD",
+        "-----" + "BEGIN RSA PRIVATE KEY-----",
+        "PIYA_RESET_CODE_HMAC" + "_KEY = abc123",
+        "PIYA_RESET_CODE_HMAC" + '_KEY="abc123"',
+        "K" + "00" + "A" * 20,
+        "xkeysib" + "-" + "a1" * 12,
+        "postgresql://piya:hunter" + "2@db.example.com/x",
+    ],
+)
+def test_check_secrets_patterns_match(planted: str) -> None:
+    assert check_secrets.scan_text(planted)
+
+
+@pytest.mark.parametrize(
+    "benign",
+    [
+        "postgresql://piya:piya@localhost:5432/piya_dev",
+        "PIYA_RESET_CODE_HMAC" + "_KEY=\nnext line",
+        "set `PIYA_RESET_CODE_HMAC" + "_KEY=<value>` in prod",
+        "-----" + "BEGIN is a PEM marker",
+        "xkeysib" + "- prefix",
+        "postgresql://host/db and user:pass in prose",
+    ],
+)
+def test_check_secrets_patterns_ignore_prose(benign: str) -> None:
+    assert not check_secrets.scan_text(benign)
 
 
 def test_check_secrets_clean_repo() -> None:

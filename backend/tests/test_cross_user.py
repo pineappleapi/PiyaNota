@@ -38,10 +38,10 @@ def _snapshot() -> list[Any]:
 
 @pytest.fixture
 def two_users(client: FlaskClient) -> tuple[dict[str, str], dict[str, str], int, int]:
-    _signup(client, "a@example.com")
+    ha = _signup(client, "a@example.com")
     hb = _signup(client, "b@example.com")
     score, job = _score(_user_id("a@example.com"))
-    return hb, hb, score, job
+    return ha, hb, score, job
 
 
 @pytest.mark.parametrize(("method", "template", "body"), SCOPED)
@@ -52,17 +52,21 @@ def test_every_scoped_endpoint_denies_other_user(
     template: str,
     body: dict[str, Any] | None,
 ) -> None:
-    hb, _, score, job = two_users
+    ha, hb, score, job = two_users
+    url = template.format(job=job, score=score)
     before = _snapshot()
-    res = client.open(template.format(job=job, score=score), method=method, json=body, headers=hb)
+    res = client.open(url, method=method, json=body, headers=hb)
     assert res.status_code == 404, res.get_json()
     assert _snapshot() == before
+    # Positive control, after the state check since it may mutate: the owner is not denied, so
+    # the 404 above came from ownership and not from a wrong URL.
+    assert client.open(url, method=method, json=body, headers=ha).status_code != 404
 
 
 def test_retake_of_other_users_job_denied(
     client: FlaskClient, two_users: tuple[dict[str, str], dict[str, str], int, int]
 ) -> None:
-    hb, _, _, job = two_users
+    _, hb, _, job = two_users
     before = _snapshot()
     res = _post(client, hb, pages=[_img("JPEG")], title="t", replacesJobId=f"job_{job}")
     _err(res, 404, "job_not_found")
@@ -72,7 +76,7 @@ def test_retake_of_other_users_job_denied(
 def test_score_list_contains_only_callers(
     client: FlaskClient, two_users: tuple[dict[str, str], dict[str, str], int, int]
 ) -> None:
-    hb, _, score, _ = two_users
+    _, hb, score, _ = two_users
     res = client.get("/api/scores", headers=hb)
     assert res.status_code == 200
     assert str(score) not in str(res.get_json()["data"])
