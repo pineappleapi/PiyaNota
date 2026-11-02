@@ -58,3 +58,6 @@ soundfont/
 
 # Hand-annotation viewing crops under gt/ (hundreds of MB of PNGs, regenerable from the photos); GT sources and labels stay tracked.
 gt/**/crops/
+.neon
+node_modules/
+.env.local
