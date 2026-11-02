@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from typing import Any, Literal, cast
 
 import psycopg
@@ -402,6 +402,7 @@ def job_status(ref: str) -> tuple[Response, int]:
     if job_id is None:
         raise ApiError(404, "job_not_found", "Job not found")
     subject = security.keyed_hash(str(g.user.id))
+    missing: ApiError | None = None
     with db.transaction() as conn:
         throttle.lock_subject(conn, STATUS_READ_BUCKET, subject)
         retry = throttle.window_retry_after(
@@ -410,7 +411,12 @@ def job_status(ref: str) -> tuple[Response, int]:
         if retry is not None:
             raise throttle.too_many(retry)
         throttle.record_hit(conn, STATUS_READ_BUCKET, subject)
-        job = access.owned_job(conn, job_id)
+        try:
+            job = access.owned_job(conn, job_id)
+        except ApiError as exc:
+            missing = exc  # raised after commit so probing unowned ids still counts against the limit
+    if missing is not None:
+        raise missing
     return ok(_status_payload(job), 200, "Processing status retrieved")
 
 
@@ -422,6 +428,7 @@ def cancel_job(ref: str) -> tuple[Response, int]:
     if job_id is None:
         raise ApiError(404, "job_not_found", "Job not found")
     with db.transaction() as conn:
+        # Read unlocked first only to learn score_id: the score must be locked before the job.
         job = access.owned_job(conn, job_id)
         if job["score_id"] is not None:  # ERD lock order: score before job
             access.owned_score(conn, job["score_id"], for_update=True)

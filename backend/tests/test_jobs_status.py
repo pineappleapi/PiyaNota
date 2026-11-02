@@ -133,3 +133,27 @@ def test_cancel_other_user_404(client: FlaskClient, headers: dict[str, str]) -> 
     _err(client.post("/api/jobs/job_x/cancel", headers=other), 404, "job_not_found")
     with db.transaction() as conn:
         assert conn.execute("SELECT status FROM jobs").fetchone()["status"] == "queued"
+
+
+def test_status_unowned_ids_are_metered(make_app: Callable[..., FlaskClient]) -> None:  # noqa: F811
+    client = make_app(status_reads_per_minute=READ_LIMIT)
+    hdrs = _signup(client)
+    for _ in range(READ_LIMIT):
+        _err(client.get("/api/jobs/job_99999", headers=hdrs), 404, "job_not_found")
+    _err(client.get("/api/jobs/job_99999", headers=hdrs), 429, "rate_limited")
+
+
+def test_cancel_job_with_score_locks_score_then_job(client: FlaskClient, headers: dict[str, str]) -> None:
+    ref = _submit(client, headers)
+    with db.transaction() as conn:
+        user_id = conn.execute("SELECT user_id FROM jobs").fetchone()["user_id"]
+        score = conn.execute(
+            "INSERT INTO scores (user_id, title, page_count, tempo_source, review) "
+            "VALUES (%s, 'Bayan Ko', 2, 'default', '{}') RETURNING id",
+            (user_id,),
+        ).fetchone()
+        conn.execute("UPDATE jobs SET status='transcribing', score_id=%s", (score["id"],))
+    res = client.post(f"/api/jobs/{ref}/cancel", headers=headers)
+    assert res.status_code == 200
+    with db.transaction() as conn:
+        assert conn.execute("SELECT status FROM jobs").fetchone()["status"] == "cancelled"
