@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime, timezone
 from collections.abc import Mapping
 from typing import Any, Literal, cast
 
@@ -17,7 +18,7 @@ from flask import Blueprint, Response, current_app, g, request
 from werkzeug.datastructures import FileStorage, MultiDict
 from werkzeug.exceptions import RequestEntityTooLarge
 
-from backend import background, db, security, standardize, throttle
+from backend import access, background, db, security, standardize, throttle
 from backend.config import SETTINGS_KEY, Settings
 from backend.envelope import ApiError, iso_z, ok
 from backend.standardize import MAX_PDF_PAGES, StandardPage
@@ -35,6 +36,8 @@ jobs_bp = Blueprint("jobs", __name__, url_prefix="/api/jobs")
 SUBMIT_BUCKET = "submit"
 SUBMIT_WINDOW_S = 3600
 QUEUE_FULL_RETRY_AFTER_S = 600
+STATUS_READ_BUCKET = "status_read"
+STATUS_READ_WINDOW_S = 60
 SNIFF_BYTES = 16
 MSG_IMAGES = "Score submitted for processing"
 MSG_PDF = "PDF rasterized and submitted for processing"
@@ -94,19 +97,13 @@ def _accepted(job_row: Mapping[str, Any]) -> tuple[Response, int]:
     return ok(submitted_payload(job_row), 202, message)
 
 
-def _check_retake(conn: Conn, user_id: int, old_id: int, *, lock: bool) -> str:
+def _check_retake(conn: Conn, old_id: int, *, lock: bool) -> str:
     """AC12 checks in the required order; returns the old job's status.
 
     Raises:
         ApiError: 404 ``job_not_found``, 409 ``retake_in_progress``, 409 ``not_retakeable``.
     """
-    old = conn.execute(
-        "SELECT status, failure_reason, failed_voice_causes, superseded_by_job_id FROM jobs "
-        "WHERE id = %s AND user_id = %s" + (" FOR UPDATE" if lock else ""),
-        (old_id, user_id),
-    ).fetchone()
-    if old is None:
-        raise ApiError(404, "job_not_found", "Job not found")
+    old = access.owned_job(conn, old_id, for_update=lock)
     running = conn.execute(
         "SELECT 1 FROM jobs WHERE replaces_job_id = %s AND status <> ALL(%s)", (old_id, list(_FINISHED))
     ).fetchone()
@@ -179,7 +176,7 @@ def create_job(
                 raise throttle.too_many(retry)
             old_status = None
             if meta.replaces_job_id is not None:
-                old_status = _check_retake(conn, user_id, meta.replaces_job_id, lock=True)
+                old_status = _check_retake(conn, meta.replaces_job_id, lock=True)
             row = conn.execute(
                 "INSERT INTO jobs (user_id, status, source, page_count, title, arranger, tempo_bpm, "
                 "tempo_source, key_signature, time_signature, replaces_job_id, client_submission_id) "
@@ -350,7 +347,7 @@ def _submit(source: Source) -> tuple[Response, int]:
         if meta.replaces_ref_invalid:
             raise ApiError(404, "job_not_found", "Job not found")
         if meta.replaces_job_id is not None:
-            _check_retake(conn, user_id, meta.replaces_job_id, lock=False)
+            _check_retake(conn, meta.replaces_job_id, lock=False)
         queued = conn.execute("SELECT count(*) AS n FROM jobs WHERE status = 'queued'").fetchone()
     if queued is not None and queued["n"] >= cfg.queue_capacity:
         raise ApiError(429, "queue_full", "The processing queue is full",
@@ -369,3 +366,72 @@ def submit_images() -> tuple[Response, int]:
 @security.require_auth
 def submit_pdf() -> tuple[Response, int]:
     return _submit("pdf")
+
+
+def _status_payload(job: Mapping[str, Any]) -> dict[str, Any]:
+    """The status ``data`` object; fields that do not apply to the job's state are null/omitted."""
+    status = job["status"]
+    data: dict[str, Any] = {
+        "jobId": job_ref(job["id"]),
+        "status": status,
+        "totalPages": job["page_count"],
+        "percentComplete": job["percent_complete"],
+        "failureReason": job["failure_reason"] if status == "failed" else None,
+        "failedVoices": job["failed_voices"] if status == "complete" else None,
+        "failedVoiceCauses": job["failed_voice_causes"] if status == "complete" else None,
+        "title": job["title"],
+        "tempoBpm": job["tempo_bpm"],
+    }
+    if status not in _FINISHED and job["current_page"] is not None:
+        data["currentPage"] = job["current_page"]
+    if status == "failed":
+        data["pageIndex"] = job["failure_page_index"]
+    if status == "complete":
+        data["scoreId"] = job["score_id"]
+    for key, column in (("arranger", "arranger"), ("keySignature", "key_signature"),
+                        ("timeSignature", "time_signature")):
+        if job[column] is not None:
+            data[key] = job[column]
+    return data
+
+
+@jobs_bp.get("/<ref>")
+@security.require_auth
+def job_status(ref: str) -> tuple[Response, int]:
+    job_id = parse_job_ref(ref)
+    if job_id is None:
+        raise ApiError(404, "job_not_found", "Job not found")
+    subject = security.keyed_hash(str(g.user.id))
+    with db.transaction() as conn:
+        throttle.lock_subject(conn, STATUS_READ_BUCKET, subject)
+        retry = throttle.window_retry_after(
+            conn, STATUS_READ_BUCKET, subject, _settings().status_reads_per_minute, STATUS_READ_WINDOW_S
+        )
+        if retry is not None:
+            raise throttle.too_many(retry)
+        throttle.record_hit(conn, STATUS_READ_BUCKET, subject)
+        job = access.owned_job(conn, job_id)
+    return ok(_status_payload(job), 200, "Processing status retrieved")
+
+
+@jobs_bp.post("/<ref>/cancel")
+@security.require_auth
+def cancel_job(ref: str) -> tuple[Response, int]:
+    """Cancel a non-terminal job; the request body is ignored (the path is authoritative)."""
+    job_id = parse_job_ref(ref)
+    if job_id is None:
+        raise ApiError(404, "job_not_found", "Job not found")
+    with db.transaction() as conn:
+        job = access.owned_job(conn, job_id)
+        if job["score_id"] is not None:  # ERD lock order: score before job
+            access.owned_score(conn, job["score_id"], for_update=True)
+        job = access.owned_job(conn, job_id, for_update=True)
+        if job["status"] in _FINISHED:  # re-check: it may have finished while we waited for the lock
+            raise ApiError(409, "job_terminal", "The job has already finished")
+        conn.execute("UPDATE jobs SET status = 'cancelled', updated_at = now() WHERE id = %s", (job_id,))
+        keys = [r["object_key"] for r in conn.execute(
+            "SELECT object_key FROM job_pages WHERE job_id = %s", (job_id,)).fetchall()]
+        background.queue_deletion(conn, keys)
+    LOG.info("job cancelled job_id=%s user_id=%s stage=%s at=%s",
+             job_id, g.user.id, job["status"], iso_z(datetime.now(timezone.utc)))
+    return ok({"jobId": ref, "status": "cancelled"}, 200, "Processing cancelled")
