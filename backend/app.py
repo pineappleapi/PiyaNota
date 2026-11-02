@@ -15,6 +15,7 @@ from backend.logutil import describe_exception
 from backend.envelope import ApiError, error_response, ok
 from backend.routes_account import account_bp
 from backend.routes_auth import auth_bp
+from backend.routes_jobs import jobs_bp
 from backend.storage import build_storage
 
 LOG = logging.getLogger(__name__)
@@ -74,6 +75,7 @@ def create_app(settings: Settings | None = None) -> Flask:
     app.extensions["storage"] = build_storage(cfg)
     app.register_blueprint(auth_bp)
     app.register_blueprint(account_bp)
+    app.register_blueprint(jobs_bp)
 
     @app.get("/healthz")
     def healthz() -> tuple[Response, int]:

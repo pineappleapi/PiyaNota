@@ -49,6 +49,7 @@ erDiagram
         smallint page_count
         text title
         smallint tempo_bpm
+        uuid client_submission_id
         bigint replaces_job_id FK
         bigint superseded_by_job_id FK
     }
@@ -198,6 +199,7 @@ Why HMAC: a 6-digit code has only 10^6 values. A plain hash can be brute-forced 
 | failure_page_index | smallint | yes | | | |
 | failed_voices | jsonb | no | `'[]'` | | |
 | failed_voice_causes | jsonb | no | `'{}'` | | |
+| client_submission_id | uuid | yes | | unique with user_id (migration 0002) | PIYA-101 idempotency |
 | replaces_job_id | bigint | yes | | FK jobs(id) ON DELETE SET NULL | PIYA-311 AC8 |
 | superseded_by_job_id | bigint | yes | | FK jobs(id) ON DELETE SET NULL | PIYA-311 AC8 |
 | completed_at | timestamptz | yes | | | |
@@ -212,6 +214,7 @@ Indexes:
 - `jobs_user_status_idx`: `(user_id, status)`.
 - `jobs_score_idx`: `(score_id)`.
 - `jobs_superseded_by_idx`: `(superseded_by_job_id)`.
+- `jobs_user_client_submission_idx`: UNIQUE on `(user_id, client_submission_id)` (migration 0002). NULLs are distinct, so jobs without a key are unconstrained; a repeat submit with the same key returns the original job.
 
 ### job_pages
 

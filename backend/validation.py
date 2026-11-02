@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import re
+import unicodedata
+import uuid
 from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Literal
 
 from flask import request
+from werkzeug.datastructures import MultiDict
 
 from backend.envelope import ApiError
 
@@ -78,3 +83,142 @@ def check_password_policy(password: str, field: str) -> None:
             "Password must be at least 8 characters and include a letter and a digit",
             field=field,
         )
+
+
+# --- Score metadata (PIYA-101 AC8, PIYA-323) ---------------------------------------------------
+MAX_TEXT_LENGTH = 120
+MIN_TEMPO_BPM = 30
+MAX_TEMPO_BPM = 240
+DEFAULT_TEMPO_BPM = 90
+_MAX_TEMPO_DIGITS = 3  # bounds int() work on hostile input
+KEY_SIGNATURES = frozenset(
+    {"C", "G", "D", "A", "E", "B", "F#", "C#", "F", "Bb", "Eb", "Ab", "Db", "Gb", "Cb"}
+)
+TIME_SIGNATURES = frozenset({"4/4", "3/4", "2/4", "6/8", "2/2"})
+_JOB_REF = re.compile(r"job_([1-9][0-9]{0,17})")  # ASCII digits only; fits bigint
+_UUID_CANONICAL = re.compile(r"[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
+CONTROL_CATEGORY = "Cc"
+
+
+@dataclass(frozen=True)
+class ScoreMetadata:
+    """Validated, normalised submission metadata.
+
+    ``replaces_ref_invalid`` is separate from ``replaces_job_id`` because a malformed
+    ``replacesJobId`` must surface as 404 at the retake step of the error precedence, not as a
+    400 here.
+    """
+
+    title: str
+    arranger: str | None
+    tempo_bpm: int
+    tempo_source: Literal["user", "fallback", "default"]
+    key_signature: str | None
+    time_signature: str | None
+    replaces_job_id: int | None
+    replaces_ref_invalid: bool = False
+
+
+def parse_job_ref(ref: str) -> int | None:
+    """Parse the app's ``"job_<n>"`` string; None when malformed."""
+    match = _JOB_REF.fullmatch(ref)
+    return int(match.group(1)) if match else None
+
+
+def _single(form: MultiDict[str, str], field: str) -> str | None:
+    """The trimmed single value of ``field``; None when absent or blank.
+
+    Raises:
+        ApiError: 400 ``duplicate_field`` when sent more than once.
+    """
+    values = form.getlist(field)
+    if len(values) > 1:
+        raise ApiError(400, "duplicate_field", f"{field} was sent more than once", field=field)
+    if not values:
+        return None
+    text = unicodedata.normalize("NFC", values[0]).strip()
+    return text or None
+
+
+def _text(form: MultiDict[str, str], field: str, *, required: bool) -> str | None:
+    value = _single(form, field)
+    if value is None:
+        if required:
+            raise ApiError(400, f"{field}_required", f"{field} is required", field=field)
+        return None
+    if any(unicodedata.category(ch) == CONTROL_CATEGORY for ch in value):
+        raise ApiError(400, f"{field}_invalid", f"{field} contains control characters", field=field)
+    if len(value) > MAX_TEXT_LENGTH:
+        raise ApiError(400, f"{field}_too_long", f"{field} is too long", field=field)
+    return value
+
+
+def _tempo(form: MultiDict[str, str], field: str) -> int | None:
+    value = _single(form, field)
+    if value is None:
+        return None
+    # isdecimal() would accept Arabic-Indic digits; the contract is ASCII only.
+    valid = value.isascii() and value.isdigit() and len(value) <= _MAX_TEMPO_DIGITS
+    if not valid or not MIN_TEMPO_BPM <= int(value) <= MAX_TEMPO_BPM:
+        raise ApiError(400, "invalid_tempo", f"{field} must be {MIN_TEMPO_BPM}-{MAX_TEMPO_BPM}", field=field)
+    return int(value)
+
+
+def _enum(form: MultiDict[str, str], field: str, allowed: frozenset[str], code: str) -> str | None:
+    value = _single(form, field)
+    if value is not None and value not in allowed:
+        raise ApiError(400, code, f"{field} is not a recognised value", field=field)
+    return value
+
+
+def parse_score_metadata(form: MultiDict[str, str]) -> ScoreMetadata:
+    """Validate the text parts of a submission (PIYA-101 AC8 and PIYA-323).
+
+    Control characters are checked after trimming, so a stray trailing newline is tolerated but
+    an embedded one is not.
+
+    Raises:
+        ApiError: 400 with the field's code; ``duplicate_field`` for a repeated field or for
+            ``tempoBpm`` sent together with ``fallbackTempoBpm``.
+    """
+    title = _text(form, "title", required=True) or ""  # required=True never returns None
+    arranger = _text(form, "arranger", required=False)
+    tempo = _tempo(form, "tempoBpm")
+    fallback = _tempo(form, "fallbackTempoBpm")
+    if tempo is not None and fallback is not None:
+        raise ApiError(400, "duplicate_field", "Send tempoBpm or fallbackTempoBpm, not both",
+                       field="fallbackTempoBpm")
+    key = _enum(form, "keySignature", KEY_SIGNATURES, "invalid_key_signature")
+    time_sig = _enum(form, "timeSignature", TIME_SIGNATURES, "invalid_time_signature")
+    ref = _single(form, "replacesJobId")
+    replaces = parse_job_ref(ref) if ref is not None else None
+    source: Literal["user", "fallback", "default"] = "user"
+    if tempo is None:
+        tempo, source = (fallback, "fallback") if fallback is not None else (DEFAULT_TEMPO_BPM, "default")
+    return ScoreMetadata(
+        title=title, arranger=arranger, tempo_bpm=tempo, tempo_source=source,
+        key_signature=key, time_signature=time_sig, replaces_job_id=replaces,
+        replaces_ref_invalid=ref is not None and replaces is None,
+    )
+
+
+def parse_client_submission_id(form: MultiDict[str, str]) -> uuid.UUID | None:
+    """The optional ``clientSubmissionId`` idempotency key as a UUID; None when absent/blank.
+
+    Only the 8-4-4-4-12 hyphenated form is accepted (any case), so equal ids always compare equal
+    after lower-casing.
+
+    Raises:
+        ApiError: 400 ``invalid_client_submission_id`` when malformed or repeated.
+    """
+    field = "clientSubmissionId"
+    try:
+        value = _single(form, field)
+    except ApiError:
+        raise ApiError(400, "invalid_client_submission_id", f"{field} was sent more than once",
+                       field=field) from None
+    if value is None:
+        return None
+    if not _UUID_CANONICAL.fullmatch(value):
+        raise ApiError(400, "invalid_client_submission_id", f"{field} must be a UUID", field=field)
+    return uuid.UUID(value.lower())

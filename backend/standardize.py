@@ -146,3 +146,16 @@ def _render_pages(pdf: pypdfium2.PdfDocument, count: int, max_side_px: int, dpi:
     finally:
         with INTAKE_SEMAPHORE:
             pdf.close()
+
+
+def verify_image(data: bytes, page_index: int) -> None:
+    """Header-only 422 check, used when a request has too many pages to decode in full.
+
+    Raises:
+        ApiError: 422 ``corrupt_image`` when the stream is unreadable.
+    """
+    with INTAKE_SEMAPHORE:
+        try:
+            Image.open(io.BytesIO(data)).verify()
+        except _DECODE_ERRORS as exc:
+            raise ApiError(422, "corrupt_image", "The image could not be decoded", page_index=page_index) from exc
