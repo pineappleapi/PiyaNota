@@ -440,6 +440,7 @@ Commit messages: `PIYA-XXX: <summary>`. Never commit without explicit user revie
 - Use frontend-lead for any Module 2 (Flutter/Android app) change.
 - Use prompt-enhancer when a task is described informally and needs
   structuring before execution begins.
+
 ## Backend
 
 Module 3 (Flask API) lives in `backend/`; setup and tests are in `backend/README.md`, deployment in

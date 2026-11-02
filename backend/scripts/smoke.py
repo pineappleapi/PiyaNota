@@ -17,7 +17,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
-TIMEOUT_S = 60
+TIMEOUT_S = 120  # Render free cold start can take a minute or more
 JOB_REF = re.compile(r"^job_[0-9]+$")
 ISO_Z = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$")
 PASSWORD = "smoke-pass-1"
@@ -90,7 +90,7 @@ def call(
     data: bytes | None = None,
     content_type: str | None = None,
 ) -> Reply:
-    headers: dict[str, str] = {}
+    headers: dict[str, str] = {"User-Agent": "piyanota-smoke/1"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
     if json_body is not None:
@@ -140,7 +140,7 @@ def error(reply: Reply, status: int, code: str) -> None:
 
 def run(base: str) -> int:
     email = f"smoke-{uuid.uuid4().hex[:12]}@example.com"
-    state: dict[str, Any] = {}
+    state: dict[str, Any] = {"password": PASSWORD}
 
     def signup() -> None:
         data = envelope(call(base, "POST", "/api/auth/signup", json_body={
@@ -193,6 +193,7 @@ def run(base: str) -> int:
     def change_password() -> None:
         envelope(call(base, "POST", "/api/auth/change-password", token=state["token"], json_body={
             "currentPassword": PASSWORD, "newPassword": NEW_PASSWORD}), 200)
+        state["password"] = NEW_PASSWORD  # later steps fall back to the old one if this failed
 
     def logout() -> None:
         envelope(call(base, "POST", "/api/auth/logout", token=state["token"]), 200)
@@ -200,14 +201,14 @@ def run(base: str) -> int:
 
     def delete_account() -> None:
         data = envelope(call(base, "POST", "/api/auth/login", json_body={
-            "email": email, "password": NEW_PASSWORD}), 200)
+            "email": email, "password": state["password"]}), 200)
         token = data["sessionToken"]
         error(call(base, "DELETE", "/api/account", token=token, json_body={"password": "wrong-pass-1"}),
               403, "invalid_current_password")
         envelope(call(base, "DELETE", "/api/account", token=token, json_body={
-            "password": NEW_PASSWORD}), 200)
+            "password": state["password"]}), 200)
         error(call(base, "POST", "/api/auth/login", json_body={
-            "email": email, "password": NEW_PASSWORD}), 401, "invalid_credentials")
+            "email": email, "password": state["password"]}), 401, "invalid_credentials")
 
     steps: list[tuple[str, Callable[[], None]]] = [
         ("signup", signup), ("account", account), ("login", login), ("submit", submit),

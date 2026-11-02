@@ -29,7 +29,7 @@ startup error that names it.
 | `PIYA_MAIL_BACKEND` | render.yaml value | `log` now; `brevo` later |
 | `PIYA_MAIL_FROM` | render.yaml value | required in prod; use the verified Brevo sender later |
 | `PIYA_TRUSTED_PROXY_COUNT` | render.yaml value | `1` until the header check below |
-| `DATABASE_URL` | dashboard (`sync: false`) | Neon **pooled** connection string. `config.py` reads `PIYA_DATABASE_URL`, falling back to `DATABASE_URL`; `python -m backend.migrate` reads `DATABASE_URL` only, so use that name for both |
+| `DATABASE_URL` | dashboard (`sync: false`) | Neon **direct (unpooled)** connection string (host without `-pooler`), because migrations run DDL on it at every boot and the backend already uses direct connections. `config.py` reads `PIYA_DATABASE_URL`, falling back to `DATABASE_URL`; `python -m backend.migrate` reads `DATABASE_URL` only, so use that name for both |
 | `PIYA_RESET_CODE_HMAC_KEY` | dashboard (`sync: false`) | long random string, e.g. `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
 | `PIYA_LOG_HASH_KEY` | dashboard (`sync: false`) | another long random string |
 | `PIYA_B2_ENDPOINT`, `PIYA_B2_BUCKET`, `PIYA_B2_KEY_ID`, `PIYA_B2_APP_KEY` | dashboard | only with `b2` |
@@ -41,7 +41,7 @@ Secrets go in the Render dashboard, never in files.
 
 ## Steps
 
-1. Neon: create a project, copy the pooled connection string (becomes `DATABASE_URL`).
+1. Neon: create a project, copy the direct (unpooled) connection string (becomes `DATABASE_URL`).
 2. Push the branch to GitHub (ask the owner first), then in Render: New > Blueprint > pick the
    repo and branch. Fill the `sync: false` values when prompted.
 3. Render builds the image; the container runs `python -m backend.migrate up` and then gunicorn.
@@ -83,6 +83,10 @@ Per-IP limits only work if `request.remote_addr` is the tester's real IP.
 - B2 Class B daily transaction cap (about 2,500/day free). Every presigned GET and audio range
   request counts; set caps and alerts in the B2 console.
 - Brevo free-mail sender deliverability.
+
+## Sleeping service
+
+The free service sleeps when idle; the background loop (cleanup, every 10 min) does not run while it sleeps and resumes on the next request. The first request after sleep is slow (cold start).
 
 ## Operator duties
 

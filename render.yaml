@@ -25,7 +25,8 @@ services:
       # One proxy hop (Render's) until the debug-headers check in deploy.md says otherwise.
       - key: PIYA_TRUSTED_PROXY_COUNT
         value: "1"
-      # Neon connection string (pooled). Read by the app and by `python -m backend.migrate`.
+      # Neon DIRECT (unpooled) connection string, not the -pooler host. Read by the app and by
+      # `python -m backend.migrate` at every boot; DDL migrations need a direct session.
       - key: DATABASE_URL
         sync: false
       - key: PIYA_RESET_CODE_HMAC_KEY
