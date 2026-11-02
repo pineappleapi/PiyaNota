@@ -1,0 +1,37 @@
+# Render Blueprint: one free Docker web service. Secrets are never in this file (sync: false);
+# set them in the Render dashboard. See docs/backend/deploy.md.
+services:
+  - type: web
+    name: piyanota-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    envVars:
+      - key: PIYA_ENV
+        value: prod
+      - key: PIYA_REQUIRE_HTTPS
+        value: "true"
+      # Backends: initial deploy has no B2/Brevo accounts. memory loses data on restart; log prints
+      # reset codes to the Render log. To switch: b2 (also set the PIYA_B2_* vars below) and
+      # brevo (also set PIYA_BREVO_API_KEY).
+      - key: PIYA_STORAGE_BACKEND
+        value: memory
+      - key: PIYA_MAIL_BACKEND
+        value: log
+      - key: PIYA_MAIL_FROM
+        value: noreply@piyanota.invalid
+      # One proxy hop (Render's) until the debug-headers check in deploy.md says otherwise.
+      - key: PIYA_TRUSTED_PROXY_COUNT
+        value: "1"
+      # Neon connection string (pooled). Read by the app and by `python -m backend.migrate`.
+      - key: DATABASE_URL
+        sync: false
+      - key: PIYA_RESET_CODE_HMAC_KEY
+        sync: false
+      - key: PIYA_LOG_HASH_KEY
+        sync: false
+      # Needed only after switching PIYA_STORAGE_BACKEND to b2:
+      #   PIYA_B2_ENDPOINT, PIYA_B2_BUCKET, PIYA_B2_KEY_ID, PIYA_B2_APP_KEY (all sync: false)
+      # Needed only after switching PIYA_MAIL_BACKEND to brevo: PIYA_BREVO_API_KEY (sync: false)

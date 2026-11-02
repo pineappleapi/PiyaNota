@@ -215,3 +215,32 @@ def test_pool_recovers_after_backend_terminated(app: Flask, settings: Settings) 
     with db.transaction() as conn:
         row = conn.execute("SELECT 1 AS one").fetchone()
     assert row == {"one": 1}
+
+
+def test_debug_headers_off_by_default(client: FlaskClient) -> None:
+    assert client.get("/api/_debug/headers").status_code == 404
+
+
+def test_debug_headers_returns_proxy_headers(settings: Settings) -> None:
+    from dataclasses import replace
+
+    from backend.app import create_app
+
+    app = create_app(replace(settings, debug_headers=True))
+    try:
+        response = app.test_client().get(
+            "/api/_debug/headers",
+            headers={"X-Forwarded-For": "203.0.113.9", "CF-Connecting-IP": "203.0.113.9"},
+        )
+        data = response.get_json()["data"]
+        assert response.status_code == 200
+        assert data["X-Forwarded-For"] == "203.0.113.9"
+        assert data["CF-Connecting-IP"] == "203.0.113.9"
+        assert data["True-Client-IP"] is None
+    finally:
+        db.close_pool()
+
+
+def test_debug_headers_env_flag(settings: Settings) -> None:
+    assert load_settings({"PIYA_ENV": "test", "PIYA_DEBUG_HEADERS": "1"}).debug_headers is True
+    assert settings.debug_headers is False

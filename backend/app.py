@@ -26,6 +26,7 @@ _HTTP_ERROR_CODES: dict[int, str] = {
     413: "request_too_large",
 }
 _INTERNAL_MESSAGE = "Internal server error"
+_DEBUG_HEADER_NAMES = ("X-Forwarded-For", "True-Client-IP", "CF-Connecting-IP")
 
 
 def create_app(settings: Settings | None = None) -> Flask:
@@ -94,6 +95,14 @@ def create_app(settings: Settings | None = None) -> Flask:
         # Deliberately no DB access: UptimeRobot pings this every 5 minutes and Neon must be
         # allowed to scale to zero.
         return ok({"ok": True}, 200, "ok")
+
+    if cfg.debug_headers:
+
+        @app.get("/api/_debug/headers")
+        def debug_headers() -> tuple[Response, int]:
+            # Temporary (PIYA-401): shows which client-IP headers the host's proxy chain sets.
+            seen = {name: request.headers.get(name) for name in _DEBUG_HEADER_NAMES}
+            return ok({**seen, "remoteAddr": request.remote_addr}, 200, "ok")
 
     if cfg.run_background:
         background.start_loop(app)

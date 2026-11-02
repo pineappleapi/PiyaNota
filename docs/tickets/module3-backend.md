@@ -550,3 +550,16 @@ _Source: `docs/tickets/module2-mobile-v2.md`. Reviewed by backend-lead 2026-10-2
   4. 200 returns `{"data": <entry>, "success": true, "status": 200, "message": "Score updated"}`, where `<entry>` has the shape of one element of PIYA-308 `data.scores` (optional fields omitted, fresh `thumbnailUrl`). It does not change `last_accessed_at`. The same body applied twice gives the same result, so retries are safe.
   5. Applies only to `scoreId`s that PIYA-308 returns. Editing a failed scan depends on PIYA-218's open dependency (failed scans listed in PIYA-308), since PIYA-321 creates a `scores` row only on completion.
   6. Added to PIYA-315 AC3's cross-user test.
+
+## Implemented contract (2026-11)
+
+What the backend actually serves (branch `feature/module3-backend`); where this differs from a ticket above, this section wins. All responses use the PIYA-101 AC9 envelope. Verified end to end by `python -m backend.scripts.smoke <base_url>`.
+
+- **Final paths:** `POST /api/auth/signup`, `POST /api/auth/login`, `POST /api/auth/logout`, `POST /api/auth/change-password`, `POST /api/auth/password-reset/request` and `/confirm` (PIYA-303/304), `GET /api/account`, `DELETE /api/account`, `POST /api/jobs`, `POST /api/jobs/pdf`, `GET /api/jobs/{jobId}`, `POST /api/jobs/{jobId}/cancel`, `GET /api/scores`, `GET /api/scores/{scoreId}/result`, `PATCH /api/scores/{scoreId}`, `DELETE /api/scores/{scoreId}`, `GET /healthz`.
+- **Types:** `userId` and `scoreId` are integers; `jobId` is the string `job_<n>`; timestamps are ISO-8601 UTC ending in `Z`.
+- **`GET /api/scores/{scoreId}/result`** closes the PIYA-308 AC8 gap: the app can fetch a finished score's audio, timing and page URLs by score id.
+- **`scoreId` on PIYA-102 complete:** the status response for a `complete` job carries `scoreId`.
+- **Delete account (PIYA-307):** a wrong password returns 403 `invalid_current_password`.
+- **Cancel response:** `{"jobId": "job_<n>", "status": "cancelled"}` (key `jobId`).
+- **PIYA-305 AC1/AC4:** AC1 wins. An expired or revoked token gets 401 `unauthorized` on logout like everywhere else; logout of a live token returns 200 and revokes that session only.
+- **Deploy:** see `docs/backend/deploy.md`. The initial Render deploy uses `memory` storage and the `log` mailer until B2 and Brevo accounts exist.
