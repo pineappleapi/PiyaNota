@@ -53,7 +53,7 @@ def create_app(settings: Settings | None = None) -> Flask:
     # X-Forwarded-For, which the per-IP rate limits depend on.
     app.wsgi_app = ProxyFix(
         app.wsgi_app,
-        x_for=cfg.trusted_proxy_count,
+        x_for=cfg.trusted_proxy_for_count or cfg.trusted_proxy_count,
         x_proto=cfg.trusted_proxy_count,
     )
     db.init_pool(

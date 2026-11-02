@@ -256,3 +256,27 @@ def test_prod_with_log_mailer_warns(settings: Settings, caplog: pytest.LogCaptur
         create_app(prod)
     db.close_pool()
     assert "mail backend is 'log'" in caplog.text
+
+
+def test_proxy_for_count_is_separate_from_proto_count(settings: Settings) -> None:
+    from dataclasses import replace
+
+    from backend.app import create_app
+
+    assert settings.trusted_proxy_count == 1 and settings.trusted_proxy_for_count is None
+    cfg = replace(settings, debug_headers=True, require_https=True, trusted_proxy_for_count=3)
+    client = create_app(cfg).test_client()
+    try:
+        headers = {"X-Forwarded-For": "203.0.113.7, 104.23.160.201, 10.27.25.14",
+                   "X-Forwarded-Proto": "https"}
+        response = client.get("/api/_debug/headers", headers=headers)
+        assert response.status_code == 200  # https still detected with proto count 1
+        assert response.get_json()["data"]["remoteAddr"] == "203.0.113.7"
+    finally:
+        db.close_pool()
+
+
+def test_proxy_for_count_env_and_default() -> None:
+    assert load_settings({"PIYA_ENV": "test"}).trusted_proxy_for_count is None
+    cfg = load_settings({"PIYA_ENV": "test", "PIYA_TRUSTED_PROXY_FOR_COUNT": "3"})
+    assert cfg.trusted_proxy_for_count == 3

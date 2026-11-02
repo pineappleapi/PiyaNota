@@ -59,6 +59,9 @@ class Settings:
     mail_from: str = "noreply@localhost"
     mail_from_name: str = "PiyaNota"
     trusted_proxy_count: int = 1
+    # Hops to skip for X-Forwarded-For only; None means trusted_proxy_count. Separate because the
+    # XFF chain on Render is longer (Cloudflare + Render) than the proto chain we can rely on.
+    trusted_proxy_for_count: int | None = None
     # Temporary: exposes the proxy headers the app sees so trusted_proxy_count can be set from
     # evidence. Remove with the endpoint in app.py once recorded in docs/backend/deploy.md.
     debug_headers: bool = False
@@ -227,6 +230,7 @@ def load_settings(env: Mapping[str, str] = os.environ) -> Settings:
         mail_from=_read_str(env, "mail_from", default="noreply@localhost", required=is_prod),
         mail_from_name=_read_str(env, "mail_from_name", default="PiyaNota"),
         trusted_proxy_count=_read_int(env, "trusted_proxy_count"),
+        trusted_proxy_for_count=_read_optional_int(env, "trusted_proxy_for_count"),
         debug_headers=_read_bool(env, "debug_headers"),
         max_content_length=_read_int(env, "max_content_length"),
         max_image_bytes=_read_int(env, "max_image_bytes"),

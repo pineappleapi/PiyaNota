@@ -28,7 +28,8 @@ startup error that names it.
 | `PIYA_STORAGE_BACKEND` | render.yaml value | `memory` now; `b2` later |
 | `PIYA_MAIL_BACKEND` | render.yaml value | `log` now; `brevo` later |
 | `PIYA_MAIL_FROM` | render.yaml value | required in prod; use the verified Brevo sender later |
-| `PIYA_TRUSTED_PROXY_COUNT` | render.yaml value | `1` until the header check below |
+| `PIYA_TRUSTED_PROXY_COUNT` | render.yaml value | `1`; hops for `X-Forwarded-Proto`/`Host` |
+| `PIYA_TRUSTED_PROXY_FOR_COUNT` | render.yaml value | `3`; hops for `X-Forwarded-For` (client IP), see the measurement below |
 | `DATABASE_URL` | dashboard (`sync: false`) | Neon **direct (unpooled)** connection string (host without `-pooler`), because migrations run DDL on it at every boot and the backend already uses direct connections. `config.py` reads `PIYA_DATABASE_URL`, falling back to `DATABASE_URL`; `python -m backend.migrate` reads `DATABASE_URL` only, so use that name for both |
 | `PIYA_RESET_CODE_HMAC_KEY` | dashboard (`sync: false`) | long random string, e.g. `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
 | `PIYA_LOG_HASH_KEY` | dashboard (`sync: false`) | another long random string |
@@ -63,7 +64,13 @@ Per-IP limits only work if `request.remote_addr` is the tester's real IP.
    mobile data and from a laptop. Expect `remoteAddr` to equal the real client IP with
    `PIYA_TRUSTED_PROXY_COUNT=1`. If `X-Forwarded-For` has more hops than that (Render sits behind
    Cloudflare), raise the count so `remoteAddr` is the real client, or switch to a trusted header.
-3. Record the result here: `TODO — not measured yet`.
+3. Result (measured on live Render, 2026-11-03): `X-Forwarded-For` = `112.208.191.212, 104.23.160.201, 10.27.25.14`
+   (client, Cloudflare edge, Render internal); `CF-Connecting-IP` and `True-Client-IP` = the real client
+   `112.208.191.212`; `remoteAddr` = `10.27.25.14` with count 1, which is shared by everyone. So
+   `PIYA_TRUSTED_PROXY_FOR_COUNT=3` (used only for `X-Forwarded-For`) gives the real client IP, while
+   `PIYA_TRUSTED_PROXY_COUNT=1` stays for `X-Forwarded-Proto`/`Host` (werkzeug ignores a forwarded header
+   with fewer entries than the count, and the proto chain length is unknown). If the Render/Cloudflare
+   topology changes, re-measure.
 4. **Remove after use:** unset `PIYA_DEBUG_HEADERS`, then delete the `debug_headers` setting
    (`backend/config.py`), the endpoint in `backend/app.py` and its tests in
    `backend/tests/test_app_basics.py`.
