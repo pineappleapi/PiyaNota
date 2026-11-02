@@ -151,10 +151,10 @@ def test_reduce_first_handles_every_mode(mode: str) -> None:
         assert out.getpixel((10, 10))[0] > 240  # transparent area flattened onto white
 
 
-MEMORY_PNG_SIDE = 7000
-# Measured 359 MB (decoder buffer ~196 MB + one reduced copy + resample); the unbounded version
-# peaked at 727 MB. The limit sits between the two with headroom for allocator noise.
-MEMORY_PEAK_LIMIT_MB = 450
+MEMORY_PNG_SIDE = 7071  # 7071^2 = 49.99 MP, the 50 MP cap
+# Measured 315 MB at 50 MP (decoder buffer ~196 MB, freed before the encode copies); the unbounded
+# version peaked at 727 MB. Limit = measured + ~40 MB for allocator noise.
+MEMORY_PEAK_LIMIT_MB = 355
 
 _MEMORY_CHILD = """
 import sys

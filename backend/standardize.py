@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 import threading
 from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Literal, NamedTuple
 
 import pypdfium2
@@ -31,6 +32,23 @@ INTAKE_SEMAPHORE = threading.BoundedSemaphore(1)
 
 # Pillow can raise any of these from a truncated or malformed stream.
 _DECODE_ERRORS = (OSError, SyntaxError, ValueError, EOFError)
+# Pillow warns between MAX_IMAGE_PIXELS and twice that, and raises beyond; both mean "too big".
+_BOMBS = (Image.DecompressionBombError, Image.DecompressionBombWarning)
+
+
+@contextmanager
+def _pixel_limit(max_pixels: int) -> Iterator[None]:
+    """Set Pillow's bomb guard for one call and restore it; callers hold INTAKE_SEMAPHORE.
+
+    Restoring matters: a process-wide change would otherwise leak into unrelated Pillow use
+    (PDF page rendering) and into other tests.
+    """
+    previous = Image.MAX_IMAGE_PIXELS
+    Image.MAX_IMAGE_PIXELS = max_pixels
+    try:
+        yield
+    finally:
+        Image.MAX_IMAGE_PIXELS = previous
 
 
 class StandardPage(NamedTuple):
@@ -106,6 +124,8 @@ def standardize_pil(
     """Downscale and re-encode an already-decoded image (used for rendered PDF pages)."""
     with INTAKE_SEMAPHORE:
         try:
+            # Rebind so the full-size original is unreferenced while _encode allocates.
+            img = _reduce_first(img, max_side_px)
             return _encode(img, max_side_px)
         except _DECODE_ERRORS as exc:
             raise ApiError(422, "corrupt_image", "The image could not be decoded", page_index=page_index) from exc
@@ -124,7 +144,8 @@ def standardize_image(
     deskew expects the pixels exactly as the app captured them.
     """
     too_big = ApiError(413, "image_pixels_too_large", "The image has too many pixels", page_index=page_index)
-    with INTAKE_SEMAPHORE:
+    # Pillow's own bomb guard is a second line behind the explicit checks.
+    with INTAKE_SEMAPHORE, _pixel_limit(max_pixels):
         try:
             img = Image.open(io.BytesIO(data))
             if img.width * img.height > max_pixels:  # header-only check, before any pixel decode
@@ -132,8 +153,10 @@ def standardize_image(
             if img.format == "JPEG":
                 img.draft("RGB", (max_side_px, max_side_px))  # DCT-domain downscale saves memory
             img.load()
+            # Drop the last reference to the full decode buffer before _encode allocates.
+            img = _reduce_first(img, max_side_px)
             return _encode(img, max_side_px)
-        except Image.DecompressionBombError as exc:
+        except _BOMBS as exc:
             raise too_big from exc
         except _DECODE_ERRORS as exc:
             raise ApiError(422, "corrupt_image", "The image could not be decoded", page_index=page_index) from exc
@@ -206,10 +229,10 @@ def check_pixels(data: bytes, page_index: int, max_pixels: int) -> None:
         ApiError: 413 ``image_pixels_too_large``.
     """
     too_big = ApiError(413, "image_pixels_too_large", "The image has too many pixels", page_index=page_index)
-    with INTAKE_SEMAPHORE:
+    with INTAKE_SEMAPHORE, _pixel_limit(max_pixels):
         try:
             width, height = Image.open(io.BytesIO(data)).size
-        except Image.DecompressionBombError as exc:
+        except _BOMBS as exc:
             raise too_big from exc
         except _DECODE_ERRORS:
             return

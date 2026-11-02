@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import io
 import json
 import re
@@ -14,6 +15,7 @@ import pytest
 from flask import Flask
 from flask.testing import FlaskClient
 from PIL import Image
+from werkzeug.test import EnvironBuilder, run_wsgi_app
 
 from backend import db
 from backend.app import create_app
@@ -237,6 +239,9 @@ def test_oversize_body_json_413(make_app: Callable[..., FlaskClient]) -> None:
     assert res.is_json
 
 
+# werkzeug aborts the multipart parse mid-file and drops its SpooledTemporaryFile without closing
+# it; the object is unreachable from our code, so the resulting warning is expected here only.
+@pytest.mark.filterwarnings("ignore::ResourceWarning", "ignore::pytest.PytestUnraisableExceptionWarning")
 def test_chunked_oversize_body_413(make_app: Callable[..., FlaskClient]) -> None:
     """No Content-Length (chunked): the limit trips while reading, not from the header."""
     limit = 64 * 1024
@@ -249,12 +254,22 @@ def test_chunked_oversize_body_413(make_app: Callable[..., FlaskClient]) -> None
         "Content-Type: image/jpeg", "", "",
     ])
     body = head.encode() + b"x" * (2 * limit) + f"{crlf}--bnd--{crlf}".encode()
-    res = client.post(
-        "/api/jobs", input_stream=io.BytesIO(body), headers=headers,
+    builder = EnvironBuilder(
+        "/api/jobs", method="POST", input_stream=io.BytesIO(body), headers=headers,
         content_type="multipart/form-data; boundary=bnd",
     )
-    _err(res, 413, "request_too_large")
+    environ = builder.get_environ()
+    # The builder derives Content-Length from the stream; remove it so only the streaming limit
+    # can trip (a chunked upload).
+    del environ["CONTENT_LENGTH"]
+    environ["wsgi.input_terminated"] = True
+    # Straight to the WSGI app: the test client would recompute Content-Length from the stream.
+    app_iter, status, _ = run_wsgi_app(client.application.wsgi_app, environ)
+    payload = json.loads(b"".join(app_iter))
+    assert status.startswith("413")
+    assert payload["error"]["code"] == "request_too_large"
     assert _jobs() == []
+    gc.collect()  # surface the leaked temp file inside this test's warning filter
 
 
 def test_submit_pdf_202(client: FlaskClient, app: Flask, headers: dict[str, str]) -> None:
