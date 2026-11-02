@@ -156,6 +156,14 @@ def test_cli_rejects_midi(app: Flask, cli_env: None, tmp_path: Path) -> None:
     assert jobs_cli.main(["complete", "1", "--audio-dir", str(tmp_path)], storage=MemoryStorage()) == 2
 
 
+def test_cli_missing_audio_dir_exits_2(
+    app: Flask, cli_env: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    missing = tmp_path / "nope"
+    assert jobs_cli.main(["complete", "1", "--audio-dir", str(missing)], storage=MemoryStorage()) == 2
+    assert "not a directory" in capsys.readouterr().err
+
+
 def test_cli_fetch_pages_and_fail(app: Flask, cli_env: None, tmp_path: Path) -> None:
     storage = MemoryStorage()
     with db.transaction() as conn:

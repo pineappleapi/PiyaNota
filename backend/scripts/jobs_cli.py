@@ -43,6 +43,9 @@ def _fetch_pages(storage: Storage, job_id: int, out_dir: Path) -> int:
 
 def _complete(storage: Storage, args: argparse.Namespace) -> int:
     audio_dir = Path(args.audio_dir)
+    if not audio_dir.is_dir():
+        print(f"error: --audio-dir {audio_dir} is not a directory", file=sys.stderr)
+        return 2
     if any(p.suffix.lower() == ".mid" for p in audio_dir.iterdir()):
         print("error: .mid files found; render audio to .mp3 first", file=sys.stderr)
         return 2

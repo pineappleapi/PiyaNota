@@ -214,7 +214,7 @@ def test_login_rehashes_outdated_hash(client: FlaskClient, app: Flask) -> None:
         assert security.needs_rehash(row["password_hash"]) is False
 
 
-def test_lock_subject_runs(app: Flask) -> None:
+def test_lock_subject_smoke_runs_without_error(app: Flask) -> None:
     with db.transaction() as conn:
         throttle.lock_subject(conn, "bucket", "key")
 
@@ -224,6 +224,7 @@ def test_password_never_logged(client: FlaskClient, caplog: pytest.LogCaptureFix
         _signup(client)
         _login(client, password=PASSWORD + "x")
     assert PASSWORD not in caplog.text
+    assert PASSWORD + "x" not in caplog.text
     assert "a@example.com" not in caplog.text
 
 

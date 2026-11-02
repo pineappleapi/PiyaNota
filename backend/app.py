@@ -44,6 +44,8 @@ def create_app(settings: Settings | None = None) -> Flask:
     cfg = settings if settings is not None else load_settings()
     if cfg.env == "prod" and not cfg.require_https:
         raise RuntimeError("HTTPS must be required (require_https) when env is prod")
+    if cfg.env == "prod" and cfg.mail_backend == "log":
+        LOG.warning("mail backend is 'log' in prod: reset codes are written to the logs, not emailed")
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = cfg.max_content_length
     app.config[SETTINGS_KEY] = cfg

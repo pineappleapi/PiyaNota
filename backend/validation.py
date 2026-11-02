@@ -229,6 +229,16 @@ def parse_client_submission_id(form: MultiDict[str, str]) -> uuid.UUID | None:
     return uuid.UUID(value.lower())
 
 
+def clean_title(value: object) -> str:
+    """Validated title for PATCH /api/scores; a required, never-empty string."""
+    return clean_text(value, "title", required=True) or ""  # required=True never returns None
+
+
+def clean_arranger(value: object) -> str | None:
+    """Validated arranger for PATCH /api/scores; None clears it."""
+    return clean_text(value, "arranger", required=False)
+
+
 def clean_text(value: object, field: str, *, required: bool) -> str | None:
     """Apply the submission title/arranger rules to one JSON value (PATCH /api/scores).
 

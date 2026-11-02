@@ -68,6 +68,31 @@ Per-IP limits only work if `request.remote_addr` is the tester's real IP.
    (`backend/config.py`), the endpoint in `backend/app.py` and its tests in
    `backend/tests/test_app_basics.py`.
 
+## Known limits of the memory/log deploy
+
+- **Memory storage returns placeholder URLs** (`https://storage.test/...`). Result and media URLs from
+  `/api/scores/{id}/result` and the library thumbnail do not resolve, so library playback and audio
+  will not work. Real playback needs B2. The memory backend is capped at 200 MB and then raises.
+- **The operator CLI cannot complete a job on this deploy.** `jobs_cli` runs in its own process with
+  its own empty memory store, separate from the web process, so it cannot upload audio to it.
+  Completing jobs needs B2 (shared storage).
+- **`jobs_cli complete` without `--timing` writes an empty `{}` timing file.** When you supply a
+  timing file, its x/y coordinates must be measured on the same pixels that
+  `jobs_cli fetch-pages` downloads (the standardized pages), not the original photos.
+- **Login backoff lockout (accepted trade-off):** anyone can trigger the wait for a known email by
+  sending wrong passwords (`free_failures=0`); the real owner is delayed until the wait ends or a
+  password reset lifts it.
+- **PIYA-116 per-page resubmit is absent.** The app's `/resubmit` call will return 404.
+- **Reset codes** show in the logs, and the app logs a startup warning when `PIYA_ENV=prod` runs with
+  the log mailer.
+
+## Before inviting testers
+
+1. Run the `/api/_debug/headers` check above so per-IP limits see real client IPs.
+2. Measure the Argon2 verify time on Render (target under 400 ms per login) and tune
+   `PIYA_ARGON2_*` if needed.
+3. Check PNG and PDF submission memory use on the 512 MB instance (large pages, multi-page PDFs).
+
 ## Optional later steps
 
 - **Backblaze B2:** private bucket with SSE-B2, application key limited to that bucket; set

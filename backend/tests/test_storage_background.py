@@ -11,7 +11,8 @@ from flask.testing import FlaskClient
 
 from backend import background, db
 from backend.config import Settings
-from backend.storage import B2Storage, MemoryStorage, new_key
+from backend import storage as storage_module
+from backend.storage import B2Storage, MemoryStorage, MemoryStorageFull, new_key
 
 EMAIL = "gone@example.com"
 PASSWORD = "Secret123zz"
@@ -56,6 +57,16 @@ def test_memory_storage_roundtrip() -> None:
     s.delete("pages/a.jpg")
     s.delete("pages/a.jpg")  # missing key is not an error
     assert "pages/a.jpg" not in s.objects
+
+
+def test_memory_storage_total_bytes_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(storage_module, "MEMORY_STORAGE_MAX_BYTES", 10)
+    s = MemoryStorage()
+    s.put("a", b"x" * 6, "x")
+    s.put("a", b"x" * 8, "x")  # overwrite counts the net size, not the sum
+    with pytest.raises(MemoryStorageFull):
+        s.put("b", b"x" * 3, "x")
+    assert "b" not in s.objects
 
 
 def test_new_key_is_random_uuid() -> None:

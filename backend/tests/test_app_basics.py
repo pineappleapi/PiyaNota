@@ -244,3 +244,15 @@ def test_debug_headers_returns_proxy_headers(settings: Settings) -> None:
 def test_debug_headers_env_flag(settings: Settings) -> None:
     assert load_settings({"PIYA_ENV": "test", "PIYA_DEBUG_HEADERS": "1"}).debug_headers is True
     assert settings.debug_headers is False
+
+
+def test_prod_with_log_mailer_warns(settings: Settings, caplog: pytest.LogCaptureFixture) -> None:
+    from dataclasses import replace
+
+    from backend.app import create_app
+
+    prod = replace(settings, env="prod", require_https=True, mail_backend="log")
+    with caplog.at_level(logging.WARNING, logger="backend.app"):
+        create_app(prod)
+    db.close_pool()
+    assert "mail backend is 'log'" in caplog.text

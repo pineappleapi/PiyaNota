@@ -19,6 +19,8 @@ _NOT_FOUND_CODES = frozenset({"NoSuchKey", "404", "NotFound"})
 B2_CONNECT_TIMEOUT_S = 5
 B2_READ_TIMEOUT_S = 15
 B2_MAX_ATTEMPTS = 2
+# Caps the memory backend so a 512 MB host fails with a clear error instead of being OOM-killed.
+MEMORY_STORAGE_MAX_BYTES = 200 * 1024 * 1024
 _REGION_RE = re.compile(r"s3\.([a-z0-9-]+)\.backblazeb2\.com")
 
 
@@ -38,13 +40,22 @@ def new_key(prefix: KeyPrefix, ext: str) -> str:
     return f"{prefix}/{uuid.uuid4()}.{ext}"
 
 
-class MemoryStorage:
-    """Test double backed by a dict."""
+class MemoryStorageFull(RuntimeError):
+    """The in-memory backend reached MEMORY_STORAGE_MAX_BYTES."""
 
-    def __init__(self) -> None:
+
+class MemoryStorage:
+    """Test double and no-account deploy backend, backed by a dict."""
+
+    def __init__(self, default_ttl_seconds: int = 3600) -> None:
         self.objects: dict[str, bytes] = {}
+        self.ttls: dict[str, int] = {}  # effective TTL of the last signed_url per key, for tests
+        self._default_ttl = default_ttl_seconds
 
     def put(self, key: str, data: bytes, content_type: str) -> None:
+        total = sum(map(len, self.objects.values())) - len(self.objects.get(key, b"")) + len(data)
+        if total > MEMORY_STORAGE_MAX_BYTES:
+            raise MemoryStorageFull(f"memory storage is full ({MEMORY_STORAGE_MAX_BYTES} bytes)")
         self.objects[key] = data
 
     def get(self, key: str) -> bytes:
@@ -54,6 +65,7 @@ class MemoryStorage:
         self.objects.pop(key, None)
 
     def signed_url(self, key: str, *, ttl_seconds: int | None = None) -> str:
+        self.ttls[key] = ttl_seconds if ttl_seconds is not None else self._default_ttl
         return f"https://storage.test/{key}?sig=fake"
 
 
@@ -106,7 +118,7 @@ class B2Storage:
 
 def build_storage(settings: Settings) -> Storage:
     """Pick the backend named in settings."""
-    return B2Storage(settings) if settings.storage_backend == "b2" else MemoryStorage()
+    return B2Storage(settings) if settings.storage_backend == "b2" else MemoryStorage(settings.signed_url_ttl_seconds)
 
 
 def get_storage() -> Storage:

@@ -14,7 +14,7 @@ from backend.config import SETTINGS_KEY, Settings
 from backend.envelope import ApiError, iso_z, ok
 from backend.routes_jobs import job_ref
 from backend.storage import get_storage
-from backend.validation import clean_text, json_body
+from backend.validation import clean_arranger, clean_title, json_body
 
 LOG = logging.getLogger(__name__)
 scores_bp = Blueprint("scores", __name__, url_prefix="/api/scores")
@@ -139,9 +139,9 @@ def _unfinished_retakes(conn: Conn, job_ids: list[int]) -> list[int]:
 @security.require_auth
 def edit(score_id: int) -> tuple[Response, int]:
     body = json_body()
-    title = clean_text(body["title"], "title", required=True) if "title" in body else None
+    title = clean_title(body["title"]) if "title" in body else None
     has_arranger = "arranger" in body
-    arranger = clean_text(body.get("arranger"), "arranger", required=False)
+    arranger = clean_arranger(body.get("arranger"))
     with db.transaction() as conn:
         score, job_ids = _lock_score_and_jobs(conn, score_id)
         if _unfinished_retakes(conn, job_ids):

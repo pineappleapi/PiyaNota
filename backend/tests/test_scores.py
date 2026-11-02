@@ -129,6 +129,16 @@ def test_library_thumbnail_signed(client: FlaskClient, headers: dict[str, str]) 
     assert entry["thumbnailUrl"] == "https://storage.test/thumbs/xt.jpg?sig=fake"
 
 
+def test_signed_url_ttls(client: FlaskClient, headers: dict[str, str]) -> None:
+    sid, _ = _score(_uid(), tag="x")
+    storage = _storage(client.application)
+    client.get("/api/scores", headers=headers)
+    assert storage.ttls["thumbs/xt.jpg"] == 3600
+    client.get(f"/api/scores/{sid}/result", headers=headers)
+    assert storage.ttls["pages/x0.jpg"] == 21600
+    assert all(t == 21600 for k, t in storage.ttls.items() if k.startswith(("audio/", "timing/")))
+
+
 def test_result_shape_and_touch(client: FlaskClient, headers: dict[str, str]) -> None:
     sid, jid = _score(_uid())
     res = client.get(f"/api/scores/{sid}/result", headers=headers)
