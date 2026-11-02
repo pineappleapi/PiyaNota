@@ -168,3 +168,60 @@ def test_cli_fetch_pages_and_fail(app: Flask, cli_env: None, tmp_path: Path) -> 
     with db.transaction() as conn:
         row = conn.execute("SELECT status, failure_reason, failure_page_index FROM jobs").fetchone()
     assert (row["status"], row["failure_reason"], row["failure_page_index"]) == ("failed", "no_staves", 0)
+
+
+def test_complete_already_complete_returns_none(app: Flask) -> None:
+    with db.transaction() as conn:
+        job_id = _job(conn, _user(conn))
+        first = completion.complete_job(conn, job_id, **_args())
+        assert completion.complete_job(conn, job_id, **_args("again-")) is None
+        assert conn.execute("SELECT count(*) AS n FROM scores").fetchone()["n"] == 1
+        assert conn.execute("SELECT score_id FROM jobs").fetchone()["score_id"] == first
+
+
+def _cli_job(tmp_path: Path, **extra: Any) -> tuple[int, MemoryStorage]:
+    storage = MemoryStorage()
+    with db.transaction() as conn:
+        job_id = _job(conn, _user(conn), **extra)
+        conn.execute(PAGE_SQL, (job_id, "pages/p0.jpg"))
+    storage.put("pages/p0.jpg", _jpeg(), "image/jpeg")
+    for voice in VOICES:
+        (tmp_path / f"{voice}.mp3").write_bytes(b"ID3")
+    return job_id, storage
+
+
+def test_cli_cancelled_job_discards_uploads(app: Flask, cli_env: None, tmp_path: Path) -> None:
+    job_id, storage = _cli_job(tmp_path, status="cancelled")
+    assert jobs_cli.main(["complete", str(job_id), "--audio-dir", str(tmp_path)], storage=storage) == 1
+    assert set(storage.objects) == {"pages/p0.jpg"}
+
+
+def test_cli_discards_uploads_on_exception(
+    app: Flask, cli_env: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    job_id, storage = _cli_job(tmp_path)
+
+    def boom(*a: Any, **k: Any) -> None:
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(completion, "complete_job", boom)
+    with pytest.raises(RuntimeError):
+        jobs_cli.main(["complete", str(job_id), "--audio-dir", str(tmp_path)], storage=storage)
+    assert set(storage.objects) == {"pages/p0.jpg"}
+
+
+def test_cli_report_failed_voice_needs_no_mp3_and_validation(app: Flask, cli_env: None, tmp_path: Path) -> None:
+    job_id, storage = _cli_job(tmp_path)
+    (tmp_path / "tenor.mp3").unlink()
+    report = tmp_path / "r.json"
+    report.write_text('{"failedVoices": ["Tenor"], "review": {}}', "utf-8")
+    base = ["complete", str(job_id), "--audio-dir", str(tmp_path)]
+    assert jobs_cli.main([*base, "--failed", "kazoo:x"], storage=storage) == 2
+    assert jobs_cli.main([*base, "--report", str(report)], storage=storage) == 0
+    with db.transaction() as conn:
+        assert conn.execute("SELECT count(*) AS n FROM audio_tracks").fetchone()["n"] == 3
+        assert conn.execute("SELECT review FROM scores").fetchone()["review"] == {}
+
+
+def test_cli_fail_missing_job_exits_1(app: Flask, cli_env: None) -> None:
+    assert jobs_cli.main(["fail", "999", "x"], storage=MemoryStorage()) == 1

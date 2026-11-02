@@ -43,14 +43,22 @@ def _fetch_pages(storage: Storage, job_id: int, out_dir: Path) -> int:
 
 def _complete(storage: Storage, args: argparse.Namespace) -> int:
     audio_dir = Path(args.audio_dir)
-    if any(audio_dir.glob("*.mid")):
+    if any(p.suffix.lower() == ".mid" for p in audio_dir.iterdir()):
         print("error: .mid files found; render audio to .mp3 first", file=sys.stderr)
         return 2
     report: dict[str, Any] = json.loads(Path(args.report).read_text("utf-8")) if args.report else {}
-    review = args.review and json.loads(Path(args.review).read_text("utf-8")) or report.get("review") or DEFAULT_REVIEW
+    if args.review:
+        review = json.loads(Path(args.review).read_text("utf-8"))
+    else:
+        review = report["review"] if "review" in report else DEFAULT_REVIEW
     failed: dict[str, str] = {k.capitalize(): v for k, v in report.get("failedVoiceCauses", {}).items()}
+    for name in report.get("failedVoices", []):
+        failed.setdefault(str(name).capitalize(), "unreadable")
     for item in args.failed:
         voice, _, cause = item.partition(":")
+        if voice.strip().lower() not in VOICES:
+            print(f"error: unknown voice {voice!r} in --failed", file=sys.stderr)
+            return 2
         failed[voice.strip().capitalize()] = cause.strip() or "unreadable"
     voices = {v: audio_dir / f"{v}.mp3" for v in VOICES if v.capitalize() not in failed}
     missing = [p.name for p in voices.values() if not p.is_file()]
@@ -73,9 +81,9 @@ def _complete(storage: Storage, args: argparse.Namespace) -> int:
         thumb_key = new_key("thumbs", "jpg")
         uploads[thumb_key] = (thumb, "image/jpeg")
     background.reserve_keys(uploads)
-    for key, (data, ctype) in uploads.items():
-        storage.put(key, data, ctype)
     try:
+        for key, (data, ctype) in uploads.items():
+            storage.put(key, data, ctype)
         with db.transaction() as conn:
             score_id = completion.complete_job(
                 conn, args.job_id, audio_keys=audio_keys, timing_key=timing_key,
@@ -141,7 +149,10 @@ def main(argv: Sequence[str], storage: Storage | None = None) -> int:
     if args.cmd == "complete":
         return _complete(store, args)
     with db.transaction() as conn:
-        completion.fail_job(conn, args.job_id, args.reason, args.page)
+        updated = completion.fail_job(conn, args.job_id, args.reason, args.page)
+    if not updated:
+        print(f"error: job {args.job_id} not found or already finished", file=sys.stderr)
+        return 1
     return 0
 
 

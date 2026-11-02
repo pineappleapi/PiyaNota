@@ -71,7 +71,7 @@ def complete_job(
     if old_score_id is not None:
         old_score = conn.execute("SELECT * FROM scores WHERE id = %s FOR UPDATE", (old_score_id,)).fetchone()
     job = conn.execute("SELECT * FROM jobs WHERE id = %s FOR UPDATE", (job_id,)).fetchone()
-    if job is None or job["status"] == "cancelled":
+    if job is None or job["status"] in _FINISHED:  # re-completing would orphan the first score
         return None
     old_job = None
     if job["replaces_job_id"] is not None:
@@ -91,8 +91,8 @@ def complete_job(
         score_id: int = old_score["id"]
         conn.execute(
             f"UPDATE scores SET ({_SCORE_COPY_COLS}, thumbnail_key, review, muted_measures, "
-            "failed_voices, failed_voice_causes) = (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
-            "WHERE id = %s",
+            "failed_voices, failed_voice_causes) = "
+            "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) WHERE id = %s",
             (*fields, score_id),
         )
         old_keys = [
@@ -141,10 +141,15 @@ def complete_job(
     return score_id
 
 
-def fail_job(conn: Conn, job_id: int, reason: str, page_index: int | None) -> None:
-    """Mark an unfinished job failed; a finished or cancelled job is left alone."""
-    conn.execute(
+def fail_job(conn: Conn, job_id: int, reason: str, page_index: int | None) -> bool:
+    """Mark an unfinished job failed; a finished or cancelled job is left alone.
+
+    Returns:
+        True when a row was updated.
+    """
+    cur = conn.execute(
         "UPDATE jobs SET status = 'failed', failure_reason = %s, failure_page_index = %s "
         "WHERE id = %s AND status <> ALL(%s)",
         (reason, page_index, job_id, list(_FINISHED)),
     )
+    return cur.rowcount > 0
