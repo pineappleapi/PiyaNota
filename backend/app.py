@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from flask import Flask, Response
+from flask import Flask, Response, request
 from werkzeug.exceptions import HTTPException, MethodNotAllowed
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -41,6 +41,8 @@ def create_app(settings: Settings | None = None) -> Flask:
         A configured Flask application.
     """
     cfg = settings if settings is not None else load_settings()
+    if cfg.env == "prod" and not cfg.require_https:
+        raise RuntimeError("HTTPS must be required (require_https) when env is prod")
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = cfg.max_content_length
     app.config[SETTINGS_KEY] = cfg
@@ -78,6 +80,14 @@ def create_app(settings: Settings | None = None) -> Flask:
     app.register_blueprint(account_bp)
     app.register_blueprint(jobs_bp)
     app.register_blueprint(scores_bp)
+
+    if cfg.require_https:
+
+        @app.before_request
+        def _require_https() -> None:
+            # Runs before auth so a plaintext request never gets as far as a token check.
+            if request.scheme != "https" and request.path != "/healthz":
+                raise ApiError(400, "https_required", "HTTPS is required")
 
     @app.get("/healthz")
     def healthz() -> tuple[Response, int]:

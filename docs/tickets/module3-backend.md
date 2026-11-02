@@ -4,6 +4,8 @@ _Covers: Authentication & Account API tickets, Score & File Management API ticke
 
 All Module 3 routes are served under the `/api` prefix (e.g. `/api/auth/change-password`); reconcile any path written without it in PIYA-214.
 
+**API-ticket template note (PIYA-315 AC4):** New endpoints must use `access.owned_*` and be added to `backend/tests/test_cross_user.py`.
+
 ## API Tickets — Authentication & Account
 
 ### PIYA-300 — Database & Hosting Technology Selection
