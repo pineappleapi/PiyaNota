@@ -227,3 +227,14 @@ def parse_client_submission_id(form: MultiDict[str, str]) -> uuid.UUID | None:
     if not _UUID_CANONICAL.fullmatch(value):
         raise ApiError(400, "invalid_client_submission_id", f"{field} must be a UUID", field=field)
     return uuid.UUID(value.lower())
+
+
+def clean_text(value: object, field: str, *, required: bool) -> str | None:
+    """Apply the submission title/arranger rules to one JSON value (PATCH /api/scores).
+
+    Raises:
+        ApiError: 400 ``<field>_required``, ``<field>_invalid`` or ``<field>_too_long``.
+    """
+    if value is not None and not isinstance(value, str):
+        raise ApiError(400, f"{field}_invalid", f"{field} must be a string", field=field)
+    return _text(MultiDict([] if value is None else [(field, value)]), field, required=required)
