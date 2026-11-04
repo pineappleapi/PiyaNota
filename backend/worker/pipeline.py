@@ -268,10 +268,11 @@ def run_pipeline(
     seconds["transcribing"] = monotonic() - t
 
     t = begin("reconstructing")
-    try:
-        satb, report = st.reconstruct(events)
-    except ValueError as exc:  # Stage 4 raises when it cannot place a voice
-        raise PipelineError(NO_VOICES_REASON) from exc  # fixed text: reasons reach clients
+    # Stage 4 raises ValueError only when all four voices are empty; checking here keeps any other
+    # ValueError (a real bug) from being reported to the client as unreadable photos.
+    if not any(events.get(v) for v in VOICES):
+        raise PipelineError(NO_VOICES_REASON)  # fixed text: reasons reach clients
+    satb, report = st.reconstruct(events)
     _flag_blank_pages(satb, report["flags"], len(page_jpegs))
     review, _detail = st.review(events, report["flags"])
     seconds["reconstructing"] = monotonic() - t

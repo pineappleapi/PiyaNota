@@ -19,6 +19,7 @@ import psycopg
 from psycopg.rows import tuple_row
 
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
+_MIGRATE_LOCK_KEY = 0x70697961  # arbitrary app-wide constant ("piya"); any int64 works if unique per app
 _UP_NAME = re.compile(r"^(\d{4})_[\w-]+\.up\.sql$")
 # Sorts before every real version, so down(to=BASE_VERSION) reverts everything.
 BASE_VERSION = "0000"
@@ -61,16 +62,22 @@ def status(conn: Conn, migrations_dir: Path = MIGRATIONS_DIR) -> list[tuple[str,
 
 def up(conn: Conn, to: str | None = None, migrations_dir: Path = MIGRATIONS_DIR) -> list[str]:
     """Apply pending migrations up to and including `to` (default: all). Returns versions applied."""
-    applied = _applied(conn)
-    done: list[str] = []
-    for version, path in _discover(migrations_dir):
-        if version in applied or (to is not None and version > to):
-            continue
-        with conn.transaction():
-            conn.execute(path.read_text(encoding="utf-8"))
-            conn.execute("INSERT INTO schema_migrations (version) VALUES (%s)", (version,))
-        done.append(version)
-    return done
+    # Two containers booting together (a rolling deploy) would both run the same DDL; the second
+    # waits here, then sees the versions already recorded and applies nothing.
+    conn.execute("SELECT pg_advisory_lock(%s)", (_MIGRATE_LOCK_KEY,))
+    try:
+        applied = _applied(conn)
+        done: list[str] = []
+        for version, path in _discover(migrations_dir):
+            if version in applied or (to is not None and version > to):
+                continue
+            with conn.transaction():
+                conn.execute(path.read_text(encoding="utf-8"))
+                conn.execute("INSERT INTO schema_migrations (version) VALUES (%s)", (version,))
+            done.append(version)
+        return done
+    finally:
+        conn.execute("SELECT pg_advisory_unlock(%s)", (_MIGRATE_LOCK_KEY,))
 
 
 def down(conn: Conn, to: str, migrations_dir: Path = MIGRATIONS_DIR) -> list[str]:

@@ -93,6 +93,15 @@ Per-IP limits only work if `request.remote_addr` is the tester's real IP.
 - **Reset codes** show in the logs, and the app logs a startup warning when `PIYA_ENV=prod` runs with
   the log mailer.
 
+## Neon storage capacity (db storage backend)
+
+- With `PIYA_STORAGE_BACKEND=db` the page photos, MP3s and timing files live in the `blobs` table.
+  One score takes about 14.5 MB, so the Neon free tier (0.5 GB) holds roughly 30 scores. There is no
+  size cap or quota in the app yet: past the limit, new uploads fail. Delete old test scores and
+  their blobs, and move to B2 or a paid Neon plan before inviting testers.
+- Migrations run at every boot under a Postgres advisory lock, so two containers starting together
+  do not race; the second waits and applies nothing.
+
 ## Before inviting testers
 
 1. Run the `/api/_debug/headers` check above so per-IP limits see real client IPs.

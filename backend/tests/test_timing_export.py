@@ -73,6 +73,13 @@ def test_inconsistent_barline_count_returns_empty_events_only() -> None:
     assert build_timing(**_inputs(off_by_two=True)) == {"events": []}
 
 
+def test_bar_edge_count_mismatch_is_not_truncated(monkeypatch: Any) -> None:
+    import timing_export
+    real = timing_export._bar_edges
+    monkeypatch.setattr(timing_export, "_bar_edges", lambda *a: real(*a)[:-1])
+    assert build_timing(**_inputs()) == {"events": []}
+
+
 def test_existing_keys_unchanged() -> None:
     timing = build_timing(**_inputs())
     assert {"bar", "startTick", "durTicks", "startMs", "durMs", "numerator", "denominator"} <= timing["bars"][1].keys()

@@ -48,7 +48,7 @@ def _fake_stages(missing: tuple[str, ...] = (), midi_only: bool = False) -> Stag
         clean_page=lambda page: CleanPage(b"jpg", 10, 20),
         detect=lambda pages, y, s, m, g: {},
         clef_key=lambda pages, m, w: None,
-        transcribe=lambda v, w, d, e, b: {},
+        transcribe=lambda v, w, d, e, b: {"Soprano": [{"type": "note"}]},
         reconstruct=lambda ev: (satb, {"flags": flags, "failed_voices": list(missing)}),
         review=lambda ev, f: ({"reviewNeeded": False}, []),
         synthesize=synthesize,
@@ -124,11 +124,9 @@ def test_voice_whose_render_fell_back_to_midi_is_failed(tmp_path: Path) -> None:
 
 
 def test_all_empty_fails_with_retake_message(tmp_path: Path) -> None:
-    def raiser(ev: Any) -> Any:
-        raise ValueError("all four empty")
-
+    stages = replace(_fake_stages(), transcribe=lambda v, w, d, e, b: {})
     with pytest.raises(PipelineError, match="retake"):
-        _run(tmp_path, replace(_fake_stages(), reconstruct=raiser))
+        _run(tmp_path, stages)
 
 
 def test_missing_weights_raises_pipeline_error(tmp_path: Path) -> None:
@@ -180,13 +178,19 @@ def test_input_errors_map_to_fixed_reasons(tmp_path: Path) -> None:
     assert info.value.reason == "no readable page"
 
 
-def test_reconstruction_error_uses_fixed_reason(tmp_path: Path) -> None:
-    def raiser(ev: Any) -> Any:
-        raise ValueError("raw stage text")
-
+def test_all_voices_empty_uses_fixed_reason(tmp_path: Path) -> None:
+    stages = replace(_fake_stages(), transcribe=lambda v, w, d, e, b: {"Soprano": [], "Alto": []})
     with pytest.raises(PipelineError) as info:
+        _run(tmp_path, stages)
+    assert info.value.reason == pipeline.NO_VOICES_REASON
+
+
+def test_stage4_bug_is_not_reported_as_unreadable_photos(tmp_path: Path) -> None:
+    def raiser(ev: Any) -> Any:
+        raise ValueError("real bug")
+
+    with pytest.raises(ValueError, match="real bug"):
         _run(tmp_path, replace(_fake_stages(), reconstruct=raiser))
-    assert info.value.reason == pipeline.NO_VOICES_REASON and "raw stage text" not in str(info.value)
 
 
 def test_audio_failure_still_cleans_output_dir(tmp_path: Path) -> None:

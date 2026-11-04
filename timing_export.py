@@ -201,6 +201,8 @@ def _build(events: dict[str, list[dict[str, Any]]], strips: list[StripGeometry],
         # Bar x: for bar j > 0 of a system it is the median barline of bar j-1 (measured). For a system's
         # first bar (and the pickup in system 0) it is the median first-note x: the header width is not
         # known, so that line may sit slightly right of the true barline and is NOT a measured barline.
+        if len(edges) != len(sys_bars):  # zip would drop bars silently and shift every highlight
+            raise TimingInconsistent(f"{len(edges)} bar edges for {len(sys_bars)} bars (p{page} s{sysi})")
         for b, (left, _right) in zip(sys_bars, edges):
             out_bars.append({
                 "bar": b["bar"], "startTick": b["startTick"], "durTicks": b["durTicks"],
