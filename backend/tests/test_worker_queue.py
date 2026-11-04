@@ -42,28 +42,50 @@ def _age(conn: Any, job_id: int) -> None:
     conn.execute("UPDATE jobs SET heartbeat_at = now() - interval '1 hour' WHERE id = %s", (job_id,))
 
 
+def _hold_lock_then_claim(settings: Settings, queued: int) -> tuple[list[dict[str, Any] | None], int]:
+    """Lock the oldest row on connection A, then claim on B with a 1s lock_timeout.
+
+    Without SKIP LOCKED, B would block on A's row and raise LockNotAvailable.
+    """
+    with db.transaction() as conn:
+        user = _user(conn)
+        first = _job(conn, user)
+        for _ in range(queued - 1):
+            _job(conn, user)
+    with psycopg.connect(settings.database_url, row_factory=dict_row) as a:
+        a.execute("SELECT id FROM jobs WHERE id = %s FOR UPDATE", (first,))
+        with psycopg.connect(settings.database_url, row_factory=dict_row) as b:
+            b.execute("SET lock_timeout = '1s'")
+            return [queue.claim_next_job(b)], first
+
+
+def test_claim_skips_row_locked_by_another_connection(app: Flask, settings: Settings) -> None:
+    (claimed,), first = _hold_lock_then_claim(settings, queued=2)
+    assert claimed is not None and claimed["id"] != first
+
+
 def test_two_concurrent_claims_never_return_the_same_job(app: Flask, settings: Settings) -> None:
+    (claimed,), _ = _hold_lock_then_claim(settings, queued=1)
+    assert claimed is None  # the only job is held by A, so B must not also get it
+
+
+def test_threaded_claims_with_one_job_have_exactly_one_winner(app: Flask, settings: Settings) -> None:
     with db.transaction() as conn:
         _job(conn, _user(conn))
     results: list[dict[str, Any] | None] = []
-    first_claimed = threading.Event()
-    release = threading.Event()
+    barrier = threading.Barrier(2)
 
-    def holder() -> None:
+    def worker() -> None:
         with psycopg.connect(settings.database_url, row_factory=dict_row) as c:
+            barrier.wait(timeout=10)
             results.append(queue.claim_next_job(c))
-            first_claimed.set()
-            release.wait(timeout=10)  # keep the row lock while the second claim runs
 
-    thread = threading.Thread(target=holder)
-    thread.start()
-    assert first_claimed.wait(timeout=10)
-    with psycopg.connect(settings.database_url, row_factory=dict_row) as c:
-        second = queue.claim_next_job(c)
-    release.set()
-    thread.join()
-    assert second is None
-    assert results[0] is not None
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sum(r is not None for r in results) == 1
 
 
 def test_claim_sets_working_state(app: Flask) -> None:
@@ -132,3 +154,45 @@ def test_touch_prevents_reclaim(app: Flask) -> None:
         _age(conn, job_id)
         queue.touch(conn, job_id)
         assert queue.reclaim_stale(conn, timeout_s=60, max_attempts=2) == (0, 0)
+
+
+def test_reclaim_leaves_fresh_queued_and_terminal_jobs_alone(app: Flask) -> None:
+    with db.transaction() as conn:
+        user = _user(conn)
+        fresh = _job(conn, user, "transcribing")
+        conn.execute("UPDATE jobs SET heartbeat_at = now() WHERE id = %s", (fresh,))
+        others = [_job(conn, user, s) for s in ("queued", "complete", "failed", "cancelled")]
+        conn.execute("UPDATE jobs SET heartbeat_at = now() - interval '1 hour' WHERE id <> %s", (fresh,))
+        assert queue.reclaim_stale(conn, timeout_s=60, max_attempts=2) == (0, 0)
+        assert _row(conn, fresh)["status"] == "transcribing"
+        assert [_row(conn, j)["status"] for j in others] == ["queued", "complete", "failed", "cancelled"]
+
+
+def test_reclaim_requeues_below_attempt_cap(app: Flask) -> None:
+    with db.transaction() as conn:
+        job_id = _job(conn, _user(conn), "transcribing")
+        conn.execute("UPDATE jobs SET attempts = 1 WHERE id = %s", (job_id,))
+        _age(conn, job_id)
+        assert queue.reclaim_stale(conn, timeout_s=60, max_attempts=2) == (1, 0)
+
+
+def test_null_heartbeat_falls_back_to_updated_at(app: Flask) -> None:
+    with db.transaction() as conn:
+        # Inserted directly: the jobs trigger would reset updated_at on any UPDATE.
+        job_id = conn.execute(
+            "INSERT INTO jobs (user_id, status, source, page_count, title, tempo_source, updated_at) "
+            "VALUES (%s, 'transcribing', 'images', 1, 'T', 'default', now() - interval '1 hour') RETURNING id",
+            (_user(conn),),
+        ).fetchone()["id"]
+        assert queue.reclaim_stale(conn, timeout_s=60, max_attempts=2) == (1, 0)
+        assert _row(conn, job_id)["status"] == "queued"
+
+
+def test_claim_reclaim_claim_reaches_attempt_two(app: Flask) -> None:
+    with db.transaction() as conn:
+        job_id = _job(conn, _user(conn))
+        queue.claim_next_job(conn)
+        _age(conn, job_id)
+        queue.reclaim_stale(conn, timeout_s=60, max_attempts=2)
+        again = queue.claim_next_job(conn)
+        assert again is not None and again["attempts"] == 2
