@@ -200,6 +200,24 @@ def _guard(status: str, call: Callable[[], Any]) -> Any:
         raise PipelineError(STAGE_FAILURE_REASONS[status]) from exc
 
 
+def _flag_blank_pages(satb: dict[str, list[dict[str, Any]]], flags: list[dict[str, Any]], n_pages: int) -> None:
+    """Add pages (1-based) where no voice has any event to every voice's ``voice_unreadable`` flag.
+
+    Stage 4 only sees pages that have events, so a fully unreadable page would otherwise be lost silently.
+    """
+    seen = {e["page_index"] for evs in satb.values() for e in evs if "page_index" in e}
+    blank = [p for p in range(1, n_pages + 1) if p not in seen] if seen else []
+    if not blank:
+        return
+    for voice in VOICES:
+        flag = next((f for f in flags if f.get("kind") == "voice_unreadable" and f.get("voice") == voice), None)
+        if flag is None:
+            flags.append({"kind": "voice_unreadable", "voice": voice, "pages": blank, "page_index": None,
+                          "sys_idx": None, "bar": None, "review_needed": True})
+        else:
+            flag["pages"] = sorted(set(flag["pages"]) | set(blank))
+
+
 def run_pipeline(
     page_jpegs: list[bytes],
     *,
@@ -254,6 +272,7 @@ def run_pipeline(
         satb, report = st.reconstruct(events)
     except ValueError as exc:  # Stage 4 raises when it cannot place a voice
         raise PipelineError(NO_VOICES_REASON) from exc  # fixed text: reasons reach clients
+    _flag_blank_pages(satb, report["flags"], len(page_jpegs))
     review, _detail = st.review(events, report["flags"])
     seconds["reconstructing"] = monotonic() - t
 
@@ -267,7 +286,9 @@ def run_pipeline(
     shutil.rmtree(out, ignore_errors=True)
     if not mp3:
         raise PipelineError("audio rendering failed")
-    failed = [v.lower() for v in report.get("failed_voices", [])]
+    # A voice whose render fell back to .mid has no MP3 either; it must not vanish from failedVoices.
+    failed = [v.lower() for v in VOICES
+              if v in report.get("failed_voices", []) or v.lower() not in mp3]
     return PipelineResult(
         mp3=mp3,
         failed_voices=failed,

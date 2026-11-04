@@ -97,6 +97,32 @@ def test_failed_voices_from_report_job_succeeds(tmp_path: Path) -> None:
     assert result.review["items"][0]["voice"] == "tenor" and result.review["items"][0]["pages"] == [1, 2]
 
 
+def test_page_with_no_events_in_any_voice_is_flagged(tmp_path: Path) -> None:
+    ev = {"type": "note", "pitch": 60, "page_index": 1}
+    seen: list[Any] = []
+    stages = replace(_fake_stages(), reconstruct=lambda e: ({v: [ev] for v in pipeline.VOICES}, {"flags": [], "failed_voices": []}),
+                     review=lambda e, f: seen.append(f) or ({}, []))
+    run_pipeline([_jpeg(), _jpeg()], tempo_bpm=90, work_dir=tmp_path / "w", config=_config(tmp_path),
+                 on_stage=lambda s, p: None, stages=stages)
+    flags = [f for f in seen[0] if f["kind"] == "voice_unreadable"]
+    assert sorted(f["voice"] for f in flags) == ["Alto", "Bass", "Soprano", "Tenor"]
+    assert all(f["pages"] == [2] and f["review_needed"] for f in flags)
+
+
+def test_voice_whose_render_fell_back_to_midi_is_failed(tmp_path: Path) -> None:
+    def synthesize(satb: dict[str, Any], out_dir: str, bpm: int, sf: str) -> dict[str, str]:
+        Path(out_dir).mkdir(parents=True, exist_ok=True)
+        paths = {}
+        for voice in satb:
+            p = Path(out_dir) / f"{voice.lower()}.{'mid' if voice == 'Bass' else 'mp3'}"
+            p.write_bytes(b"x")
+            paths[voice] = str(p)
+        return paths
+
+    result = _run(tmp_path, replace(_fake_stages(), synthesize=synthesize))
+    assert result.failed_voices == ["bass"] and "bass" not in result.mp3
+
+
 def test_all_empty_fails_with_retake_message(tmp_path: Path) -> None:
     def raiser(ev: Any) -> Any:
         raise ValueError("all four empty")
