@@ -206,7 +206,14 @@ class HttpScoreUploadApi implements ScoreUploadApi {
       );
     }
     return _submit(
-      () => _post(ApiConfig.submitImagesPath, form, cancelToken: cancelToken),
+      () => _post(
+        ApiConfig.submitImagesPath,
+        form,
+        cancelToken: cancelToken,
+        // The server reads, validates and stores every page before it
+        // replies; 4 full-size photos exceeded the 15 s default.
+        receiveTimeout: ApiConfig.pdfReceiveTimeout,
+      ),
       replacesJobId: replacesJobId,
     );
   }
