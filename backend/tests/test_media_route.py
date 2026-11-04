@@ -106,7 +106,7 @@ def test_head_returns_length_without_body(app: Flask, client: FlaskClient) -> No
     assert resp.headers["Content-Type"] == "audio/mpeg"
 
 
-def test_signature_compare_is_constant_time(
+def test_signature_check_uses_hmac_compare_digest(
     app: Flask, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[int] = []
@@ -119,3 +119,45 @@ def test_signature_compare_is_constant_time(
     monkeypatch.setattr(routes_media.hmac, "compare_digest", spy)
     assert client.get(_link(app)).status_code == 200
     assert calls
+
+
+def _parts(app: Flask) -> tuple[str, str, str]:
+    path, query = _link(app).split("?")
+    exp = query.split("&")[0].removeprefix("exp=")
+    sig = query.split("&")[1].removeprefix("sig=")
+    return path, exp, sig
+
+
+def test_malformed_exp_and_sig_are_403_not_500(app: Flask, client: FlaskClient) -> None:
+    path, exp, sig = _parts(app)
+    cases = [
+        f"{path}?exp=%C2%B2&sig={sig}",
+        f"{path}?exp={'9' * 5000}&sig={sig}",
+        f"{path}?sig={sig}",
+        f"{path}?exp={exp}&exp={exp}&sig={sig}",
+        f"{path}?exp={exp}&sig={sig}&sig={sig}",
+        f"{path}?exp={exp}&sig={sig[:-2]}",
+        f"{path}?exp={exp}&sig=%C3%A9%C3%A9",
+        f"{path}?exp={exp}",
+    ]
+    for url in cases:
+        assert client.get(url).status_code == 403, url
+
+
+def test_huge_range_number_is_416(app: Flask, client: FlaskClient) -> None:
+    resp = client.get(_link(app), headers={"Range": f"bytes={'9' * 5000}-"})
+    assert resp.status_code == 416
+    assert client.get(_link(app), headers={"Range": "bytes=" + chr(0x662) + "-"}).status_code == 416
+
+
+def test_range_slice_of_larger_blob_and_nosniff(app: Flask, client: FlaskClient) -> None:
+    big = bytes(i % 251 for i in range(100_000))
+    app.extensions["storage"].put("audio/big.mp3", big, "audio/mpeg")
+    link = _link(app, key="audio/big.mp3")
+    resp = client.get(link, headers={"Range": "bytes=40000-40009"})
+    assert resp.status_code == 206
+    assert resp.data == big[40000:40010]
+    assert resp.headers["Content-Range"] == "bytes 40000-40009/100000"
+    assert resp.headers["X-Content-Type-Options"] == "nosniff"
+    head = client.head(link)
+    assert head.headers["Content-Length"] == "100000" and head.data == b""

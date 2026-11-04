@@ -198,6 +198,11 @@ def load_settings(env: Mapping[str, str] = os.environ) -> Settings:
         MailBackend,
         _read_choice(env, "mail_backend", _MAIL_BACKENDS, default="memory", required=is_prod),
     )
+    public_base_url = _read_str(
+        env, "public_base_url", default=_DEV_PUBLIC_BASE_URL, required=is_prod and storage == "db"
+    ).rstrip("/")
+    if is_prod and storage == "db" and not public_base_url.startswith("https://"):
+        raise ValueError(f"{_var('public_base_url')} must start with https:// in prod; got {public_base_url!r}")
     require_https = _read_bool(env, "require_https")
     if is_prod and not require_https:
         raise RuntimeError("PIYA_REQUIRE_HTTPS must be true when PIYA_ENV=prod")
@@ -233,9 +238,7 @@ def load_settings(env: Mapping[str, str] = os.environ) -> Settings:
         media_hmac_key=_read_str(
             env, "media_hmac_key", default=_DEV_MEDIA_HMAC_KEY, required=is_prod and storage == "db"
         ).encode("utf-8"),
-        public_base_url=_read_str(
-            env, "public_base_url", default=_DEV_PUBLIC_BASE_URL, required=is_prod and storage == "db"
-        ).rstrip("/"),
+        public_base_url=public_base_url,
         mail_backend=mail,
         brevo_api_key=_read_str(env, "brevo_api_key", default="", required=mail == "brevo"),
         mail_from=_read_str(env, "mail_from", default="noreply@localhost", required=is_prod),

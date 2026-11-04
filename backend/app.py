@@ -84,7 +84,8 @@ def create_app(settings: Settings | None = None) -> Flask:
     app.register_blueprint(account_bp)
     app.register_blueprint(jobs_bp)
     app.register_blueprint(scores_bp)
-    app.register_blueprint(media_bp)
+    if cfg.storage_backend == "db":  # keeps the dev HMAC key unreachable when /media is unused
+        app.register_blueprint(media_bp)
 
     if cfg.require_https:
 
