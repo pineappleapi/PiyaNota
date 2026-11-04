@@ -92,14 +92,19 @@ def _bar_layout(report: dict[str, Any]) -> list[dict[str, Any]]:
     bars: list[dict[str, Any]] = []
     pickup = int(report.get("pickup_ticks", 0))
     for i, sysinfo in enumerate(report["systems"]):
-        num, den = (int(v) for v in str(sysinfo["time_signature"]).split("/"))
-        common = dict(numerator=num, denominator=den, page=sysinfo["page_index"], sys=sysinfo["sys_idx"])
+        where = dict(page=sysinfo["page_index"], sys=sysinfo["sys_idx"])
+        # Per-bar meters when Stage 4 gives them (a meter can change mid-system); else one per system.
+        per_bar = sysinfo.get("bars") or [{"ticks": sysinfo["bar_ticks"], "time_signature": sysinfo["time_signature"]}
+                                          ] * int(sysinfo["n_bars"])
         if i == 0 and pickup > 0:
-            bars.append(dict(bar=0, startTick=0, durTicks=pickup, **common))
-        for r in range(int(sysinfo["n_bars"])):
-            bars.append(dict(bar=int(sysinfo["first_bar"]) + r,
-                             startTick=int(sysinfo["start_tick"]) + r * int(sysinfo["bar_ticks"]),
-                             durTicks=int(sysinfo["bar_ticks"]), **common))
+            num, den = (int(v) for v in str(sysinfo["time_signature"]).split("/"))
+            bars.append(dict(bar=0, startTick=0, durTicks=pickup, numerator=num, denominator=den, **where))
+        start = int(sysinfo["start_tick"])
+        for r, b in enumerate(per_bar[:int(sysinfo["n_bars"])]):
+            num, den = (int(v) for v in str(b["time_signature"]).split("/"))
+            bars.append(dict(bar=int(sysinfo["first_bar"]) + r, startTick=start, durTicks=int(b["ticks"]),
+                             numerator=num, denominator=den, **where))
+            start += int(b["ticks"])
     return bars
 
 

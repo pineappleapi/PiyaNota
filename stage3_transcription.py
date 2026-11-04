@@ -851,7 +851,12 @@ TIME_SIG_TOKENS = {
     "metersign.C/": "2/2",
 }
 DEFAULT_TIME_SIGNATURE = "4/4"
- 
+# Task 3 (2026-11-04 plan): apply a mid-strip meter change the system agreed on (quorum), and stamp each event's
+# ``time_signature_source`` ("explicit" = read from a token in this strip or applied from the system's agreed
+# change, "default" = no token, the 4/4 placeholder) so Stage 4 can carry meters across systems and tell a real
+# 4/4 from a default. False reproduces R3 exactly (reported, never applied; no source field) for the ablation.
+APPLY_MID_METER_CHANGE: bool = True
+
 SHARP_ORDER = ["F", "C", "G", "D", "A", "E", "B"]
 FLAT_ORDER  = ["B", "E", "A", "D", "G", "C", "F"]
  
@@ -1201,6 +1206,7 @@ def infer_pitch(
     trace:      Optional[list] = None,
     system_key_changes: Optional[dict[int, int]] = None,
     mid_changes_out: Optional[list] = None,
+    system_meter_changes: Optional[dict[int, str]] = None,
 ) -> list:
     """
     Converts a CRNN symbol sequence into note events with MIDI pitch.
@@ -1211,8 +1217,12 @@ def infer_pitch(
     single-strip rule (every accepted burst is applied).
     mid_changes_out: when a list, every post-barline key or time-signature change candidate is appended as a
     dict: ``{"kind": "key", "bar", "key", "glyphs", "meter_follows", "courtesy", "applied"}`` (courtesy: no
-    note or rest follows in the strip) or ``{"kind": "meter", "bar", "meter"}``. A mid-strip time signature
-    is only reported, never applied (R3): events keep the strip's opening time signature.
+    note or rest follows in the strip) or ``{"kind": "meter", "bar", "meter", "courtesy"}``. Without
+    ``system_meter_changes`` a mid-strip time signature is only reported, never applied (R3).
+    system_meter_changes: {measure_index: meter} the whole system agreed on (``decide_mid_changes``'s
+    ``meters_out``, Task 3); each is applied at its barline in every voice, glyphs or not. Key 0 is a courtesy
+    meter carried from the end of the previous system and sets the strip's opening meter (a header meter read
+    here still overrides it).
 
     header_override: clef, opening key and octave decided by ClefKeyNet (stage3_clefkey). Every CRNN clef
     token is then ignored (the CRNN's clef can't override the rule, user decision 2026-09-28), and the
@@ -1379,6 +1389,11 @@ def infer_pitch(
     # consumed (see "keysig" stage below); every emitted event carries this
     # value regardless of whether the note itself is decorated with one.
     time_signature         = DEFAULT_TIME_SIGNATURE
+    # (number of events emitted when the source changed, source); see APPLY_MID_METER_CHANGE.
+    ts_marks: list[tuple[int, str]] = [(0, "default")]
+    if system_meter_changes and 0 in system_meter_changes:
+        time_signature = system_meter_changes[0]
+        ts_marks.append((0, "explicit"))
     # 0-based measure counter, incremented on every barline. Barline tokens
     # themselves are never appended as events (they only drive the key-sig
     # state machine below), so this is the only place measure boundaries are
@@ -1620,6 +1635,7 @@ def infer_pitch(
                 if sym.startswith("metersign"):
                     time_signature = TIME_SIG_TOKENS.get(
                         sym.split("-")[0], time_signature)
+                    ts_marks.append((len(events), "explicit"))
                 ks_stage        = "body"
                 # fall through to body processing below
  
@@ -1648,6 +1664,7 @@ def infer_pitch(
                 # Stay in the header: an accidental after the metersign is still a misread key glyph
                 # unless it sits directly on the first note, and must not reach body's looser anchoring.
                 time_signature = TIME_SIG_TOKENS.get(sym.split("-")[0], time_signature)
+                ts_marks.append((len(events), "explicit"))
                 meter_seen     = True
                 continue
             elif sym.startswith("digit.") and not meter_seen and len(meter_digits) < 2:
@@ -1660,6 +1677,7 @@ def infer_pitch(
                 # A digit here follows a complete meter, so it is a multirest count for body.
                 if len(meter_digits) == 2 and not meter_seen:
                     time_signature = f"{meter_digits[0]}/{meter_digits[1]}"
+                    ts_marks.append((len(events), "explicit"))
                 ks_stage = "body"
                 # fall through to body processing below
             elif sym.startswith("slur.end"):
@@ -1692,6 +1710,7 @@ def infer_pitch(
                 key_alterations = _commit_opening(ks_sharp, ks_flat)
                 time_signature  = TIME_SIG_TOKENS.get(
                     sym.split("-")[0], time_signature)
+                ts_marks.append((len(events), "explicit"))
                 ks_stage        = "body"
                 continue
             elif sym.startswith("digit.") and len(meter_digits) < 2:
@@ -1709,6 +1728,7 @@ def infer_pitch(
                 key_alterations = _commit_opening(ks_sharp, ks_flat)
                 if len(meter_digits) == 2:
                     time_signature = f"{meter_digits[0]}/{meter_digits[1]}"
+                    ts_marks.append((len(events), "explicit"))
                 ks_stage        = "body"
                 # fall through to body processing below
             elif sym.startswith("slur.end"):
@@ -1737,9 +1757,12 @@ def infer_pitch(
             else:
                 meter = _meter_at(symbols, tok_idx)
                 if meter is not None:
-                    # R3: reported for review, not applied (re-timing on a misread meter would shift bars).
+                    # R3: a single strip's reading is only reported; a system-agreed change was already applied
+                    # at the barline (system_meter_changes), so the glyphs are skipped either way.
                     if mid_changes_out is not None:
-                        mid_changes_out.append({"kind": "meter", "bar": measure_index, "meter": meter[0]})
+                        courtesy = not any(t.startswith(("note.", "rest.", "multirest")) for t in symbols[meter[1]:])
+                        mid_changes_out.append({"kind": "meter", "bar": measure_index, "meter": meter[0],
+                                                "courtesy": courtesy})
                     skip_until = meter[1]
                     ks_stage = "body"
                     continue
@@ -1761,7 +1784,8 @@ def infer_pitch(
                                             "glyphs": end - tok_idx, "meter_follows": meter is not None,
                                             "courtesy": courtesy, "applied": applied})
                     if meter is not None:
-                        mid_changes_out.append({"kind": "meter", "bar": measure_index, "meter": meter[0]})
+                        mid_changes_out.append({"kind": "meter", "bar": measure_index, "meter": meter[0],
+                                                "courtesy": courtesy})
                 if applied:
                     if system_key_changes is None:
                         key_alterations = _commit_mid(n_sharp, n_flat)
@@ -1933,6 +1957,10 @@ def infer_pitch(
                 target = _signed_key_counts(system_key_changes[measure_index])
                 if get_key_sig_alterations(*target) != key_alterations:
                     key_alterations = _commit_mid(*target)
+            if system_meter_changes and measure_index in system_meter_changes:
+                # Task 3: the system agreed on a meter change at this barline; it holds in every voice.
+                time_signature = system_meter_changes[measure_index]
+                ts_marks.append((len(events), "explicit"))
             continue
  
         # ── Multirest ─────────────────────────────────────────────────────
@@ -1973,8 +2001,8 @@ def infer_pitch(
         if sym.startswith("digit."):
             meter = _meter_at(symbols, tok_idx)
             if meter is not None:
-                # A time signature, not a multirest count (R3: not applied); as a count its numerator
-                # would stretch the next multirest.
+                # A time signature, not a multirest count (not applied here: only a system-agreed change at a
+                # barline is); as a count its numerator would stretch the next multirest.
                 skip_until = meter[1]
                 continue
             try:
@@ -2018,6 +2046,12 @@ def infer_pitch(
     if header_dropped:
         print(f"[Stage 3] {voice} p{page_index} s{sys_idx}: dropped {header_dropped} CRNN header "
               "accidental(s) (key taken from header_override)")
+    if APPLY_MID_METER_CHANGE:
+        mark = 0
+        for i, e in enumerate(events):
+            while mark + 1 < len(ts_marks) and ts_marks[mark + 1][0] <= i:
+                mark += 1
+            e["time_signature_source"] = ts_marks[mark][1]
     return events
  
  
@@ -2509,10 +2543,11 @@ def build_strip_labels(
             if role == "keysig":
                 text = _key_label(after["key_alterations"])
             elif role == "meter" and entry.get("key_change_glyph"):
-                # A mid-strip time signature is never applied (R3), so the committed value is the old one;
-                # show what the glyphs read instead.
+                # A mid-strip time signature is applied only on a system quorum (Task 3): show what the glyphs
+                # read and whether it took effect.
                 read = _meter_at(symbols, i)
-                text = f"time {read[0] if read else '?'} read, not applied (mid-strip)"
+                applied = read is not None and entry.get("time_signature") == read[0]
+                text = f"time {read[0] if read else '?'} read, {'applied' if applied else 'not applied'} (mid-strip)"
             elif role == "meter":
                 text = f"time {after['time_signature']}"
             else:
@@ -2854,6 +2889,9 @@ MID_KEY_CHANGE_REJECTED_FLAG = "mid_strip_key_change_rejected"
 MID_METER_CHANGE_FLAG = "mid_strip_meter_change"
 MID_METER_UNCONFIRMED_FLAG = "mid_strip_meter_unconfirmed"
 KEY_CHANGE_CONTRADICTED_FLAG = "key_change_contradicted"
+# Floor of the mid-strip meter quorum: one voice's reading alone never re-times the piece (choral-conductor,
+# 2026-11-04: a lone surviving voice makes the bar evidence weak). Hand-set, not tuned.
+MIN_METER_QUORUM = 2
 
 
 def scan_mid_changes(symbols: list, voice: str, page_index: int, sys_idx: int,
@@ -2867,29 +2905,54 @@ def scan_mid_changes(symbols: list, voice: str, page_index: int, sys_idx: int,
     return out
 
 
+def meter_quorum(n_readable: Optional[int]) -> int:
+    """Voices that must read the same mid-strip meter at the same bar: HEADER_QUORUM, or every readable voice
+    when fewer are readable (an unreadable voice must not block every change), never below MIN_METER_QUORUM."""
+    if n_readable is None:
+        return HEADER_QUORUM
+    return max(MIN_METER_QUORUM, min(HEADER_QUORUM, n_readable))
+
+
 def decide_mid_changes(
     system: dict[str, tuple[str, list[dict[str, Any]]]],
+    n_readable: Optional[int] = None,
+    meters_out: Optional[dict[str, Any]] = None,
 ) -> tuple[dict[int, int], dict[str, list[str]]]:
     """Keeps the mid-strip changes at least HEADER_QUORUM voices of one system read at the same bar (R4).
 
     Args:
         system: {strip_id: (voice, scan_mid_changes output)} for every strip of one system.
+        n_readable: strips of the system with a note or rest; lowers the meter quorum (``meter_quorum``).
+        meters_out: when a dict, filled with ``changes`` {measure_index: meter} (the quorum meter changes, for
+            infer_pitch's ``system_meter_changes``) and ``courtesy`` (the last agreed meter when it follows the
+            strip's last note, so it opens the next system; else None). A bar where two different meters both
+            reach the quorum is applied in neither.
 
     Returns:
         (key changes {measure_index: signed key} for infer_pitch's ``system_key_changes``, per-strip flags).
-        A quorum meter change flags the whole system and is never applied (R3); Stage 4's bar-length flags
-        in that system are then expected consequences of the unapplied meter.
+        A quorum meter change flags the whole system (internal flag, not sent to the client).
     """
     key_voices: dict[tuple[int, int], set[str]] = {}
     meter_voices: dict[tuple[int, str], set[str]] = {}
+    courtesy_votes: dict[tuple[int, str], set[str]] = {}
     for voice, cands in system.values():
         for c in cands:
             if c["kind"] == "key":
                 key_voices.setdefault((c["bar"], c["key"]), set()).add(voice)
             else:
                 meter_voices.setdefault((c["bar"], c["meter"]), set()).add(voice)
+                if c.get("courtesy"):
+                    courtesy_votes.setdefault((c["bar"], c["meter"]), set()).add(voice)
     gate = {bar: key for (bar, key), vs in sorted(key_voices.items()) if len(vs) >= HEADER_QUORUM}
-    meters = {bm for bm, vs in meter_voices.items() if len(vs) >= HEADER_QUORUM}
+    quorum = meter_quorum(n_readable)
+    meters = {bm for bm, vs in meter_voices.items() if len(vs) >= quorum}
+    if meters_out is not None:
+        per_bar = Counter(bar for bar, _ in meters)
+        changes = {bar: m for bar, m in sorted(meters) if per_bar[bar] == 1}
+        meters_out["changes"] = changes
+        last = max(changes) if changes else None
+        meters_out["courtesy"] = (changes[last] if last is not None
+                                  and len(courtesy_votes.get((last, changes[last]), ())) >= quorum else None)
     flags: dict[str, list[str]] = {}
     for sid, (_, cands) in system.items():
         f: set[str] = set()
@@ -2973,11 +3036,14 @@ def _events_for_symbols(
     system_key_changes: Optional[dict[int, int]] = None,
     spans:      Optional[List[Tuple[float, float]]] = None,
     barlines_out: Optional[List[float]] = None,
+    system_meter_changes: Optional[dict[int, str]] = None,
 ) -> list:
     """Pitch inference, log line and optional viz for one strip's decoded tokens (process_strip's second half).
 
     system_key_changes: the system's agreed mid-strip key changes (``decide_mid_changes``); None keeps the
     single-strip rule (``process_strip`` sees one strip only).
+    system_meter_changes: the system's agreed mid-strip meter changes (``decide_mid_changes``'s ``meters_out``);
+    None applies none (R3).
     spans: the CTC x-ranges of ``symbols`` (same length and order) for the visualization and the timing export.
     barlines_out: timing export switch. When a list is given (needs ``spans``), every note/rest event gets
         ``ctc_x`` (strip-pixel centre of its token) and the strip-pixel centres of the barline tokens that
@@ -2988,10 +3054,12 @@ def _events_for_symbols(
     if clef_key_decision is not None:
         import stage3_clefkey  # lazy: stage3_clefkey imports this module
         events, _, _ = stage3_clefkey.infer_pitch_b(symbols, confs, voice, page_index, sys_idx,
-                                                    clef_key_decision, system_key_changes, trace=trace)
+                                                    clef_key_decision, system_key_changes, trace=trace,
+                                                    system_meter_changes=system_meter_changes)
     else:
         events = infer_pitch(symbols, voice=voice, page_index=page_index, sys_idx=sys_idx,
-                             confidences=confs, trace=trace, system_key_changes=system_key_changes)
+                             confidences=confs, trace=trace, system_key_changes=system_key_changes,
+                             system_meter_changes=system_meter_changes)
 
     print(f"[Stage 3] {voice} p{page_index}: "
           f"{len(symbols)} symbols -> {len(events)} events")
@@ -3119,7 +3187,8 @@ def transcribe_voice_sequences(
             strip_bars: Optional[List[float]] = [] if barlines_out is not None else None
             events = _events_for_symbols(d["strip"], d["symbols"], d["confs"], d["voice_label"], d["page_index"],
                                          img_height, d["v_idx"], viz_dir, d["sys_idx"], d["decision"],
-                                         d["system_key_changes"], spans=d["spans"], barlines_out=strip_bars)
+                                         d["system_key_changes"], spans=d["spans"], barlines_out=strip_bars,
+                                         system_meter_changes=d["system_meter_changes"])
             if barlines_out is not None:
                 barlines_out[(d["page_index"], d["sys_idx"], d["voice_label"])] = strip_bars
             if d["decision"] is None:
@@ -3155,8 +3224,9 @@ def transcribe_voice_sequences(
 def _apply_system_checks(decoded: dict[str, dict[str, Any]], meter_change_systems: set[tuple[int, int]]) -> None:
     """Whole-system checks on decoded strips, in place: R1 key continuity, then R2-R4 mid-strip changes.
 
-    Sets each entry's ``decision`` (revised by R1 when ClefKeyNet is used), ``system_key_changes`` and
-    ``mid_change_flags``.
+    Sets each entry's ``decision`` (revised by R1 when ClefKeyNet is used), ``system_key_changes``,
+    ``system_meter_changes`` (None while APPLY_MID_METER_CHANGE is False) and ``mid_change_flags``. A courtesy
+    meter at the end of a system opens the next system in page/system order (key 0 of its map).
 
     Args:
         decoded: transcribe_voice_sequences's Pass 1 entries (after the header filter).
@@ -3171,6 +3241,7 @@ def _apply_system_checks(decoded: dict[str, dict[str, Any]], meter_change_system
                                                       systems, meter_change_systems)
         for sid, d in decoded.items():
             d["decision"] = revised[sid]
+    carried: Optional[str] = None
     for key in sorted(systems):
         scans: dict[str, tuple[str, list[dict[str, Any]]]] = {}
         for sid in systems[key]:
@@ -3180,7 +3251,18 @@ def _apply_system_checks(decoded: dict[str, dict[str, Any]], meter_change_system
                           scan_mid_changes(d["symbols"], d["voice_label"], d["page_index"], d["sys_idx"],
                                            None if dec is None else stage3_clefkey.header_override(dec),
                                            None if dec is None else dec.next_key))
-        gate, flags = decide_mid_changes(scans)
+        n_readable = sum(1 for _, syms in systems[key].values()
+                         if any(s.startswith(("note.", "rest.", "multirest")) for s in syms))
+        meter_info: dict[str, Any] = {}
+        gate, flags = decide_mid_changes(scans, n_readable, meter_info)
+        meter_map: Optional[dict[int, str]] = None
+        if APPLY_MID_METER_CHANGE:
+            meter_map = dict(meter_info["changes"])
+            if carried is not None:
+                meter_map.setdefault(0, carried)
+            carried = meter_info["courtesy"]
+            if meter_map:
+                print(f"[Stage 3] p{key[0]} s{key[1]}: system mid-strip meter change(s) applied {meter_map}")
         for sid in systems[key]:
             d = decoded[sid]
             dec = d["decision"]
@@ -3190,6 +3272,7 @@ def _apply_system_checks(decoded: dict[str, dict[str, Any]], meter_change_system
                     # The next system still reads the key this change left (choral-conductor 2026-09-30).
                     f = sorted(set(f) | {KEY_CHANGE_CONTRADICTED_FLAG, "review_needed"})
             d["system_key_changes"] = gate
+            d["system_meter_changes"] = meter_map
             d["mid_change_flags"] = f
         if gate:
             print(f"[Stage 3] p{key[0]} s{key[1]}: system mid-strip key change(s) {gate}")

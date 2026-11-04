@@ -169,6 +169,21 @@ PICKUP_STANDARD_LENGTHS = {
 # Tenor sounds an octave below written; written A4 (MIDI 69) -> 57.
 TENOR_MAX_SOUNDING_MIDI = 57
 
+# Per-bar meters (Task 3, 2026-11-04 plan). Used only when Stage 3 stamps time_signature_source on its events
+# (stage3_transcription.APPLY_MID_METER_CHANGE); without it the legacy one-meter-per-system rule runs.
+# Internal flags: none reaches the client review object (stage5_synthesis.CLIENT_REVIEW_CODES).
+FLAG_METER_INFERRED = "meter_inferred"
+FLAG_METER_NOT_INFERRED = "meter_inference_rejected"
+FLAG_METER_DURATION_MISMATCH = "meter_change_duration_mismatch"
+# Voices of a system whose explicit readings must agree on a bar's meter (Stage 3's HEADER_QUORUM), or every
+# voice when fewer are present. Hand-set, not tuned.
+METER_QUORUM = 3
+# Bar-total inference (choral-conductor 2026-11-04): only 2, 3 or 4 quarters, beat = quarter (a 6/8 piece is
+# inferred as 3/4: right length, wrong beat grouping). Any other total is flagged, never inferred.
+INFERABLE_METERS = {2 * TICKS_PER_QUARTER: "2/4", 3 * TICKS_PER_QUARTER: "3/4", 4 * TICKS_PER_QUARTER: "4/4"}
+# Inference needs this many bars sharing the top total, or a clear majority (> half, at least 2).
+METER_INFERENCE_MIN_BARS = 3
+
 
 # ── Main reconstruction function ──────────────────────────────────────────────
 
@@ -239,6 +254,9 @@ def reconstruct_satb_with_report(voice_events: dict) -> tuple[dict, dict]:
     flags: list[Flag] = []
     strips = _split_into_strips(voice_events)
     layout, pickup_ticks, voice_pickup = _plan_layout(strips, flags)
+    if _has_meter_source(strips):
+        # Before placement: placement repairs (scaling, clipping) change the very totals this check reads.
+        _flag_meter_duration_mismatch(strips, layout, flags)
 
     reconstructed: dict = {voice: [] for voice in VOICES}
     for key in sorted(strips):
@@ -259,8 +277,7 @@ def reconstruct_satb_with_report(voice_events: dict) -> tuple[dict, dict]:
     _flag_midbar_breaks(strips, layout, flags)
     _flag_unreadable_voices(voice_events, flags)
 
-    total_ticks = pickup_ticks + sum(
-        info["n_bars"] * info["bar_ticks"] for info in layout.values())
+    total_ticks = pickup_ticks + sum(_system_ticks(info) for info in layout.values())
     report_data = {
         "flags": flags,
         "pickup_ticks": pickup_ticks,
@@ -363,14 +380,192 @@ def _consensus_time_signatures(strips: dict) -> dict:
     return result
 
 
+def _has_meter_source(strips: dict) -> bool:
+    """True when Stage 3 marked explicit vs default meters (APPLY_MID_METER_CHANGE on)."""
+    return any("time_signature_source" in e for voices in strips.values()
+               for events in voices.values() for e in events)
+
+
+def _snap_total(ticks: int) -> int:
+    """A bar total within tolerance of an inferable length counts as that length."""
+    return next((t for t in INFERABLE_METERS if abs(ticks - t) <= DURATION_MISMATCH_TOLERANCE_TICKS), ticks)
+
+
+def resolve_bar_meter(explicit: Optional[str], previous: Optional[str],
+                      bar_total_ticks: list[int]) -> tuple[str, str]:
+    """The meter of a bar and where it came from: "explicit", "carried", "inferred" or "default".
+
+    Precedence: an agreed meter token, then the meter in force (a time signature holds until the next one,
+    across systems and pages), then the bar totals, then 4/4. Inference accepts only 2, 3 or 4 quarters, and
+    only when the top total is strictly the most common and shared by METER_INFERENCE_MIN_BARS bars or by a
+    clear majority.
+    """
+    if explicit:
+        return explicit, "explicit"
+    if previous:
+        return previous, "carried"
+    if bar_total_ticks:
+        ranked = Counter(_snap_total(t) for t in bar_total_ticks).most_common(2)
+        top, count = ranked[0]
+        unique = len(ranked) == 1 or ranked[1][1] < count
+        clear = count >= METER_INFERENCE_MIN_BARS or (count >= 2 and 2 * count > len(bar_total_ticks))
+        if unique and clear and top in INFERABLE_METERS:
+            return INFERABLE_METERS[top], "inferred"
+    return DEFAULT_TIME_SIGNATURE, "default"
+
+
+def _explicit_meter(m_events: list) -> Optional[str]:
+    """The meter this voice read for one measure (Stage 3 source "explicit"), or None."""
+    read = Counter(e["time_signature"] for e in m_events if e.get("time_signature_source") == "explicit")
+    return read.most_common(1)[0][0] if read else None
+
+
+def _quorum_meter(votes: Counter, n_voices: int) -> Optional[str]:
+    """The meter at least min(METER_QUORUM, n_voices) voices read, if exactly one meter has that many."""
+    need = min(METER_QUORUM, n_voices)
+    top = votes.most_common(2)
+    if not top or top[0][1] < need or (len(top) > 1 and top[1][1] == top[0][1]):
+        return None
+    return top[0][0]
+
+
+def _is_vote_bar(m_events: list) -> bool:
+    """A measure whose total says something about its meter: no multirest, not a lone whole rest (a full-bar
+    rest in any meter)."""
+    lone_whole = (len(m_events) == 1 and m_events[0]["type"] == "rest"
+                  and str(m_events[0].get("symbol", "")).startswith("rest.whole"))
+    return not _is_multirest(m_events) and not lone_whole
+
+
+def _opening_meter(strips: dict, first_key: tuple, flags: list) -> tuple[str, str]:
+    """The first system's meter: the quorum of each voice's first-measure reading, else bar-total inference.
+
+    Inference skips each voice's first measure (a pickup), the piece's last bar (its complement) and
+    over-full bars (divisi read in sequence or a missed barline, choral-conductor 2026-11-04).
+    """
+    votes: Counter = Counter()
+    n_voices = 0
+    totals: list[int] = []
+    last_system = first_key == max(strips)
+    for events in strips[first_key].values():
+        measures = _measures(events)
+        if not measures:
+            continue
+        n_voices += 1
+        ms = list(measures.values())
+        read = _explicit_meter(ms[0])
+        if read is not None:
+            votes[read] += 1
+        body = ms[1:-1] if last_system else ms[1:]
+        totals += [t for m in body if _is_vote_bar(m)
+                   for t in [_measure_ticks(m)] if t <= WHOLE_NOTE_TICKS + DURATION_MISMATCH_TOLERANCE_TICKS]
+    meter, source = resolve_bar_meter(_quorum_meter(votes, n_voices), None, totals)
+    if source in ("inferred", "default") and totals:
+        common = Counter(_snap_total(t) for t in totals).most_common(1)[0][0]
+        flags.append({"kind": FLAG_METER_INFERRED if source == "inferred" else FLAG_METER_NOT_INFERRED,
+                      "page_index": first_key[0], "sys_idx": first_key[1], "bar": 1, "voice": None,
+                      "expected_ticks": _bar_ticks(meter), "actual_ticks": common,
+                      "detail": (f"no agreed time signature token; {meter} inferred from {len(totals)} bar totals"
+                                 if source == "inferred" else
+                                 f"no agreed time signature token and the bar totals (most common {common} "
+                                 f"ticks) are not 2, 3 or 4 quarters; {meter} assumed"),
+                      "action": "none"})
+    return meter, source
+
+
+def _system_bars(voices: dict, voice_base: dict, n_bars: int, running: str,
+                 opening_source: Optional[str]) -> list[dict[str, Any]]:
+    """[{ticks, time_signature, meter_source}] per bar rank of one system.
+
+    A bar takes the meter a quorum of the system's voices read explicitly there (a header, or a change Stage 3
+    applied system-wide), otherwise the meter in force. ``opening_source`` labels the first system's first
+    bar when no token was agreed on it (its meter was inferred or defaulted by _opening_meter).
+    """
+    votes: dict[int, Counter] = defaultdict(Counter)
+    n_voices = 0
+    for voice, events in voices.items():
+        measures = _measures(events)
+        if measures is None or voice not in voice_base:
+            continue
+        n_voices += 1
+        for mi, m_events in measures.items():
+            read = _explicit_meter(m_events) if mi >= voice_base[voice] else None
+            if read is not None:
+                votes[mi - voice_base[voice]][read] += 1
+    bars: list[dict[str, Any]] = []
+    for r in range(n_bars):
+        meter, source = resolve_bar_meter(_quorum_meter(votes[r], n_voices), running, [])
+        if r == 0 and opening_source is not None and source == "carried":
+            source = opening_source
+        bars.append({"ticks": _bar_ticks(meter), "time_signature": meter, "meter_source": source})
+        running = meter
+    return bars
+
+
+def _bar_len(info: dict, rank: int) -> int:
+    """Ticks of bar `rank` of a system (the system's first-bar length outside its bar list)."""
+    bars = info.get("bars")
+    return bars[rank]["ticks"] if bars and 0 <= rank < len(bars) else info["bar_ticks"]
+
+
+def _bar_start(info: dict, rank: int) -> int:
+    return info["start_tick"] + sum(_bar_len(info, r) for r in range(rank))
+
+
+def _system_ticks(info: dict) -> int:
+    return sum(_bar_len(info, r) for r in range(info["n_bars"]))
+
+
+def _flag_meter_duration_mismatch(strips: dict, layout: dict, flags: list) -> None:
+    """Flags a meter change the bars themselves do not support (review_needed).
+
+    The voices that read a change share one CRNN and font, so a quorum can be a correlated misread
+    (ml-cv-lead 2026-11-05). From each change to the next, the voice-bar totals (bar-mode voices, vote bars
+    only) that fit the new bar length must outnumber those that fit the old one; otherwise the change is
+    flagged, not reverted. Bar totals are an independent signal; CRNN confidence is not (BUG-011).
+    """
+    tol = DURATION_MISMATCH_TOLERANCE_TICKS
+    seq: list[tuple[tuple, int]] = [(key, r) for key in sorted(layout) for r in range(layout[key]["n_bars"])]
+    totals: dict[tuple[tuple, int], list[int]] = defaultdict(list)
+    for key in sorted(layout):
+        info = layout[key]
+        for voice, events in strips[key].items():
+            measures = _measures(events)
+            if measures is None or info["voice_bars"].get(voice) != info["n_bars"]:
+                continue
+            for mi, m_events in measures.items():
+                if mi >= info["voice_base"][voice] and _is_vote_bar(m_events):
+                    totals[(key, mi - info["voice_base"][voice])].append(_measure_ticks(m_events))
+    lengths = [_bar_len(layout[k], r) for k, r in seq]
+    changes = [i for i in range(1, len(seq)) if lengths[i] != lengths[i - 1]]
+    for n, i in enumerate(changes):
+        end = changes[n + 1] if n + 1 < len(changes) else len(seq)
+        new, old = lengths[i], lengths[i - 1]
+        span = [t for j in range(i, end) for t in totals[seq[j]]]
+        fit_new = sum(abs(t - new) <= tol for t in span)
+        fit_old = sum(abs(t - old) <= tol for t in span)
+        if fit_new <= fit_old:
+            key, r = seq[i]
+            flags.append({"kind": FLAG_METER_DURATION_MISMATCH, "page_index": key[0], "sys_idx": key[1],
+                          "bar": layout[key]["first_bar"] + r, "voice": None, "expected_ticks": new,
+                          "actual_ticks": old,
+                          "detail": (f"meter change to {layout[key]['bars'][r]['time_signature']} is not "
+                                     f"supported by the bar totals up to the next change: {fit_new} fit the new "
+                                     f"length, {fit_old} fit the old {old} ticks; possible correlated misread"),
+                          "action": "none", "review_needed": True})
+
+
 def _plan_layout(strips: dict, flags: list) -> tuple[dict, int, dict]:
     """
     Decides bar structure for the whole piece before any event is moved.
 
     Returns:
         layout: {(page, sys): {time_signature, bar_ticks, n_bars,
-                 first_bar, start_tick}} -- n_bars is the cross-voice
-                 consensus (most common; ties -> larger).
+                 first_bar, start_tick, bars}} -- n_bars is the cross-voice
+                 consensus (most common; ties -> larger). bars is one
+                 {ticks, time_signature, meter_source} per bar (a meter can
+                 change mid-system); time_signature/bar_ticks are the first
+                 bar's (the system's opening meter when it has no bars).
         pickup_ticks: length of the anacrusis (0 if none) = the length the
                  agreeing voices share (deviant voices do not move it). Bar
                  1's downbeat is at this tick in every voice.
@@ -386,15 +581,22 @@ def _plan_layout(strips: dict, flags: list) -> tuple[dict, int, dict]:
     reported as FLAG_PICKUP (review_needed unless the final bar completes it)
     so it is visible, not assumed correct.
     """
-    meters = _consensus_time_signatures(strips)
     first_key = min(strips)
+    per_bar = _has_meter_source(strips)
+    opening_source: Optional[str] = None
+    if per_bar:
+        running, opening_source = _opening_meter(strips, first_key, flags)
+        meters = {first_key: running}
+    else:
+        meters = _consensus_time_signatures(strips)
     voice_pickup, pickup_ticks, suffix_ok = _decide_pickups(
         strips, meters, first_key, flags)
     voice_base: dict = {}
 
     layout: dict = {}
     for key in sorted(strips):
-        bar_ticks = _bar_ticks(meters[key])
+        system_meter = running if per_bar else meters[key]
+        bar_ticks = _bar_ticks(system_meter)
         n_by_voice: dict = {}
         for voice, events in strips[key].items():
             measures = _measures(events)
@@ -410,9 +612,18 @@ def _plan_layout(strips: dict, flags: list) -> tuple[dict, int, dict]:
                 for mi in indices if mi >= base)
         counts = Counter(n_by_voice.values())
         n_bars = max(counts, key=lambda n: (counts[n], n)) if counts else 0
-        layout[key] = {"time_signature": meters[key], "bar_ticks": bar_ticks,
+        bases = {v: voice_base[(key, v)] for v in n_by_voice}
+        if per_bar:
+            bars = _system_bars(strips[key], bases, n_bars, running,
+                                opening_source if key == first_key else None)
+            if bars:
+                running = bars[-1]["time_signature"]
+        else:
+            bars = [{"ticks": bar_ticks, "time_signature": system_meter, "meter_source": "system"}] * n_bars
+        layout[key] = {"time_signature": bars[0]["time_signature"] if bars else system_meter,
+                       "bar_ticks": bars[0]["ticks"] if bars else bar_ticks,
                        "n_bars": n_bars, "voice_bars": n_by_voice,
-                       "voice_base": {v: voice_base[(key, v)] for v in n_by_voice}}
+                       "voice_base": bases, "bars": [dict(b) for b in bars]}
 
     # Voices whose shorter pickup is a dropped-leading-note suffix of the agreed
     # one: their length mismatch is informational (a list, so the report stays
@@ -424,7 +635,7 @@ def _plan_layout(strips: dict, flags: list) -> tuple[dict, int, dict]:
     for key in sorted(layout):
         layout[key]["start_tick"] = running
         layout[key]["first_bar"] = bar_no
-        running += layout[key]["n_bars"] * layout[key]["bar_ticks"]
+        running += _system_ticks(layout[key])
         bar_no += layout[key]["n_bars"]
     return layout, pickup_ticks, voice_pickup
 
@@ -803,7 +1014,7 @@ def _flag_midbar_breaks(strips: dict, layout: dict, flags: list) -> None:
     """
     keys = sorted(strips)
     for cur, nxt in zip(keys, keys[1:]):
-        bar_ticks = layout[cur]["bar_ticks"]
+        bar_ticks = _bar_len(layout[cur], layout[cur]["n_bars"] - 1)  # the split bar's meter
         tails: dict = {}
         heads: dict = {}
         for voice in VOICES:
@@ -908,7 +1119,6 @@ def _place_voice_strip(
     page_index, sys_idx = key
     measures = _measures(events)
     start_tick = info["start_tick"]
-    bar_ticks = info["bar_ticks"]
 
     def flag(kind: str, bar: Optional[int], expected: Optional[int],
              actual: Optional[int], detail: str, action: str,
@@ -933,7 +1143,7 @@ def _place_voice_strip(
                  "placed_by_local_ticks")
         # Never before tick 0, even for a pickup voice longer than the agreed one.
         origin = max(0, start_tick - own_pickup_ticks)
-        system_end = start_tick + info["n_bars"] * bar_ticks
+        system_end = start_tick + _system_ticks(info)
         kept_events: list[Event] = []
         dropped_desc: list[str] = []
         trimmed = 0
@@ -949,7 +1159,7 @@ def _place_voice_strip(
                 trimmed += 1
             kept_events.append(e)
         if dropped_desc or trimmed:
-            flag(FLAG_LOCAL_OVERRUN, None, info["n_bars"] * bar_ticks, None,
+            flag(FLAG_LOCAL_OVERRUN, None, _system_ticks(info), None,
                  f"locally placed voice ran past the system end (tick "
                  f"{system_end}); trimmed {trimmed} event(s), dropped "
                  f"{len(dropped_desc)} note(s): {dropped_desc}",
@@ -959,6 +1169,7 @@ def _place_voice_strip(
     base = info["voice_base"][voice]
     placed: list = []
     for mi, m_events in measures.items():
+        bar_ticks = _bar_len(info, max(0, mi - base))  # this bar's own meter
         _normalise_whole_rest(m_events, bar_ticks)
         first_local = min(e["local_tick_onset"] for e in m_events)
         total = _measure_ticks(m_events)
@@ -993,7 +1204,7 @@ def _place_voice_strip(
             bar_end: Optional[int] = None
         else:
             rank = mi - base
-            origin = start_tick + rank * bar_ticks
+            origin = _bar_start(info, rank)
             bar_no = info["first_bar"] + rank
             bar_end = origin + bar_ticks
             if not _is_multirest(m_events):
@@ -1049,7 +1260,6 @@ def _split_stem_ranks(voices: dict, info: dict) -> dict[str, set[int]]:
     suspected_missing_barline; an underfull bar (dropped note) also fits.
     If any voice is absent from the system or in local placement, the whole
     system returns {}: "the other three fit" cannot be checked."""
-    bar_ticks = info["bar_ticks"]
     totals: dict[str, dict[int, int]] = {}
     for voice, events in voices.items():
         measures = _measures(events)
@@ -1060,6 +1270,7 @@ def _split_stem_ranks(voices: dict, info: dict) -> dict[str, set[int]]:
         for mi, m_events in measures.items():
             if mi < base:
                 continue
+            bar_ticks = _bar_len(info, mi - base)
             _normalise_whole_rest(m_events, bar_ticks)
             if _is_multirest(m_events):
                 for r in range(_measure_span(m_events, bar_ticks)):
@@ -1068,11 +1279,11 @@ def _split_stem_ranks(voices: dict, info: dict) -> dict[str, set[int]]:
                 totals[voice][mi - base] = _measure_ticks(m_events)
     if len(totals) != len(VOICES):
         return {}
-    fit = bar_ticks + DURATION_MISMATCH_TOLERANCE_TICKS
     return {voice: {r for r, t in ranks.items()
-                    if SPLIT_STEM_RATIO_MIN * bar_ticks <= t
-                    <= SPLIT_STEM_RATIO_MAX * bar_ticks
-                    and all(r in totals[v] and totals[v][r] <= fit
+                    if SPLIT_STEM_RATIO_MIN * _bar_len(info, r) <= t
+                    <= SPLIT_STEM_RATIO_MAX * _bar_len(info, r)
+                    and all(r in totals[v] and totals[v][r]
+                            <= _bar_len(info, r) + DURATION_MISMATCH_TOLERANCE_TICKS
                             for v in VOICES if v != voice)}
             for voice, ranks in totals.items()}
 

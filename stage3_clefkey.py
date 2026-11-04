@@ -465,11 +465,13 @@ def substitute_header(tokens: Sequence[str], confs: Sequence[float], clef_token:
 def infer_pitch_b(tokens: Sequence[str], confs: Sequence[float], voice: str, page_index: int, sys_idx: int,
                   decision: StripDecision, system_key_changes: Optional[dict[int, int]] = None,
                   trace: Optional[list[dict[str, Any]]] = None,
+                  system_meter_changes: Optional[dict[int, str]] = None,
                   ) -> tuple[list[dict[str, Any]], list[str], dict[str, Any]]:
     """Version (b) pitch inference for one strip.
 
     ``system_key_changes`` is passed to ``infer_pitch`` (the system's agreed mid-strip key changes, R4);
-    None keeps the single-strip rule. With ``decision.key_candidates`` set (R1 held or accepted an
+    None keeps the single-strip rule. ``system_meter_changes`` likewise (agreed meter changes, Task 3).
+    With ``decision.key_candidates`` set (R1 held or accepted an
     uncorroborated key change), events and info carry ``key_candidates`` for the reviewer.
 
     Args:
@@ -491,7 +493,8 @@ def infer_pitch_b(tokens: Sequence[str], confs: Sequence[float], voice: str, pag
         events = s3.infer_pitch(list(tokens), voice=voice, page_index=page_index, sys_idx=sys_idx,
                                 confidences=list(confs), header_override=header_override(decision),
                                 next_system_key=decision.next_key, trace=trace,
-                                system_key_changes=system_key_changes)
+                                system_key_changes=system_key_changes,
+                                system_meter_changes=system_meter_changes)
     print(log.getvalue(), end="")
     flags = list(decision.flags) + list(decision.clef.flags)
     info["mid_key_changes"] = log.getvalue().count(MID_KEY_CHANGE_MARK)
