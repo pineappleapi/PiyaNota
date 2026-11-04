@@ -67,3 +67,7 @@ def db_clean(app: Flask) -> None:
         if names:
             table_list = sql.SQL(", ").join(sql.Identifier(name) for name in names)
             conn.execute(sql.SQL("TRUNCATE {} RESTART IDENTITY CASCADE").format(table_list))
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line("markers", "slow: runs the real OMR pipeline; needs torch and model weights")
