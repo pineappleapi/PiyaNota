@@ -138,6 +138,21 @@ def test_input_errors_map_to_fixed_reasons(tmp_path: Path) -> None:
     assert info.value.reason == "no readable page"
 
 
+def test_reconstruction_error_uses_fixed_reason(tmp_path: Path) -> None:
+    def raiser(ev: Any) -> Any:
+        raise ValueError("raw stage text")
+
+    with pytest.raises(PipelineError) as info:
+        _run(tmp_path, replace(_fake_stages(), reconstruct=raiser))
+    assert info.value.reason == "no readable staves" and "raw stage text" not in str(info.value)
+
+
+def test_audio_failure_still_cleans_output_dir(tmp_path: Path) -> None:
+    with pytest.raises(PipelineError, match="audio rendering failed"):
+        _run(tmp_path, _fake_stages(midi_only=True))
+    assert not (tmp_path / "w" / "audio").exists()
+
+
 def test_genuine_bugs_propagate(tmp_path: Path) -> None:
     def raiser(*args: Any) -> Any:
         raise TypeError("bug")

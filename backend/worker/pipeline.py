@@ -234,7 +234,7 @@ def run_pipeline(
     try:
         satb, report = st.reconstruct(events)
     except ValueError as exc:  # Stage 4 raises when it cannot place a voice
-        raise PipelineError(f"reconstruction failed: {exc}") from exc
+        raise PipelineError("no readable staves") from exc  # fixed text: reasons reach clients
     review, _detail = st.review(events, report["flags"])
     seconds["reconstructing"] = monotonic() - t
 
@@ -244,10 +244,10 @@ def run_pipeline(
 
     # Stage 5 falls back to a .mid when rendering fails; only real MP3s count as delivered voices.
     mp3 = {v.lower(): Path(p).read_bytes() for v, p in paths.items() if Path(p).suffix == ".mp3"}
+    shutil.rmtree(out, ignore_errors=True)
     if not mp3:
         raise PipelineError("audio rendering failed")
     failed = [v.lower() for v in VOICES if v.lower() not in mp3]
-    shutil.rmtree(out, ignore_errors=True)
     return PipelineResult(
         mp3=mp3,
         failed_voices=failed,
