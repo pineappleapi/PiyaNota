@@ -43,7 +43,12 @@ def check_test_db(url: str) -> None:
         SystemExit: host, port or database name is not exactly the local test database.
     """
     parts = urlparse(url)
-    if (parts.hostname not in TEST_DB_HOSTS or parts.port != TEST_DB_PORT
+    try:
+        port = parts.port
+    except ValueError:  # malformed port
+        port = None
+    # libpq lets ?dbname=/?host=/?port= override the components, so any query or params is refused.
+    if (parts.query or parts.params or parts.hostname not in TEST_DB_HOSTS or port != TEST_DB_PORT
             or parts.path != f"/{TEST_DB_NAME}"):
         raise SystemExit("refusing non-test database (need localhost:55432/piya_test)")
 

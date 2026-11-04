@@ -305,7 +305,9 @@ def test_smoke_db_guard_accepts_only_the_local_test_database() -> None:
     check_test_db("postgresql://127.0.0.1:55432/piya_test")
     for bad in ("postgresql://localhost.evil.net:55432/piya_test", "postgresql://localhost:5432/piya_test",
                 "postgresql://localhost:55432/piya", "postgresql://localhost:55432/piya_test_x",
-                "postgresql://evil.net/x?host=localhost:55432/piya_test"):
+                "postgresql://evil.net/x?host=localhost:55432/piya_test",
+                "postgresql://localhost:55432/piya_test?dbname=prod", "postgresql://localhost:55432/piya_test?host=evil.net",
+                "postgresql://localhost:55432/piya_test?port=5432", "postgresql://localhost:abc/piya_test"):
         with pytest.raises(SystemExit):
             check_test_db(bad)
 
