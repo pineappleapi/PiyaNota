@@ -14,6 +14,7 @@ from pathlib import Path
 from ultralytics import YOLO
 
 from stage1_preprocessing import StaffCurve, track_staff_curves
+from timing_export import StripGeometry
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ def detect_staff_regions(
     save_viz: bool = False,          # ← new flag
     viz_dir: str = "data/detection_viz",
     manifest_path: str | None = None,
+    geometry_out: list[StripGeometry] | None = None,
 ) -> dict:
     """Detects staves per page and crops one fixed-height strip per staff.
 
@@ -60,6 +62,9 @@ def detect_staff_regions(
             voice, box, source, strip_source} so a strip can be traced back to its page
             region. ``strip_source`` is "native" or "fallback" (cut from the 1600 px
             detection page, where thin rests/ties can already be broken).
+        geometry_out: If a list is given, one StripGeometry per strip is appended (crop rows, scale
+            ratios, staff box) so the timing export can map strip x back to page x. Off by default;
+            strips and manifest are identical either way.
     """
     manifest: list[dict] = []
     output_path = Path(output_dir)
@@ -145,10 +150,15 @@ def detect_staff_regions(
             for v_idx, box in enumerate(system, start=1):
                 voice = VOICE_MAP.get(v_idx, f"Voice_{v_idx}")
                 strip_id = f"page{page_index:03d}_sys{sys_idx:02d}_{voice}_vidx{v_idx}"
+                crop: dict | None = {} if geometry_out is not None else None
                 strip = _crop_and_resize(
                     image_bgr, box, STRIP_HEIGHT, strip_id=strip_id,
                     limits=_neighbor_limits(boxes, box_index[id(box)], img_h),
-                    source=strip_source)
+                    source=strip_source, crop_out=crop)
+                if geometry_out is not None and crop:
+                    geometry_out.append(StripGeometry(
+                        page_index=page_index, sys_idx=sys_idx, voice=voice,
+                        staff_y1=int(box["y1"]), staff_y2=int(box["y2"]), **crop))
                 voice_sequences[voice].append((strip, page_index, sys_idx, voice, v_idx))
                 manifest.append({
                     "strip_id": strip_id, "page": page_index, "system": sys_idx,
@@ -522,7 +532,8 @@ def _crop_and_resize(image: np.ndarray, box: dict, target_height: int,
                      strip_id: str = "",
                      adaptive_extent: bool = True,
                      limits: tuple[int, int] | None = None,
-                     source: np.ndarray | None = None) -> np.ndarray:
+                     source: np.ndarray | None = None,
+                     crop_out: dict | None = None) -> np.ndarray:
     """Crops one staff to a full-width strip and resizes it to target_height.
 
     Args:
@@ -532,6 +543,8 @@ def _crop_and_resize(image: np.ndarray, box: dict, target_height: int,
         limits: Adjacent-staff midpoints bounding adaptive growth (see _content_extent).
         source: Optional native-resolution page in the same geometry as ``image``. The crop
             rows/columns are found on ``image`` and mapped onto it by the size ratio.
+        crop_out: If a dict is given, receives the StripGeometry crop fields (detection-page
+            crop box, kx, ky, crop_h_src). Left empty for an empty crop.
     """
     img_h, img_w = image.shape[:2]
     x1, y1, x2, y2 = box["x1"], box["y1"], box["x2"], box["y2"]
@@ -544,11 +557,15 @@ def _crop_and_resize(image: np.ndarray, box: dict, target_height: int,
         y2 = min(img_h, y2 + pad)
 
     x1 = max(0, x1)
+    ky = kx = 1.0
     if source is not None:
         ky, kx = source.shape[0] / img_h, source.shape[1] / img_w
         crop = source[int(round(y1 * ky)):int(round(y2 * ky)), int(round(x1 * kx)):int(round(x2 * kx))]
     else:
         crop = image[y1:y2, x1:x2]
+    if crop_out is not None and crop.size:
+        crop_out.update(crop_x1=int(x1), crop_y1=int(y1), crop_x2=int(x2), crop_y2=int(y2),
+                        kx=float(kx), ky=float(ky), crop_h_src=int(crop.shape[0]))
 
     if crop.size == 0:
         return np.zeros((target_height, target_height, 3), dtype=np.uint8)

@@ -2939,6 +2939,26 @@ def process_strip(
                                sys_idx, clef_key_decision, spans=spans)
 
 
+def _attach_ctc_x(symbols: list, events: list, trace: list, voice: str,
+                  spans: List[Tuple[float, float]], barlines_out: List[float]) -> None:
+    """Stores each event's token x on the event and collects barline x (timing export).
+
+    Reuses build_strip_labels so the event-to-token join is the one the visualisation already trusts.
+    A barline before the first note/rest is the strip's left edge or a header artefact, not a bar end.
+    """
+    items = build_strip_labels(symbols, events, trace, voice)
+    first_body: Optional[int] = None
+    for item in items:
+        centre = 0.5 * (spans[item["token_indices"][0]][0] + spans[item["token_indices"][0]][1])
+        if item["kind"] in ("note", "rest", "chordnote"):
+            for ei in item["event_indices"]:
+                events[ei]["ctc_x"] = centre
+            if item["event_indices"] and first_body is None:
+                first_body = item["token_indices"][0]
+        elif item["kind"] == "barline" and first_body is not None:
+            barlines_out.append(centre)
+
+
 def _events_for_symbols(
     strip:      np.ndarray,
     symbols:    list,
@@ -2952,14 +2972,19 @@ def _events_for_symbols(
     clef_key_decision: Optional["StripDecision"],
     system_key_changes: Optional[dict[int, int]] = None,
     spans:      Optional[List[Tuple[float, float]]] = None,
+    barlines_out: Optional[List[float]] = None,
 ) -> list:
     """Pitch inference, log line and optional viz for one strip's decoded tokens (process_strip's second half).
 
     system_key_changes: the system's agreed mid-strip key changes (``decide_mid_changes``); None keeps the
     single-strip rule (``process_strip`` sees one strip only).
-    spans: the CTC x-ranges of ``symbols`` (same length and order) for the visualization only.
+    spans: the CTC x-ranges of ``symbols`` (same length and order) for the visualization and the timing export.
+    barlines_out: timing export switch. When a list is given (needs ``spans``), every note/rest event gets
+        ``ctc_x`` (strip-pixel centre of its token) and the strip-pixel centres of the barline tokens that
+        follow the first note/rest are appended. None leaves the events untouched.
     """
-    trace: Optional[list] = [] if viz_dir else None
+    want_x = barlines_out is not None and spans is not None
+    trace: Optional[list] = [] if (viz_dir or want_x) else None
     if clef_key_decision is not None:
         import stage3_clefkey  # lazy: stage3_clefkey imports this module
         events, _, _ = stage3_clefkey.infer_pitch_b(symbols, confs, voice, page_index, sys_idx,
@@ -2970,6 +2995,9 @@ def _events_for_symbols(
 
     print(f"[Stage 3] {voice} p{page_index}: "
           f"{len(symbols)} symbols -> {len(events)} events")
+
+    if want_x:
+        _attach_ctc_x(symbols, events, trace, voice, spans, barlines_out)
 
     if viz_dir and symbols:
         visualize_strip(strip, symbols, voice, page_index, v_idx, viz_dir, img_height,
@@ -2989,6 +3017,7 @@ def transcribe_voice_sequences(
     events_dir:      str = r"D:\PiyaNota (Code)\data\transcribed_symbols",   # ← add this
     clef_key_decisions: Optional[dict[str, "StripDecision"]] = None,
     header_filter:   bool = True,
+    barlines_out:    Optional[dict[Tuple[int, int, str], List[float]]] = None,
 ) -> dict:
     """
     Processes all voice strips from Stage 2 and returns event sequences.
@@ -3017,6 +3046,10 @@ def transcribe_voice_sequences(
     signature is flagged, not applied (``decide_mid_changes``, R2-R4). Their flags go on the events as
     ``mid_change_flags`` / ``review_needed``.
 
+        barlines_out: timing export switch (see ``timing_export.build_timing``). When a dict is given, every
+          note/rest event gets ``ctc_x`` and ``barlines_out[(page_index, sys_idx, voice)]`` receives the
+          strip-pixel x of that strip's barlines. None (default) leaves events byte-identical.
+
     Raises:
         ValueError: clef_key_decisions is given but lacks a strip.
 
@@ -3044,7 +3077,7 @@ def transcribe_voice_sequences(
                 if strip_id not in clef_key_decisions:
                     raise ValueError(f"no clef/key decision for {strip_id} (Stage 2 manifest out of sync)")
                 decision = clef_key_decisions[strip_id]
-            spans: Optional[List[Tuple[float, float]]] = [] if viz_dir else None
+            spans: Optional[List[Tuple[float, float]]] = [] if (viz_dir or barlines_out is not None) else None
             scored = transcribe_strip(strip, model, device, img_height, return_confidence=True, strip_id=strip_id,
                                       spans_out=spans)
             decoded[strip_id] = dict(voice=voice, strip=strip, page_index=page_index, sys_idx=sys_idx,
@@ -3083,9 +3116,12 @@ def transcribe_voice_sequences(
         for sid, d in decoded.items():
             if d["voice"] != voice:
                 continue
+            strip_bars: Optional[List[float]] = [] if barlines_out is not None else None
             events = _events_for_symbols(d["strip"], d["symbols"], d["confs"], d["voice_label"], d["page_index"],
                                          img_height, d["v_idx"], viz_dir, d["sys_idx"], d["decision"],
-                                         d["system_key_changes"], spans=d["spans"])
+                                         d["system_key_changes"], spans=d["spans"], barlines_out=strip_bars)
+            if barlines_out is not None:
+                barlines_out[(d["page_index"], d["sys_idx"], d["voice_label"])] = strip_bars
             if d["decision"] is None:
                 for e in events:
                     e["clef_key_flags"] = [CLEF_KEY_DISABLED_FLAG, "review_needed"]

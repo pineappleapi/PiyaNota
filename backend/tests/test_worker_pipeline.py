@@ -47,12 +47,13 @@ def _fake_stages(missing: tuple[str, ...] = (), midi_only: bool = False) -> Stag
     return Stages(
         preprocess=lambda i, p, k: [("img", 1, None)],
         clean_page=lambda page: CleanPage(b"jpg", 10, 20),
-        detect=lambda pages, y, s, m: {},
+        detect=lambda pages, y, s, m, g: {},
         clef_key=lambda pages, m, w: None,
-        transcribe=lambda v, w, d, e: {},
+        transcribe=lambda v, w, d, e, b: {},
         reconstruct=lambda ev: (satb, {"flags": flags}),
         review=lambda ev, f: ({"reviewNeeded": False}, []),
         synthesize=synthesize,
+        page_size=lambda page: (10, 20),
     )
 
 
@@ -79,7 +80,8 @@ def test_result_maps_voices_and_lowercases_keys(tmp_path: Path) -> None:
     assert set(result.events) == {"soprano", "alto", "tenor", "bass"}
     assert result.pages == [CleanPage(b"jpg", 10, 20)]
     assert result.muted_measures == [{"kind": "x", "start_tick": 0, "end_tick": 5}]
-    assert result.timing_inputs == {}
+    assert result.timing_inputs["page_sizes"] == [(10, 20)] and result.timing_inputs["bpm"] == 90
+    assert set(result.timing_inputs) == {"events", "strips", "barlines", "report", "page_sizes", "bpm"}
 
 
 def test_empty_voice_becomes_failed_voice_unreadable(tmp_path: Path) -> None:

@@ -85,12 +85,15 @@ class Stages:
 
     preprocess: Callable[[str, str, bool], list[Any]]
     clean_page: Callable[[Any], CleanPage]
-    detect: Callable[[list[Any], str, str, str], dict[str, Any]]
+    detect: Callable[[list[Any], str, str, str, list[Any] | None], dict[str, Any]]
     clef_key: Callable[[list[Any], str, str], Any]
-    transcribe: Callable[[dict[str, Any], str, Any, str], dict[str, list[dict[str, Any]]]]
+    transcribe: Callable[[dict[str, Any], str, Any, str, dict[Any, list[float]] | None],
+                         dict[str, list[dict[str, Any]]]]
     reconstruct: Callable[[dict[str, Any]], tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]]
     review: Callable[[dict[str, Any], list[dict[str, Any]]], tuple[dict[str, Any], list[dict[str, Any]]]]
     synthesize: Callable[[dict[str, Any], str, int, str], dict[str, str]]
+    # (width, height) of the Stage 1 detection page; timing x/y are measured on it, not on the native image.
+    page_size: Callable[[Any], tuple[int, int]]
 
 
 @dataclass
@@ -103,7 +106,8 @@ class PipelineResult:
     pages: list[CleanPage]
     events: dict[str, list[dict[str, Any]]]
     stage_seconds: dict[str, float]
-    # Strip geometry and CTC spans for the timing export; empty until Stage 3 persists them (Task 4).
+    # Keyword arguments for timing_export.build_timing (voice-capitalised events, strips, barlines,
+    # page_sizes, report, bpm); empty when timing collection is off.
     timing_inputs: dict[str, Any] = field(default_factory=dict)
 
 
@@ -133,24 +137,26 @@ def real_stages() -> Stages:
             raise PipelineError("could not encode the cleaned page", page[1] - 1)
         return CleanPage(buf.tobytes(), int(image.shape[1]), int(image.shape[0]))
 
-    def detect(pages: list[Any], yolo: str, strips_dir: str, manifest: str) -> Any:
-        return detect_staff_regions(pages, model_weights=yolo, output_dir=strips_dir, manifest_path=manifest)
+    def detect(pages: list[Any], yolo: str, strips_dir: str, manifest: str, geometry_out: list[Any] | None) -> Any:
+        return detect_staff_regions(pages, model_weights=yolo, output_dir=strips_dir, manifest_path=manifest,
+                                    geometry_out=geometry_out)
 
     def clef_key(pages: list[Any], manifest_path: str, weights: str) -> Any:
         model = stage3_clefkey.load_clef_key_model(stage3_clefkey.check_clef_key_weights(weights))
         manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
         return stage3_clefkey.decisions_for_pages(pages, manifest, model)[0]
 
-    def transcribe(voices: dict[str, Any], weights: str, decisions: Any, events_dir: str) -> Any:
+    def transcribe(voices: dict[str, Any], weights: str, decisions: Any, events_dir: str,
+                   barlines_out: dict[Any, list[float]] | None) -> Any:
         return s3.transcribe_voice_sequences(
             voices, model_weights=weights, img_height=CRNN_STRIP_HEIGHT, viz_dir=events_dir + "_viz",
-            events_dir=events_dir, clef_key_decisions=decisions)
+            events_dir=events_dir, clef_key_decisions=decisions, barlines_out=barlines_out)
 
     def synthesize(satb: dict[str, Any], out_dir: str, bpm: int, soundfont: str) -> dict[str, str]:
         return synthesize_satb(satb, output_dir=out_dir, bpm=bpm, soundfont_path=soundfont)
 
     return Stages(preprocess, clean_page, detect, clef_key, transcribe, reconstruct_satb_with_report,
-                  build_review, synthesize)
+                  build_review, synthesize, lambda page: (int(page[0].shape[1]), int(page[0].shape[0])))
 
 
 def _validate_inputs(page_jpegs: list[bytes], config: PipelineConfig) -> None:
@@ -167,7 +173,7 @@ def _validate_inputs(page_jpegs: list[bytes], config: PipelineConfig) -> None:
             with Image.open(BytesIO(data)) as img:
                 img.verify()
         except (OSError, SyntaxError, Image.DecompressionBombError) as exc:  # truncated, non-image or huge
-            raise PipelineError(f"unreadable page image: {exc}", index) from exc
+            raise PipelineError("unreadable page image", index) from exc  # reasons reach clients: no exc text
 
 
 def _input_errors() -> tuple[type[BaseException], ...]:
@@ -195,8 +201,12 @@ def run_pipeline(
     config: PipelineConfig,
     on_stage: Callable[[str, int], None],
     stages: Stages | None = None,
+    timing: bool = True,
 ) -> PipelineResult:
-    """Run Stages 1-5 on the page photos; all temporary files stay under ``work_dir``."""
+    """Run Stages 1-5 on the page photos; all temporary files stay under ``work_dir``.
+
+    ``timing`` makes Stages 2 and 3 record strip geometry and barline positions for the timing export.
+    """
     _validate_inputs(page_jpegs, config)
     st = stages or real_stages()
     in_dir, prep, strips, out = (work_dir / n for n in ("input", "prep", "strips", "audio"))
@@ -205,6 +215,8 @@ def run_pipeline(
         (in_dir / f"page_{index:03d}.jpg").write_bytes(data)
     manifest = str(strips / STRIPS_MANIFEST)
     seconds: dict[str, float] = {}
+    geometry: list[Any] | None = [] if timing else None
+    barlines: dict[Any, list[float]] | None = {} if timing else None
     percent = dict(STAGE_PERCENT)
 
     def begin(status: str) -> float:
@@ -219,13 +231,13 @@ def run_pipeline(
 
     t = begin("detecting_staff")
     voices = _guard("detecting_staff",
-                    lambda: st.detect(pages, str(config.yolo_weights), str(strips), manifest))
+                    lambda: st.detect(pages, str(config.yolo_weights), str(strips), manifest, geometry))
     seconds["detecting_staff"] = monotonic() - t
 
     t = begin("transcribing")
     def transcribe() -> dict[str, list[dict[str, Any]]]:
         decisions = st.clef_key(pages, manifest, str(config.clef_key_weights)) if use_ck else None
-        return st.transcribe(voices, str(config.crnn_weights), decisions, str(work_dir / "stage3"))
+        return st.transcribe(voices, str(config.crnn_weights), decisions, str(work_dir / "stage3"), barlines)
 
     events = _guard("transcribing", transcribe)
     seconds["transcribing"] = monotonic() - t
@@ -257,4 +269,6 @@ def run_pipeline(
         pages=clean,
         events={v.lower(): satb.get(v, []) for v in VOICES},
         stage_seconds=seconds,
+        timing_inputs={"events": satb, "strips": geometry, "barlines": barlines, "report": report,
+                       "page_sizes": [st.page_size(p) for p in pages], "bpm": tempo_bpm} if timing else {},
     )

@@ -94,6 +94,10 @@ class Settings:
     db_pool_max_size: int = 6
     # None keeps server-side prepared statements off, which is safe behind PgBouncer transaction mode.
     db_prepare_threshold: int | None = None
+    # Conversion worker: heartbeat must stay well under the queue's stale timeout (1200 s).
+    worker_heartbeat_interval_s: int = 60
+    worker_poll_interval_s: int = 5
+    timing_enabled: bool = True
 
 
 _DEFAULTS: dict[str, Any] = {f.name: f.default for f in fields(Settings)}
@@ -268,4 +272,7 @@ def load_settings(env: Mapping[str, str] = os.environ) -> Settings:
         background_interval_s=_read_int(env, "background_interval_s"),
         db_pool_max_size=_read_int(env, "db_pool_max_size"),
         db_prepare_threshold=_read_optional_int(env, "db_prepare_threshold"),
+        worker_heartbeat_interval_s=_read_int(env, "worker_heartbeat_interval_s"),
+        worker_poll_interval_s=_read_int(env, "worker_poll_interval_s"),
+        timing_enabled=_read_bool(env, "timing_enabled"),
     )
