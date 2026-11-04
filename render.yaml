@@ -13,11 +13,15 @@ services:
         value: prod
       - key: PIYA_REQUIRE_HTTPS
         value: "true"
-      # Backends: initial deploy has no B2/Brevo accounts. memory loses data on restart; log prints
-      # reset codes to the Render log. To switch: b2 (also set the PIYA_B2_* vars below) and
-      # brevo (also set PIYA_BREVO_API_KEY).
+      # Backends: db stores media in Neon so the Space worker and this API share it (needs the two
+      # sync: false vars below, identical on the Space). log prints reset codes to the Render log.
+      # To switch: b2 (also set the PIYA_B2_* vars below) and brevo (also set PIYA_BREVO_API_KEY).
       - key: PIYA_STORAGE_BACKEND
-        value: memory
+        value: db
+      - key: PIYA_MEDIA_HMAC_KEY
+        sync: false
+      - key: PIYA_PUBLIC_BASE_URL
+        sync: false
       - key: PIYA_MAIL_BACKEND
         value: log
       - key: PIYA_MAIL_FROM
