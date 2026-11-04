@@ -42,15 +42,29 @@ def check_test_db(url: str) -> None:
     Raises:
         SystemExit: host, port or database name is not exactly the local test database.
     """
+    refuse = SystemExit("refusing non-test database (need localhost:55432/piya_test)")
+    # libpq reparses what urlparse splits off (e.g. "#?host=evil" becomes host=evil), so refuse it all.
+    if any(c.isspace() or not c.isprintable() for c in url):
+        raise refuse
     parts = urlparse(url)
     try:
         port = parts.port
     except ValueError:  # malformed port
         port = None
-    # libpq lets ?dbname=/?host=/?port= override the components, so any query or params is refused.
-    if (parts.query or parts.params or parts.hostname not in TEST_DB_HOSTS or port != TEST_DB_PORT
-            or parts.path != f"/{TEST_DB_NAME}"):
-        raise SystemExit("refusing non-test database (need localhost:55432/piya_test)")
+    # libpq lets ?dbname=/?host=/?port= override the components, so any query, params or fragment is refused.
+    if (parts.scheme not in ("postgresql", "postgres") or parts.query or parts.params or parts.fragment
+            or parts.hostname not in TEST_DB_HOSTS or port != TEST_DB_PORT or parts.path != f"/{TEST_DB_NAME}"):
+        raise refuse
+    # Defence in depth: ask libpq's own parser what it would connect to.
+    try:
+        from psycopg.conninfo import conninfo_to_dict
+
+        info = conninfo_to_dict(url)
+    except Exception as exc:  # any parse failure fails closed
+        raise refuse from exc
+    if (info.get("host") not in TEST_DB_HOSTS or str(info.get("port")) != str(TEST_DB_PORT)
+            or info.get("dbname") != TEST_DB_NAME or "hostaddr" in info or "service" in info):
+        raise refuse
 
 
 def _child(args_path: str, out_path: str) -> int:
