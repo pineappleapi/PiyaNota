@@ -33,6 +33,8 @@ CLEF_KEY_DEFAULT = "training/clef_key_artifacts/t4_full_seed20260926_runA/clef_k
 STAGE_FAILURE_REASONS = {"preprocessing": "no readable page", "detecting_staff": "no readable staves",
                          "transcribing": "could not read the notation"}
 
+NO_VOICES_REASON = "no readable staves, please retake clearer photos of your pages"  # all four voices empty
+
 LOG = logging.getLogger(__name__)
 MISCONFIGURED_REASON = "service misconfigured"  # fixed text: reasons reach clients
 
@@ -251,7 +253,7 @@ def run_pipeline(
     try:
         satb, report = st.reconstruct(events)
     except ValueError as exc:  # Stage 4 raises when it cannot place a voice
-        raise PipelineError("no readable staves") from exc  # fixed text: reasons reach clients
+        raise PipelineError(NO_VOICES_REASON) from exc  # fixed text: reasons reach clients
     review, _detail = st.review(events, report["flags"])
     seconds["reconstructing"] = monotonic() - t
 
@@ -259,12 +261,13 @@ def run_pipeline(
     paths = st.synthesize(satb, str(out), tempo_bpm, str(config.soundfont))
     seconds["synthesizing"] = monotonic() - t
 
-    # Stage 5 falls back to a .mid when rendering fails; only real MP3s count as delivered voices.
+    # Stage 5 falls back to a .mid when rendering fails; an unreadable voice is a silent MP3 and
+    # is listed by Stage 4, not inferred from a missing file.
     mp3 = {v.lower(): Path(p).read_bytes() for v, p in paths.items() if Path(p).suffix == ".mp3"}
     shutil.rmtree(out, ignore_errors=True)
     if not mp3:
         raise PipelineError("audio rendering failed")
-    failed = [v.lower() for v in VOICES if v.lower() not in mp3]
+    failed = [v.lower() for v in report.get("failed_voices", [])]
     return PipelineResult(
         mp3=mp3,
         failed_voices=failed,

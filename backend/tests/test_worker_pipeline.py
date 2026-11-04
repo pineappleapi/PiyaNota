@@ -35,11 +35,10 @@ def _fake_stages(missing: tuple[str, ...] = (), midi_only: bool = False) -> Stag
     def synthesize(satb: dict[str, Any], out_dir: str, bpm: int, sf: str) -> dict[str, str]:
         Path(out_dir).mkdir(parents=True, exist_ok=True)
         paths = {}
-        for voice, events in satb.items():
-            if events:
-                p = Path(out_dir) / f"{voice.lower()}.{'mid' if midi_only else 'mp3'}"
-                p.write_bytes(b"mp3-" + voice.encode())
-                paths[voice] = str(p)
+        for voice in satb:  # an unreadable voice is a silent track, never a missing file
+            p = Path(out_dir) / f"{voice.lower()}.{'mid' if midi_only else 'mp3'}"
+            p.write_bytes(b"mp3-" + voice.encode())
+            paths[voice] = str(p)
         return paths
 
     satb = {v: ([] if v in missing else [EVENT]) for v in pipeline.VOICES}
@@ -50,7 +49,7 @@ def _fake_stages(missing: tuple[str, ...] = (), midi_only: bool = False) -> Stag
         detect=lambda pages, y, s, m, g: {},
         clef_key=lambda pages, m, w: None,
         transcribe=lambda v, w, d, e, b: {},
-        reconstruct=lambda ev: (satb, {"flags": flags}),
+        reconstruct=lambda ev: (satb, {"flags": flags, "failed_voices": list(missing)}),
         review=lambda ev, f: ({"reviewNeeded": False}, []),
         synthesize=synthesize,
         page_size=lambda page: (10, 20),
@@ -84,11 +83,26 @@ def test_result_maps_voices_and_lowercases_keys(tmp_path: Path) -> None:
     assert set(result.timing_inputs) == {"events", "strips", "barlines", "report", "page_sizes", "bpm"}
 
 
-def test_empty_voice_becomes_failed_voice_unreadable(tmp_path: Path) -> None:
-    result = _run(tmp_path, _fake_stages(missing=("Alto",)))
-    assert result.failed_voices == ["alto"]
-    assert result.failed_voice_causes == {"alto": "unreadable"}
-    assert "alto" not in result.mp3 and len(result.mp3) == 3
+def test_failed_voices_from_report_job_succeeds(tmp_path: Path) -> None:
+    item = {"code": "voice_unreadable", "voice": "tenor", "pages": [1, 2]}
+    stages = replace(_fake_stages(missing=("Tenor",)), review=lambda ev, f: ({"items": [item]}, [item]),
+                     reconstruct=lambda ev: (
+                         {v: ([] if v == "Tenor" else [EVENT]) for v in pipeline.VOICES},
+                         {"flags": [{"kind": "voice_unreadable", "voice": "Tenor", "pages": [1, 2],
+                                     "review_needed": True}], "failed_voices": ["Tenor"]}))
+    result = _run(tmp_path, stages)
+    assert result.failed_voices == ["tenor"]
+    assert result.failed_voice_causes == {"tenor": "unreadable"}
+    assert result.review["items"][0]["code"] == "voice_unreadable"
+    assert result.review["items"][0]["voice"] == "tenor" and result.review["items"][0]["pages"] == [1, 2]
+
+
+def test_all_empty_fails_with_retake_message(tmp_path: Path) -> None:
+    def raiser(ev: Any) -> Any:
+        raise ValueError("all four empty")
+
+    with pytest.raises(PipelineError, match="retake"):
+        _run(tmp_path, replace(_fake_stages(), reconstruct=raiser))
 
 
 def test_missing_weights_raises_pipeline_error(tmp_path: Path) -> None:
@@ -146,7 +160,7 @@ def test_reconstruction_error_uses_fixed_reason(tmp_path: Path) -> None:
 
     with pytest.raises(PipelineError) as info:
         _run(tmp_path, replace(_fake_stages(), reconstruct=raiser))
-    assert info.value.reason == "no readable staves" and "raw stage text" not in str(info.value)
+    assert info.value.reason == pipeline.NO_VOICES_REASON and "raw stage text" not in str(info.value)
 
 
 def test_audio_failure_still_cleans_output_dir(tmp_path: Path) -> None:
