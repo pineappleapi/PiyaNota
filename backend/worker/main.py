@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import shutil
+import signal
 import tempfile
 import threading
 from collections.abc import Callable, Sequence
@@ -36,22 +37,34 @@ class _Cancelled(Exception):
     """The job left the working statuses (user cancel or reclaim); stop without failing it."""
 
 
-def _heartbeat(url: str, job_id: int, interval_s: float, stop: threading.Event) -> None:
+def _heartbeat(url: str, job_id: int, interval_s: float, stop: threading.Event,
+               connect: Callable[..., Any] = psycopg.connect) -> None:
     """Touch the job until ``stop`` is set, on a private autocommit connection.
 
     Its own connection keeps the heartbeat visible while the main thread holds long transactions;
     prepare_threshold=None keeps it safe behind Neon's pooled (PgBouncer) endpoint.
     """
+    conn: Any = None
+    while not stop.wait(interval_s):
+        try:
+            if conn is None:
+                conn = connect(url, autocommit=True, prepare_threshold=None)
+            conn.execute("UPDATE jobs SET heartbeat_at = clock_timestamp(), "
+                         "updated_at = clock_timestamp() WHERE id = %s", (job_id,))
+        except psycopg.Error as exc:  # transient (Neon idle cutoff, restart): reconnect next tick, never exit
+            LOG.warning("heartbeat failed job_id=%s: %s", job_id, type(exc).__name__)
+            _close_quietly(conn)
+            conn = None
+    _close_quietly(conn)
+
+
+def _close_quietly(conn: Any) -> None:
+    if conn is None:
+        return
     try:
-        with psycopg.connect(url, autocommit=True, prepare_threshold=None) as conn:
-            while not stop.wait(interval_s):
-                try:
-                    conn.execute("UPDATE jobs SET heartbeat_at = clock_timestamp(), "
-                                 "updated_at = clock_timestamp() WHERE id = %s", (job_id,))
-                except psycopg.Error as exc:
-                    LOG.warning("heartbeat failed job_id=%s: %s", job_id, type(exc).__name__)
+        conn.close()
     except psycopg.Error as exc:
-        LOG.error("heartbeat connection failed job_id=%s: %s", job_id, type(exc).__name__)
+        LOG.warning("heartbeat close failed: %s", type(exc).__name__)
 
 
 def _discard(storage: Storage, keys: Sequence[str]) -> None:
@@ -76,11 +89,16 @@ def _timing_bytes(result: PipelineResult, settings: Settings) -> bytes:
     elif not result.timing_inputs:
         LOG.info("timing skipped: no inputs")
     else:
-        from timing_export import build_timing  # repo-root module, pure python
+        try:
+            from timing_export import build_timing  # repo-root module, pure python
 
-        timing = build_timing(**result.timing_inputs)
-        if not timing.get("events"):
-            LOG.warning("timing empty: build_timing found the geometry inconsistent")
+            timing = build_timing(**result.timing_inputs)
+            if not timing.get("events"):
+                LOG.warning("timing empty: build_timing found the geometry inconsistent")
+            return json.dumps(timing).encode("utf-8")
+        except Exception as exc:  # noqa: BLE001 - timing is optional; it must never fail a converted job
+            LOG.error("timing failed, using empty timing: %s", describe_exception(exc))
+            timing = EMPTY_TIMING
     return json.dumps(timing).encode("utf-8")
 
 
@@ -151,13 +169,13 @@ def process_one(*, storage: Storage, runner: Runner, settings: Settings,
     job_id: int = job["id"]
     LOG.info("job claimed job_id=%s attempt=%s", job_id, job["attempts"])
 
+    work_dir = Path(tempfile.mkdtemp(prefix=f"piya-job-{job_id}-"))  # before the thread so finally always pairs
     stop = threading.Event()
     beat = threading.Thread(
         target=_heartbeat, name=f"piya-heartbeat-{job_id}", daemon=True,
         args=(settings.database_url, job_id, heartbeat_interval_s or settings.worker_heartbeat_interval_s, stop))
     beat.start()
     uploaded: list[str] = []
-    work_dir = Path(tempfile.mkdtemp(prefix=f"piya-job-{job_id}-"))
     failure: tuple[str, int | None] | None = None
     try:
         def on_stage(status: str, percent: int) -> None:
@@ -221,7 +239,10 @@ def cli(argv: Sequence[str] | None = None) -> int:
         if args.once:
             process_one(storage=storage, runner=runner, settings=settings)
         else:
-            run_loop(storage=storage, runner=runner, settings=settings, stop=threading.Event())
+            stop = threading.Event()
+            # SIGTERM lets the current job finish or discard cleanly instead of dying mid-upload.
+            signal.signal(signal.SIGTERM, lambda signum, frame: stop.set())
+            run_loop(storage=storage, runner=runner, settings=settings, stop=stop)
     except KeyboardInterrupt:
         LOG.info("worker stopped")
     finally:

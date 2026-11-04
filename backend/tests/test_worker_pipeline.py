@@ -93,7 +93,7 @@ def test_empty_voice_becomes_failed_voice_unreadable(tmp_path: Path) -> None:
 
 def test_missing_weights_raises_pipeline_error(tmp_path: Path) -> None:
     config = PipelineConfig(tmp_path / "no.pt", tmp_path / "no2.pt", tmp_path / "no.sf2", None)
-    with pytest.raises(PipelineError, match="missing model file"):
+    with pytest.raises(PipelineError, match="service misconfigured"):
         run_pipeline([_jpeg()], tempo_bpm=90, work_dir=tmp_path / "w", config=config,
                      on_stage=lambda s, p: None, stages=_fake_stages())
 
@@ -116,7 +116,7 @@ def test_from_env_defaults_and_opt_out() -> None:
 def test_missing_clef_key_file_raises(tmp_path: Path) -> None:
     config = _config(tmp_path)
     config = PipelineConfig(config.yolo_weights, config.crnn_weights, config.soundfont, tmp_path / "ck.pt")
-    with pytest.raises(PipelineError, match="ck.pt"):
+    with pytest.raises(PipelineError, match="service misconfigured"):
         run_pipeline([_jpeg()], tempo_bpm=90, work_dir=tmp_path / "w", config=config,
                      on_stage=lambda s, p: None, stages=_fake_stages())
 

@@ -7,6 +7,7 @@ they are imported lazily and reached only through a ``Stages`` bundle that tests
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 from collections.abc import Callable, Mapping
@@ -31,6 +32,9 @@ STAGE_PERCENT = (("preprocessing", 5), ("detecting_staff", 25), ("transcribing",
 CLEF_KEY_DEFAULT = "training/clef_key_artifacts/t4_full_seed20260926_runA/clef_key_classifier.pt"
 STAGE_FAILURE_REASONS = {"preprocessing": "no readable page", "detecting_staff": "no readable staves",
                          "transcribing": "could not read the notation"}
+
+LOG = logging.getLogger(__name__)
+MISCONFIGURED_REASON = "service misconfigured"  # fixed text: reasons reach clients
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -165,7 +169,8 @@ def _validate_inputs(page_jpegs: list[bytes], config: PipelineConfig) -> None:
         required.append(config.clef_key_weights)
     for path in required:
         if not path.is_file():
-            raise PipelineError(f"missing model file: {path.name}")
+            LOG.error("missing model file: %s", path)
+            raise PipelineError(MISCONFIGURED_REASON)
     if not page_jpegs:
         raise PipelineError("no pages")
     for index, data in enumerate(page_jpegs):

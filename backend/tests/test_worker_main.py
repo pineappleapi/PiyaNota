@@ -248,3 +248,51 @@ def test_health_endpoint_answers_ok() -> None:
     thread = health.serve(0)
     with urllib.request.urlopen(f"http://127.0.0.1:{thread.port}/health", timeout=5) as resp:  # type: ignore[attr-defined]
         assert resp.status == 200 and resp.read() == b"ok"
+
+
+def test_timing_failure_never_fails_the_job(app: Flask, settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    import timing_export
+
+    def boom(**kwargs: Any) -> dict[str, Any]:
+        raise KeyError("bad geometry")
+
+    monkeypatch.setattr(timing_export, "build_timing", boom)
+    storage = MemoryStorage()
+    job_id, _ = _seed_job(storage)
+    process_one(storage=storage, runner=_runner(replace(_result(), timing_inputs={"bpm": 100})), settings=settings)
+    with db.transaction() as conn:
+        key = conn.execute("SELECT metadata_key FROM timing_metadata").fetchone()["metadata_key"]
+    assert _job(job_id)["status"] == "complete" and storage.get(key) == b'{"events": []}'
+
+
+def test_heartbeat_reconnects_after_transient_failure(app: Flask) -> None:
+    import threading
+
+    import psycopg
+
+    from backend.worker.main import _heartbeat
+
+    executed = threading.Event()
+    attempts: list[int] = []
+
+    class FakeConn:
+        def execute(self, *args: Any) -> None:
+            executed.set()
+
+        def close(self) -> None:
+            pass
+
+    def connect(url: str, **kwargs: Any) -> FakeConn:
+        assert kwargs["prepare_threshold"] is None
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise psycopg.OperationalError("down")
+        return FakeConn()
+
+    stop = threading.Event()
+    thread = threading.Thread(target=_heartbeat, args=("x", 1, 0.01, stop, connect))
+    thread.start()
+    assert executed.wait(5)
+    stop.set()
+    thread.join(5)
+    assert not thread.is_alive() and len(attempts) == 2
