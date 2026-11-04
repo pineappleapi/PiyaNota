@@ -49,7 +49,7 @@ def test_strip_flags_kept_next_to_unvalidated_flag() -> None:
     assert info["flags"] == ["key_no_majority", "review_needed"]
 
 
-def test_review_shape_and_job_level_reason() -> None:
+def test_review_shape_and_voice_only_contents() -> None:
     unval = [s3ck.CLEF_KEY_UNVALIDATED_FLAG, "review_needed"]
     stage3 = {"Soprano": [_event("Soprano", 1, 1, unval)] * 3,
               "Tenor": [_event("Tenor", 1, 2, unval + ["key_no_majority"],
@@ -57,21 +57,16 @@ def test_review_shape_and_job_level_reason() -> None:
     stage4 = [{"kind": "bar_overflow_clipped", "page_index": 1, "sys_idx": 1, "bar": 4, "voice": "Bass",
                "expected_ticks": 1920, "actual_ticks": 2400, "detail": "x", "action": "clip",
                "review_needed": True},
-              {"kind": "pickup_detected", "page_index": 1, "sys_idx": 1, "bar": 0, "voice": None,
-               "expected_ticks": 0, "actual_ticks": 0, "detail": "", "action": ""}]
+              {"kind": "voice_unreadable", "voice": "Alto", "pages": [2], "page_index": None,
+               "sys_idx": None, "bar": None, "review_needed": True}]
     review, full = s5.build_review(stage3, stage4)
     assert set(review) == {"reviewNeeded", "reasons", "items", "truncated"}
     assert review["reviewNeeded"] is True and review["truncated"] is False
-    assert review["reasons"] == ["bar_overflow_clipped", s3ck.CLEF_KEY_UNVALIDATED_FLAG, "key_no_majority"]
-    # Stage 4 items first; one item per strip and code; camelCase indices are 0-based (page 1 / system 2
-    # in, pageIndex 0 / systemIndex 1 out); job-level reasons and unflagged Stage 4 entries
-    # are not items.
-    assert review["items"] == [
-        {"code": "bar_overflow_clipped", "voice": "bass", "pageIndex": 0, "systemIndex": 0, "bar": 4},
-        {"code": "key_no_majority", "voice": "tenor", "pageIndex": 0, "systemIndex": 1, "bar": None},
-    ]
-    assert full == review["items"]
-    # Internal fields never leak into the client object.
+    assert review["reasons"] == ["voice_unreadable"]
+    assert review["items"] == [{"code": "voice_unreadable", "voice": "alto", "pageIndex": None,
+                                "systemIndex": None, "bar": None, "pages": [2]}]
+    # The job record keeps the internal flags the client no longer sees.
+    assert {i["code"] for i in full} == {"bar_overflow_clipped", "voice_unreadable", "key_no_majority"}
     assert "expected_ticks" not in str(review) and "sha256" not in str(review).lower()
 
 
@@ -82,11 +77,10 @@ def test_informational_strip_flag_is_not_a_review_item() -> None:
     assert review == {"reviewNeeded": False, "reasons": [], "items": [], "truncated": False} and full == []
 
 
-def test_disabled_classifier_is_a_reason() -> None:
+def test_disabled_classifier_is_not_a_client_reason() -> None:
     stage3 = {"Bass": [_event("Bass", 1, 1, [CLEF_KEY_DISABLED_FLAG, "review_needed"])]}
     review, _ = s5.build_review(stage3, [])
-    assert review == {"reviewNeeded": True, "reasons": [CLEF_KEY_DISABLED_FLAG], "items": [],
-                      "truncated": False}
+    assert review == {"reviewNeeded": False, "reasons": [], "items": [], "truncated": False}
 
 
 def test_nothing_flagged() -> None:
@@ -95,13 +89,13 @@ def test_nothing_flagged() -> None:
 
 
 def test_items_capped_with_full_list_kept() -> None:
-    stage4 = [{"kind": "bar_underfull", "page_index": 1, "sys_idx": 1, "bar": b, "voice": "Alto",
-               "review_needed": True} for b in range(s5.REVIEW_ITEMS_CAP + 5)]
+    stage4 = [{"kind": "voice_unreadable", "page_index": None, "sys_idx": None, "bar": None,
+               "voice": "Alto", "pages": [b], "review_needed": True} for b in range(s5.REVIEW_ITEMS_CAP + 5)]
     strips = {"Alto": [_event("Alto", 1, s, ["review_needed"], ["key_no_majority", "review_needed"])
                        for s in range(300)]}
     review, full = s5.build_review(strips, stage4)
     assert len(review["items"]) == s5.REVIEW_ITEMS_CAP and review["truncated"] is True
-    assert all(i["code"] == "bar_underfull" for i in review["items"]), "bar items survive the cap"
+    assert all(i["code"] == "voice_unreadable" for i in review["items"])
     assert len(full) == s5.REVIEW_ITEMS_CAP + 5 + 300
 
 
