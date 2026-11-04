@@ -68,17 +68,22 @@ Changes vs original stage3_transcription.py
       • NOTE_DURATION_TICKS extended with "sixty_fourth" entry.
 """
  
+import contextlib
+import hashlib
+import io
 import itertools
 import logging
 import os
+import re
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import transforms
 import cv2
 import numpy as np
+from collections import Counter
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, List, NamedTuple, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, List, Mapping, NamedTuple, Optional, Tuple, Union
 import json
 
 if TYPE_CHECKING:
@@ -606,11 +611,93 @@ VOCAB = [
     "note.double_whole-S6",
     "note.eighth-L-2",
 ]
- 
+
+# Divisi arm (PIYA-106, docs/decisions/piya-106-divisi-arm-freeze.md section 2): one `chordnote-<pos>` per drawn
+# position L-2..L9 (Phase 1 MIN_POSITION -6 .. MAX_POSITION 16), appended so VOCAB stays a prefix and every old index
+# keeps its meaning. The name is frozen; tuplet tokens were cut. Only models trained by the arm emit these.
+CHORDNOTE_POSITIONS = range(-6, 17)
+VOCAB_EXT_CHORD_TUPLET = VOCAB + [
+    f"chordnote-L{p // 2 + 1}" if p % 2 == 0 else f"chordnote-S{(p - 1) // 2 + 1}" for p in CHORDNOTE_POSITIONS]
+
+# Divisi A7 (docs/decisions/piya-106-divisi-a7-design.md section 4, ml-cv-lead 2026-10-30): a new constant with the A6
+# table as its exact prefix, so A6 checkpoints still load and can be scored on A7 renders. `layer.split` opens a
+# two-layer bar; a layer-2 head or rest is its layer-1 token with `.l2` fused before the position. Both A7 arms use it.
+LAYER_SPLIT_TOKEN = "layer.split"
+LAYER2_TAG = ".l2"
+VOCAB_EXT_A7 = VOCAB_EXT_CHORD_TUPLET + [LAYER_SPLIT_TOKEN] + [
+    t.replace("-", LAYER2_TAG + "-", 1) for t in VOCAB if t.startswith(("note.", "rest."))]
+
+# Divisi A9 (docs/decisions/piya-106-divisi-a9-design.md section 7): below-staff note heads that A7 cannot output.
+# A closure rule, not data: every A7 note family (duration, beamed and `.l2` forms) at each position from S-2 down to
+# L-3 where A7 lacks it (L-1 too: the Task 5 gap list names note.whole-L-1), then the dot and the three accidentals at those positions. A7 stays the exact prefix so head
+# expansion keeps every old row. The new tokens are frozen in training/vocab_ext_a9_tokens.txt, pinned by sha256.
+BELOW_STAFF_POSITIONS = ("L-1", "S-2", "L-2", "S-3", "L-3")
+BELOW_STAFF_ACCIDENTALS = ("accidental.sharp", "accidental.flat", "accidental.natural")
+VOCAB_EXT_A9_NEW_SHA256 = "a8ab6616b95bc7f9d17feeeff24f28ecba7e6eb990c329d1e4234673383f5974"   # sha256 of the new tokens, one per line with a final newline
+
+
+def _a9_new_tokens() -> list[str]:
+    # A7 note tokens end in "-<L|S><digits>" or "-<L|S>-<digits>"; the family is everything before that suffix.
+    families = list(dict.fromkeys(re.sub(r"-[LS]-?\d+$", "", t) for t in VOCAB_EXT_A7 if t.startswith("note.")))
+    have = set(VOCAB_EXT_A7)
+    wanted = [f"{fam}-{pos}" for fam in families for pos in BELOW_STAFF_POSITIONS]
+    wanted += [f"{fam}-{pos}" for fam in ("dot",) + BELOW_STAFF_ACCIDENTALS for pos in BELOW_STAFF_POSITIONS]
+    return [t for t in wanted if t not in have]
+
+
+VOCAB_EXT_A9_NEW = _a9_new_tokens()
+VOCAB_EXT_A9 = VOCAB_EXT_A7 + VOCAB_EXT_A9_NEW
+assert len(set(VOCAB_EXT_A9)) == len(VOCAB_EXT_A9), "VOCAB_EXT_A9 has a duplicate token"
+_A9_NEW_BODY = "\n".join(VOCAB_EXT_A9_NEW) + "\n"
+assert hashlib.sha256(_A9_NEW_BODY.encode()).hexdigest() == VOCAB_EXT_A9_NEW_SHA256, \
+    "VOCAB_EXT_A9 new-token list changed; it is frozen (training/vocab_ext_a9_tokens.txt)"
+
 BLANK_IDX  = 0
 VOCAB_SIZE = len(VOCAB)
 SYM_TO_IDX = {s: i for i, s in enumerate(VOCAB)}
 IDX_TO_SYM = {i: s for i, s in enumerate(VOCAB)}
+
+# The vocabularies a checkpoint may carry. Decoding with the wrong one maps every index past VOCAB to "<unk>" (or,
+# for a reordered list, to the wrong token), so anything else is refused rather than guessed.
+KNOWN_VOCABS: tuple[list[str], ...] = (VOCAB, VOCAB_EXT_CHORD_TUPLET, VOCAB_EXT_A7, VOCAB_EXT_A9)
+# _vocab_for_head picks a table by head size alone, so no two known vocabularies may share a length.
+assert len({len(v) for v in KNOWN_VOCABS}) == len(KNOWN_VOCABS), "known vocabularies must differ in length"
+
+
+def _vocab_for_checkpoint(ckpt: dict[str, Any]) -> list[str]:
+    """The token table a checkpoint was trained with.
+
+    A stored ``vocab`` must equal one of KNOWN_VOCABS exactly; with none stored (pre-arm checkpoints)
+    it is VOCAB. Either way its length must equal the head's output rows.
+
+    Raises:
+        ValueError: unknown stored vocab, or its length differs from ``fc.weight`` rows.
+    """
+    rows = int(ckpt["model_state"]["fc.weight"].shape[0])
+    stored = ckpt.get("vocab")
+    if stored is None:
+        vocab = VOCAB
+    else:
+        match = [v for v in KNOWN_VOCABS if list(stored) == v]
+        if not match:
+            raise ValueError(f"checkpoint vocab ({len(stored)} tokens) is not a known vocabulary (KNOWN_VOCABS)")
+        vocab = match[0]
+    if len(vocab) != rows:
+        raise ValueError(f"checkpoint vocab has {len(vocab)} tokens but the head has {rows} outputs")
+    return vocab
+
+
+def _vocab_for_head(model: nn.Module) -> list[str]:
+    """The token table for a loaded CRNN, from its head size (the known vocabularies differ in length).
+
+    Raises:
+        ValueError: the head size matches no known vocabulary.
+    """
+    rows = int(model.fc.out_features)
+    match = [v for v in KNOWN_VOCABS if len(v) == rows]
+    if not match:
+        raise ValueError(f"CRNN head has {rows} outputs; no known vocabulary has that size")
+    return match[0]
  
  
 # ── Pitch tables ──────────────────────────────────────────────────────────────
@@ -764,41 +851,7 @@ TIME_SIG_TOKENS = {
     "metersign.C/": "2/2",
 }
 DEFAULT_TIME_SIGNATURE = "4/4"
-
-# PIYA-107 AC9: whether an event's time_signature was read in its own strip or
-# is AC4's stamped default. Stage 4 inherits the previous meter over a default
-# instead of reading it as a change back to 4/4 (PIYA-108 AC7).
-TIME_SIG_SOURCE_DETECTED = "detected"
-TIME_SIG_SOURCE_DEFAULT = "default"
-
-# PIYA-107 AC8: Camera-PrIMuS engraves a numeric time signature ON the staff
-# (numerator on line 4, denominator on line 2) and a multirest's bar count
-# ABOVE it (space 5). Telling them apart by position, not by token order, is
-# what fixes BUG-035 / BUG-051. Checked against all 3,996 Camera-PrIMuS
-# .agnostic files (2026-10-09): every L4 digit is directly followed by an L2
-# digit and vice versa (1,606 pairs, 21 of them mid-strip after a barline),
-# and every run of S5 digits is directly followed by a multirest (962 runs,
-# 405 of them two digits long, e.g. "digit.1-S5 digit.0-S5" = 10 bars).
-#
-# Refined by ml-cv-lead 2026-10-09 (resolution 10 of
-# docs/decisions/meter-click-and-muting-gaps.md): a digit the parser cannot
-# place is never silently dropped, it flags the strip for review, because on a
-# real image it means a misread (a lone half of a meter, or an S5 run with no
-# multirest after it: a tuplet number or bar-number hallucination).
-METER_FLAG_UNPAIRED_DIGIT = "meter_digit_unpaired"
-METER_FLAG_ORPHAN_COUNT = "multirest_count_orphaned"
-# A meter (pair or metersign) with notes/rests before it in the same measure: an engraver only ever
-# changes meter at a barline, so this is a misread and is never applied (senior-reviewer 2026-10-09).
-METER_FLAG_MID_MEASURE = "meter_mid_measure"
-# Tokens that are measure content: a meter with none of these after it in the
-# strip is a courtesy meter (it announces the next system) and changes nothing
-# in this one.
-BODY_CONTENT_PREFIXES = ("note.", "gracenote.", "rest.", "multirest")
-METER_NUMERATOR_POSITION = "L4"
-METER_DENOMINATOR_POSITION = "L2"
-MULTIREST_COUNT_POSITION = "S5"
-DECIMAL_BASE = 10
-
+ 
 SHARP_ORDER = ["F", "C", "G", "D", "A", "E", "B"]
 FLAT_ORDER  = ["B", "E", "A", "D", "G", "C", "F"]
  
@@ -815,67 +868,6 @@ NOTE_DURATION_TICKS = {
 }
  
 REST_DURATION_TICKS = NOTE_DURATION_TICKS
-
-
-def _parse_digit(sym: str) -> Optional[tuple[int, str]]:
-    """(value, staff position) of a ``digit.N-POS`` token, or None if it does not parse."""
-    try:
-        body, position = sym.split(".", 1)[1].split("-", 1)
-        return int(body), position
-    except (IndexError, ValueError):
-        return None
-
-
-def _meter_pair_at(symbols: list[str], idx: int) -> Optional[str]:
-    """``"N/D"`` if symbols[idx] is a numerator digit directly followed by a denominator digit.
-
-    Adjacency is required: in Camera-PrIMuS the two are always consecutive, so
-    anything else is an unpaired digit, which resolution 10 of
-    docs/decisions/meter-click-and-muting-gaps.md says never to guess a meter
-    from (it flags the strip instead).
-    """
-    if idx + 1 >= len(symbols):
-        return None
-    num, den = _parse_digit(symbols[idx]), _parse_digit(symbols[idx + 1])
-    if (num is None or den is None or num[1] != METER_NUMERATOR_POSITION
-            or den[1] != METER_DENOMINATOR_POSITION or num[0] <= 0 or den[0] <= 0):
-        return None
-    return f"{num[0]}/{den[0]}"
-
-
-def _is_multirest_count(sym: str) -> bool:
-    parsed = _parse_digit(sym) if sym.startswith("digit.") else None
-    return parsed is not None and parsed[1] == MULTIREST_COUNT_POSITION
-
-
-def _has_body_content_after(symbols: list[str], start: int) -> bool:
-    """True if any note/rest/multirest token sits at or after ``start`` (courtesy-meter test)."""
-    return any(sym.startswith(BODY_CONTENT_PREFIXES) for sym in symbols[start:])
-
-
-def _at_measure_start(symbols: list[str], idx: int) -> bool:
-    """True if no note/rest/multirest sits between the previous barline (or strip start) and ``idx``."""
-    for sym in reversed(symbols[:idx]):
-        if sym.startswith("barline"):
-            return True
-        if sym.startswith(BODY_CONTENT_PREFIXES):
-            return False
-    return True
-
-
-def _meter_bar_ticks(time_signature: str) -> int:
-    """Ticks in one bar of ``time_signature``; a whole note if it does not parse.
-
-    Mirrors stage4_reconstruction._bar_ticks (not imported: Stage 4 must stay
-    importable without torch, and Stage 3 imports torch).
-    """
-    try:
-        num, den = (int(part) for part in time_signature.split("/"))
-    except (ValueError, AttributeError):
-        return NOTE_DURATION_TICKS["whole"]
-    if num <= 0 or den <= 0:
-        return NOTE_DURATION_TICKS["whole"]
-    return num * NOTE_DURATION_TICKS["whole"] // den
 
 
 def _dotted_ticks(base_ticks: int, n_dots: int) -> int:
@@ -919,6 +911,18 @@ KEY_SIG_ORDER: dict[str, dict[str, list[str]]] = {
 # wrapper), so a missed 1-accidental change costs at most the rest of one
 # strip. Hand-set, not tuned.
 MIN_MID_KEY_CHANGE_ACCIDENTALS = 2
+
+# Divisi chord validators (freeze doc section 6, docs/decisions/piya-106-divisi-arm-freeze.md): V1 member interval
+# over 12 semitones, V2 3 or more members, V4 sounding MIDI range per voice. Flag only (the notes still play), and
+# only on events with a chord_id, so monophonic output is unchanged.
+CHORD_MAX_INTERVAL = 12
+CHORD_MAX_MEMBERS = 2
+CHORD_VOICE_RANGE: dict[str, tuple[int, int]] = {
+    "Soprano": (58, 86),
+    "Alto":    (51, 79),
+    "Tenor":   (46, 71),
+    "Bass":    (38, 66),
+}
 
 
 class HeaderOverride(NamedTuple):
@@ -978,17 +982,26 @@ def _position_suffix(sym: str) -> Optional[str]:
     return sym.split("-", 1)[1] if "-" in sym else None
 
 
-def _next_note_position(symbols: list[str], idx: int) -> Optional[str]:
-    """Position of the first note after ``symbols[idx]`` in the same measure, or None.
+def _next_onset_positions(symbols: list[str], idx: int) -> set[str]:
+    """Staff positions of the next onset after ``symbols[idx]`` in the same measure.
 
-    A barline ends the search: an accidental never modifies a note in the next bar.
+    An onset is a ``note.*`` token plus the ``chordnote-*`` tokens directly after it (a same-stem divisi chord,
+    converter order: accidentals bottom to top, then the lowest head, then the other heads). Empty if a barline
+    comes first (an accidental never modifies a note in the next bar). Without chordnotes this is the first
+    note's position alone, so monophonic anchoring is unchanged.
     """
-    for sym in symbols[idx + 1:]:
+    for i in range(idx + 1, len(symbols)):
+        sym = symbols[i]
         if sym.startswith("barline"):
-            return None
+            return set()
         if sym.startswith("note."):
-            return _position_suffix(sym)
-    return None
+            onset = [sym]
+            for member in symbols[i + 1:]:
+                if not member.startswith("chordnote-"):
+                    break
+                onset.append(member)
+            return {pos for pos in map(_position_suffix, onset) if pos is not None}
+    return set()
 
 
 def _accidental_is_anchored(symbols: list[str], idx: int) -> bool:
@@ -1003,7 +1016,7 @@ def _accidental_is_anchored(symbols: list[str], idx: int) -> bool:
     and the greedy-CTC evidence rescue tried in BUG-033 did not recover it either.
     """
     pos = _position_suffix(symbols[idx])
-    return pos is not None and _next_note_position(symbols, idx) == pos
+    return pos is not None and pos in _next_onset_positions(symbols, idx)
 
 
 def _header_accidental_is_inline(symbols: list[str], idx: int) -> bool:
@@ -1013,13 +1026,50 @@ def _header_accidental_is_inline(symbols: list[str], idx: int) -> bool:
     engraved before the time signature and any rest, so a glyph followed by a metersign, digit, rest or
     multirest is a (misread) key-signature glyph, not the first note's accidental. Only slur and fermata
     tokens (engraved above/below the note, emitted before it) may sit between the accidental and its note.
+    A divisi chord's accidentals are stacked before its lowest head (converter order), so further accidental
+    tokens may also sit in between, but only when the onset reached is a chord; the accidental then belongs
+    to it if any member is on its position. A monophonic onset keeps the stop-at-first-token rule.
     """
     pos = _position_suffix(symbols[idx])
-    for sym in symbols[idx + 1:]:
+    skipped_accidental = False
+    for i in range(idx + 1, len(symbols)):
+        sym = symbols[i]
         if sym.startswith(("slur.", "fermata.")):
             continue
-        return pos is not None and sym.startswith("note.") and _position_suffix(sym) == pos
+        if sym.startswith("accidental."):
+            skipped_accidental = True
+            continue
+        if pos is None or not sym.startswith("note."):
+            return False
+        is_chord = i + 1 < len(symbols) and symbols[i + 1].startswith("chordnote-")
+        if not is_chord:
+            return not skipped_accidental and _position_suffix(sym) == pos
+        return pos in _next_onset_positions(symbols, i - 1)
     return False
+
+
+def _meter_at(symbols: list[str], idx: int) -> Optional[tuple[str, int]]:
+    """(time signature, index after it) if a time signature starts at ``idx``, else None.
+
+    A metersign, or a numerator digit on L4 directly over a denominator digit on L2. The digit positions are
+    staff lines in every clef, so the test needs no clef (choral-conductor review 2026-09-30), and 12/8's
+    numerator is one token (digit.12-L4). Multirest counts sit on S5, so they never pass.
+    """
+    if idx < len(symbols) and symbols[idx].startswith("metersign"):
+        base = symbols[idx].split("-")[0]
+        return TIME_SIG_TOKENS.get(base, base), idx + 1
+    if (idx + 1 < len(symbols) and symbols[idx].startswith("digit.") and symbols[idx + 1].startswith("digit.")
+            and _position_suffix(symbols[idx]) == "L4" and _position_suffix(symbols[idx + 1]) == "L2"):
+        num = symbols[idx].split(".")[1].split("-")[0]
+        den = symbols[idx + 1].split(".")[1].split("-")[0]
+        return f"{num}/{den}", idx + 2
+    return None
+
+
+def _burst_in_key_order(burst: list[str], acc_type: str, active_clef: str) -> bool:
+    """True if ``burst`` is exactly the leading part of a printed key signature of ``acc_type``."""
+    order = KEY_SIG_ORDER.get(active_clef, {}).get(acc_type)
+    return bool(order) and bool(burst) and [_position_suffix(t) for t in burst] == order[:len(burst)]
 
 
 def _is_mid_key_change(burst: list[str], symbols: list[str], burst_end: int, acc_type: str, active_clef: str,
@@ -1036,7 +1086,44 @@ def _is_mid_key_change(burst: list[str], symbols: list[str], burst_end: int, acc
     positions = [_position_suffix(t) for t in burst]
     if positions != order[:len(burst)]:
         return False
-    return _next_note_position(symbols, burst_end - 1) != positions[-1]
+    return positions[-1] not in _next_onset_positions(symbols, burst_end - 1)
+
+
+def _burst_key_change(symbols: list[str], start: int, acc_type: str, active_clef: str,
+                      confirmed: Optional[tuple[int, int]]) -> Optional[tuple[int, int, int]]:
+    """Reads a sharp/flat burst right after a barline as a key change.
+
+    Accepted when the burst is in printed key-signature order and either has MIN_MID_KEY_CHANGE_ACCIDENTALS
+    glyphs, is exactly ``confirmed`` (ClefKeyNet's key on the next system, BUG-029), or is directly followed
+    by a time signature (R2: engravers print a key and meter change together, so the meter vouches for a
+    one-glyph key, choral-conductor review 2026-09-30). When the last glyph sits on the next note it is read
+    as that note's accidental and the rest as the key change.
+
+    Returns:
+        (n_sharp, n_flat, index after the key-signature glyphs), or None.
+    """
+    burst_end = start
+    while burst_end < len(symbols) and symbols[burst_end].split("-")[0] == acc_type:
+        burst_end += 1
+    burst = symbols[start:burst_end]
+    sign = 1 if acc_type == "accidental.sharp" else -1
+    n = 0
+    if _meter_at(symbols, burst_end) is not None and _burst_in_key_order(burst, acc_type, active_clef):
+        n = len(burst)
+    elif _is_mid_key_change(burst, symbols, burst_end, acc_type, active_clef):
+        n = len(burst)
+    elif _is_mid_key_change(burst[:-1], symbols, burst_end - 1, acc_type, active_clef):
+        n = len(burst) - 1
+    elif (confirmed is not None and _signed_key_counts(sign * len(burst)) == confirmed
+          and _is_mid_key_change(burst, symbols, burst_end, acc_type, active_clef, min_glyphs=1)):
+        n = len(burst)
+    elif (confirmed is not None and len(burst) > 1
+          and _signed_key_counts(sign * (len(burst) - 1)) == confirmed
+          and _is_mid_key_change(burst[:-1], symbols, burst_end - 1, acc_type, active_clef, min_glyphs=1)):
+        n = len(burst) - 1
+    if not n:
+        return None
+    return _signed_key_counts(sign * n) + (start + n,)
 
 
 def _natural_led_key_change(symbols: list[str], start: int, active_clef: str,
@@ -1075,8 +1162,11 @@ def _natural_led_key_change(symbols: list[str], start: int, active_clef: str,
         while end < len(symbols) and symbols[end].split("-")[0] == new_type:
             end += 1
     burst = [_position_suffix(t) for t in symbols[nat_end:end]]
+    # Cancelling the whole old key and then printing the new one may re-use positions (3# -> 1#:
+    # ♮F ♮C ♮G ♯F, choral-conductor review 2026-09-30); after a partial cancel an overlap is a misread.
+    full_cancel = set(naturals) == set(old_positions)
     if burst:
-        if burst != order[new_type][:len(burst)] or set(burst) & set(naturals):
+        if burst != order[new_type][:len(burst)] or (set(burst) & set(naturals) and not full_cancel):
             return None
         n_new, type_new = len(burst), new_type
     else:
@@ -1089,8 +1179,11 @@ def _natural_led_key_change(symbols: list[str], start: int, active_clef: str,
     result = (n_new, 0) if type_new == "accidental.sharp" else (0, n_new)
     if n_new == 0:
         result = (0, 0)
-    enough = len(glyphs) >= MIN_MID_KEY_CHANGE_ACCIDENTALS or result == confirmed
-    if not enough or _next_note_position(symbols, end - 1) == glyphs[-1]:
+    # A time signature right after the glyphs vouches for a short key change (R2) and stands between them
+    # and the next note, so no glyph can be that note's accidental.
+    meter_follows = _meter_at(symbols, end) is not None
+    enough = len(glyphs) >= MIN_MID_KEY_CHANGE_ACCIDENTALS or result == confirmed or meter_follows
+    if not enough or (not meter_follows and glyphs[-1] in _next_onset_positions(symbols, end - 1)):
         return None
     return result + (end,)
 
@@ -1106,14 +1199,20 @@ def infer_pitch(
     header_override: Optional[HeaderOverride] = None,
     next_system_key: Optional[int] = None,
     trace:      Optional[list] = None,
-    meter_flags_out: Optional[list[str]] = None,
+    system_key_changes: Optional[dict[int, int]] = None,
+    mid_changes_out: Optional[list] = None,
 ) -> list:
     """
     Converts a CRNN symbol sequence into note events with MIDI pitch.
 
-    meter_flags_out: optional out-list that receives the strip's meter_flags.
-    They are also stamped on every event, but a strip with no events has
-    nowhere else to carry them, and they must still reach the review.
+    system_key_changes: {measure_index: signed key} of the mid-strip key changes the whole system agreed on
+    (``decide_mid_changes``, R4). When given, only these are applied, at their barline, even in a voice that
+    shows no glyphs there; a key-change burst at any other bar is read as inline accidentals. None keeps the
+    single-strip rule (every accepted burst is applied).
+    mid_changes_out: when a list, every post-barline key or time-signature change candidate is appended as a
+    dict: ``{"kind": "key", "bar", "key", "glyphs", "meter_follows", "courtesy", "applied"}`` (courtesy: no
+    note or rest follows in the strip) or ``{"kind": "meter", "bar", "meter"}``. A mid-strip time signature
+    is only reported, never applied (R3): events keep the strip's opening time signature.
 
     header_override: clef, opening key and octave decided by ClefKeyNet (stage3_clefkey). Every CRNN clef
     token is then ignored (the CRNN's clef can't override the rule, user decision 2026-09-28), and the
@@ -1156,6 +1255,19 @@ def infer_pitch(
       Inline accidentals not on the next note's staff position are dropped as
       CRNN phantoms (_accidental_is_anchored).
 
+    Divisi chords (``note.* chordnote-*``, PIYA-106): each chordnote is a note event sharing the base note's
+    onset, duration, measure and time signature, and one ``chord_id`` (an int counted from 1 per call, so
+    it is unique only within one strip: key on (page_index, sys_idx, chord_id)); the cursor advances once.
+    Accidentals are paired by staff position, so each reaches its own member. Junk shapes are dropped or
+    flagged, never fatal, each with ``review_needed``: ``unison_chordnote_dropped`` (base; a chordnote on a
+    position the onset already has), ``orphan_chordnote_dropped`` (next emitted event; a chordnote with no
+    note before it in its onset). Members come in drawn left-to-right order, so one below the base note is
+    normal and carries no flag (``chordnote_below_base`` was retired in A9 Task 1h). Chord members also get
+    the V1/V2/V4 flags (``chord_interval_over_octave``, ``chord_three_plus_members``,
+    ``chord_member_out_of_range``) and, with confidences, ``chord_confidence`` = min over the members (each
+    member's own confidence is the min of its chordnote and accidental tokens). Neither is a trust signal
+    (BUG-011). Monophonic input is unchanged (golden harness, training/phase2/stage3_golden.py).
+
     Key-signature state machine
     ───────────────────────────
     "clef"
@@ -1166,8 +1278,8 @@ def infer_pitch(
         (clef dropped by CRNN)                   → infer clef was missed,
                                                    start counting, → "keysig"
       • accidental at wrong position             → inline if anchored, → "body"
-      • metersign / note / rest / multirest /    → warn, commit empty key sig,
-        S5 multirest count                         → "body", fall-through
+      • metersign / note / rest                  → warn, commit empty key sig,
+                                                   → "body", fall-through
  
     "keysig"
       Counting opening key-sig accidentals. No ambiguity — clef confirmed.
@@ -1176,24 +1288,24 @@ def infer_pitch(
       • mixed sharp+flat                         → CTC noise, skip
       • accidental.natural                       → CTC noise, skip
       • second clef                              → update reference, stay
-      • metersign                                → commit, → "body",
-                                                   fall-through (body reads it)
-      • note / rest / multirest / S5 count       → commit (no metersign on
+      • metersign                                → commit, → "body"
+      • note / rest                              → commit (no metersign on
                                                    continuation strips),
                                                    → "body", fall-through
  
     "body"
       Normal note / rest / accidental processing.
-      • metersign                                → meter change from here on
-      • S5 digit(s)                              → count for the next multirest
       On every barline                           → → "post_bar"
  
     "post_bar"
       Symbol immediately after a barline.
-      • sharp/flat burst that _is_mid_key_change → commit new key, skip the
+      • sharp/flat burst (_burst_key_change)     → commit new key, skip the
                                                    burst, → "body"
       • naturals cancelling the old key, then an → commit new key, skip the
         optional burst (_natural_led_key_change)   glyphs, → "body"
+        (either one followed by a time signature needs only one glyph, R2;
+        with system_key_changes only the system-agreed bars commit, R4)
+      • time signature                           → reported, not applied (R3)
       • any other accidental                    → → "body", fall-through
                                                    (inline if anchored)
       • clef change                              → update reference, stay
@@ -1203,17 +1315,8 @@ def infer_pitch(
       • clef                                     → ignored
       • accidental directly before a note on its position → inline, stay
       • other accidental                         → dropped, stay
-      • metersign                                → read time signature, stay
-      • note / rest / multirest / S5 count       → → "body", fall-through
-
-    Meter digits, in every state (before the machine runs; PIYA-107 AC7/AC8)
-      • digit-L4 directly followed by digit-L2   → time signature N/D from here
-                                                   on, source "detected"
-      • any other non-S5 digit (lone L4 or L2)   → ignored (never a multirest
-                                                   count, never a meter)
-    Every event carries time_signature (its own measure's meter) and
-    time_signature_source ("detected" once a meter was read in this strip at
-    or before it, else "default" with AC4's 4/4).
+      • metersign / time-signature digits        → read time signature
+      • note / rest                              → → "body", fall-through
     """
 
     # ── Initialise ────────────────────────────────────────────────────────
@@ -1229,8 +1332,10 @@ def infer_pitch(
         if next_system_key is not None and next_system_key != header_override.key:
             confirmed_next = _signed_key_counts(next_system_key)
  
-    pending_acc: Optional[int] = None
-    pending_acc_conf       = 1.0
+    # Anchored inline accidentals waiting for their notehead, by staff position: (alteration, confidence,
+    # token). Keyed by position so each accidental of a divisi chord reaches its own member; in monophonic
+    # input every anchored accidental sits on the next note's position, so this holds at most one entry.
+    pending_accs: dict[str, tuple[int, float, str]] = {}
     # Inline accidental rejected by _accidental_is_anchored, kept until the next note so that note
     # carries a trace of it: a real accidental placed one step off plays a wrong pitch (BUG-033).
     dropped_acc: Optional[str] = None
@@ -1238,10 +1343,13 @@ def infer_pitch(
     # (alteration, accidental confidence) set by an inline accidental, per staff step, until the next
     # barline. The confidence travels with it so every note that inherits the accidental reports it.
     measure_alterations: dict[int, tuple[int, float]] = {}
-    # Step/alteration of the last note, so a tie into the same step keeps its pitch across a barline.
-    last_note_step: Optional[int] = None
-    last_note_alteration: int = 0
-    last_note_alt_conf: float = 1.0
+    # Alteration per step of the last onset (all chord members, not just the last-processed one, since members
+    # now come in drawn order), so a tie into any of its steps keeps its pitch across a barline.
+    prev_onset_alts: dict[int, tuple[int, float]] = {}
+    cur_onset_alts: dict[int, tuple[int, float]] = {}
+    # prev_onset_alts while the current onset is tied into, else empty; read by every head of that onset
+    # (slur_end_pending is cleared after the base, so members could not see it).
+    tie_source: dict[int, tuple[int, float]] = {}
     # Tokens before this index were consumed by a mid-piece key-change lookahead.
     skip_until             = 0
     # Dots stack on the event they follow; its undotted length is kept so a second dot adds a quarter
@@ -1249,20 +1357,28 @@ def infer_pitch(
     dot_target: Optional[dict] = None
     dot_base               = 0
     dot_count              = 0
+    # Dot tokens per staff position since the dotted chord's onset: the converter writes one dot per head per
+    # dot, so the chord's dot count is the highest count at any one position, not the token total.
+    chord_dot_counts: dict[Optional[str], int] = {}
     chord_id               = 0
-    in_chord               = False
+    # The onset being read: a note event, then its chordnote members, and their staff positions. Closed by
+    # _close_onset before any token that is not a chordnote.
+    onset_events: list[dict] = []
+    onset_positions: set[str] = set()
+    onset_open             = False
+    # A chordnote with no note before it in its onset (strip start, after a rest or barline, in the header),
+    # kept until the next emitted event so the dropped notehead stays visible for review.
+    orphan_chordnote: Optional[str] = None
     slur_active            = False
     slur_start_idx         = -1
     slur_end_pending       = False
     pending_multirest_bars = 1
     events                 = []
     current_tick           = 0
-    # PIYA-107 AC4/AC7/AC9: defaults to 4/4 until a meter is read (metersign or
-    # an L4+L2 digit pair, in the header or after a barline mid-strip); every
-    # emitted event carries the meter in effect at its own position, so an
-    # event's time_signature is the meter of the measure it sits in.
+    # PIYA-107 AC4/AC6: defaults to 4/4 until an explicit metersign token is
+    # consumed (see "keysig" stage below); every emitted event carries this
+    # value regardless of whether the note itself is decorated with one.
     time_signature         = DEFAULT_TIME_SIGNATURE
-    time_signature_source  = TIME_SIG_SOURCE_DEFAULT
     # 0-based measure counter, incremented on every barline. Barline tokens
     # themselves are never appended as events (they only drive the key-sig
     # state machine below), so this is the only place measure boundaries are
@@ -1275,13 +1391,17 @@ def infer_pitch(
     ks_flat         = 0
     key_alterations = {}
     header_dropped  = 0
-    meter_flags: list[str] = []     # strip-level review codes for digits the parser could not place
-    # Camera-PrIMuS writes a numeric meter (e.g. "3/4") as a digit.N-L4 +
-    # digit.N-L2 pair instead of a metersign.* token (1586/3996 corpus samples
-    # carry no metersign at all). Digits are classified by staff position
-    # before the state machine runs (PIYA-107 AC8): see the "Meter digits"
-    # block at the top of the main loop.
-
+    # PIYA-107 AC4/AC6: Camera-PrIMuS encodes a numeric time signature (e.g.
+    # "3/4") as two consecutive digit.N tokens in the header, rather than a
+    # metersign.* token -- confirmed against ground truth: 1586/3996 (40%) of
+    # corpus samples carry no metersign token at all and rely solely on this
+    # digit-pair form. Only the first two header digit tokens are the time
+    # signature (numerator, then denominator); any further digit tokens
+    # before the first note/rest are unrelated noise and are ignored, same
+    # as prior (pre-PIYA-107) behaviour.
+    meter_digits = []
+    meter_seen   = False  # fixed_header: a metersign was read, so later digits are multirest counts
+ 
     # ── Commit helpers ────────────────────────────────────────────────────
  
     def _commit_opening(n_sharp, n_flat):
@@ -1328,7 +1448,6 @@ def infer_pitch(
             "reference_pitch": reference_pitch,
             "key_alterations": dict(key_alterations),
             "time_signature":  time_signature,
-            "time_signature_source": time_signature_source,
             "stage":           ks_stage,
             # A mid-piece key-signature burst is consumed by lookahead (skip_until), so its glyphs never
             # reach a stage of their own; this is the only way the viz can tell them from inline accidentals.
@@ -1336,6 +1455,78 @@ def infer_pitch(
             "clef_fixed":      clef_fixed,
         })
         traced_events = len(events)
+
+    def _hold_accidental(sym: str, acc_type: str, tok_conf: float) -> None:
+        # Only anchored accidentals get here, and anchoring requires a position suffix.
+        pending_accs[sym.split("-", 1)[1]] = (ACCIDENTAL_OFFSET.get(acc_type, 0), tok_conf, sym)
+
+    def _member_pitch(pos_str: str, tok_conf: float) -> tuple[int, int, float]:
+        """(MIDI pitch, staff step, confidence) of a notehead at ``pos_str``; consumes its pending accidental.
+
+        Shared by a note and the chordnote members of its onset. Alteration precedence: A(p) in the docstring.
+        """
+        # Camera-PrIMuS numbers the bottom line L1 and the space above it S1 (1-indexed), BUG-009.
+        step          = _staff_step(pos_str)
+        bottom_letter = CLEF_BOTTOM_LETTER.get(active_clef, "E")
+        delta         = _diatonic_delta(step, bottom_letter)
+        alt_conf      = 1.0   # key-signature alterations are excluded from confidence
+        pending       = pending_accs.pop(pos_str, None)
+        if pending is not None:
+            alteration, alt_conf = pending[0], pending[1]
+            measure_alterations[step] = (alteration, alt_conf)
+        elif step in tie_source:
+            # Not stored in measure_alterations: a tie carries the accidental into the next bar for the
+            # tied note only, later notes on that step fall back to the key.
+            alteration, alt_conf = tie_source[step]
+        elif step in measure_alterations:
+            alteration, alt_conf = measure_alterations[step]
+        else:
+            alteration = key_alterations.get(_pitch_class_at_step(step, bottom_letter), 0)
+        cur_onset_alts[step] = (alteration, alt_conf)
+        midi = max(0, min(127, reference_pitch + delta + alteration))
+        return midi, step, min(tok_conf, alt_conf)
+
+    def _take_orphan(event: dict) -> None:
+        nonlocal orphan_chordnote
+        if orphan_chordnote is not None:
+            event["orphan_chordnote_dropped"] = orphan_chordnote
+            event["review_needed"] = True
+            orphan_chordnote = None
+
+    def _close_onset() -> None:
+        """Finish the open onset. A single note needs nothing (monophonic output stays as before)."""
+        nonlocal onset_open, dropped_acc_count
+        was_open, onset_open = onset_open, False
+        if not was_open or len(onset_events) < 2:
+            return
+        base = onset_events[0]
+        if pending_accs:
+            # Anchored to this onset (an accidental for the next onset comes after this point) but no member
+            # took it, e.g. its chordnote was a dropped unison.
+            # A lost member accidental changes a pitch, so it needs review; every token is named, none hidden.
+            leftovers = [tok for _, _, tok in pending_accs.values()]
+            prior = base.get("unanchored_accidental_dropped")
+            base["unanchored_accidental_dropped"] = " ".join(([prior] if prior else []) + leftovers)
+            base["review_needed"] = True
+            dropped_acc_count += len(leftovers)
+            pending_accs.clear()
+        pitches = [e["pitch"] for e in onset_events]
+        wide = max(pitches) - min(pitches) > CHORD_MAX_INTERVAL
+        crowded = len(onset_events) > CHORD_MAX_MEMBERS
+        voice_range = CHORD_VOICE_RANGE.get(voice)
+        chord_conf = min(e["confidence"] for e in onset_events) if with_conf else None
+        for e in onset_events:
+            if wide:
+                e["chord_interval_over_octave"] = True
+                e["review_needed"] = True
+            if crowded:
+                e["chord_three_plus_members"] = True
+                e["review_needed"] = True
+            if voice_range is not None and not voice_range[0] <= e["pitch"] <= voice_range[1]:
+                e["chord_member_out_of_range"] = True
+                e["review_needed"] = True
+            if chord_conf is not None:
+                e["chord_confidence"] = chord_conf
 
     # ── Main loop ─────────────────────────────────────────────────────────
     for tok_idx, sym in enumerate(symbols):
@@ -1350,58 +1541,45 @@ def infer_pitch(
         is_flat  = sym.startswith("accidental.flat")
         is_acc   = sym.startswith("accidental.")
 
-        # ── Meter digits and counts (every state; PIYA-107 AC7/AC8) ──────
-        # Classified by staff position before the state machine, so the same
-        # rule holds in the header and the body (resolution 10 as refined by
-        # ml-cv-lead 2026-10-09):
-        #   • an L4+L2 pair is a meter wherever it appears, unless it is a
-        #     courtesy meter (no note/rest after it in this strip): that only
-        #     announces the next system and must not change this one;
-        #   • a meter with notes/rests before it in the same measure is a
-        #     misread (meters change only at a barline): not applied, flagged;
-        #   • a lone L4/L2 digit changes nothing and flags the strip;
-        #   • an S5 run that ends at a multirest is that multirest's count and
-        #     goes on to the states below; any other S5 run (missing multirest,
-        #     or a tuplet / bar-number hallucination) is neither count nor
-        #     meter and flags the strip;
-        #   • a digit at any other position is not in VOCAB and is ignored.
-        if sym.startswith("digit."):
-            if _is_multirest_count(sym):
-                run_start = tok_idx
-                while run_start > 0 and _is_multirest_count(symbols[run_start - 1]):
-                    run_start -= 1
-                run_end = tok_idx
-                while run_end < len(symbols) and _is_multirest_count(symbols[run_end]):
-                    run_end += 1
-                if run_end < len(symbols) and symbols[run_end].startswith("multirest"):
-                    pass        # a real count: handled by the states / body below
-                else:
-                    if tok_idx == run_start:
-                        meter_flags.append(METER_FLAG_ORPHAN_COUNT)
-                    continue
+        # ── Chordnote (divisi member) ─────────────────────────────────────
+        # Handled before the key-sig state machine: it is never a header token, and outside an open onset
+        # (header stages included) it is an orphan.
+        if sym.startswith("chordnote-"):
+            pos_str = sym[len("chordnote-"):]
+            # Repeats are joined, space-separated, so no dropped token is lost.
+            if not onset_open:
+                orphan_chordnote = sym if orphan_chordnote is None else f"{orphan_chordnote} {sym}"
+            elif pos_str in onset_positions:
+                prior_unison = onset_events[0].get("unison_chordnote_dropped")
+                onset_events[0]["unison_chordnote_dropped"] = sym if prior_unison is None else f"{prior_unison} {sym}"
+                onset_events[0]["review_needed"] = True
             else:
-                meter = _meter_pair_at(symbols, tok_idx)
-                if meter is not None:
-                    # Courtesy check first (same order as metersign): a courtesy
-                    # meter after the strip's last notes announces the next
-                    # system and is never "mid-measure".
-                    if not _has_body_content_after(symbols, tok_idx + 2):
-                        pass
-                    elif not _at_measure_start(symbols, tok_idx):
-                        meter_flags.append(METER_FLAG_MID_MEASURE)
-                    else:
-                        time_signature        = meter
-                        time_signature_source = TIME_SIG_SOURCE_DETECTED
-                elif (_parse_digit(sym) or (0, ""))[1] in (
-                        METER_NUMERATOR_POSITION, METER_DENOMINATOR_POSITION) and not (
-                        tok_idx > 0 and _meter_pair_at(symbols, tok_idx - 1) is not None):
-                    meter_flags.append(METER_FLAG_UNPAIRED_DIGIT)
-                continue
-        elif sym.startswith("metersign") and not _has_body_content_after(symbols, tok_idx + 1):
-            continue    # courtesy metersign at the end of the strip: announces the next system only
-        elif sym.startswith("metersign") and not _at_measure_start(symbols, tok_idx):
-            meter_flags.append(METER_FLAG_MID_MEASURE)
+                base = onset_events[0]
+                midi_pitch, _step, member_conf = _member_pitch(pos_str, tok_conf)
+                if base["chord_id"] is None:
+                    chord_id += 1
+                    base["chord_id"] = chord_id
+                events.append({
+                    "type":           "note",
+                    "pitch":          midi_pitch,
+                    "duration_ticks": base["duration_ticks"],
+                    "voice":          voice,
+                    "page_index":     page_index,
+                    "sys_idx":        sys_idx,
+                    "chord_id":       base["chord_id"],
+                    "symbol":         sym,
+                    "tick_onset":     base["tick_onset"],
+                    # Ties into/out of a member are deferred (freeze section 1): only the base carries "end".
+                    "slur":           "middle" if slur_active else None,
+                    "measure_index":  base["measure_index"],
+                    "time_signature": base["time_signature"],
+                })
+                if with_conf:
+                    events[-1]["confidence"] = member_conf
+                onset_events.append(events[-1])
+                onset_positions.add(pos_str)
             continue
+        _close_onset()
 
         # ══════════════════════════════════════════════════════════════════
         # KEY-SIG STATE MACHINE
@@ -1426,23 +1604,24 @@ def infer_pitch(
                     ks_stage = "keysig"
                 else:
                     if _accidental_is_anchored(symbols, tok_idx):
-                        pending_acc      = ACCIDENTAL_OFFSET.get(acc_type, 0)
-                        pending_acc_conf = tok_conf
+                        _hold_accidental(sym, acc_type, tok_conf)
                     else:
                         dropped_acc = sym
                         dropped_acc_count += 1
                     ks_stage = "body"
                 continue
 
-            elif (sym.startswith(("metersign", "note.", "rest.", "multirest"))
-                  or _is_multirest_count(sym)):
-                # A multirest (or its S5 count) opening the strip is body
-                # content, not header: skipping it loses its bars (BUG-035).
+            elif (sym.startswith("metersign") or
+                  sym.startswith("note.")     or
+                  sym.startswith("rest.")):
                 print(f"[Stage 3] Warning: {voice} p{page_index}: "
                       f"no clef detected — using fallback {active_clef}, C major assumed")
                 key_alterations = _commit_opening(0, 0)
+                if sym.startswith("metersign"):
+                    time_signature = TIME_SIG_TOKENS.get(
+                        sym.split("-")[0], time_signature)
                 ks_stage        = "body"
-                # fall through to body processing below (metersign included)
+                # fall through to body processing below
  
             elif sym.startswith("slur.end"):
                 # Header slur.end = tie arriving from the previous system;
@@ -1452,8 +1631,8 @@ def infer_pitch(
                 continue
 
             else:
-                continue    # barline / slur.start before clef — skip
-
+                continue    # barline / digit / slur.start before clef — skip
+ 
         # ── "fixed_header" ────────────────────────────────────────────────
         elif ks_stage == "fixed_header":
 
@@ -1461,20 +1640,26 @@ def infer_pitch(
                 continue
             elif is_acc:
                 if _header_accidental_is_inline(symbols, tok_idx):
-                    pending_acc      = ACCIDENTAL_OFFSET.get(acc_type, 0)
-                    pending_acc_conf = tok_conf
+                    _hold_accidental(sym, acc_type, tok_conf)
                 else:
                     header_dropped += 1
                 continue
             elif sym.startswith("metersign"):
                 # Stay in the header: an accidental after the metersign is still a misread key glyph
                 # unless it sits directly on the first note, and must not reach body's looser anchoring.
-                meter = TIME_SIG_TOKENS.get(sym.split("-")[0])
-                if meter is not None:
-                    time_signature, time_signature_source = meter, TIME_SIG_SOURCE_DETECTED
+                time_signature = TIME_SIG_TOKENS.get(sym.split("-")[0], time_signature)
+                meter_seen     = True
+                continue
+            elif sym.startswith("digit.") and not meter_seen and len(meter_digits) < 2:
+                try:
+                    meter_digits.append(int(sym.split(".")[1].split("-")[0]))
+                except ValueError:
+                    pass
                 continue
             elif sym.startswith(("note.", "rest.", "multirest", "digit.")):
-                # Only an S5 multirest count gets here as a digit (meter digits were consumed above).
+                # A digit here follows a complete meter, so it is a multirest count for body.
+                if len(meter_digits) == 2 and not meter_seen:
+                    time_signature = f"{meter_digits[0]}/{meter_digits[1]}"
                 ks_stage = "body"
                 # fall through to body processing below
             elif sym.startswith("slur.end"):
@@ -1505,14 +1690,25 @@ def infer_pitch(
                 continue
             elif sym.startswith("metersign"):
                 key_alterations = _commit_opening(ks_sharp, ks_flat)
+                time_signature  = TIME_SIG_TOKENS.get(
+                    sym.split("-")[0], time_signature)
                 ks_stage        = "body"
-                # fall through: body reads the metersign
-            elif (sym.startswith(("note.", "rest.", "multirest"))
-                  or _is_multirest_count(sym)):
-                # No metersign (continuation strip, or an L4+L2 digit meter
-                # already read above) — commit on the first body token. A
-                # multirest and its S5 count are body content (BUG-035).
+                continue
+            elif sym.startswith("digit.") and len(meter_digits) < 2:
+                # Numeric time signature (e.g. "3/4"), Camera-PrIMuS's other
+                # encoding besides metersign.* -- see meter_digits comment
+                # at initialisation. A 3rd+ header digit (rare CTC noise /
+                # unrelated token) is left to the catch-all `else` below.
+                try:
+                    meter_digits.append(int(sym.split(".")[1].split("-")[0]))
+                except ValueError:
+                    pass
+                continue
+            elif sym.startswith("note.") or sym.startswith("rest."):
+                # No meter sign (continuation strip) — commit on first note
                 key_alterations = _commit_opening(ks_sharp, ks_flat)
+                if len(meter_digits) == 2:
+                    time_signature = f"{meter_digits[0]}/{meter_digits[1]}"
                 ks_stage        = "body"
                 # fall through to body processing below
             elif sym.startswith("slur.end"):
@@ -1521,68 +1717,59 @@ def infer_pitch(
                 slur_end_pending = True
                 continue
             else:
-                continue    # barline / slur.start in header — skip
+                continue    # barline / digit / slur.start in header — skip
  
         # ── "post_bar" ────────────────────────────────────────────────────
         elif ks_stage == "post_bar":
 
+            change: Optional[tuple[int, int, int]] = None
             if sym.startswith("accidental.natural"):
                 change = _natural_led_key_change(symbols, tok_idx, active_clef, key_alterations,
                                                  confirmed_next)
-                if change is not None:
-                    n_sharp, n_flat, skip_until = change
-                    key_alterations = _commit_mid(n_sharp, n_flat)
-                    ks_stage = "body"
-                    continue
-                ks_stage = "body"
-                # fall through: an inline natural candidate
-
             elif is_sharp or is_flat:
-                burst_end = tok_idx
-                while burst_end < len(symbols) and symbols[burst_end].split("-")[0] == acc_type:
-                    burst_end += 1
-                burst = symbols[tok_idx:burst_end]
-                n = 0
-                if _is_mid_key_change(burst, symbols, burst_end, acc_type, active_clef):
-                    n = len(burst)
-                elif _is_mid_key_change(burst[:-1], symbols, burst_end - 1, acc_type, active_clef):
-                    # The last glyph sits on the next note: read it as that note's accidental and keep
-                    # the rest as the key change, instead of losing the key change for the whole strip.
-                    n = len(burst) - 1
-                elif (confirmed_next is not None
-                      and _signed_key_counts(len(burst) if is_sharp else -len(burst)) == confirmed_next
-                      and _is_mid_key_change(burst, symbols, burst_end, acc_type, active_clef, min_glyphs=1)):
-                    # Too short for the unconfirmed rule, but it is exactly the key ClefKeyNet reads on the
-                    # next system (BUG-029).
-                    n = len(burst)
-                elif (confirmed_next is not None and len(burst) > 1
-                      and _signed_key_counts(len(burst) - 1 if is_sharp else 1 - len(burst)) == confirmed_next
-                      and _is_mid_key_change(burst[:-1], symbols, burst_end - 1, acc_type, active_clef,
-                                             min_glyphs=1)):
-                    # As above, with the last glyph belonging to the next note (e.g. #L5 #S3 note-S3).
-                    n = len(burst) - 1
-                if n:
-                    new_alts = get_key_sig_alterations(n if is_sharp else 0, n if is_flat else 0)
-                    # A burst repeating the current key (cautionary reprint or phantom) changes nothing;
-                    # committing it would log "mid-piece key change" and flag the strip for review.
-                    if new_alts != key_alterations:
-                        key_alterations = _commit_mid(n if is_sharp else 0, n if is_flat else 0)
-                    skip_until = tok_idx + n
-                    ks_stage = "body"
-                    continue
-                ks_stage = "body"
-                # fall through: not a key change, so each accidental is an inline candidate
-
+                change = _burst_key_change(symbols, tok_idx, acc_type, active_clef, confirmed_next)
             elif sym.startswith("clef."):
                 if sym in CLEF_REFERENCE and not clef_fixed:
                     active_clef     = sym
                     reference_pitch = get_clef_reference(sym, voice)
                 # Stay in "post_bar" — key sig accidentals may still follow
                 continue
-
             else:
-                ks_stage = "body"
-                # fall through to body processing below
+                meter = _meter_at(symbols, tok_idx)
+                if meter is not None:
+                    # R3: reported for review, not applied (re-timing on a misread meter would shift bars).
+                    if mid_changes_out is not None:
+                        mid_changes_out.append({"kind": "meter", "bar": measure_index, "meter": meter[0]})
+                    skip_until = meter[1]
+                    ks_stage = "body"
+                    continue
+
+            if change is not None:
+                n_sharp, n_flat, end = change
+                meter = _meter_at(symbols, end)
+                consumed = meter[1] if meter is not None else end
+                if get_key_sig_alterations(n_sharp, n_flat) == key_alterations:
+                    # A burst repeating the key in force (cautionary reprint, phantom, or the glyphs of a
+                    # system-agreed change already applied at this barline) changes nothing.
+                    skip_until = consumed
+                    ks_stage = "body"
+                    continue
+                applied = system_key_changes is None or measure_index in system_key_changes
+                if mid_changes_out is not None:
+                    courtesy = not any(t.startswith(("note.", "rest.", "multirest")) for t in symbols[consumed:])
+                    mid_changes_out.append({"kind": "key", "bar": measure_index, "key": n_sharp - n_flat,
+                                            "glyphs": end - tok_idx, "meter_follows": meter is not None,
+                                            "courtesy": courtesy, "applied": applied})
+                    if meter is not None:
+                        mid_changes_out.append({"kind": "meter", "bar": measure_index, "meter": meter[0]})
+                if applied:
+                    if system_key_changes is None:
+                        key_alterations = _commit_mid(n_sharp, n_flat)
+                    skip_until = consumed
+                    ks_stage = "body"
+                    continue
+            ks_stage = "body"
+            # fall through: not an (applied) key change, so each accidental is an inline candidate
  
         # ══════════════════════════════════════════════════════════════════
         # BODY — process musical symbols
@@ -1592,14 +1779,7 @@ def infer_pitch(
  
         if ks_stage != "body":
             continue
-
-        # ── Metersign (header fall-through or mid-strip change, AC7) ──────
-        if sym.startswith("metersign"):
-            meter = TIME_SIG_TOKENS.get(sym.split("-")[0])
-            if meter is not None:
-                time_signature, time_signature_source = meter, TIME_SIG_SOURCE_DETECTED
-            continue
-
+ 
         # ── Clef change mid-piece ─────────────────────────────────────────
         if sym.startswith("clef."):
             if sym in CLEF_REFERENCE and not clef_fixed:
@@ -1610,8 +1790,7 @@ def infer_pitch(
         # ── Inline accidental ─────────────────────────────────────────────
         if is_acc:
             if _accidental_is_anchored(symbols, tok_idx):
-                pending_acc      = ACCIDENTAL_OFFSET.get(acc_type, 0)
-                pending_acc_conf = tok_conf
+                _hold_accidental(sym, acc_type, tok_conf)
             else:
                 dropped_acc = sym
                 dropped_acc_count += 1
@@ -1619,6 +1798,23 @@ def infer_pitch(
  
         # ── Dot (augmentation) ────────────────────────────────────────────
         if sym.startswith("dot-"):
+            if events and events[-1]["chord_id"] is not None and events[-1] is onset_events[-1]:
+                # Every member takes the same duration and the cursor moves once. The dot is not folded into
+                # member confidence (freeze 10.6: a member's confidence is its note and accidental tokens).
+                base = onset_events[0]
+                if dot_target is not base:
+                    dot_target       = base
+                    dot_base         = base["duration_ticks"]
+                    chord_dot_counts = {}
+                pos = _position_suffix(sym)
+                chord_dot_counts[pos] = chord_dot_counts.get(pos, 0) + 1
+                old_ticks = base["duration_ticks"]
+                new_ticks = _dotted_ticks(dot_base, max(chord_dot_counts.values()))
+                for member in onset_events:
+                    member["duration_ticks"] = new_ticks
+                if base["tick_onset"] + old_ticks == current_tick:
+                    current_tick += new_ticks - old_ticks
+                continue
             # A dot never follows a multi-measure rest in engraving; stretching one would shift every
             # later bar of this voice, so a (misread) dot there is dropped.
             if events and not events[-1]["symbol"].startswith("multirest"):
@@ -1633,10 +1829,8 @@ def infer_pitch(
                 # The cursor already advanced by old_ticks when the note/rest
                 # was emitted; without also advancing by the extra half, every
                 # later onset overlaps the dotted note. Only when this event
-                # is the one that moved the cursor: a chord tail (in_chord)
-                # never advanced it, so dotting the tail must not either.
-                if (not in_chord and
-                        events[-1]["tick_onset"] + old_ticks == current_tick):
+                # is the one that moved the cursor.
+                if events[-1]["tick_onset"] + old_ticks == current_tick:
                     current_tick += new_ticks - old_ticks
                 if with_conf:
                     events[-1]["confidence"] = min(
@@ -1660,12 +1854,11 @@ def infer_pitch(
                 "slur":           None,
                 "measure_index":  measure_index,
                 "time_signature": time_signature,
-                "time_signature_source": time_signature_source,
             })
             if with_conf:
                 events[-1]["confidence"] = tok_conf
+            _take_orphan(events[-1])
             current_tick += ticks
-            in_chord      = False
             slur_end_pending = False   # a tie cannot run into a rest
             continue
  
@@ -1689,52 +1882,11 @@ def infer_pitch(
                     }.get(beam_num, "eighth")
                     break
  
-            # Parse position suffix → diatonic step number.
-            # Camera-PrIMuS agnostic encoding numbers the bottom staff line
-            # L1 (not L0) and the space just above it S1 -- i.e. pos is
-            # 1-indexed from the bottom line, not 0-indexed -- so pos must be
-            # shifted down by one before doubling to land step=0 on the
-            # bottom line, matching STEP_TO_PITCH_CLASS/_diatonic_delta's own
-            # step=0-is-bottom-line convention (see BUG-009).
-            step = _staff_step(pos_str)
+            prev_onset_alts, cur_onset_alts = cur_onset_alts, {}
+            tie_source = prev_onset_alts if slur_end_pending else {}
+            midi_pitch, step, note_conf = _member_pitch(pos_str, tok_conf)
 
-            bottom_letter = CLEF_BOTTOM_LETTER.get(active_clef, "E")
-            delta         = _diatonic_delta(step, bottom_letter)
- 
-            # Alteration precedence: see A(p) in the docstring.
-            alt_conf = 1.0   # key-signature alterations are excluded from confidence
-            if pending_acc is not None:
-                alteration, alt_conf = pending_acc, pending_acc_conf
-                measure_alterations[step] = (alteration, alt_conf)
-            elif slur_end_pending and last_note_step == step:
-                # Not stored in measure_alterations: a tie carries the accidental into the next bar for the
-                # tied note only, later notes on that step fall back to the key.
-                alteration, alt_conf = last_note_alteration, last_note_alt_conf
-            elif step in measure_alterations:
-                alteration, alt_conf = measure_alterations[step]
-            else:
-                alteration = key_alterations.get(_pitch_class_at_step(step, bottom_letter), 0)
-            note_conf = min(tok_conf, alt_conf)
-            pending_acc = None
-            last_note_step, last_note_alteration, last_note_alt_conf = step, alteration, alt_conf
-
-            midi_pitch  = max(0, min(127,
-                reference_pitch + delta + alteration))
- 
             ticks = NOTE_DURATION_TICKS.get(dur_name, 480)
- 
-            # Chord detection — consecutive notes sharing the same tick onset
-            if (events
-                    and events[-1]["type"] == "note"
-                    and events[-1]["tick_onset"] == current_tick):
-                if not in_chord:
-                    chord_id += 1
-                    events[-1]["chord_id"] = chord_id
-                in_chord = True
-                c_id     = chord_id
-            else:
-                in_chord = False
-                c_id     = None
  
             events.append({
                 "type":           "note",
@@ -1743,51 +1895,49 @@ def infer_pitch(
                 "voice":          voice,
                 "page_index":     page_index,
                 "sys_idx":        sys_idx,
-                "chord_id":       c_id,
+                "chord_id":       None,   # set by its first chordnote member
                 "symbol":         sym,
                 "tick_onset":     current_tick,
                 "slur":           ("end" if slur_end_pending
                                    else "middle" if slur_active else None),
                 "measure_index":  measure_index,
                 "time_signature": time_signature,
-                "time_signature_source": time_signature_source,
             })
             if with_conf:
                 events[-1]["confidence"] = note_conf
             if dropped_acc is not None:
                 events[-1]["unanchored_accidental_dropped"] = dropped_acc
                 dropped_acc = None
+            _take_orphan(events[-1])
             if slur_end_pending:
                 # A tie chain (A~A~A) puts slur.end then slur.start on the
                 # middle note; the later "start" overwrites "slur", so the
                 # end mark is kept separately for Stage 4's tie inference.
                 events[-1]["slur_end"] = True
             slur_end_pending = False
-            if not in_chord:
-                current_tick += ticks
+            onset_events     = [events[-1]]
+            onset_positions  = {pos_str}
+            onset_open       = True
+            current_tick += ticks
             continue
  
         # ── Barline ───────────────────────────────────────────────────────
         if sym.startswith("barline"):
-            pending_acc = None      # stale inline accidental — discard
+            pending_accs.clear()    # stale inline accidentals — discard
             dropped_acc = None
             measure_alterations = {}
-            in_chord    = False
             ks_stage    = "post_bar"
             measure_index += 1
-            # A count is engraved directly over its own multirest, never across a barline.
-            pending_multirest_bars = 1
+            if system_key_changes is not None and measure_index in system_key_changes:
+                # R4: the system agreed on a key change here, so it holds in every voice, glyphs or not.
+                target = _signed_key_counts(system_key_changes[measure_index])
+                if get_key_sig_alterations(*target) != key_alterations:
+                    key_alterations = _commit_mid(*target)
             continue
  
         # ── Multirest ─────────────────────────────────────────────────────
         if sym.startswith("multirest"):
-            # Each bar at its own meter's length (BUG-052): a 4-bar multirest
-            # in 3/4 is 4 x 1440, so the strip's later local ticks stay true.
-            # multirest_bars carries the count itself so Stage 4 never has to
-            # recover it by dividing ticks (PIYA-108 AC6).
-            # A lone "0" count is a misread; a multirest always spans at least one bar.
-            bars  = max(1, pending_multirest_bars)
-            ticks = _meter_bar_ticks(time_signature) * bars
+            ticks = NOTE_DURATION_TICKS["whole"] * pending_multirest_bars
             events.append({
                 "type":           "rest",
                 "pitch":          None,
@@ -1801,11 +1951,10 @@ def infer_pitch(
                 "slur":           None,
                 "measure_index":  measure_index,
                 "time_signature": time_signature,
-                "time_signature_source": time_signature_source,
             })
-            events[-1]["multirest_bars"] = bars
             if with_conf:
                 events[-1]["confidence"] = tok_conf
+            _take_orphan(events[-1])
             current_tick += ticks
             # A multirest is engraved between exactly one pair of barlines
             # regardless of how many bars it spans (digit.N gives that count),
@@ -1816,20 +1965,22 @@ def infer_pitch(
             # voices that notate the same span as N separate measures. Bump
             # by (N-1), not N: the barline token that follows this multirest
             # still fires normally and supplies the final +1.
-            measure_index          += (bars - 1)
+            measure_index          += (pending_multirest_bars - 1)
             pending_multirest_bars  = 1
-            in_chord                = False
             continue
  
-        # ── Digit (multirest count; only S5 digits reach here) ────────────
+        # ── Digit (multirest count) ───────────────────────────────────────
         if sym.startswith("digit."):
-            parsed = _parse_digit(sym)
-            if parsed is not None:
-                # A count of 10+ is one S5 glyph per decimal digit ("1","0"),
-                # so a digit right after another S5 digit extends the number.
-                follows_count = tok_idx > 0 and _is_multirest_count(symbols[tok_idx - 1])
-                pending_multirest_bars = (pending_multirest_bars * DECIMAL_BASE + parsed[0]
-                                          if follows_count else parsed[0])
+            meter = _meter_at(symbols, tok_idx)
+            if meter is not None:
+                # A time signature, not a multirest count (R3: not applied); as a count its numerator
+                # would stretch the next multirest.
+                skip_until = meter[1]
+                continue
+            try:
+                pending_multirest_bars = int(sym.split(".")[1].split("-")[0])
+            except ValueError:
+                pass
             continue
  
         # ── Slur ─────────────────────────────────────────────────────────
@@ -1853,20 +2004,20 @@ def infer_pitch(
 
     if symbols:
         _trace_token(len(symbols) - 1)
+    _close_onset()
+    if orphan_chordnote is not None:
+        # No later event to carry it: put it on the last one rather than lose it silently.
+        if events:
+            _take_orphan(events[-1])
+        else:
+            print(f"[Stage 3] {voice} p{page_index} s{sys_idx}: dropped orphan {orphan_chordnote} "
+                  "(no note or rest in the strip)")
     if dropped_acc_count:
         print(f"[Stage 3] {voice} p{page_index} s{sys_idx}: dropped {dropped_acc_count} "
               "unanchored accidental(s) (not on the next note's staff position)")
     if header_dropped:
         print(f"[Stage 3] {voice} p{page_index} s{sys_idx}: dropped {header_dropped} CRNN header "
               "accidental(s) (key taken from header_override)")
-    strip_meter_flags = sorted(set(meter_flags))
-    if strip_meter_flags:
-        print(f"[Stage 3] {voice} p{page_index} s{sys_idx}: unplaced digit token(s): "
-              f"{', '.join(strip_meter_flags)} (strip flagged for review)")
-    if meter_flags_out is not None:
-        meter_flags_out.extend(strip_meter_flags)
-    for e in events:
-        e["meter_flags"] = list(strip_meter_flags)
     return events
  
  
@@ -1888,6 +2039,11 @@ class ResNetBlock(nn.Module):
         return F.relu(x + residual)
  
  
+CNN_CHANNELS = 512            # CRNN.cnn output channels
+ROWS_PER_FRAME = 4            # CNN map height for a 64 px strip (64 / 2 / 2 / 2 / 2)
+STRIP_HEIGHT_KEEP_ROWS = 64   # keep_rows is only defined at this input height
+
+
 class CRNN(nn.Module):
     """
     CRNN for music symbol recognition.
@@ -1902,8 +2058,12 @@ class CRNN(nn.Module):
     Output: (T, B, vocab_size) — CTC-ready log-probs
     """
     def __init__(self, vocab_size: int = VOCAB_SIZE,
-                 rnn_hidden: int = 256, rnn_layers: int = 2):
+                 rnn_hidden: int = 256, rnn_layers: int = 2,
+                 keep_rows: bool = False):
         super().__init__()
+        # keep_rows (A9 C3): a learned 2048->512 projection of the 4 CNN rows replaces the row average, so the
+        # LSTM can tell staff heights apart. Off by default so every old checkpoint loads and decodes unchanged.
+        self.keep_rows = keep_rows
  
         self.cnn = nn.Sequential(
             nn.Conv2d(1, 64, 3, padding=1, bias=False),
@@ -1928,6 +2088,9 @@ class CRNN(nn.Module):
             nn.AdaptiveAvgPool2d((1, None)),
         )
  
+        if keep_rows:
+            self.row_proj = nn.Linear(CNN_CHANNELS * ROWS_PER_FRAME, CNN_CHANNELS)
+
         self.rnn = nn.LSTM(
             input_size=512,
             hidden_size=rnn_hidden,
@@ -1939,14 +2102,40 @@ class CRNN(nn.Module):
         self.fc = nn.Linear(rnn_hidden * 2, vocab_size)
  
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        features = self.cnn(x)
-        features = features.squeeze(2)
-        features = features.permute(2, 0, 1)
+        if self.keep_rows:
+            if x.shape[2] != STRIP_HEIGHT_KEEP_ROWS:
+                raise ValueError(f"keep_rows needs input height {STRIP_HEIGHT_KEEP_ROWS} "
+                                 f"(map height {ROWS_PER_FRAME}), got {x.shape[2]}")
+            rows = self.cnn[:-1](x)                                    # (B, 512, 4, T)
+            # Channel-major flatten (c * 4 + h) so init_row_proj_as_average reproduces the row mean exactly.
+            features = self.row_proj(rows.permute(3, 0, 1, 2).reshape(rows.shape[3], rows.shape[0], -1))
+        else:
+            features = self.cnn(x)
+            features = features.squeeze(2)
+            features = features.permute(2, 0, 1)
         output, _ = self.rnn(features)
         output = self.fc(output)
         return F.log_softmax(output, dim=2)
  
  
+def init_row_proj_as_average(model: "CRNN") -> None:
+    """Set row_proj to the 4-row mean (weight[o, c*4+h] = 0.25 iff o == c, bias 0) so a keep-rows model starts
+    exactly equal to the averaging model it was copied from."""
+    with torch.no_grad():
+        w = torch.zeros(CNN_CHANNELS, CNN_CHANNELS, ROWS_PER_FRAME)
+        w[torch.arange(CNN_CHANNELS), torch.arange(CNN_CHANNELS), :] = 1.0 / ROWS_PER_FRAME
+        model.row_proj.weight.copy_(w.reshape(CNN_CHANNELS, -1))
+        model.row_proj.bias.zero_()
+
+
+def crnn_from_state(state: Mapping[str, torch.Tensor]) -> "CRNN":
+    """Build a CRNN whose shape is read from `state` (vocab from fc.weight, keep_rows from row_proj) and load it
+    strictly, so an old checkpoint never silently gains or loses the projection."""
+    model = CRNN(state["fc.weight"].shape[0], keep_rows="row_proj.weight" in state)
+    model.load_state_dict(state, strict=True)
+    return model
+
+
 # Input-pixel width of one CTC frame: the two MaxPool2d(2, 2) layers in
 # CRNN.cnn each halve the width; the (2, 1) pools only shrink height. Must be
 # changed together with the backbone or token x-positions drift.
@@ -2056,7 +2245,11 @@ def transcribe_strip(
         List[str] symbols in reading order (default), or
         List[Tuple[str, float]] (symbol, confidence) pairs if
         return_confidence=True.
+
+    Raises:
+        ValueError: the model's head size matches no known vocabulary.
     """
+    idx_to_sym = dict(enumerate(_vocab_for_head(model)))
     if len(image.shape) == 3:
         image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
@@ -2085,13 +2278,13 @@ def transcribe_strip(
             spans_out.extend((s * px_per_frame, e * px_per_frame) for s, e in frame_spans)
 
     if return_confidence:
-        tokens = [(IDX_TO_SYM.get(i, "<unk>"), c) for i, c in zip(indices, confidences)]
+        tokens = [(idx_to_sym[i], c) for i, c in zip(indices, confidences)]
         logger.info("transcribe_strip strip_id=%s raw_tokens=%s", strip_id, [t for t, _ in tokens])
         return tokens
 
     if frame_spans is None:
         indices = _greedy_ctc_decode(log_probs)
-    tokens = [IDX_TO_SYM.get(i, "<unk>") for i in indices]
+    tokens = [idx_to_sym[i] for i in indices]
     logger.info("transcribe_strip strip_id=%s raw_tokens=%s", strip_id, tokens)
     return tokens
  
@@ -2263,13 +2456,9 @@ def _token_role(symbols: List[str], idx: int, stage_before: str, entry: dict) ->
     if symbol.startswith("metersign"):
         return "meter"
     if symbol.startswith("digit."):
-        # Same position rule as infer_pitch (PIYA-107 AC8): an L4+L2 pair is a meter, an S5 digit a
-        # multirest count, anything else was ignored.
-        if _is_multirest_count(symbol):
-            return "digit"
-        if _meter_pair_at(symbols, idx) is not None or (idx > 0 and _meter_pair_at(symbols, idx - 1)):
-            return "meter"
-        return "other"
+        in_header = stage_before == stage_after and stage_after in ("keysig", "fixed_header")
+        # A digit consumed by lookahead belongs to a mid-strip time signature (R3; reported, not applied).
+        return "meter" if in_header or entry.get("key_change_glyph") else "digit"
     for prefix, role in (("note.", "note"), ("rest.", "rest"), ("multirest", "rest"),
                          ("barline", "barline"), ("dot", "dot"), ("slur.", "slur"),
                          ("gracenote.", "grace")):
@@ -2319,6 +2508,11 @@ def build_strip_labels(
             after = committed_after(j)
             if role == "keysig":
                 text = _key_label(after["key_alterations"])
+            elif role == "meter" and entry.get("key_change_glyph"):
+                # A mid-strip time signature is never applied (R3), so the committed value is the old one;
+                # show what the glyphs read instead.
+                read = _meter_at(symbols, i)
+                text = f"time {read[0] if read else '?'} read, not applied (mid-strip)"
             elif role == "meter":
                 text = f"time {after['time_signature']}"
             else:
@@ -2346,7 +2540,7 @@ def build_strip_labels(
         elif role == "rest" and ev_idx:
             ev = events[ev_idx[0]]
             if ev["symbol"].startswith("multirest"):
-                text = f"rest x{ev.get('multirest_bars', 1)} bars"
+                text = f"rest x{ev['duration_ticks'] // NOTE_DURATION_TICKS['whole']} bars"
             else:
                 text = f"rest_{_duration_label(ev['duration_ticks'])}"
         elif role in ("accidental", "accidental_dropped"):
@@ -2359,7 +2553,7 @@ def build_strip_labels(
         elif role == "slur":
             text = "slur(" if sym.startswith("slur.start") else ")slur"
         elif role == "digit":
-            text = f"count {sym.split('.')[1].split('-')[0]}"
+            text = f"{sym.split('.')[1].split('-')[0]} bars"
         elif role == "grace":
             text = "grace (not played)"
         elif role == "barline":
@@ -2567,6 +2761,151 @@ def _wrap_tokens(symbols: List[str], max_chars: int) -> List[str]:
 CLEF_KEY_DISABLED_FLAG = "clef_key_disabled"  # event flag when Stage 3 runs without ClefKeyNet
 
 
+# ── Header-zone hallucination filter (PIYA-106, docs/decisions/piya-106-ser-15-plan.md, E1c) ─────────────
+# Every Camera-PrIMuS sample opens with clef + key + time signature, so the CRNN writes a time signature (and
+# often a fermata or multirest) at the start of continuation systems that have none. On eval_prelim (dev data)
+# the GT has none of these before the first barline on 207 continuation strips; dropping them cut token SER by
+# about 8 pp camera and 9 pp digital with pitch unchanged. Conditions follow the choral-conductor review of
+# 2026-09-29: an open-score system shares its barlines and meter, so a real multirest or meter change shows in
+# (nearly) every voice at once, and a multirest's digit tokens are its bar count and must go with it.
+HEADER_QUORUM = 3  # voices of one system that must agree before a header meter/multirest is believed
+HEADER_METER_CHANGE_FLAG = "header_meter_change_kept"
+_TIME_SIG_PREFIXES = ("digit", "metersign")
+_BODY_PREFIXES = ("note", "rest", "gracenote")
+
+
+def _header_parts(symbols: list) -> tuple[set, tuple, set, set]:
+    """Splits the zone before the first barline into (multirest-unit indices, time-signature group,
+    time-signature indices, fermata indices before the first note/rest)."""
+    first_bar = next((i for i, s in enumerate(symbols) if s.startswith("barline")), len(symbols))
+    multirest: set[int] = set()
+    i = 0
+    while i < first_bar:
+        if symbols[i].startswith("multirest"):
+            multirest.add(i)
+            i += 1
+            while i < first_bar and symbols[i].startswith("digit"):
+                multirest.add(i)
+                i += 1
+        else:
+            i += 1
+    ts_idx = {i for i in range(first_bar) if i not in multirest and symbols[i].startswith(_TIME_SIG_PREFIXES)}
+    first_body = next((i for i, s in enumerate(symbols) if s.startswith(_BODY_PREFIXES)), len(symbols))
+    fermatas = {i for i in range(min(first_bar, first_body)) if symbols[i].startswith("fermata")}
+    return multirest, tuple(symbols[i] for i in sorted(ts_idx)), ts_idx, fermatas
+
+
+def filter_header_hallucinations(
+    system_symbols: dict[str, tuple[str, list]],
+    running_meter: dict[str, tuple],
+    is_first_system: bool,
+) -> tuple[dict[str, list[int]], dict[str, list[str]], dict[str, tuple]]:
+    """Drops header-zone tokens the CRNN copies from its training layout on a continuation system.
+
+    Args:
+        system_symbols: {strip_id: (voice, symbols)} for every strip of one system.
+        running_meter: {voice: time-signature token group} in force before this system.
+        is_first_system: the piece's first system keeps its header untouched (its time signature is real).
+
+    Returns:
+        (keep, flags, running): per strip the indices of symbols to keep (in order, so confidences can be
+        filtered alike), per strip the review flags, and the updated running meter per voice.
+    """
+    parts = {sid: _header_parts(syms) for sid, (_, syms) in system_symbols.items()}
+    running = dict(running_meter)
+    keep: dict[str, list[int]] = {}
+    flags: dict[str, list[str]] = {}
+    if is_first_system:
+        for sid, (voice, syms) in system_symbols.items():
+            keep[sid] = list(range(len(syms)))
+            flags[sid] = []
+            running[voice] = parts[sid][1]
+        return keep, flags, running
+    n_multirest = sum(1 for p in parts.values() if p[0])
+    meter_votes = Counter(p[1] for p in parts.values() if p[1])
+    top = meter_votes.most_common(1)
+    accepted = top[0][0] if top and top[0][1] >= HEADER_QUORUM else None
+    voices = {voice for voice, _ in system_symbols.values()}
+    # A meter change is a system-wide event, so it moves every voice's running meter, and the whole system is
+    # flagged: the CRNN also agrees with itself on phantoms, and a voice that misread the change is exactly the
+    # disagreement a reviewer should see (choral-conductor, 2026-09-29).
+    changed = accepted is not None and any(running.get(v) != accepted for v in voices)
+    for sid, (voice, syms) in system_symbols.items():
+        multirest, group, ts_idx, fermatas = parts[sid]
+        drop = set(fermatas)
+        if n_multirest < HEADER_QUORUM:
+            drop |= multirest
+        if group and not (changed and group == accepted):
+            drop |= ts_idx
+        flags[sid] = [HEADER_METER_CHANGE_FLAG, "review_needed"] if changed else []
+        keep[sid] = [i for i in range(len(syms)) if i not in drop]
+    if changed:
+        for v in voices:
+            running[v] = accepted
+    return keep, flags, running
+
+
+# ── Mid-strip key / meter changes agreed per system (PIYA-106 R4, choral-conductor + ml-cv-lead 2026-09-30) ──
+# An open-score system shares its barlines, so a real key or time-signature change is printed in every staff at
+# the same bar. A change the CRNN reads in fewer than HEADER_QUORUM voices is a misread in those voices (or a
+# missed one in the rest); either way a reviewer must look, so it is flagged, not applied.
+MID_KEY_CHANGE_FLAG = "mid_strip_key_change"
+MID_KEY_CHANGE_REJECTED_FLAG = "mid_strip_key_change_rejected"
+MID_METER_CHANGE_FLAG = "mid_strip_meter_change"
+MID_METER_UNCONFIRMED_FLAG = "mid_strip_meter_unconfirmed"
+KEY_CHANGE_CONTRADICTED_FLAG = "key_change_contradicted"
+
+
+def scan_mid_changes(symbols: list, voice: str, page_index: int, sys_idx: int,
+                     header_override: Optional[HeaderOverride] = None,
+                     next_system_key: Optional[int] = None) -> list[dict[str, Any]]:
+    """Mid-strip key / time-signature change candidates of one strip (single-strip rule, nothing applied)."""
+    out: list[dict[str, Any]] = []
+    with contextlib.redirect_stdout(io.StringIO()):
+        infer_pitch(list(symbols), voice=voice, page_index=page_index, sys_idx=sys_idx,
+                    header_override=header_override, next_system_key=next_system_key, mid_changes_out=out)
+    return out
+
+
+def decide_mid_changes(
+    system: dict[str, tuple[str, list[dict[str, Any]]]],
+) -> tuple[dict[int, int], dict[str, list[str]]]:
+    """Keeps the mid-strip changes at least HEADER_QUORUM voices of one system read at the same bar (R4).
+
+    Args:
+        system: {strip_id: (voice, scan_mid_changes output)} for every strip of one system.
+
+    Returns:
+        (key changes {measure_index: signed key} for infer_pitch's ``system_key_changes``, per-strip flags).
+        A quorum meter change flags the whole system and is never applied (R3); Stage 4's bar-length flags
+        in that system are then expected consequences of the unapplied meter.
+    """
+    key_voices: dict[tuple[int, int], set[str]] = {}
+    meter_voices: dict[tuple[int, str], set[str]] = {}
+    for voice, cands in system.values():
+        for c in cands:
+            if c["kind"] == "key":
+                key_voices.setdefault((c["bar"], c["key"]), set()).add(voice)
+            else:
+                meter_voices.setdefault((c["bar"], c["meter"]), set()).add(voice)
+    gate = {bar: key for (bar, key), vs in sorted(key_voices.items()) if len(vs) >= HEADER_QUORUM}
+    meters = {bm for bm, vs in meter_voices.items() if len(vs) >= HEADER_QUORUM}
+    flags: dict[str, list[str]] = {}
+    for sid, (_, cands) in system.items():
+        f: set[str] = set()
+        if gate:
+            f.add(MID_KEY_CHANGE_FLAG)
+        if meters:
+            f.add(MID_METER_CHANGE_FLAG)
+        for c in cands:
+            if c["kind"] == "key" and gate.get(c["bar"]) != c["key"]:
+                f.add(MID_KEY_CHANGE_REJECTED_FLAG)
+            elif c["kind"] == "meter" and (c["bar"], c["meter"]) not in meters:
+                f.add(MID_METER_UNCONFIRMED_FLAG)
+        flags[sid] = sorted(f | {"review_needed"}) if f else []
+    return gate, flags
+
+
 # ── Full pipeline for one strip ───────────────────────────────────────────────
  
 def process_strip(
@@ -2581,13 +2920,9 @@ def process_strip(
     sys_idx:    int = 1,
     strip_id:   str = "",
     clef_key_decision: Optional["StripDecision"] = None,
-    strip_flags_out: Optional[list[dict[str, Any]]] = None,
 ) -> list:
 
     """Transcribes one strip and returns pitch-assigned events for Stage 4.
-
-    strip_flags_out: receives ``{"voice", "page_index", "sys_idx", "meter_flags"}`` for a strip that
-    produced no events but raised meter flags (on any other strip the flags ride on its events).
 
     clef_key_decision: a stage3_clefkey.StripDecision; when given, clef/key/octave come from ClefKeyNet
     (version b) and every event carries ``review_needed`` / ``clef_key_flags``.
@@ -2595,25 +2930,43 @@ def process_strip(
     # Spans and trace are only side-outputs for the visualization; the tokens
     # and events are the same with or without them.
     spans: Optional[List[Tuple[float, float]]] = [] if viz_dir else None
-    trace: Optional[list] = [] if viz_dir else None
     scored  = transcribe_strip(strip, model, device, img_height,
                                return_confidence=True, strip_id=strip_id,
                                spans_out=spans)
     symbols = [s for s, _ in scored]
     confs   = [c for _, c in scored]
-    meter_flags: list[str] = []
+    return _events_for_symbols(strip, symbols, confs, voice, page_index, img_height, v_idx, viz_dir,
+                               sys_idx, clef_key_decision, spans=spans)
+
+
+def _events_for_symbols(
+    strip:      np.ndarray,
+    symbols:    list,
+    confs:      list,
+    voice:      str,
+    page_index: int,
+    img_height: int,
+    v_idx:      int,
+    viz_dir:    Optional[str],
+    sys_idx:    int,
+    clef_key_decision: Optional["StripDecision"],
+    system_key_changes: Optional[dict[int, int]] = None,
+    spans:      Optional[List[Tuple[float, float]]] = None,
+) -> list:
+    """Pitch inference, log line and optional viz for one strip's decoded tokens (process_strip's second half).
+
+    system_key_changes: the system's agreed mid-strip key changes (``decide_mid_changes``); None keeps the
+    single-strip rule (``process_strip`` sees one strip only).
+    spans: the CTC x-ranges of ``symbols`` (same length and order) for the visualization only.
+    """
+    trace: Optional[list] = [] if viz_dir else None
     if clef_key_decision is not None:
         import stage3_clefkey  # lazy: stage3_clefkey imports this module
         events, _, _ = stage3_clefkey.infer_pitch_b(symbols, confs, voice, page_index, sys_idx,
-                                                    clef_key_decision, trace=trace,
-                                                    meter_flags_out=meter_flags)
+                                                    clef_key_decision, system_key_changes, trace=trace)
     else:
-        events = infer_pitch(symbols, voice=voice, page_index=page_index,
-                             sys_idx=sys_idx, confidences=confs, trace=trace,
-                             meter_flags_out=meter_flags)
-    if not events and meter_flags and strip_flags_out is not None:
-        strip_flags_out.append({"voice": voice, "page_index": page_index, "sys_idx": sys_idx,
-                                "meter_flags": meter_flags})
+        events = infer_pitch(symbols, voice=voice, page_index=page_index, sys_idx=sys_idx,
+                             confidences=confs, trace=trace, system_key_changes=system_key_changes)
 
     print(f"[Stage 3] {voice} p{page_index}: "
           f"{len(symbols)} symbols -> {len(events)} events")
@@ -2635,11 +2988,11 @@ def transcribe_voice_sequences(
     viz_dir:         str = r"D:\PiyaNota (Code)\data\symbol_detection_viz",
     events_dir:      str = r"D:\PiyaNota (Code)\data\transcribed_symbols",   # ← add this
     clef_key_decisions: Optional[dict[str, "StripDecision"]] = None,
-    strip_flags_out: Optional[list[dict[str, Any]]] = None,
+    header_filter:   bool = True,
 ) -> dict:
     """
     Processes all voice strips from Stage 2 and returns event sequences.
- 
+
     Args:
         voice_sequences: Output of Stage 2 detect_staff_regions().
           Format: {voice: [(strip, page_index, sys_idx, voice, v_idx), ...]}
@@ -2654,8 +3007,15 @@ def transcribe_voice_sequences(
           ``stage3_clefkey.decisions_for_pages``; None runs version (a) (CRNN clef/key), and every
           event is then flagged ``clef_key_disabled`` / ``review_needed`` (the CRNN clef collapses on
           real scores, BUG-011).
-        strip_flags_out: optional out-list for meter flags of strips with no events (see
-          ``process_strip``); Stage 5's ``build_review`` turns them into review items.
+        header_filter: drop the time signatures / fermatas / multirests the CRNN invents at the start of
+          continuation systems (``filter_header_hallucinations``); a meter change kept by voice quorum flags
+          its events ``header_flags`` / ``review_needed``. False keeps the raw CRNN tokens.
+
+    Between decoding and pitch inference whole systems are checked: with ClefKeyNet, a system key that breaks
+    from the previous one needs corroboration (``stage3_clefkey.apply_key_continuity``, R1); then a mid-strip
+    key change is applied only where HEADER_QUORUM voices read it at the same bar, and a mid-strip time
+    signature is flagged, not applied (``decide_mid_changes``, R2-R4). Their flags go on the events as
+    ``mid_change_flags`` / ``review_needed``.
 
     Raises:
         ValueError: clef_key_decisions is given but lacks a strip.
@@ -2667,16 +3027,16 @@ def transcribe_voice_sequences(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[Stage 3] Using device: {device}")
  
-    model = CRNN(VOCAB_SIZE).to(device)
     checkpoint = torch.load(model_weights, map_location=device)
-    model.load_state_dict(checkpoint["model_state"])
+    _vocab_for_checkpoint(checkpoint)
+    model = crnn_from_state(checkpoint["model_state"]).to(device)
     model.eval()
     print(f"[Stage 3] Loaded weights -> {model_weights} "
           f"(epoch {checkpoint.get('epoch', '?')})")
  
-    results = {}
+    # Pass 1: decode every strip. The header filter needs all voices of a system at once (quorum).
+    decoded: dict[str, dict[str, Any]] = {}
     for voice, strips in voice_sequences.items():
-        all_events = []
         for strip, page_index, sys_idx, voice_label, v_idx in strips:
             strip_id = f"page{page_index:03d}_sys{sys_idx:02d}_{voice_label}_vidx{v_idx}"
             decision = None
@@ -2684,17 +3044,59 @@ def transcribe_voice_sequences(
                 if strip_id not in clef_key_decisions:
                     raise ValueError(f"no clef/key decision for {strip_id} (Stage 2 manifest out of sync)")
                 decision = clef_key_decisions[strip_id]
-            events = process_strip(strip, voice_label, page_index,
-                    model, device, img_height,
-                    v_idx=v_idx,
-                    viz_dir=viz_dir,
-                    sys_idx=sys_idx,
-                    strip_id=strip_id,
-                    clef_key_decision=decision,
-                    strip_flags_out=strip_flags_out)
-            if decision is None:
+            spans: Optional[List[Tuple[float, float]]] = [] if viz_dir else None
+            scored = transcribe_strip(strip, model, device, img_height, return_confidence=True, strip_id=strip_id,
+                                      spans_out=spans)
+            decoded[strip_id] = dict(voice=voice, strip=strip, page_index=page_index, sys_idx=sys_idx,
+                                     voice_label=voice_label, v_idx=v_idx, decision=decision,
+                                     symbols=[s for s, _ in scored], confs=[c for _, c in scored],
+                                     spans=spans, header_flags=[])
+
+    meter_change_systems: set[tuple[int, int]] = set()
+    if header_filter and decoded:
+        systems: dict[tuple, dict[str, tuple[str, list]]] = {}
+        for sid, d in decoded.items():
+            systems.setdefault((d["page_index"], d["sys_idx"]), {})[sid] = (d["voice_label"], d["symbols"])
+        first_system = min(systems)
+        running: dict[str, tuple] = {}
+        n_dropped = 0
+        for key in sorted(systems):
+            keep, flags, running = filter_header_hallucinations(systems[key], running, key == first_system)
+            for sid, idx in keep.items():
+                d = decoded[sid]
+                n_dropped += len(d["symbols"]) - len(idx)
+                d["symbols"] = [d["symbols"][i] for i in idx]
+                d["confs"] = [d["confs"][i] for i in idx]
+                if d["spans"] is not None:
+                    d["spans"] = [d["spans"][i] for i in idx]
+                d["header_flags"] = flags[sid]
+                if HEADER_METER_CHANGE_FLAG in flags[sid]:
+                    meter_change_systems.add(key)
+        print(f"[Stage 3] Header filter: dropped {n_dropped} header-zone tokens on continuation systems")
+
+    _apply_system_checks(decoded, meter_change_systems)
+
+    # Pass 2: pitch inference per strip, in the original voice/strip order.
+    results = {}
+    for voice in voice_sequences:
+        all_events = []
+        for sid, d in decoded.items():
+            if d["voice"] != voice:
+                continue
+            events = _events_for_symbols(d["strip"], d["symbols"], d["confs"], d["voice_label"], d["page_index"],
+                                         img_height, d["v_idx"], viz_dir, d["sys_idx"], d["decision"],
+                                         d["system_key_changes"], spans=d["spans"])
+            if d["decision"] is None:
                 for e in events:
                     e["clef_key_flags"] = [CLEF_KEY_DISABLED_FLAG, "review_needed"]
+                    e["review_needed"] = True
+            if d["header_flags"]:
+                for e in events:
+                    e["header_flags"] = list(d["header_flags"])
+                    e["review_needed"] = True
+            if d["mid_change_flags"]:
+                for e in events:
+                    e["mid_change_flags"] = list(d["mid_change_flags"])
                     e["review_needed"] = True
             all_events.extend(events)
         all_events.sort(key=lambda e: (e["page_index"], e["sys_idx"], e["tick_onset"]))
@@ -2714,6 +3116,49 @@ def transcribe_voice_sequences(
     return results
  
  
+def _apply_system_checks(decoded: dict[str, dict[str, Any]], meter_change_systems: set[tuple[int, int]]) -> None:
+    """Whole-system checks on decoded strips, in place: R1 key continuity, then R2-R4 mid-strip changes.
+
+    Sets each entry's ``decision`` (revised by R1 when ClefKeyNet is used), ``system_key_changes`` and
+    ``mid_change_flags``.
+
+    Args:
+        decoded: transcribe_voice_sequences's Pass 1 entries (after the header filter).
+        meter_change_systems: (page, system) keys where the header filter kept a quorum meter change.
+    """
+    import stage3_clefkey  # lazy: stage3_clefkey imports this module
+    systems: dict[tuple[int, int], dict[str, tuple[str, list]]] = {}
+    for sid, d in decoded.items():
+        systems.setdefault((d["page_index"], d["sys_idx"]), {})[sid] = (d["voice_label"], d["symbols"])
+    if any(d["decision"] is not None for d in decoded.values()):
+        revised = stage3_clefkey.apply_key_continuity({sid: d["decision"] for sid, d in decoded.items()},
+                                                      systems, meter_change_systems)
+        for sid, d in decoded.items():
+            d["decision"] = revised[sid]
+    for key in sorted(systems):
+        scans: dict[str, tuple[str, list[dict[str, Any]]]] = {}
+        for sid in systems[key]:
+            d = decoded[sid]
+            dec = d["decision"]
+            scans[sid] = (d["voice_label"],
+                          scan_mid_changes(d["symbols"], d["voice_label"], d["page_index"], d["sys_idx"],
+                                           None if dec is None else stage3_clefkey.header_override(dec),
+                                           None if dec is None else dec.next_key))
+        gate, flags = decide_mid_changes(scans)
+        for sid in systems[key]:
+            d = decoded[sid]
+            dec = d["decision"]
+            f = list(flags[sid])
+            if gate and dec is not None and dec.next_key is not None:
+                if gate[max(gate)] != dec.next_key and dec.next_key == dec.key:
+                    # The next system still reads the key this change left (choral-conductor 2026-09-30).
+                    f = sorted(set(f) | {KEY_CHANGE_CONTRADICTED_FLAG, "review_needed"})
+            d["system_key_changes"] = gate
+            d["mid_change_flags"] = f
+        if gate:
+            print(f"[Stage 3] p{key[0]} s{key[1]}: system mid-strip key change(s) {gate}")
+
+
 # ── Symbol Error Rate ─────────────────────────────────────────────────────────
  
 def compute_ser(predicted: list, ground_truth: list) -> float:
@@ -2741,9 +3186,9 @@ def load_model(model_weights: str,
     """Loads CRNN weights and returns (model, device)."""
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = CRNN(VOCAB_SIZE).to(device)
     ckpt  = torch.load(model_weights, map_location=device)
-    model.load_state_dict(ckpt["model_state"])
+    _vocab_for_checkpoint(ckpt)
+    model = crnn_from_state(ckpt["model_state"]).to(device)
     model.eval()
     return model, device
  
@@ -2778,8 +3223,7 @@ def run_stages_1_to_3(
         crnn_weights: Stage 3 CRNN checkpoint.
         clef_key_weights: ClefKeyNet checkpoint; None opts out (version a, CRNN clef/key).
         img_height: CRNN input height.
-        **transcribe_kwargs: passed on to ``transcribe_voice_sequences`` (viz_dir, events_dir,
-            strip_flags_out).
+        **transcribe_kwargs: passed on to ``transcribe_voice_sequences`` (viz_dir, events_dir).
 
     Returns:
         {voice: [event_dict, ...]} as ``transcribe_voice_sequences``.
