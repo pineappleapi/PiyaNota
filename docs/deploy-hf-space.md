@@ -1,0 +1,74 @@
+# Deploy the conversion worker to a Hugging Face Space
+
+The worker runs on a free CPU Space (Docker). The API stays on Render. Both share the Neon database,
+and results are stored in the database (`PIYA_STORAGE_BACKEND=db`). This file was written without being
+able to build the image (Docker is not available on the dev machine), so the first Space build is the
+first real test.
+
+## Which variables are secrets
+
+Set these as Space **Secrets** (Settings, Variables and secrets, New secret):
+`PIYA_DATABASE_URL`, `PIYA_MEDIA_HMAC_KEY`, `PIYA_RESET_CODE_HMAC_KEY`, `PIYA_LOG_HASH_KEY`.
+
+Set these as plain Space **Variables** (not secret): `PIYA_STORAGE_BACKEND` (value `db`) and
+`PIYA_PUBLIC_BASE_URL` (the Render URL, starting with `https://`).
+
+The image already sets `PIYA_ENV=prod`, `PIYA_REQUIRE_HTTPS=true`, `PIYA_MAIL_BACKEND=log`,
+`PIYA_MAIL_FROM` and the four model paths. Do not set them again. Production mode makes the worker
+refuse to start unless the reset-code and log-hash keys are present, which is why they are listed above.
+The values of `PIYA_MEDIA_HMAC_KEY`, `PIYA_RESET_CODE_HMAC_KEY` and `PIYA_LOG_HASH_KEY` should be long
+random strings. The worker needs the same `PIYA_MEDIA_HMAC_KEY` as Render so that links signed by one
+side are accepted by the other.
+
+## Steps
+
+1. Create the Space at huggingface.co/new-space. Choose SDK `Docker`, template `Blank`, hardware
+   `CPU basic (free)`, visibility Private. Confirm that the page does not ask for a payment card. If it does, stop here.
+2. Open the Space, then Settings, then Variables and secrets. Add the four secrets and the two variables from the section above.
+   For `PIYA_DATABASE_URL` use the Neon **unpooled** (direct) connection string, the same one that Render uses as `DATABASE_URL`.
+3. On your PC, clone the Space repository: `git clone https://huggingface.co/spaces/<your-user>/<space-name> piya-space`.
+   Install Git LFS once with `git lfs install`.
+4. Copy the packaging files from this repository into the Space clone. Run these from the repository root
+   (`D:/PiyaNota/.claude/worktrees/module3-backend` or the main checkout after merge), replacing `<space>` with the clone path:
+   `cp deploy/space/Dockerfile deploy/space/README.md deploy/space/entrypoint.sh deploy/space/requirements-worker.txt deploy/space/.dockerignore deploy/space/.gitattributes <space>/`
+5. Copy the code into the Space clone, keeping the same names:
+   `cp -r backend <space>/backend` and
+   `cp stage1_preprocessing.py stage2_detection.py stage3_transcription.py stage3_clefkey.py stage4_reconstruction.py stage5_synthesis.py timing_export.py clef_key_core.py clef_voice_rules.py <space>/`.
+   Then delete `<space>/backend/.venv`, `<space>/backend/tests` and every `__pycache__` folder if they were copied.
+6. Copy the model files into `<space>/models/` under exactly these names. The source paths are in the main checkout (`D:/PiyaNota`),
+   because the weights are not in this worktree:
+   - `staff_detector_files/weights/best.pt` as `models/best.pt`
+   - `music_symbol_detection/phase2_kaggle_models/seed1/phase2_seed1.pt` as `models/phase2_seed1.pt`
+   - `training/clef_key_artifacts/t4_full_seed20260926_runA/clef_key_classifier.pt` as `models/clef_key_classifier.pt`
+     (this file is git-ignored in the main repository, so it exists only on your PC; without it every job fails with a "missing model file" log line)
+   - `soundfont/piano.sf2` as `models/piano.sf2`
+   Check the ClefKeyNet copy with `sha256sum models/clef_key_classifier.pt`. The expected value is
+   `e718d4479b1310369b64cfaf9a8f1ff433179543ffa9d1810b24c683de13fe10`.
+7. In the Space clone, run `git add .`, then `git commit -m "Add conversion worker"`, then `git push`.
+   The push uploads about 160 MB through Git LFS. Hugging Face then builds the image, which takes several minutes.
+8. Watch the Logs tab of the Space. A healthy start prints `Running` and no tracebacks. Then open
+   `https://<your-user>-<space-name>.hf.space/health`. It must answer `ok`.
+9. On the Render service, add these environment variables, using the same values as the Space:
+   `PIYA_STORAGE_BACKEND=db`, `PIYA_MEDIA_HMAC_KEY`, `PIYA_PUBLIC_BASE_URL` (the Render service URL, starting with `https://`).
+   Render then redeploys.
+10. Run migration 0003 against Neon with the **unpooled** connection string. Render's start command runs
+    `python -m backend.migrate up` on every boot, so the redeploy in step 9 applies it. To check by hand from the
+    repository root: set `DATABASE_URL` to the unpooled string, then run `backend/.venv/Scripts/python -m backend.migrate status`.
+    Version 0003 (`0003_worker_and_blobs`) must show as applied before the worker can claim jobs.
+11. Add an UptimeRobot monitor: type HTTP(s), URL `https://<your-user>-<space-name>.hf.space/health`, interval 5 minutes.
+    This ping stops the free Space from sleeping. Add a second monitor for Render at `/healthz`.
+12. Submit one real conversion from the app. In the Space logs you must see `job claimed`. When the job finishes the app shows the audio.
+
+## Backup (run on your PC)
+
+Media is stored in the database, so back up the database regularly. This needs the PostgreSQL client tools. Use the unpooled URL:
+
+`pg_dump "<unpooled Neon URL>" --format=custom --file=D:/PiyaNota-backups/piya-$(date +%F).dump`
+
+Create the `D:/PiyaNota-backups` folder first. Restore with `pg_restore --clean --dbname "<target URL>" <file>`.
+
+## Known limits
+
+- The free Space has 2 CPU cores and 16 GB RAM. A multi-page score may take several minutes per job.
+- The Space restarts on every push. A job that was running is recovered by the queue after its stale timeout (1200 seconds).
+- If you change model files, push the new files under the same names in `models/`.
