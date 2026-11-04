@@ -21,6 +21,17 @@ VoicePart? parseVoicePart(Object? value) {
   return null;
 }
 
+/// A `voice_unreadable` review item, merged per voice: the voice could not
+/// be read on [pages] (1-based, as the backend sends them; empty means the
+/// item carried no list, so every page is named).
+@immutable
+class UnreadableVoiceFlag {
+  const UnreadableVoiceFlag({required this.voice, this.pages = const []});
+
+  final VoicePart voice;
+  final List<int> pages;
+}
+
 /// PIYA-103's per-score review summary.
 @immutable
 class ReviewSummary {
@@ -29,6 +40,7 @@ class ReviewSummary {
     this.reasons = const [],
     this.itemCount = 0,
     this.truncated = false,
+    this.voiceFlags = const [],
   });
 
   /// Used when a response has no usable `review` block. The pipeline's
@@ -43,6 +55,31 @@ class ReviewSummary {
   /// not shown yet; PIYA-208 only surfaces the banner.
   final int itemCount;
   final bool truncated;
+
+  /// `voice_unreadable` items only (the backend sends no other kind to the
+  /// client), one per voice in first-seen order.
+  final List<UnreadableVoiceFlag> voiceFlags;
+
+  static List<UnreadableVoiceFlag> _voiceFlags(Object? items) {
+    final pagesByVoice = <VoicePart, Set<int>>{};
+    if (items is List) {
+      for (final item in items) {
+        if (item is! Map || item['code'] != 'voice_unreadable') continue;
+        final voice = parseVoicePart(item['voice']);
+        if (voice == null) continue;
+        final pages = item['pages'];
+        pagesByVoice.putIfAbsent(voice, () => {}).addAll([
+          if (pages is List)
+            for (final page in pages)
+              if (page is int && page >= 1) page,
+        ]);
+      }
+    }
+    return List.unmodifiable([
+      for (final MapEntry(:key, :value) in pagesByVoice.entries)
+        UnreadableVoiceFlag(voice: key, pages: (value.toList()..sort())),
+    ]);
+  }
 
   static ReviewSummary fromJson(Object? json) {
     if (json is! Map<String, dynamic>) return unknown;
@@ -59,6 +96,7 @@ class ReviewSummary {
       ],
       itemCount: items is List ? items.length : 0,
       truncated: json['truncated'] == true,
+      voiceFlags: _voiceFlags(items),
     );
   }
 }

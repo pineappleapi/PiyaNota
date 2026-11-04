@@ -340,6 +340,12 @@ abstract final class PlaybackDemo {
   static List<Map<String, Object?>> barsJson() => [
     for (var bar = 0; bar < bars.length; bar++)
       {
+        'pageIndex': 0,
+        'systemIndex': systemOf(bar),
+        'x': barEdges(systemOf(bar))[bar - _systemStarts[systemOf(bar)]],
+        'systemTopY': _systemStaffTops[systemOf(bar)].first - _systemPad,
+        'systemBottomY':
+            _systemStaffTops[systemOf(bar)].last + _staffHeight + _systemPad,
         'bar': bar,
         'startMs': tickMs(barStartTick(bar)),
         'durMs': tickMs(barStartTick(bar + 1)) - tickMs(barStartTick(bar)),

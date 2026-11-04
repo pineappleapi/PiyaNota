@@ -610,7 +610,14 @@ class PlaybackController extends Notifier<PlaybackState> {
     try {
       final file = await api.fetchTiming(url);
       return (
-        ScoreTimeline(onExistingPages(file.events, result.hasPage)),
+        ScoreTimeline(
+          onExistingPages(file.events, result.hasPage),
+          // A bar on a page with no image can't be drawn (as for events).
+          bars: [
+            for (final bar in file.bars)
+              if (bar.pageIndex == null || result.hasPage(bar.pageIndex!)) bar,
+          ],
+        ),
         file.bars,
         false,
       );

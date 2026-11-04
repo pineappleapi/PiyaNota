@@ -244,7 +244,11 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
     if (!_offerChecked) {
       _offerChecked = true;
       final result = state.result;
-      if (result != null && result.unreadableVoices.isNotEmpty) {
+      if (result != null && result.review.voiceFlags.isNotEmpty) {
+        // The review flags carry the pages, so this prompt replaces the
+        // generic offer below for the same voices.
+        _queueAlert(() => _promptUnreadableVoices(result));
+      } else if (result != null && result.unreadableVoices.isNotEmpty) {
         // First in the queue: nothing else is shown until it's answered.
         _queueAlert(() => _offerRephotograph(result));
       }
@@ -275,6 +279,27 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
       if (result != null && measures.isNotEmpty) {
         _queueAlert(() => _showMuted(result, measures));
       }
+    }
+  }
+
+  /// The general notice was closed; lasts as long as this screen visit.
+  bool _noticeDismissed = false;
+
+  /// One prompt per flagged voice; Retake stops the rest.
+  Future<void> _promptUnreadableVoices(ScoreResult result) async {
+    for (final flag in result.review.voiceFlags) {
+      if (!mounted || _leaving) return;
+      final retake = await showVoiceUnreadablePrompt(
+        context,
+        message: PlaybackMessages.voiceUnreadablePrompt(
+          flag.voice,
+          flag.pages,
+          result.scoreImages.length,
+        ),
+      );
+      // The existing whole-score retake; there is no per-page resubmit
+      // of a finished job, so the page numbers are advice only.
+      if (retake && mounted) return _rephotograph();
     }
   }
 
@@ -464,13 +489,32 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
               playing: state.playing,
             ),
           ),
-          if (state.showReviewBanner)
-            Positioned(
-              top: 8,
-              left: 12,
-              right: 12,
-              child: _ReviewBanner(onDismiss: _controller.dismissReview),
+          Positioned(
+            top: 8,
+            left: 12,
+            right: 12,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (!_noticeDismissed)
+                  _ReviewBanner(
+                    key: const ValueKey('accuracy-notice'),
+                    message: PlaybackMessages.accuracyNotice,
+                    dismissTooltip: PlaybackMessages.dismissNotice,
+                    onDismiss: () => setState(() => _noticeDismissed = true),
+                  ),
+                if (state.showReviewBanner) ...[
+                  if (!_noticeDismissed) const SizedBox(height: 8),
+                  _ReviewBanner(
+                    key: const ValueKey('review-banner'),
+                    message: PlaybackMessages.review,
+                    dismissTooltip: PlaybackMessages.dismissReview,
+                    onDismiss: _controller.dismissReview,
+                  ),
+                ],
+              ],
             ),
+          ),
         ],
       ),
     };
@@ -928,14 +972,20 @@ class _ErrorView extends StatelessWidget {
 }
 
 class _ReviewBanner extends StatelessWidget {
-  const _ReviewBanner({required this.onDismiss});
+  const _ReviewBanner({
+    super.key,
+    required this.message,
+    required this.dismissTooltip,
+    required this.onDismiss,
+  });
 
+  final String message;
+  final String dismissTooltip;
   final VoidCallback onDismiss;
 
   @override
   Widget build(BuildContext context) {
     return Material(
-      key: const ValueKey('review-banner'),
       color: AppTheme.playbackReviewFill,
       elevation: 2,
       borderRadius: BorderRadius.circular(12),
@@ -953,7 +1003,7 @@ class _ReviewBanner extends StatelessWidget {
               child: Semantics(
                 liveRegion: true,
                 child: Text(
-                  PlaybackMessages.review,
+                  message,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     fontSize: 13,
                     color: AppTheme.playbackReviewText,
@@ -962,7 +1012,7 @@ class _ReviewBanner extends StatelessWidget {
               ),
             ),
             IconButton(
-              tooltip: PlaybackMessages.dismissReview,
+              tooltip: dismissTooltip,
               onPressed: onDismiss,
               color: AppTheme.playbackReviewText,
               icon: const Icon(Icons.close_rounded, size: 20),

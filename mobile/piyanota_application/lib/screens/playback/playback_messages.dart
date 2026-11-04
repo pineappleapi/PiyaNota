@@ -143,6 +143,31 @@ class PlaybackMessages {
       'Automatic transcription — some notes may be wrong. Listen critically.';
   static const String dismissReview = 'Dismiss';
 
+  /// General notice, shown once per result screen visit.
+  static const String accuracyNotice =
+      "PiyaNota's conversion is not fully accurate yet. Please review the "
+      'playback against your score before relying on it.';
+  static const String dismissNotice = 'Dismiss notice';
+
+  // Unreadable-voice prompt (backend `voice_unreadable` review item).
+  static const String promptContinue = 'Continue';
+  static const String promptRetake = 'Retake';
+
+  /// [pages] are 1-based; empty names every one of [total].
+  static String voiceUnreadablePrompt(
+    VoicePart voice,
+    List<int> pages,
+    int total,
+  ) {
+    final named = pages.isEmpty ? [for (var i = 1; i <= total; i++) i] : pages;
+    final list = named.length < 2
+        ? named.join()
+        : '${named.sublist(0, named.length - 1).join(', ')} and ${named.last}';
+    return 'Voice ${voice.label} could not be read. Do you want to continue '
+        'with playback anyway? It is recommended to retake a clearer picture '
+        'of page $list of the score to be more sure of the output';
+  }
+
   static const String noScoreImage =
       'The score image couldn\'t be shown, but you can still listen.';
   static const String indicatorUnavailable =

@@ -2,6 +2,7 @@ import 'dart:ui' show Size;
 
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:piyanota_application/models/measure_table.dart';
 import 'package:piyanota_application/models/score_result.dart';
 import 'package:piyanota_application/models/score_timeline.dart';
 import 'package:piyanota_application/models/voice_part.dart';
@@ -247,7 +248,7 @@ void main() {
     });
 
     test('interpolates x toward the next onset on the same system', () {
-      final timeline = ScoreTimeline(testTiming());
+      final timeline = ScoreTimeline(testTiming(), barStep: false);
       expect(
         timeline.positionAt(const Duration(milliseconds: 1000))!.x,
         closeTo(200, 1e-9),
@@ -266,7 +267,7 @@ void main() {
     test('before the first onset it waits there; after the last it stays', () {
       final timeline = ScoreTimeline(testTiming());
       expect(timeline.positionAt(Duration.zero)!.x, 100);
-      expect(timeline.positionAt(const Duration(seconds: 60))!.x, 400);
+      expect(timeline.positionAt(const Duration(seconds: 60))!.x, 100); // bar 3 downbeat
     });
 
     test('derives systems and band from x jumps and y spread', () {
@@ -292,7 +293,7 @@ void main() {
     });
 
     test('chord notes sharing a timestamp form one onset', () {
-      final timeline = ScoreTimeline([
+      final timeline = ScoreTimeline(barStep: false, [
         ev(0, 100, 10, voice: VoicePart.soprano),
         ev(0, 110, 20, voice: VoicePart.alto),
         ev(1000, 300, 10, voice: VoicePart.soprano),
@@ -307,6 +308,117 @@ void main() {
     test('empty timeline has no position', () {
       expect(ScoreTimeline.empty.positionAt(Duration.zero), isNull);
       expect(ScoreTimeline.empty.isEmpty, isTrue);
+    });
+  });
+
+  group('ScoreTimeline bar-step line', () {
+    // Bar 1 has three onsets, bar 2 one; same system.
+    List<TimingEvent> twoBars() => [
+      ev(0, 100, 10, bar: 1, systemIndex: 0, top: 0, bottom: 90, tick: 0),
+      ev(500, 150, 10, bar: 1, systemIndex: 0, top: 0, bottom: 90, tick: 480),
+      ev(1000, 200, 10, bar: 1, systemIndex: 0, top: 0, bottom: 90, tick: 960),
+      ev(1500, 300, 10, bar: 2, systemIndex: 0, top: 0, bottom: 90, tick: 1920),
+    ];
+    double xAt(ScoreTimeline t, int ms) =>
+        t.positionAt(Duration(milliseconds: ms))!.x;
+
+    test('kBarStepLine is on by default', () => expect(kBarStepLine, isTrue));
+
+    test('x stays on the bar downbeat all bar, then jumps', () {
+      final t = ScoreTimeline(twoBars());
+      expect(
+        [xAt(t, 0), xAt(t, 500), xAt(t, 1000), xAt(t, 1499)],
+        [100, 100, 100, 100],
+      );
+      expect(xAt(t, 1500), 300);
+    });
+
+    test('pickup bar 0 is a step, then bar 1', () {
+      final t = ScoreTimeline([
+        ev(0, 50, 10, bar: 0, systemIndex: 0, top: 0, bottom: 90, tick: 0),
+        ev(400, 120, 10, bar: 1, systemIndex: 0, top: 0, bottom: 90, tick: 480),
+      ]);
+      expect(xAt(t, 0), 50);
+      expect(xAt(t, 399), 50);
+      expect(xAt(t, 400), 120);
+    });
+
+    test('system break changes system and band with no in-between x', () {
+      final t = ScoreTimeline(testTiming());
+      final before = t.positionAt(const Duration(milliseconds: 3499))!;
+      expect((before.systemIndex, before.x), (0, 600));
+      final after = t.positionAt(const Duration(milliseconds: 3500))!;
+      expect((after.systemIndex, after.x, after.top), (1, 100, 760));
+    });
+
+    test('page break changes pageIndex', () {
+      final t = ScoreTimeline(pagedTiming(2));
+      expect(t.positionAt(const Duration(milliseconds: 1400))!.pageIndex, 0);
+      expect(t.positionAt(const Duration(milliseconds: 1500))!.pageIndex, 1);
+    });
+
+    test('downbeat chord across voices takes the smallest x', () {
+      final t = ScoreTimeline([
+        ev(0, 112, 10, bar: 1, tick: 0, voice: VoicePart.soprano),
+        ev(0, 100, 20, bar: 1, tick: 0, voice: VoicePart.bass),
+        ev(500, 150, 10, bar: 1, tick: 480, voice: VoicePart.soprano),
+      ]);
+      expect(xAt(t, 0), 100);
+      expect(xAt(t, 600), 100);
+    });
+
+    test('events with no bar number step per onset, no slide', () {
+      final t = ScoreTimeline([ev(0, 100, 10), ev(1000, 300, 10)]);
+      expect(xAt(t, 500), 100);
+      expect(xAt(t, 1000), 300);
+    });
+
+    test('empty, before first and after last', () {
+      expect(ScoreTimeline(const []).positionAt(Duration.zero), isNull);
+      final t = ScoreTimeline(twoBars());
+      expect(xAt(t, 0), 100);
+      expect(xAt(t, 99999), 300);
+    });
+
+    test('seeking backwards gives a fresh lookup', () {
+      final t = ScoreTimeline(twoBars());
+      final fresh = t.positionAt(const Duration(milliseconds: 700));
+      xAt(t, 1600);
+      expect(t.positionAt(const Duration(milliseconds: 700)), fresh);
+    });
+
+    BarInfo bar(int n, int ms, double x, {int system = 0, int page = 0}) =>
+        BarInfo(
+          bar: n,
+          startTick: n * 1920,
+          durTicks: 1920,
+          startMs: ms,
+          x: x,
+          pageIndex: page,
+          systemIndex: system,
+          systemTopY: 5,
+          systemBottomY: 95,
+        );
+
+    test('backend bar x is used, and a bar with no events still steps', () {
+      final bars = [bar(1, 0, 80), bar(2, 1000, 160), bar(3, 1500, 240)];
+      final t = ScoreTimeline(twoBars(), bars: bars);
+      expect(xAt(t, 500), 80);
+      expect(xAt(t, 1000), 160); // bar 2 has no events at 1000
+      expect(xAt(t, 1500), 240);
+      expect(t.positionAt(Duration.zero)!.top, 5);
+    });
+
+    test('bars without position fields fall back to the derived x', () {
+      final bars = [
+        const BarInfo(bar: 1, startTick: 0, durTicks: 1920, startMs: 0),
+      ];
+      expect(xAt(ScoreTimeline(twoBars(), bars: bars), 700), 100);
+    });
+
+    test('barStep false keeps the old slide', () {
+      final t = ScoreTimeline(twoBars(), barStep: false);
+      expect(xAt(t, 250), closeTo(125, 1e-9));
     });
   });
 }

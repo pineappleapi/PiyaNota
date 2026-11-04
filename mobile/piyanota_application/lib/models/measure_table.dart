@@ -44,6 +44,11 @@ class BarInfo {
     this.denominator,
     this.meterSource = MeterSource.unknown,
     this.pickup = false,
+    this.x,
+    this.pageIndex,
+    this.systemIndex,
+    this.systemTopY,
+    this.systemBottomY,
   });
 
   /// Printed measure number; 0 is the pickup.
@@ -62,6 +67,24 @@ class BarInfo {
   final int? denominator;
   final MeterSource meterSource;
   final bool pickup;
+
+  /// Backend bar position (all null on rows stored before it existed):
+  /// the bar's left edge in served-page pixels and the system it sits in.
+  /// For a system's first bar it is the first note's x, not a barline.
+  final double? x;
+  final int? pageIndex;
+  final int? systemIndex;
+  final double? systemTopY;
+  final double? systemBottomY;
+
+  /// Enough to draw the playback line on this bar without any event.
+  bool get hasPosition =>
+      startMs != null &&
+      x != null &&
+      pageIndex != null &&
+      systemIndex != null &&
+      systemTopY != null &&
+      systemBottomY != null;
 
   bool get hasMeter => numerator != null && denominator != null;
 
@@ -87,7 +110,18 @@ class BarInfo {
         _denominators.contains(denominator);
     final startMs = json['startMs'];
     final durMs = json['durMs'];
+    final x = json['x'];
+    final page = json['pageIndex'];
+    final system = json['systemIndex'];
+    final top = json['systemTopY'];
+    final bottom = json['systemBottomY'];
+    final hasBox = top is num && bottom is num && bottom > top;
     return BarInfo(
+      x: x is num && x >= 0 ? x.toDouble() : null,
+      pageIndex: page is int && page >= 0 ? page : null,
+      systemIndex: system is int && system >= 0 ? system : null,
+      systemTopY: hasBox ? top.toDouble() : null,
+      systemBottomY: hasBox ? bottom.toDouble() : null,
       bar: bar,
       startTick: startTick,
       durTicks: durTicks,

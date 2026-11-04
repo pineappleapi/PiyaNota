@@ -342,7 +342,9 @@ TimingEvent ev(
   double? top,
   double? bottom,
   int page = 0,
+  int? tick,
 }) => TimingEvent(
+  tick: tick,
   timestampMs: ms,
   pageIndex: page,
   x: x,
@@ -417,6 +419,7 @@ ScoreResult testResult({
   String jobId = kJobId,
   Map<VoicePart, VoiceFailureCause> failedVoiceCauses = const {},
   int pages = 1,
+  ReviewSummary? review,
 }) => ScoreResult(
   scoreId: kScoreId,
   jobId: jobId,
@@ -431,7 +434,7 @@ ScoreResult testResult({
     for (var i = 1; i <= pages; i++) Uri.parse('test://page$i.png'),
   ],
   timingMetadataUrl: Uri.parse('https://cdn.test/timing.json'),
-  review: ReviewSummary(reviewNeeded: reviewNeeded),
+  review: review ?? ReviewSummary(reviewNeeded: reviewNeeded),
   pageSizes: [for (var i = 0; i < pages; i++) const Size(1000, 1400)],
   arranger: arranger,
   tempoBpm: tempoBpm,

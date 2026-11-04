@@ -30,6 +30,32 @@ Future<void> showFailedVoicesAlert(
   ),
 );
 
+/// The voice prompt: true to retake, false to continue (also when
+/// dismissed, which only system Back can do).
+Future<bool> showVoiceUnreadablePrompt(
+  BuildContext context, {
+  required String message,
+}) async =>
+    await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        key: const ValueKey('voice-unreadable-prompt'),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text(PlaybackMessages.promptContinue),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text(PlaybackMessages.promptRetake),
+          ),
+        ],
+      ),
+    ) ??
+    false;
+
 /// Lists [measures] (PIYA-207 AC10). True when "Don't show again for this
 /// score" was ticked when it was closed.
 Future<bool> showMutedMeasuresAlert(

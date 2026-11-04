@@ -411,12 +411,15 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('play-pause')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 1000));
+      // Bar-step line: it holds on bar 1 and jumps at bar 2 (2.5 s).
+      expect(band(tester).center.dx, atStart.center.dx);
+      await tester.pump(const Duration(milliseconds: 1600));
       final playing = band(tester);
       expect(playing.center.dx, greaterThan(atStart.center.dx));
       expect(playing.top, atStart.top);
 
       // 3.6 s: second system, lower on the page.
-      await tester.pump(const Duration(milliseconds: 2600));
+      await tester.pump(const Duration(milliseconds: 1000));
       expect(band(tester).top, greaterThan(atStart.bottom));
     });
 
