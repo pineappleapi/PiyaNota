@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -30,13 +31,13 @@ def _config(tmp_path: Path) -> PipelineConfig:
     return PipelineConfig(files[0], files[1], files[2], None)
 
 
-def _fake_stages(missing: tuple[str, ...] = ()) -> Stages:
+def _fake_stages(missing: tuple[str, ...] = (), midi_only: bool = False) -> Stages:
     def synthesize(satb: dict[str, Any], out_dir: str, bpm: int, sf: str) -> dict[str, str]:
         Path(out_dir).mkdir(parents=True, exist_ok=True)
         paths = {}
         for voice, events in satb.items():
             if events:
-                p = Path(out_dir) / f"{voice.lower()}.mp3"
+                p = Path(out_dir) / f"{voice.lower()}.{'mid' if midi_only else 'mp3'}"
                 p.write_bytes(b"mp3-" + voice.encode())
                 paths[voice] = str(p)
         return paths
@@ -102,12 +103,58 @@ def test_unreadable_page_raises_with_index(tmp_path: Path) -> None:
     assert info.value.page_index == 1
 
 
+def test_from_env_defaults_and_opt_out() -> None:
+    default = PipelineConfig.from_env({})
+    assert default.clef_key_weights is not None and default.clef_key_weights.name == "clef_key_classifier.pt"
+    assert default.yolo_weights.name == "best.pt" and default.crnn_weights.name == "phase2_seed1.pt"
+    assert PipelineConfig.from_env({"PIYA_CLEFKEY_WEIGHTS": ""}).clef_key_weights is None
+    assert PipelineConfig.from_env({"PIYA_CLEFKEY_WEIGHTS": "x.pt"}).clef_key_weights == Path("x.pt")
+
+
+def test_missing_clef_key_file_raises(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    config = PipelineConfig(config.yolo_weights, config.crnn_weights, config.soundfont, tmp_path / "ck.pt")
+    with pytest.raises(PipelineError, match="ck.pt"):
+        run_pipeline([_jpeg()], tempo_bpm=90, work_dir=tmp_path / "w", config=config,
+                     on_stage=lambda s, p: None, stages=_fake_stages())
+
+
+def test_midi_only_output_raises_audio_rendering_failed(tmp_path: Path) -> None:
+    with pytest.raises(PipelineError, match="audio rendering failed"):
+        _run(tmp_path, _fake_stages(midi_only=True))
+
+
+def test_input_errors_map_to_fixed_reasons(tmp_path: Path) -> None:
+    def boom(exc: Exception) -> Any:
+        def raiser(*args: Any) -> Any:
+            raise exc
+        return raiser
+
+    with pytest.raises(PipelineError) as info:
+        _run(tmp_path, replace(_fake_stages(), detect=boom(ValueError("secret detail"))))
+    assert info.value.reason == "no readable staves"
+    with pytest.raises(PipelineError) as info:
+        _run(tmp_path, replace(_fake_stages(), preprocess=boom(FileNotFoundError("/x"))))
+    assert info.value.reason == "no readable page"
+
+
+def test_genuine_bugs_propagate(tmp_path: Path) -> None:
+    def raiser(*args: Any) -> Any:
+        raise TypeError("bug")
+
+    with pytest.raises(TypeError):
+        _run(tmp_path, replace(_fake_stages(), transcribe=raiser))
+
+
 @pytest.mark.slow
 def test_moonriver_page1_end_to_end(tmp_path: Path) -> None:
     config = PipelineConfig.from_env(os.environ)
-    needed = [MOONRIVER, config.yolo_weights, config.crnn_weights, config.soundfont]
-    if not all(p.is_file() for p in needed):
-        pytest.skip("weights or fixture absent")
+    weights = [config.yolo_weights, config.crnn_weights, config.soundfont]
+    if config.clef_key_weights is not None:
+        weights.append(config.clef_key_weights)
+    if not all(p.is_file() for p in weights):
+        pytest.skip("weights absent")
+    assert MOONRIVER.is_file(), f"fixture image missing: {MOONRIVER}"
     result = run_pipeline([MOONRIVER.read_bytes()], tempo_bpm=90, work_dir=tmp_path, config=config,
                           on_stage=lambda s, p: None)
     print("STAGE_SECONDS", result.stage_seconds)

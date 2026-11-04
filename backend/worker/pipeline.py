@@ -28,6 +28,10 @@ STRIPS_MANIFEST = "manifest.json"
 STAGE_PERCENT = (("preprocessing", 5), ("detecting_staff", 25), ("transcribing", 40),
                  ("reconstructing", 85), ("synthesizing", 92))
 
+CLEF_KEY_DEFAULT = "training/clef_key_artifacts/t4_full_seed20260926_runA/clef_key_classifier.pt"
+STAGE_FAILURE_REASONS = {"preprocessing": "no readable page", "detecting_staff": "no readable staves",
+                         "transcribing": "could not read the notation"}
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -56,20 +60,22 @@ class PipelineConfig:
     yolo_weights: Path
     crnn_weights: Path
     soundfont: Path
-    clef_key_weights: Path | None  # None runs without ClefKeyNet (CRNN clef/key, every event flagged)
+    # ClefKeyNet is advisory but ON by default (its events are flagged review_needed); None opts out.
+    clef_key_weights: Path | None
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> PipelineConfig:
         def path(name: str, default: str) -> Path:
             return Path(env.get(name) or _REPO_ROOT / default)
 
-        clef_key = env.get("PIYA_CLEF_KEY_WEIGHTS")
+        clef_key = env.get("PIYA_CLEFKEY_WEIGHTS")  # empty string = explicit opt-out
         return cls(
             yolo_weights=path("PIYA_YOLO_WEIGHTS", "staff_detector_files/weights/best.pt"),
             crnn_weights=path("PIYA_CRNN_WEIGHTS",
                               "music_symbol_detection/phase2_kaggle_models/seed1/phase2_seed1.pt"),
             soundfont=path("PIYA_SOUNDFONT", "soundfont/piano.sf2"),
-            clef_key_weights=Path(clef_key) if clef_key else None,
+            clef_key_weights=(_REPO_ROOT / CLEF_KEY_DEFAULT if clef_key is None
+                              else Path(clef_key) if clef_key else None),
         )
 
 
@@ -102,7 +108,11 @@ class PipelineResult:
 
 
 def real_stages() -> Stages:
-    """Bind the real stage modules; CPU only, forced before torch loads."""
+    """Bind the real stage modules; CPU only.
+
+    CUDA_VISIBLE_DEVICES=-1 is set here, before torch is imported, and is the only CPU guard; the worker
+    entry point should set it too. The caller removes work_dir.
+    """
     os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # empty string crashes ultralytics
     import cv2
     import stage3_clefkey
@@ -156,8 +166,25 @@ def _validate_inputs(page_jpegs: list[bytes], config: PipelineConfig) -> None:
         try:
             with Image.open(BytesIO(data)) as img:
                 img.verify()
-        except (OSError, SyntaxError) as exc:  # PIL raises these for truncated or non-image bytes
+        except (OSError, SyntaxError, Image.DecompressionBombError) as exc:  # truncated, non-image or huge
             raise PipelineError(f"unreadable page image: {exc}", index) from exc
+
+
+def _input_errors() -> tuple[type[BaseException], ...]:
+    """Exceptions a bad photo can cause; cv2.error only exists where the real stages run."""
+    try:
+        import cv2
+    except ImportError:
+        return (ValueError, FileNotFoundError)
+    return (ValueError, FileNotFoundError, cv2.error)
+
+
+def _guard(status: str, call: Callable[[], Any]) -> Any:
+    """Map input-caused failures to PipelineError with a fixed reason; real bugs (TypeError...) propagate."""
+    try:
+        return call()
+    except _input_errors() as exc:
+        raise PipelineError(STAGE_FAILURE_REASONS[status]) from exc
 
 
 def run_pipeline(
@@ -186,17 +213,21 @@ def run_pipeline(
 
     t = begin("preprocessing")
     use_ck = config.clef_key_weights is not None
-    pages = st.preprocess(str(in_dir), str(prep), use_ck)
+    pages = _guard("preprocessing", lambda: st.preprocess(str(in_dir), str(prep), use_ck))
     clean = [st.clean_page(p) for p in pages]
     seconds["preprocessing"] = monotonic() - t
 
     t = begin("detecting_staff")
-    voices = st.detect(pages, str(config.yolo_weights), str(strips), manifest)
+    voices = _guard("detecting_staff",
+                    lambda: st.detect(pages, str(config.yolo_weights), str(strips), manifest))
     seconds["detecting_staff"] = monotonic() - t
 
     t = begin("transcribing")
-    decisions = st.clef_key(pages, manifest, str(config.clef_key_weights)) if use_ck else None
-    events = st.transcribe(voices, str(config.crnn_weights), decisions, str(work_dir / "stage3"))
+    def transcribe() -> dict[str, list[dict[str, Any]]]:
+        decisions = st.clef_key(pages, manifest, str(config.clef_key_weights)) if use_ck else None
+        return st.transcribe(voices, str(config.crnn_weights), decisions, str(work_dir / "stage3"))
+
+    events = _guard("transcribing", transcribe)
     seconds["transcribing"] = monotonic() - t
 
     t = begin("reconstructing")
@@ -213,8 +244,10 @@ def run_pipeline(
 
     # Stage 5 falls back to a .mid when rendering fails; only real MP3s count as delivered voices.
     mp3 = {v.lower(): Path(p).read_bytes() for v, p in paths.items() if Path(p).suffix == ".mp3"}
+    if not mp3:
+        raise PipelineError("audio rendering failed")
     failed = [v.lower() for v in VOICES if v.lower() not in mp3]
-    shutil.rmtree(out)
+    shutil.rmtree(out, ignore_errors=True)
     return PipelineResult(
         mp3=mp3,
         failed_voices=failed,
