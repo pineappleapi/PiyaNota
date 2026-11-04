@@ -81,6 +81,29 @@ def _discard(storage: Storage, keys: Sequence[str]) -> None:
         background.release_keys(conn, keys)
 
 
+SCALED_KEYS = ("x", "y", "systemTopY", "systemBottomY")
+
+
+def _scale_to_served_pages(timing: dict[str, Any], result: PipelineResult) -> None:
+    """Rescale event coordinates from the detection page to the served cleaned page, in place.
+
+    build_timing measures on the 1600 px detection page while the app is served the native-size cleaned
+    page, so unscaled highlights would sit at the wrong place. An event whose page has a missing or
+    zero size on either side is left unscaled rather than failing the job (the app still plays audio).
+    """
+    detect_sizes = result.timing_inputs.get("page_sizes") or []
+    for event in timing.get("events", []):
+        page = event.get("pageIndex")
+        if not isinstance(page, int) or not 0 <= page < min(len(detect_sizes), len(result.pages)):
+            continue
+        (det_w, det_h), served = detect_sizes[page], result.pages[page]
+        if det_w <= 0 or det_h <= 0 or served.width <= 0 or served.height <= 0:
+            continue
+        for key in SCALED_KEYS:
+            if isinstance(event.get(key), (int, float)):
+                event[key] = round(event[key] * (served.width / det_w if key == "x" else served.height / det_h), 1)
+
+
 def _timing_bytes(result: PipelineResult, settings: Settings) -> bytes:
     """Timing JSON, or ``{"events": []}`` (with the reason logged) when disabled or inconsistent."""
     timing = EMPTY_TIMING
@@ -93,6 +116,7 @@ def _timing_bytes(result: PipelineResult, settings: Settings) -> bytes:
             from timing_export import build_timing  # repo-root module, pure python
 
             timing = build_timing(**result.timing_inputs)
+            _scale_to_served_pages(timing, result)
             if not timing.get("events"):
                 LOG.warning("timing empty: build_timing found the geometry inconsistent")
             return json.dumps(timing).encode("utf-8")

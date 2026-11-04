@@ -296,3 +296,17 @@ def test_heartbeat_reconnects_after_transient_failure(app: Flask) -> None:
     stop.set()
     thread.join(5)
     assert not thread.is_alive() and len(attempts) == 2
+
+
+def test_timing_scaled_to_served_page_and_missing_size_is_safe() -> None:
+    from backend.worker.main import _scale_to_served_pages
+
+    event = {"pageIndex": 0, "x": 100.0, "y": 200.0, "systemTopY": 160.0, "systemBottomY": 240.0, "tick": 0}
+    other = {"pageIndex": 1, "x": 100.0, "y": 200.0}
+    timing = {"events": [dict(event), dict(other)]}
+    result = replace(_result(pages=2), pages=[CleanPage(_jpeg(), 1500, 3000), CleanPage(_jpeg(), 1500, 3000)],
+                     timing_inputs={"page_sizes": [(800, 1600), (0, 1600)]})
+    _scale_to_served_pages(timing, result)
+    assert timing["events"][0] == {**event, "x": 187.5, "y": 375.0, "systemTopY": 300.0, "systemBottomY": 450.0}
+    assert timing["events"][1] == other  # zero detection width: left unscaled, no crash
+    _scale_to_served_pages({"events": [dict(event)]}, replace(result, timing_inputs={}))  # no sizes at all
