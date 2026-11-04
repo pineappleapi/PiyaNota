@@ -202,7 +202,7 @@ def test_empty_voice_warns_loudly() -> None:
         err, out = io.StringIO(), io.StringIO()
         with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
             files = s5.synthesize_satb(seqs, output_dir=tmp, soundfont_path="missing.sf2")
-    assert "Alto" not in files
+    assert "Alto" in files  # silent track, not a missing file
     assert any("Alto" in str(w.message) for w in caught)
     assert "WARNING" in err.getvalue() and "Alto" in err.getvalue()
 

@@ -73,6 +73,7 @@ ACTION_COMPRESSED = "compressed_into_bar"
 ACTION_SCALED_TUPLET = "scaled_tuplet"
 ACTION_SCALED_RUN = "scaled_run"
 FLAG_TENOR_RANGE = "tenor_range_suspect"
+FLAG_VOICE_UNREADABLE = "voice_unreadable"
 FLAG_BAR_INVARIANT = "bar_length_invariant_failed"
 FLAG_LOCAL_OVERRUN = "local_placement_overrun"
 FLAG_SPLIT_STEM = "divisi_rhythm_split_suspected"
@@ -214,22 +215,26 @@ def reconstruct_satb_with_report(voice_events: dict) -> tuple[dict, dict]:
 
     Returns:
         (satb, report). satb is {voice: [event_dict, ...]} ordered by global
-        tick. report has keys: flags (list of dicts, see FLAG_* kinds),
-        pickup_ticks, total_ticks (end of the last bar), systems (per-system
-        layout).
+        tick, with [] for a failed voice. report has keys: flags (list of
+        dicts, see FLAG_* kinds), pickup_ticks, total_ticks (end of the last
+        bar), failed_voices (voices with no events at all, SATB order),
+        systems (per-system layout).
 
     Raises:
-        ValueError if any voice sequence is missing or empty.
+        ValueError if all four voice sequences are missing or empty. One to
+        three empty voices are reported, not raised (PIYA-108 AC4/AC5).
     """
     print("\n[Stage 4] Reconstructing SATB part sequences...")
 
-    missing = [v for v in VOICES if v not in voice_events
-               or len(voice_events[v]) == 0]
-    if missing:
+    failed = [v for v in VOICES if not voice_events.get(v)]
+    if len(failed) == len(VOICES):
         raise ValueError(
-            f"[Stage 4] Missing or empty voice sequence(s): {missing}. "
-            f"Check Stage 2/3 outputs or recapture the score."
+            "[Stage 4] All four voice sequences are missing or empty. "
+            "Check Stage 2/3 outputs or recapture the score."
         )
+    if failed:
+        print(f"[Stage 4] WARNING: no events for {failed}; continuing with the "
+              "other voices (reported as failed voices)")
 
     flags: list[Flag] = []
     strips = _split_into_strips(voice_events)
@@ -252,6 +257,7 @@ def reconstruct_satb_with_report(voice_events: dict) -> tuple[dict, dict]:
     _flag_voice_run_scaling(reconstructed, flags)
     _flag_tenor_range(reconstructed.get("Tenor", []), flags)
     _flag_midbar_breaks(strips, layout, flags)
+    _flag_unreadable_voices(voice_events, flags)
 
     total_ticks = pickup_ticks + sum(
         info["n_bars"] * info["bar_ticks"] for info in layout.values())
@@ -259,6 +265,7 @@ def reconstruct_satb_with_report(voice_events: dict) -> tuple[dict, dict]:
         "flags": flags,
         "pickup_ticks": pickup_ticks,
         "total_ticks": total_ticks,
+        "failed_voices": failed,
         "systems": [{"page_index": k[0], "sys_idx": k[1], **layout[k]}
                     for k in sorted(layout)],
     }
@@ -293,7 +300,7 @@ def _split_into_strips(voice_events: dict) -> dict:
     strips: dict = defaultdict(dict)
     for voice in VOICES:
         by_strip: dict = defaultdict(list)
-        for e in voice_events[voice]:
+        for e in voice_events.get(voice) or []:
             copy = dict(e)
             copy["local_tick_onset"] = copy["tick_onset"]
             by_strip[(copy["page_index"], copy["sys_idx"])].append(copy)
@@ -826,6 +833,24 @@ def _flag_midbar_breaks(strips: dict, layout: dict, flags: list) -> None:
                               "likely one bar split across the system break. "
                               "Not merged (flag only).",
                     "action": "none", "review_needed": True})
+
+
+def _flag_unreadable_voices(voice_events: dict, flags: list) -> None:
+    """Flag each voice that has no events on a page where another voice has some.
+
+    ``pages`` are the pipeline's 1-based page numbers (what the user counts); a voice that is empty
+    everywhere lists every page seen. The client prompt is built from this flag.
+    """
+    pages_by_voice = {v: {e["page_index"] for e in voice_events.get(v) or []} for v in VOICES}
+    all_pages = sorted(set().union(*pages_by_voice.values()))
+    for voice in VOICES:
+        missing = [p for p in all_pages if p not in pages_by_voice[voice]]
+        if missing:
+            flags.append({"kind": FLAG_VOICE_UNREADABLE, "voice": voice, "pages": missing,
+                          "page_index": None, "sys_idx": None, "bar": None,
+                          "expected_ticks": None, "actual_ticks": None, "action": "none",
+                          "detail": f"no readable staff for {voice} on page(s) {missing}",
+                          "review_needed": True})
 
 
 def _flag_tenor_range(events: list, flags: list) -> None:

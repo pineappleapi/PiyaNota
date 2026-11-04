@@ -34,6 +34,9 @@ DEFAULT_BPM  = 90           # default tempo if not detected
 # 2026-09-29: Stage 4 bar flags are unbounded, strips are at most 20 pages x 16 staves).
 REVIEW_ITEMS_CAP = 200
 # Reasons that apply to the whole job, not to one strip; reported once in `reasons`, never as items.
+# The user can only act on a missing or unreadable voice (retake the page); every other flag stays in
+# the job record and logs. No Stage 4 "voice dropped" code exists yet; the name is reserved.
+CLIENT_REVIEW_CODES: frozenset[str] = frozenset({"voice_unreadable", "voice_dropped"})
 JOB_LEVEL_REVIEW_CODES = frozenset({stage3_clefkey.CLEF_KEY_UNVALIDATED_FLAG, CLEF_KEY_DISABLED_FLAG})
 MIDI_CHANNEL = 0            # piano channel
 MIDI_VOLUME  = 100          # note velocity (0–127)
@@ -87,17 +90,13 @@ def synthesize_satb(
     total_ticks = _piece_end_tick(satb_sequences)
 
     for voice in VOICES:
+        # An empty (unreadable) voice still gets a silent track padded to the common length, so the
+        # app always has four tracks that stay in sync; Stage 4 reports it via failed_voices.
         events = satb_sequences.get(voice, [])
         if not events:
-            # Loud on purpose: the caller gets fewer than four tracks, which
-            # downstream playback would otherwise treat as a valid result.
-            msg = (f"[Stage 5] No events for {voice}: NO audio file will be "
-                   f"produced for this voice ({len(output_files)} of "
-                   f"{len(VOICES)} so far).")
-            print(f"  {msg.replace('[Stage 5]', '[Stage 5] WARNING:', 1)}",
-                  file=sys.stderr)
+            msg = f"[Stage 5] No events for {voice}: writing a silent track for this voice."
+            print(f"  {msg.replace('[Stage 5]', '[Stage 5] WARNING:', 1)}", file=sys.stderr)
             warnings.warn(msg, RuntimeWarning, stacklevel=2)
-            continue
 
         # ── Build single-track MIDI per voice ─────────────────────────────
         midi = build_voice_midi(events, bpm, total_ticks)
@@ -305,21 +304,25 @@ def build_review(stage3_events: dict, stage4_flags: list) -> tuple[dict[str, Any
             (docs/decisions/piya-106-ser-15-plan.md §3).
         stage4_flags: ``reconstruct_satb_with_report``'s ``flags``; only those with ``review_needed`` count.
 
+    Only CLIENT_REVIEW_CODES reach the client object: the user can only act on a missing or unreadable
+    voice, so meter, clef/key and tenor-range flags would be noise.
+
     Returns:
-        (review, full_items): ``review`` is the client object with at most REVIEW_ITEMS_CAP items;
-        ``full_items`` is the uncapped list for the job record.
+        (review, full_items): ``review`` is the client object with at most REVIEW_ITEMS_CAP voice items;
+        ``full_items`` is the uncapped list of every flag for the job record and logs.
     """
-    job_reasons: set[str] = set()
     items: list[dict[str, Any]] = []
     for f in stage4_flags:
         if f.get("review_needed"):
-            items.append({"code": f["kind"], "voice": f["voice"].lower() if f.get("voice") else None,
-                          "pageIndex": f.get("page_index"), "systemIndex": f.get("sys_idx"),
-                          "bar": f.get("bar")})
+            item = {"code": f["kind"], "voice": f["voice"].lower() if f.get("voice") else None,
+                    "pageIndex": f.get("page_index"), "systemIndex": f.get("sys_idx"),
+                    "bar": f.get("bar")}
+            if f.get("pages"):
+                item["pages"] = f["pages"]  # 1-based, for the voice-unreadable prompt
+            items.append(item)
     seen_strips: set[tuple] = set()
     for voice, events in stage3_events.items():
         for e in events:
-            job_reasons |= set(e.get("clef_key_flags", [])) & JOB_LEVEL_REVIEW_CODES
             for field in ("clef_key_strip_flags", "header_flags", "mid_change_flags"):
                 strip_flags = set(e.get(field, []))
                 if "review_needed" not in strip_flags:
@@ -330,9 +333,10 @@ def build_review(stage3_events: dict, stage4_flags: list) -> tuple[dict[str, Any
                         seen_strips.add(key)
                         items.append({"code": code, "voice": voice.lower(), "pageIndex": e["page_index"],
                                       "systemIndex": e["sys_idx"], "bar": None})
-    reasons = sorted(job_reasons | {i["code"] for i in items})
-    review = {"reviewNeeded": bool(reasons), "reasons": reasons, "items": items[:REVIEW_ITEMS_CAP],
-              "truncated": len(items) > REVIEW_ITEMS_CAP}
+    client_items = [i for i in items if i["code"] in CLIENT_REVIEW_CODES]
+    reasons = sorted({i["code"] for i in client_items})
+    review = {"reviewNeeded": bool(reasons), "reasons": reasons, "items": client_items[:REVIEW_ITEMS_CAP],
+              "truncated": len(client_items) > REVIEW_ITEMS_CAP}
     return review, items
 
 
