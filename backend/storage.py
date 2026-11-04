@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import re
+import time
 import uuid
 from typing import Any, Literal, Protocol
+from urllib.parse import quote
 
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 from flask import current_app
 
+from backend import db
 from backend.config import Settings
 
 KeyPrefix = Literal["pages", "thumbs", "audio", "timing"]
@@ -69,6 +74,48 @@ class MemoryStorage:
         return f"https://storage.test/{key}?sig=fake"
 
 
+def sign_media(key: str, exp: int, hmac_key: bytes) -> str:
+    """Hex HMAC-SHA256 over ``key\\nexp``; the newline keeps key and expiry unambiguous."""
+    return hmac.new(hmac_key, f"{key}\n{exp}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+class DbStorage:
+    """Objects in the ``blobs`` table, so the API and a separate worker process share files.
+
+    Each call opens its own transaction; ``signed_url`` points at this API's /media route.
+    """
+
+    def __init__(self, settings: Settings) -> None:
+        self._hmac_key = settings.media_hmac_key
+        self._base_url = settings.public_base_url
+        self._default_ttl = settings.signed_url_ttl_seconds
+
+    def put(self, key: str, data: bytes, content_type: str) -> None:
+        with db.transaction() as conn:
+            conn.execute(
+                "INSERT INTO blobs (key, content_type, data) VALUES (%s, %s, %s) "
+                "ON CONFLICT (key) DO UPDATE SET content_type = EXCLUDED.content_type, "
+                "data = EXCLUDED.data, created_at = now()",
+                (key, content_type, data),
+            )
+
+    def get(self, key: str) -> bytes:
+        with db.transaction() as conn:
+            row = conn.execute("SELECT data FROM blobs WHERE key = %s", (key,)).fetchone()
+        if row is None:
+            raise KeyError(key)
+        return bytes(row["data"])
+
+    def delete(self, key: str) -> None:
+        with db.transaction() as conn:
+            conn.execute("DELETE FROM blobs WHERE key = %s", (key,))
+
+    def signed_url(self, key: str, *, ttl_seconds: int | None = None) -> str:
+        exp = int(time.time()) + (ttl_seconds if ttl_seconds is not None else self._default_ttl)
+        sig = sign_media(key, exp, self._hmac_key)
+        return f"{self._base_url}/media/{quote(key, safe='/')}?exp={exp}&sig={sig}"
+
+
 class B2Storage:
     """Backblaze B2 through boto3's S3 client."""
 
@@ -118,7 +165,11 @@ class B2Storage:
 
 def build_storage(settings: Settings) -> Storage:
     """Pick the backend named in settings."""
-    return B2Storage(settings) if settings.storage_backend == "b2" else MemoryStorage(settings.signed_url_ttl_seconds)
+    if settings.storage_backend == "b2":
+        return B2Storage(settings)
+    if settings.storage_backend == "db":
+        return DbStorage(settings)
+    return MemoryStorage(settings.signed_url_ttl_seconds)
 
 
 def get_storage() -> Storage:

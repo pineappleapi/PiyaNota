@@ -16,7 +16,7 @@ from typing import Any, Literal, cast, get_args
 SETTINGS_KEY = "PIYA_SETTINGS"
 
 Env = Literal["dev", "test", "prod"]
-StorageBackend = Literal["b2", "memory"]
+StorageBackend = Literal["b2", "memory", "db"]
 MailBackend = Literal["brevo", "memory", "log"]
 
 _ENVS: tuple[str, ...] = get_args(Env)
@@ -31,6 +31,8 @@ _TEST_DATABASE_URL = "postgresql://piya:piya@localhost:55432/piya_test"
 # Dev-only fallbacks. Public knowledge by design: only ever used when PIYA_ENV is dev or test.
 _DEV_RESET_CODE_HMAC_KEY = "dev-only-reset-code-hmac-key"
 _DEV_LOG_HASH_KEY = "dev-only-log-hash-key"
+_DEV_MEDIA_HMAC_KEY = "dev-only-media-hmac-key"
+_DEV_PUBLIC_BASE_URL = "http://localhost"
 
 
 @dataclass(frozen=True)
@@ -54,6 +56,9 @@ class Settings:
     # Thumbnails are short-lived; audio and page images outlive a session so playback survives a seek.
     signed_url_ttl_seconds: int = 3600
     media_url_ttl_seconds: int = 21600
+    # Signs /media links for the db storage backend; public_base_url makes them absolute for the app.
+    media_hmac_key: bytes = _DEV_MEDIA_HMAC_KEY.encode("utf-8")
+    public_base_url: str = _DEV_PUBLIC_BASE_URL
     mail_backend: MailBackend = "memory"
     brevo_api_key: str = ""
     mail_from: str = "noreply@localhost"
@@ -225,6 +230,12 @@ def load_settings(env: Mapping[str, str] = os.environ) -> Settings:
         b2_app_key=_read_str(env, "b2_app_key", default="", required=storage == "b2"),
         signed_url_ttl_seconds=_read_int(env, "signed_url_ttl_seconds"),
         media_url_ttl_seconds=_read_int(env, "media_url_ttl_seconds"),
+        media_hmac_key=_read_str(
+            env, "media_hmac_key", default=_DEV_MEDIA_HMAC_KEY, required=is_prod and storage == "db"
+        ).encode("utf-8"),
+        public_base_url=_read_str(
+            env, "public_base_url", default=_DEV_PUBLIC_BASE_URL, required=is_prod and storage == "db"
+        ).rstrip("/"),
         mail_backend=mail,
         brevo_api_key=_read_str(env, "brevo_api_key", default="", required=mail == "brevo"),
         mail_from=_read_str(env, "mail_from", default="noreply@localhost", required=is_prod),

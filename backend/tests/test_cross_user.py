@@ -96,7 +96,8 @@ def test_route_inventory_complete(app: Flask) -> None:
     found = {
         (m, _norm(r.rule))
         for r in app.url_map.iter_rules()
-        if "<" in r.rule and r.endpoint != "static"
+        # /media is capability-by-signature, not user-scoped; test_media_route.py covers it.
+        if "<" in r.rule and r.endpoint not in ("static", "media.get_media")
         for m in (r.methods or set()) - {"HEAD", "OPTIONS"}
     }
     assert found <= listed, sorted(found - listed)
