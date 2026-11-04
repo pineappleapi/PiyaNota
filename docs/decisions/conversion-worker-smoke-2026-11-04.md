@@ -12,8 +12,9 @@ Moonriver is dev data. Nothing in this document is an accuracy result. The run p
 
 The job finished with status `complete` and no failed voices.
 
-- Total wall clock for 4 pages: 204.8 s, which is 51.2 s per page. This is a PC CPU number. The thesis target is 1 to 2 minutes per page, so this is inside it on this machine. The Hugging Face Space speed is unmeasured and its CPU is likely slower.
-- Per stage, for the whole 4-page job: preprocessing 102.0 s, staff detection 32.1 s, transcription (ClefKeyNet plus CRNN) 32.3 s, reconstruction under 0.1 s, synthesis 27.2 s. Preprocessing is half of the time. The earlier one-page run (Task 3) took about 33 s in total, so one page costs less than the 4-page average of 51 s; the reason was not investigated.
+- Final run (after the timing fix), total wall clock for 4 pages: 104.0 s, which is 26.0 s per page. This is a PC CPU number. The thesis target is 1 to 2 minutes per page, so this is inside it on this machine. The Hugging Face Space speed is unmeasured and its CPU is likely slower.
+- Final run, per stage for the whole 4-page job: preprocessing 49.7 s, staff detection 16.7 s, transcription (ClefKeyNet plus CRNN) 15.4 s, reconstruction under 0.1 s, synthesis 16.4 s. Preprocessing is about half of the time.
+- History: the first run took 204.8 s (51.2 s per page; preprocessing 102.0, detection 32.1, transcription 32.3, reconstruction under 0.1, synthesis 27.2 s), probably with cold caches; this was not investigated. The earlier one-page run (Task 3) took about 33 s in total, so one page costs less than the 4-page average of 51 s; the reason was not investigated.
 - MP3 sizes: soprano 2,616,885 bytes, alto 2,617,512, tenor 2,619,393, bass 2,622,528. All four were served with a 206 `Range` response for the first 1024 bytes and a full 200 response.
 - Cleaned pages: four JPEGs, each 2250 x 3000, between 854 KB and 1.03 MB each, all served as valid JPEGs.
 - Blob bytes stored for this score (4 MP3s, timing, thumbnail, 4 cleaned pages): 14,477,929 bytes, about 13.8 MiB. The whole `blobs` table held 20,022,386 bytes right after the run because the four standardized upload pages (about 5.5 MB) wait in the deletion queue until the API's background loop removes them. Against the Neon budget, plan on roughly 14 MB per 4-page score once the queue has drained, of which 10.5 MB is audio.
@@ -23,7 +24,7 @@ The job finished with status `complete` and no failed voices.
 
 Timing came out non-empty. The real Stage 2 geometry and Stage 3 barline wiring worked for real, not only with fakes: `build_timing` returned 334 events and 40 bars, covering all four voices and all four pages, with no unplaceable entry under the Flutter rules (timestamps, page index, x and y all valid). The fallback to `{"events": []}` was not used.
 
-Barline accuracy comes from the Task 4 spike (`docs/decisions/piya-106-timing-x-mapping.md` in the `piya106-stage4-fixes` worktree): "Barline x error vs reference: median 4.6 px = 0.54 staff space; p90 7.1 px = 0.83 staff space (n = 40)". That was measured on the same Moonriver dev photos, so it is a feasibility number only. Note x was not measured.
+Barline accuracy comes from the Task 4 spike (`docs/decisions/piya-106-timing-x-mapping.md` in the `piya106-stage4-fixes` worktree): "Barline x error vs reference: median 4.6 px = 0.54 staff space; p90 7.1 px = 0.83 staff space (n = 40)". That was measured on the same Moonriver dev photos, so it is a feasibility number only. The spike did not measure the horizontal position of individual notes, only of barlines.
 
 ### Defect found and fixed: timing coordinates were in the detection pixel space
 

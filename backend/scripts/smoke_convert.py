@@ -24,12 +24,28 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
+TEST_DB_HOSTS = ("localhost", "127.0.0.1")
+TEST_DB_PORT = 55432
+TEST_DB_NAME = "piya_test"
 STAGE_PREFIX = "STAGE "
 TEST_DB_URL = "postgresql://piya:piya@localhost:55432/piya_test"
 RANGE_BYTES = 1024
 MIN_MP3_BYTES = 1000
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def check_test_db(url: str) -> None:
+    """Refuse anything but the local test database; the smoke truncates every table.
+
+    Raises:
+        SystemExit: host, port or database name is not exactly the local test database.
+    """
+    parts = urlparse(url)
+    if (parts.hostname not in TEST_DB_HOSTS or parts.port != TEST_DB_PORT
+            or parts.path != f"/{TEST_DB_NAME}"):
+        raise SystemExit("refusing non-test database (need localhost:55432/piya_test)")
 
 
 def _child(args_path: str, out_path: str) -> int:
@@ -115,7 +131,7 @@ def run(photos: list[Path]) -> int:
     import psycopg
 
     url = os.environ.get("TEST_DATABASE_URL", TEST_DB_URL)
-    assert "localhost" in url and url.endswith("/piya_test"), f"refusing non-test database {url}"
+    check_test_db(url)
     base = "http://localhost"
     settings = dataclasses.replace(
         load_settings({"PIYA_ENV": "test", "PIYA_DATABASE_URL": url, "PIYA_STORAGE_BACKEND": "db",
