@@ -244,13 +244,19 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
     if (!_offerChecked) {
       _offerChecked = true;
       final result = state.result;
-      if (result != null && result.review.voiceFlags.isNotEmpty) {
-        // The review flags carry the pages, so this prompt replaces the
-        // generic offer below for the same voices.
-        _queueAlert(() => _promptUnreadableVoices(result));
-      } else if (result != null && result.unreadableVoices.isNotEmpty) {
-        // First in the queue: nothing else is shown until it's answered.
-        _queueAlert(() => _offerRephotograph(result));
+      if (result != null) {
+        final flagged = {for (final f in result.review.voiceFlags) f.voice};
+        if (flagged.isNotEmpty) {
+          // The review flags carry the pages, so this prompt replaces the
+          // generic offer below for the same voices.
+          _queueAlert(() => _promptUnreadableVoices(result));
+        }
+        // A voice that failed without a review flag (e.g. a render fallback)
+        // still gets the generic retake offer. First in the queue: nothing
+        // else is shown until it's answered.
+        if (result.unreadableVoices.any((v) => !flagged.contains(v))) {
+          _queueAlert(() => _offerRephotograph(result));
+        }
       }
     }
     // PIYA-208: `unreadable` voices were offered a retake by PIYA-207
