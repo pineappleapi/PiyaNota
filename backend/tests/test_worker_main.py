@@ -327,3 +327,11 @@ def test_timing_scaled_to_served_page_and_missing_size_is_safe() -> None:
     assert timing["events"][0] == {**event, "x": 187.5, "y": 300.0, "systemTopY": 240.0, "systemBottomY": 360.0}  # sx 1.875, sy 1.5
     assert timing["events"][1] == other  # zero detection width: left unscaled, no crash
     _scale_to_served_pages({"events": [dict(event)]}, replace(result, timing_inputs={}))  # no sizes at all
+
+    bar = {"bar": 1, "pageIndex": 0, "x": 100.0, "systemTopY": 160.0, "systemBottomY": 240.0}
+    bar_other = {"bar": 2, "pageIndex": 1, "x": 100.0}
+    timing = {"events": [], "bars": [dict(bar), dict(bar_other)]}
+    _scale_to_served_pages(timing, result)
+    assert timing["bars"][0] == {**bar, "x": 187.5, "systemTopY": 240.0, "systemBottomY": 360.0}
+    assert timing["bars"][1] == bar_other  # zero detection width: unscaled
+    _scale_to_served_pages({"events": []}, result)  # no bars key

@@ -16,6 +16,7 @@ from __future__ import annotations
 import dataclasses
 import io
 import json
+import math
 import os
 import pickle
 import subprocess
@@ -125,7 +126,19 @@ def _validate_timing(timing: dict[str, Any], page_sizes: list[dict[str, int]]) -
         bad += not ok
     max_x = max((e["x"] for e in events), default=0)
     max_y = max((e["y"] for e in events), default=0)
-    return {"events": len(events), "unplaceable": bad, "max_x": max_x, "max_y": max_y,
+    bars = timing.get("bars", [])
+    last_x: dict[tuple[Any, Any], float] = {}
+    bad_bars = 0
+    for b in bars:  # bars arrive sorted by startTick, so x must rise within one (page, system)
+        page = b.get("pageIndex")
+        x = b.get("x")
+        ok = (isinstance(page, int) and 0 <= page < len(page_sizes) and isinstance(x, (int, float))
+              and math.isfinite(x) and 0 <= x <= page_sizes[page]["width"]
+              and x > last_x.get((page, b.get("systemIndex")), -1.0))
+        bad_bars += not ok
+        if isinstance(x, (int, float)):
+            last_x[(page, b.get("systemIndex"))] = x
+    return {"events": len(events), "unplaceable": bad, "bad_bars": bad_bars, "max_x": max_x, "max_y": max_y,
             "voices": sorted({e.get("voice") for e in events if e.get("voice")}),
             "bars": len(timing.get("bars", []))}
 

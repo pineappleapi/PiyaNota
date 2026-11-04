@@ -1,6 +1,6 @@
 # Backend timing for a bar-step playback line
 
-Date: 2026-11-04. Status: advice only, no code changed. Author: backend review.
+Date: 2026-11-04. Status: implemented 2026-11-04 (PIYA-300, Task 4); real Moonriver smoke rerun still pending. Author: backend review.
 
 ## Question
 

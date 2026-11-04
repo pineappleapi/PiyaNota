@@ -168,6 +168,7 @@ def _build(events: dict[str, list[dict[str, Any]]], strips: list[StripGeometry],
         by_system.setdefault((b["page"], b["sys"]), []).append(b)
 
     out_events: list[dict[str, Any]] = []
+    out_bars: list[dict[str, Any]] = []
     for (page, sysi), sys_bars in by_system.items():
         voice_geo = {v: geo[(page, sysi, v)] for v in VOICES if (page, sysi, v) in geo}
         if not voice_geo:
@@ -192,6 +193,18 @@ def _build(events: dict[str, list[dict[str, Any]]], strips: list[StripGeometry],
         bottom = max(g.staff_y2 for g in voice_geo.values())
         space = min(g.staff_y2 - g.staff_y1 for g in voice_geo.values()) / STAFF_LINE_GAPS
         page_w, page_h = page_sizes[out_page]
+        # Bar x: for bar j > 0 of a system it is the median barline of bar j-1 (measured). For a system's
+        # first bar (and the pickup in system 0) it is the median first-note x: the header width is not
+        # known, so that line may sit slightly right of the true barline and is NOT a measured barline.
+        for b, (left, _right) in zip(sys_bars, edges):
+            out_bars.append({
+                "bar": b["bar"], "startTick": b["startTick"], "durTicks": b["durTicks"],
+                "startMs": timestamp_ms(b["startTick"], bpm, ppq), "durMs": timestamp_ms(b["durTicks"], bpm, ppq),
+                "numerator": b["numerator"], "denominator": b["denominator"],
+                "pageIndex": out_page, "systemIndex": sysi,
+                "x": round(min(max(left, 0.0), float(page_w)), 1),
+                "systemTopY": float(top), "systemBottomY": float(bottom),
+                "pickup": b["bar"] == 0 and int(report.get("pickup_ticks", 0)) > 0})
         for voice, e in sys_events:
             g = voice_geo.get(voice)
             if g is None:
@@ -214,7 +227,5 @@ def _build(events: dict[str, list[dict[str, Any]]], strips: list[StripGeometry],
                 "voice": voice, "tick": tick, "bar": bar["bar"], "systemIndex": sysi,
                 "systemTopY": float(top), "systemBottomY": float(bottom)})
     out_events.sort(key=lambda ev: (ev["timestampMs"], ev["pageIndex"], ev["x"]))
-    out_bars = [{"bar": b["bar"], "startTick": b["startTick"], "durTicks": b["durTicks"],
-                 "startMs": timestamp_ms(b["startTick"], bpm, ppq), "durMs": timestamp_ms(b["durTicks"], bpm, ppq),
-                 "numerator": b["numerator"], "denominator": b["denominator"]} for b in bars]
+    out_bars.sort(key=lambda b: (b["startTick"], b["pageIndex"]))
     return {"events": out_events, "bars": out_bars}

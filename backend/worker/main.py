@@ -92,7 +92,7 @@ def _scale_to_served_pages(timing: dict[str, Any], result: PipelineResult) -> No
     zero size on either side is left unscaled rather than failing the job (the app still plays audio).
     """
     detect_sizes = result.timing_inputs.get("page_sizes") or []
-    for event in timing.get("events", []):
+    for event in timing.get("events", []) + timing.get("bars", []):
         page = event.get("pageIndex")
         if not isinstance(page, int) or not 0 <= page < min(len(detect_sizes), len(result.pages)):
             continue
