@@ -276,6 +276,7 @@ def _check_reset_code(
     *,
     hit_on_gone: bool,
     precheck: Callable[[], None] | None = None,
+    lock_login: bool = False,
 ) -> tuple[ApiError | None, Mapping[str, Any] | None]:
     """Shared by verify and confirm: locks, waits, token lookup, wrong-code bookkeeping.
 
@@ -307,6 +308,10 @@ def _check_reset_code(
         return throttle.too_many(max(active)), None
     if precheck is not None:
         precheck()
+    if lock_login:
+        # Lock order: reset_code, then login_email, then users. Login success locks login_email and
+        # then users (rehash); confirm clears that backoff row after the users lock, so take it first.
+        throttle.lock_subject(conn, _LOGIN_EMAIL_SCOPE, email_key)
     row = conn.execute(
         "SELECT u.id AS user_id, t.id AS token_id, t.token_hash, "
         "GREATEST(1, CEIL(EXTRACT(EPOCH FROM t.expires_at - now())))::int AS expires_in "
@@ -373,7 +378,7 @@ def password_reset_confirm() -> tuple[Response, int]:
 
     with db.transaction() as conn:
         failure, row = _check_reset_code(
-            conn, email, code, hit_on_gone=False, precheck=precheck
+            conn, email, code, hit_on_gone=False, precheck=precheck, lock_login=True
         )
         if failure is None and row is not None:
             # Hashed only once the code verified, so unauthenticated callers cannot burn CPU.

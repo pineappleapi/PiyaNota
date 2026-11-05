@@ -18,7 +18,7 @@ from typing import Any
 
 import psycopg
 
-from backend import background, completion, db
+from backend import background, completion, db, migrate
 from backend.config import Settings, load_settings
 from backend.logutil import describe_exception
 from backend.storage import Storage, build_storage, new_key
@@ -275,6 +275,13 @@ def run_loop(*, storage: Storage, runner: Runner, settings: Settings, stop: thre
         stop.wait(settings.worker_poll_interval_s)
 
 
+def check_schema(conn: psycopg.Connection[Any]) -> None:
+    """Raise if any migration file is unapplied: a worker newer than the schema fails every job late."""
+    missing = [v for v, ok in migrate.status(conn) if not ok]
+    if missing:
+        raise RuntimeError(f"database schema is behind this worker; unapplied migrations: {', '.join(missing)}")
+
+
 def cli(argv: Sequence[str] | None = None) -> int:
     """Entry point for ``python -m backend.worker``."""
     parser = argparse.ArgumentParser(prog="python -m backend.worker")
@@ -288,6 +295,13 @@ def cli(argv: Sequence[str] | None = None) -> int:
     settings = load_settings(os.environ)
     db.init_pool(settings.database_url, max_size=settings.db_pool_max_size,
                  prepare_threshold=settings.db_prepare_threshold)
+    try:
+        with db.transaction() as conn:
+            check_schema(conn)
+    except RuntimeError as exc:
+        LOG.error("%s; deploy the API (it migrates at boot) first", exc)
+        db.close_pool()
+        return 1
     storage = build_storage(settings)
     runner = functools.partial(run_pipeline, config=PipelineConfig.from_env(os.environ))
     if args.health_port is not None:

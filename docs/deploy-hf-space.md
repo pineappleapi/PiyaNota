@@ -26,10 +26,10 @@ side are accepted by the other.
    `CPU basic (free)`, visibility Private. Confirm that the page does not ask for a payment card. If it does, stop here.
 2. Create a Hugging Face access token with **write** access at huggingface.co/settings/tokens. Use it as the password
    when the clone and push commands below ask for credentials.
-3. Run migration 0003 against Neon with the **unpooled** connection string, before the worker exists. Render's start command
+3. Run all migrations against Neon with the **unpooled** connection string, before the worker exists. Render's start command
    runs `python -m backend.migrate up` on every boot, so step 6 applies it too. To do it by hand from the repository root:
    set `DATABASE_URL` to the unpooled string, then run `backend/.venv/Scripts/python -m backend.migrate up`, then
-   `backend/.venv/Scripts/python -m backend.migrate status`. Version `0003_worker_and_blobs` must show as applied.
+   `backend/.venv/Scripts/python -m backend.migrate status`. Every migration in `backend/migrations` must show as applied (latest is 0005); the worker refuses to start otherwise.
 4. Open the Space, then Settings, then Variables and secrets. Add the four secrets and the two variables from the section above.
    For `PIYA_DATABASE_URL` use the Neon **unpooled** (direct) connection string, the same one that Render uses as `DATABASE_URL`.
 5. On your PC, install Git LFS once with `git lfs install`, then clone the Space:

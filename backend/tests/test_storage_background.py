@@ -285,7 +285,6 @@ def _seed_failed_job(email: str, age: str, *, status: str = "failed", retaken: b
 def test_prune_failed_job_pages(app: Flask) -> None:
     _, old_key = _seed_failed_job("old@example.com", "8 days")
     _seed_failed_job("recent@example.com", "6 days")
-    _seed_failed_job("retaken@example.com", "8 days", retaken=True)
     _seed_failed_job("done@example.com", "8 days", status="complete")
     _seed_failed_job("busy@example.com", "8 days", status="transcribing")
     with db.transaction() as conn:
@@ -294,4 +293,20 @@ def test_prune_failed_job_pages(app: Flask) -> None:
     with db.transaction() as conn:
         assert background.prune_failed_job_pages(conn) == 0  # rows gone: no second queueing
     assert _queued_keys() == {old_key}
-    assert _count("job_pages") == 4
+    assert _count("job_pages") == 3
+
+
+@pytest.mark.parametrize(
+    ("retake_status", "queued"),
+    [("complete", True), ("failed", True), ("cancelled", True), ("queued", False), ("transcribing", False)],
+)
+def test_prune_failed_job_with_retake(app: Flask, retake_status: str, queued: bool) -> None:
+    jid, key = _seed_failed_job("retaken@example.com", "8 days")
+    with db.transaction() as conn:
+        uid = conn.execute("SELECT user_id FROM jobs WHERE id = %s", (jid,)).fetchone()["user_id"]
+        rid = conn.execute(
+            "INSERT INTO jobs (user_id, status, source, page_count, title, tempo_source, replaces_job_id) "
+            "VALUES (%s, %s, 'images', 1, 't', 'user', %s) RETURNING id", (uid, retake_status, jid)
+        ).fetchone()["id"]
+        assert background.prune_failed_job_pages(conn) == (1 if queued else 0)
+    assert _queued_keys() == ({key} if queued else set())

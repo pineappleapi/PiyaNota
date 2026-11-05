@@ -176,12 +176,16 @@ def run_prune(conn: Conn, hit_max_age_s: int = THROTTLE_HIT_MAX_AGE_S) -> int:
     return sum(conn.execute(sql, {"s": secs}).rowcount for sql, secs in statements)
 
 
-def prune_failed_job_pages(conn: Conn, retention_s: int = FAILED_JOB_PAGE_RETENTION_S) -> int:
-    """Queue page blobs of failed jobs nobody retook, a week after they failed.
+_FINISHED_JOB_STATUSES = ("complete", "failed", "cancelled")  # same set as routes_jobs._FINISHED
 
-    Retaken means a newer job replaces it (``replaces_job_id``) or it is marked superseded. Only
-    ``failed`` is pruned: cancel already queues its pages, and queued/processing/complete jobs still
-    need theirs. The ``job_pages`` rows are deleted in the same statement, which also makes a second
+
+def prune_failed_job_pages(conn: Conn, retention_s: int = FAILED_JOB_PAGE_RETENTION_S) -> int:
+    """Queue page blobs of failed jobs a week after they failed, unless a retake is still running.
+
+    A retake uploads fresh photos, so the failed job's pages are never reused; only a retake that
+    has not finished yet (``replaces_job_id`` child not complete/failed/cancelled) keeps them, in
+    case it is cancelled and the user falls back. Only ``failed`` is pruned: cancel already queues
+    its pages, and queued/processing/complete jobs still need theirs. The ``job_pages`` rows are deleted in the same statement, which also makes a second
     run a no-op. ``updated_at`` is the end time: nothing touches a failed job afterwards.
 
     Returns:
@@ -191,11 +195,12 @@ def prune_failed_job_pages(conn: Conn, retention_s: int = FAILED_JOB_PAGE_RETENT
         r["object_key"]
         for r in conn.execute(
             "DELETE FROM job_pages WHERE job_id IN ("
-            " SELECT j.id FROM jobs j WHERE j.status = 'failed' AND j.superseded_by_job_id IS NULL"
+            " SELECT j.id FROM jobs j WHERE j.status = 'failed'"
             " AND j.updated_at < now() - make_interval(secs => %s)"
-            " AND NOT EXISTS (SELECT 1 FROM jobs r WHERE r.replaces_job_id = j.id)"
+            " AND NOT EXISTS (SELECT 1 FROM jobs r WHERE r.replaces_job_id = j.id"
+            "   AND r.status <> ALL(%s))"
             ") RETURNING object_key",
-            (retention_s,),
+            (retention_s, list(_FINISHED_JOB_STATUSES)),
         ).fetchall()
     ]
     queue_deletion(conn, keys)

@@ -16,7 +16,7 @@ from backend import db
 from backend.config import Settings
 from backend.storage import MemoryStorage
 from backend.worker import health
-from backend.worker.main import UNEXPECTED_FAILURE_REASON, process_one
+from backend.worker.main import UNEXPECTED_FAILURE_REASON, check_schema, process_one
 from backend.worker.pipeline import CleanPage, PipelineError, PipelineResult
 
 VOICES = ("soprano", "alto", "tenor", "bass")
@@ -392,3 +392,14 @@ def test_runner_progress_is_stored_and_job_completes_at_100(
 
     assert process_one(storage=storage, runner=run, settings=settings) is True
     assert seen == [17, 25] and _job(job_id)["percent_complete"] == 100
+
+
+def test_check_schema_passes_when_applied_and_raises_when_behind(app: Flask) -> None:
+    with db.transaction() as conn:
+        check_schema(conn)
+        conn.execute("DELETE FROM schema_migrations WHERE version = (SELECT max(version) FROM schema_migrations)")
+        try:
+            with pytest.raises(RuntimeError, match="unapplied migrations"):
+                check_schema(conn)
+        finally:
+            conn.rollback()  # the delete must not outlive the test: later tests need the real schema

@@ -53,6 +53,11 @@ Secrets go in the Render dashboard, never in files.
 5. Phone check (owner): `flutter build apk --release --dart-define=API_BASE_URL=https://<service>.onrender.com --dart-define=USE_FAKE_AUTH=false`.
    The reset code is read from the Render logs while the log mailer is on.
 
+## Order
+
+Deploy the API first (its container runs migrations at boot), then restart the PC worker. The
+worker refuses to start on a schema older than its code (exit 1, unapplied versions in the log).
+
 ## Proxy / client IP check (temporary)
 
 Per-IP limits only work if `request.remote_addr` is the tester's real IP.
