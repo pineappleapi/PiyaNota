@@ -284,8 +284,11 @@ void main() {
       await tester.enterText(_field(0), FakeAuthApi.demoEmail);
       await tester.enterText(_field(1), 'wrong-pass1');
       await tester.pump();
-      await tester.tap(buttonLabelled('Log In'));
-      await tester.pumpAndSettle();
+      // Four wrong passwords are free; the 5th starts the wait (J2).
+      for (var i = 0; i < 5; i++) {
+        await tester.tap(buttonLabelled('Log In'));
+        await tester.pumpAndSettle();
+      }
       expect(find.textContaining('Try again in'), findsOneWidget);
 
       await tester.tap(find.text('Forgot Password?'));
@@ -379,7 +382,7 @@ void main() {
       );
       await _requestCode(tester);
 
-      expect(find.text('Try again in 60:00'), findsOneWidget);
+      expect(find.text('Try again in 1:00:00'), findsOneWidget);
       expect(find.text(AuthMessages.serverError), findsNothing);
       expect(find.text('Enter Code'), findsNothing);
     });

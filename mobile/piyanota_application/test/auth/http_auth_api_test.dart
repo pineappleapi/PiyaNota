@@ -99,6 +99,44 @@ void main() {
     expect(_login(api), throwsA(isA<InvalidCredentialsException>()));
   });
 
+  test('401 carries attemptsRemaining from the error body', () {
+    final api = _apiWith(
+      _StubAdapter(
+        status: 401,
+        body: {
+          'error': {'code': 'invalid_credentials', 'attemptsRemaining': 1},
+        },
+      ),
+    );
+    expect(
+      _login(api),
+      throwsA(
+        isA<InvalidCredentialsException>()
+            .having((e) => e.attemptsRemaining, 'attemptsRemaining', 1)
+            .having((e) => e.retryAfterSeconds, 'retryAfterSeconds', null),
+      ),
+    );
+  });
+
+  test('401 carries retryAfterSeconds from the error body', () {
+    final api = _apiWith(
+      _StubAdapter(
+        status: 401,
+        body: {
+          'error': {'code': 'invalid_credentials', 'retryAfterSeconds': 3600},
+        },
+      ),
+    );
+    expect(
+      _login(api),
+      throwsA(
+        isA<InvalidCredentialsException>()
+            .having((e) => e.retryAfterSeconds, 'retryAfterSeconds', 3600)
+            .having((e) => e.attemptsRemaining, 'attemptsRemaining', null),
+      ),
+    );
+  });
+
   test('login 429 carries retryAfterSeconds', () {
     final api = _apiWith(
       _StubAdapter(

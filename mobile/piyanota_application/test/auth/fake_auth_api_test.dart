@@ -77,7 +77,7 @@ void main() {
     );
   });
 
-  group('login wait (PIYA-202-V2.1 AC7)', () {
+  group('login ladder (J2 / D0.1)', () {
     Matcher rateLimited(int seconds) => throwsA(
       isA<AuthRateLimitedException>().having(
         (e) => e.retryAfterSeconds,
@@ -86,27 +86,94 @@ void main() {
       ),
     );
 
-    test('repeated wrong logins are limited on the 30 s doubling', () async {
-      var now = DateTime.utc(2026, 10, 28, 9);
-      final api = FakeAuthApi(latency: Duration.zero, clock: () => now);
-      Future<void> wrong() =>
-          api.login(email: FakeAuthApi.demoEmail, password: 'nope');
+    Matcher wrongWith({int? wait, int? left}) => throwsA(
+      isA<InvalidCredentialsException>()
+          .having((e) => e.retryAfterSeconds, 'retryAfterSeconds', wait)
+          .having((e) => e.attemptsRemaining, 'attemptsRemaining', left),
+    );
 
-      await expectLater(wrong(), throwsA(isA<InvalidCredentialsException>()));
-      await expectLater(wrong(), rateLimited(30));
-      now = now.add(const Duration(seconds: 30));
-      await expectLater(wrong(), throwsA(isA<InvalidCredentialsException>()));
-      now = now.add(const Duration(seconds: 20));
-      await expectLater(wrong(), rateLimited(40));
+    late DateTime now;
+    late FakeAuthApi api;
+    Future<void> wrong([String email = FakeAuthApi.demoEmail]) =>
+        api.login(email: email, password: 'nope');
+
+    setUp(() {
+      now = DateTime.utc(2026, 10, 28, 9);
+      api = FakeAuthApi(latency: Duration.zero, clock: () => now);
+    });
+
+    test('wrongs 1 to 4 are free and count down the tries left', () async {
+      for (var left = 4; left >= 1; left--) {
+        await expectLater(wrong(), wrongWith(left: left));
+      }
+    });
+
+    test('wrongs 5 to 10 wait 30, 60, 90, 120, 150, 3600 s', () async {
+      for (var i = 0; i < 4; i++) {
+        await expectLater(wrong(), wrongWith(left: 4 - i));
+      }
+      for (final seconds in [30, 60, 90, 120, 150, 3600]) {
+        await expectLater(wrong(), wrongWith(wait: seconds));
+        // Inside the wait even the right password gets the 429, and the
+        // request is not counted.
+        now = now.add(const Duration(seconds: 1));
+        await expectLater(
+          api.login(
+            email: FakeAuthApi.demoEmail,
+            password: FakeAuthApi.demoPassword,
+          ),
+          rateLimited(seconds - 1),
+        );
+        now = now.add(Duration(seconds: seconds - 1));
+      }
+    });
+
+    Future<void> lockUp() async {
+      for (var i = 0; i < 9; i++) {
+        await expectLater(wrong(), throwsA(isA<InvalidCredentialsException>()));
+        now = now.add(const Duration(hours: 1));
+      }
+      await expectLater(wrong(), wrongWith(wait: 3600));
+    }
+
+    test('after the lock the count steps back: next wrong waits 30 s', () async {
+      await lockUp();
+      now = now.add(const Duration(hours: 1));
+      await expectLater(wrong(), wrongWith(wait: 30));
+    });
+
+    test('the right password after the lock logs in', () async {
+      await lockUp();
+      now = now.add(const Duration(hours: 1));
+      final session = await api.login(
+        email: FakeAuthApi.demoEmail,
+        password: FakeAuthApi.demoPassword,
+      );
+      expect(session.email, FakeAuthApi.demoEmail);
+      // Success cleared the count: a fresh wrong is wrong 1.
+      await expectLater(wrong(), wrongWith(left: 4));
+    });
+
+    test('a 429 does not refresh the 24 h idle clock', () async {
+      await lockUp();
+      now = now.add(const Duration(minutes: 59));
+      await expectLater(wrong(), rateLimited(60));
+      // 24 h after the 10th wrong, not after the 429.
+      now = now.add(const Duration(hours: 23, minutes: 1));
+      await expectLater(wrong(), wrongWith(left: 4));
+    });
+
+    test('a different email is independent', () async {
+      for (var i = 0; i < 5; i++) {
+        await expectLater(wrong(), throwsA(isA<InvalidCredentialsException>()));
+      }
+      await expectLater(wrong('other@example.com'), wrongWith(left: 4));
     });
 
     test('a completed password reset clears the wait', () async {
-      final now = DateTime.utc(2026, 10, 28, 9);
-      final api = FakeAuthApi(latency: Duration.zero, clock: () => now);
-      await expectLater(
-        api.login(email: FakeAuthApi.demoEmail, password: 'nope'),
-        throwsA(isA<InvalidCredentialsException>()),
-      );
+      for (var i = 0; i < 5; i++) {
+        await expectLater(wrong(), throwsA(isA<InvalidCredentialsException>()));
+      }
       await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
       await api.confirmPasswordReset(
         email: FakeAuthApi.demoEmail,
@@ -115,29 +182,8 @@ void main() {
         newPasswordConfirmation: 'Newpass123',
       );
 
-      // Same instant: still inside the 30 s, yet the new password gets in,
-      // and the old one is simply wrong again (count restarted).
       await api.login(email: FakeAuthApi.demoEmail, password: 'Newpass123');
-      await expectLater(
-        api.login(email: FakeAuthApi.demoEmail, password: 'nope'),
-        throwsA(isA<InvalidCredentialsException>()),
-      );
-    });
-
-    test('a correct login after the wait resets the count', () async {
-      var now = DateTime.utc(2026, 10, 28, 9);
-      final api = FakeAuthApi(latency: Duration.zero, clock: () => now);
-      Future<void> wrong() =>
-          api.login(email: FakeAuthApi.demoEmail, password: 'nope');
-
-      await expectLater(wrong(), throwsA(isA<InvalidCredentialsException>()));
-      now = now.add(const Duration(seconds: 30));
-      await api.login(
-        email: FakeAuthApi.demoEmail,
-        password: FakeAuthApi.demoPassword,
-      );
-      await expectLater(wrong(), throwsA(isA<InvalidCredentialsException>()));
-      await expectLater(wrong(), rateLimited(30));
+      await expectLater(wrong(), wrongWith(left: 4));
     });
   });
 
@@ -443,25 +489,44 @@ void main() {
       ),
     );
 
-    // Wrong login at start, then another [after] later; returns the wait
-    // the second one earned.
-    Future<void> secondWrongLogin(Duration after, int expectedWait) async {
+    // Four free wrongs at start, then a 5th [after] later: it waits 30 s
+    // only while the count is still alive.
+    Future<void> fifthWrongLogin(Duration after, Matcher expected) async {
       var now = start;
       final api = FakeAuthApi(latency: Duration.zero, clock: () => now);
       Future<void> wrong() =>
           api.login(email: FakeAuthApi.demoEmail, password: 'nope');
-      await expectLater(wrong(), throwsA(isA<InvalidCredentialsException>()));
+      for (var i = 0; i < 4; i++) {
+        await expectLater(wrong(), throwsA(isA<InvalidCredentialsException>()));
+      }
       now = start.add(after);
-      await expectLater(wrong(), throwsA(isA<InvalidCredentialsException>()));
-      await expectLater(wrong(), rateLimited(expectedWait));
+      await expectLater(wrong(), expected);
     }
 
     test('login: 23 h 59 m after the last wrong try the count is kept', () {
-      return secondWrongLogin(almostDay, 60);
+      return fifthWrongLogin(
+        almostDay,
+        throwsA(
+          isA<InvalidCredentialsException>().having(
+            (e) => e.retryAfterSeconds,
+            'retryAfterSeconds',
+            30,
+          ),
+        ),
+      );
     });
 
     test('login: at 24 h the count resets, the first wait comes again', () {
-      return secondWrongLogin(day, 30);
+      return fifthWrongLogin(
+        day,
+        throwsA(
+          isA<InvalidCredentialsException>().having(
+            (e) => e.attemptsRemaining,
+            'attemptsRemaining',
+            4,
+          ),
+        ),
+      );
     });
 
     Future<void> secondWrongCode(Duration after, int expectedWait) async {

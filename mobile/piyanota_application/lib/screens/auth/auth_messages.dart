@@ -17,11 +17,20 @@ class AuthMessages {
   static const String sessionSaveFailed =
       "Couldn't save your sign-in on this device. Please try again.";
 
-  /// PIYA-202-V2.1 AC1: m:ss, e.g. "Try again in 0:30".
+  /// Shown only when the server says one wrong password is left (J2).
+  static const String oneTryLeft = '1 try left';
+
+  /// PIYA-202-V2.1 AC1: m:ss, e.g. "Try again in 0:30"; h:mm:ss from one
+  /// hour, so the 3600 s lock reads 1:00:00 and not 60:00.
   static String tryAgainIn(Duration wait) {
     final seconds = wait.inSeconds;
-    final rest = (seconds % 60).toString().padLeft(2, '0');
-    return 'Try again in ${seconds ~/ 60}:$rest';
+    String two(int n) => n.toString().padLeft(2, '0');
+    final secs = two(seconds % 60);
+    if (seconds >= Duration.secondsPerHour) {
+      final mins = two(seconds % Duration.secondsPerHour ~/ 60);
+      return 'Try again in ${seconds ~/ Duration.secondsPerHour}:$mins:$secs';
+    }
+    return 'Try again in ${seconds ~/ 60}:$secs';
   }
 
   /// A 429 that gave no usable wait (backend note B3.2).

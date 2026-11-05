@@ -13,8 +13,18 @@ sealed class AuthException implements Exception {
 
 /// 401 from Login — deliberately covers both unknown email and wrong
 /// password (PIYA-302 AC3).
+///
+/// The server owns the wrong-password ladder (J2): [retryAfterSeconds] is
+/// set from the 5th wrong password on, [attemptsRemaining] only on wrongs
+/// 1 to 4. The app never infers either.
 class InvalidCredentialsException extends AuthException {
-  const InvalidCredentialsException();
+  const InvalidCredentialsException({
+    this.retryAfterSeconds,
+    this.attemptsRemaining,
+  });
+
+  final int? retryAfterSeconds;
+  final int? attemptsRemaining;
 }
 
 /// Any 401 from an endpoint that needs a session (PIYA-322 AC1). Kept apart
@@ -274,7 +284,10 @@ class HttpAuthApi implements AuthApi {
     // invalid` error code, because the error-envelope field holding that
     // code isn't pinned down by PIYA-304 (reconcile in PIYA-214).
     return switch (response?.statusCode) {
-      _unauthorized => const InvalidCredentialsException(),
+      _unauthorized => InvalidCredentialsException(
+        retryAfterSeconds: retryAfterSecondsOf(response),
+        attemptsRemaining: _attemptsRemaining(response?.data),
+      ),
       // Matched on the code too: a bare proxy 404 is not "unregistered".
       _notFound when _errorCode(response?.data) == emailNotRegisteredCode =>
         const EmailNotRegisteredException(),
@@ -289,6 +302,14 @@ class HttpAuthApi implements AuthApi {
       _badRequest => _validationFailure(response),
       _ => const AuthServerException(),
     };
+  }
+
+  static int? _attemptsRemaining(Object? body) {
+    final error = body is Map<String, dynamic> ? body['error'] : null;
+    final value = error is Map<String, dynamic>
+        ? error['attemptsRemaining']
+        : null;
+    return value is int && value >= 0 ? value : null;
   }
 
   /// PIYA-322. Mapped on status, not body, wherever the contract allows:

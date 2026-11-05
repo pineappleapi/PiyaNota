@@ -85,10 +85,15 @@ class FakeAuthApi implements AuthApi {
   /// the PIYA-322 AC5 sliding window.
   final Map<String, List<DateTime>> _changePasswordFailures = {};
 
-  /// PIYA-202-V2.1 AC7: wrong logins per account and when the current wait
-  /// ends, on the same schedule as the app's own throttle.
+  /// J2 / D0.1: wrong logins per account, when the current wait ends, and
+  /// which accounts sit in the long lock (the count steps back once it ends).
+  static const int loginFreeFailures = 4;
+  static const int loginLockAt = 10;
+  static const Duration loginStep = Duration(seconds: 30);
+  static const Duration loginLock = Duration(hours: 1);
   final Map<String, int> _loginFailures = {};
   final Map<String, DateTime> _loginBlockedUntil = {};
+  final Set<String> _loginLocked = {};
 
   /// B1.4: when each account's last wrong login happened.
   final Map<String, DateTime> _lastWrongLogin = {};
@@ -128,17 +133,30 @@ class FakeAuthApi implements AuthApi {
             .ceil(),
       );
     }
+    // The idle reset comes first, then the step-down after a lock that has
+    // ended (the deadline check above already passed).
+    final stale = _isStale(_lastWrongLogin[normalized], now);
+    if (stale) _loginLocked.remove(normalized);
+    if (_loginLocked.remove(normalized)) {
+      _loginFailures[normalized] = loginFreeFailures;
+    }
     if (_passwordsByEmail[normalized] != password) {
-      final stale = _isStale(_lastWrongLogin[normalized], now);
       final failures = (stale ? 0 : _loginFailures[normalized] ?? 0) + 1;
       _loginFailures[normalized] = failures;
       _lastWrongLogin[normalized] = now;
-      _loginBlockedUntil[normalized] = now.add(backoffAfter(failures));
-      throw const InvalidCredentialsException();
+      if (failures <= loginFreeFailures) {
+        throw InvalidCredentialsException(
+          attemptsRemaining: loginFreeFailures + 1 - failures,
+        );
+      }
+      final wait = failures >= loginLockAt
+          ? loginLock
+          : loginStep * (failures - loginFreeFailures);
+      if (failures >= loginLockAt) _loginLocked.add(normalized);
+      _loginBlockedUntil[normalized] = now.add(wait);
+      throw InvalidCredentialsException(retryAfterSeconds: wait.inSeconds);
     }
-    _loginFailures.remove(normalized);
-    _loginBlockedUntil.remove(normalized);
-    _lastWrongLogin.remove(normalized);
+    _clearLogin(normalized);
     return _issueSession(normalized);
   }
 
@@ -238,9 +256,14 @@ class FakeAuthApi implements AuthApi {
     _passwordsByEmail[normalized] = newPassword;
     // PIYA-202-V2.1: a reset proves control of the mailbox, so it lifts any
     // login wait the forgotten password caused.
+    _clearLogin(normalized);
+  }
+
+  void _clearLogin(String normalized) {
     _loginFailures.remove(normalized);
     _loginBlockedUntil.remove(normalized);
     _lastWrongLogin.remove(normalized);
+    _loginLocked.remove(normalized);
   }
 
   /// PIYA-322 stand-in, in the contract's order: session (AC1), rate limit
