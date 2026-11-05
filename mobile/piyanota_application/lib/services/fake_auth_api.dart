@@ -208,6 +208,15 @@ class FakeAuthApi implements AuthApi {
   }
 
   @override
+  Future<void> verifyPasswordReset({
+    required String email,
+    required String code,
+  }) async {
+    await Future<void>.delayed(latency);
+    _checkResetCode(_normalize(email), code);
+  }
+
+  @override
   Future<void> confirmPasswordReset({
     required String email,
     required String resetToken,
@@ -216,6 +225,23 @@ class FakeAuthApi implements AuthApi {
   }) async {
     await Future<void>.delayed(latency);
     final normalized = _normalize(email);
+    _checkResetCode(normalized, resetToken);
+    _checkNewPassword(newPassword, newPasswordConfirmation);
+    // PIYA-304 AC4: single use — consumed only once the reset succeeds, so
+    // a weak-password 400 doesn't burn the user's code.
+    _grantsByEmail.remove(normalized);
+    _wrongCodes.remove(normalized);
+    _wrongCodeBlockedUntil.remove(normalized);
+    _lastWrongCode.remove(normalized);
+    _passwordsByEmail[normalized] = newPassword;
+    // PIYA-202-V2.1: a reset proves control of the mailbox, so it lifts any
+    // login wait the forgotten password caused.
+    _clearLogin(normalized);
+  }
+
+  /// One code check for verify and confirm, as on the server (D0.2), so the
+  /// two can never disagree and a wrong code cannot reach the password step.
+  void _checkResetCode(String normalized, String code) {
     final now = _now();
     final blockedUntil = _wrongCodeBlockedUntil[normalized];
     // B4.5: even the right code waits, so the limit can't be guessed
@@ -232,31 +258,20 @@ class FakeAuthApi implements AuthApi {
     if (grant == null || !now.isBefore(grant.expiresAt)) {
       throw const ResetCodeInvalidException();
     }
-    if (grant.code != resetToken.trim()) {
-      // B4.4: every wrong code is a 400; from the 3rd on it also starts a
+    if (grant.code != code.trim()) {
+      // B4.4: every wrong code is a 400; from the 5th on it also starts a
       // wait, which the next request meets as a 429.
       final stale = _isStale(_lastWrongCode[normalized], now);
       final count = (stale ? 0 : _wrongCodes[normalized] ?? 0) + 1;
       _wrongCodes[normalized] = count;
       _lastWrongCode[normalized] = now;
       if (count > resetCodeFreeAttempts) {
-        _wrongCodeBlockedUntil[normalized] = now.add(
-          backoffAfter(count - resetCodeFreeAttempts),
-        );
+        final wait = backoffAfter(count - resetCodeFreeAttempts);
+        _wrongCodeBlockedUntil[normalized] = now.add(wait);
+        throw ResetCodeWrongException(retryAfterSeconds: wait.inSeconds);
       }
       throw const ResetCodeWrongException();
     }
-    _checkNewPassword(newPassword, newPasswordConfirmation);
-    // PIYA-304 AC4: single use — consumed only once the reset succeeds, so
-    // a weak-password 400 doesn't burn the user's code.
-    _grantsByEmail.remove(normalized);
-    _wrongCodes.remove(normalized);
-    _wrongCodeBlockedUntil.remove(normalized);
-    _lastWrongCode.remove(normalized);
-    _passwordsByEmail[normalized] = newPassword;
-    // PIYA-202-V2.1: a reset proves control of the mailbox, so it lifts any
-    // login wait the forgotten password caused.
-    _clearLogin(normalized);
   }
 
   void _clearLogin(String normalized) {

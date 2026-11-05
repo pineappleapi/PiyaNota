@@ -58,8 +58,7 @@ class AuthMessages {
       'Email has not yet been registered. ';
   static const String createNewAccount = 'Create a new account';
   static const String emailNotRegisteredEnd = '?';
-  static const String resetCodeInvalid =
-      'That code is invalid or has expired. Request a new code and try again.';
+  static const String resetCodeInvalid = 'Code expired. Request a new one.';
 
   /// PIYA-204-V2.4 AC1 (exact text). Separate from [resetCodeInvalid],
   /// which is for an expired or used code (AC3).

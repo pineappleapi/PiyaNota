@@ -136,11 +136,14 @@ void main() {
       await expectLater(wrong(), wrongWith(wait: 3600));
     }
 
-    test('after the lock the count steps back: next wrong waits 30 s', () async {
-      await lockUp();
-      now = now.add(const Duration(hours: 1));
-      await expectLater(wrong(), wrongWith(wait: 30));
-    });
+    test(
+      'after the lock the count steps back: next wrong waits 30 s',
+      () async {
+        await lockUp();
+        now = now.add(const Duration(hours: 1));
+        await expectLater(wrong(), wrongWith(wait: 30));
+      },
+    );
 
     test('the right password after the lock logs in', () async {
       await lockUp();
@@ -346,7 +349,7 @@ void main() {
     });
 
     test(
-      'every wrong code is a 400; the 3rd starts a wait of 30 s, 60 s, 120 s',
+      'every wrong code is a 400; the 5th starts a wait of 30 s, 60 s, 120 s',
       () async {
         var now = DateTime.utc(2026, 10, 28, 9);
         final api = FakeAuthApi(latency: Duration.zero, clock: () => now);
@@ -354,10 +357,10 @@ void main() {
         final good = api.demoInboxCodeFor(FakeAuthApi.demoEmail)!;
         Future<void> wrong() => confirm(api, not(good));
 
-        for (var i = 0; i < 2; i++) {
+        for (var i = 0; i < 4; i++) {
           await expectLater(wrong(), throwsA(isA<ResetCodeWrongException>()));
         }
-        // 3rd, 4th and 5th wrong codes: still "wrong", each then a wait.
+        // 5th, 6th and 7th wrong codes: still "wrong", each then a wait.
         for (final seconds in [30, 60, 120]) {
           await expectLater(wrong(), throwsA(isA<ResetCodeWrongException>()));
           // Even the right code waits, and a request during the wait is
@@ -375,7 +378,7 @@ void main() {
       () async {
         final api = _api();
         await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
-        for (var i = 0; i < 2; i++) {
+        for (var i = 0; i < 4; i++) {
           await confirm(api, '000000').then((_) {}, onError: (_) {});
         }
         await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
@@ -385,6 +388,53 @@ void main() {
           throwsA(isA<ResetCodeWrongException>()),
         );
         await expectLater(confirm(api, good), rateLimited(30));
+      },
+    );
+
+    test(
+      'verify and confirm share one check: a wrong code never passes',
+      () async {
+        var now = DateTime.utc(2026, 11, 6, 9);
+        final api = FakeAuthApi(latency: Duration.zero, clock: () => now);
+        await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
+        final good = api.demoInboxCodeFor(FakeAuthApi.demoEmail)!;
+        Future<void> verify(String code) =>
+            api.verifyPasswordReset(email: FakeAuthApi.demoEmail, code: code);
+
+        // Wrongs 1 to 4 carry no wait; the 5th carries the server's 30 s.
+        for (var i = 0; i < 4; i++) {
+          await expectLater(
+            verify(not(good)),
+            throwsA(
+              isA<ResetCodeWrongException>().having(
+                (e) => e.retryAfterSeconds,
+                'retryAfterSeconds',
+                isNull,
+              ),
+            ),
+          );
+        }
+        await expectLater(
+          verify(not(good)),
+          throwsA(
+            isA<ResetCodeWrongException>().having(
+              (e) => e.retryAfterSeconds,
+              'retryAfterSeconds',
+              30,
+            ),
+          ),
+        );
+        // Verify and confirm count together, and the right code waits too.
+        await expectLater(verify(good), rateLimited(30));
+        await expectLater(confirm(api, good), rateLimited(30));
+        now = now.add(const Duration(seconds: 30));
+        await verify(good);
+        // Verify spends nothing: confirm still works with the same code.
+        await confirm(api, good);
+        await expectLater(
+          verify(good),
+          throwsA(isA<ResetCodeInvalidException>()),
+        );
       },
     );
 
@@ -539,8 +589,8 @@ void main() {
         newPasswordConfirmation: 'choir2026',
       );
       await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
-      // Two free wrong codes, the 3rd starts the 30 s wait.
-      for (var i = 0; i < 3; i++) {
+      // Four free wrong codes, the 5th starts the 30 s wait.
+      for (var i = 0; i < 5; i++) {
         await expectLater(wrong(), throwsA(isA<ResetCodeWrongException>()));
       }
       now = start.add(after);
@@ -561,7 +611,7 @@ void main() {
       return secondWrongCode(almostDay, 60);
     });
 
-    test('code: at 24 h the count resets, so 2 more are free again', () async {
+    test('code: at 24 h the count resets, so 4 more are free again', () async {
       var now = start;
       final api = FakeAuthApi(latency: Duration.zero, clock: () => now);
       Future<void> wrong(String code) => api.confirmPasswordReset(
@@ -571,7 +621,7 @@ void main() {
         newPasswordConfirmation: 'choir2026',
       );
       await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
-      for (var i = 0; i < 3; i++) {
+      for (var i = 0; i < 5; i++) {
         await expectLater(
           wrong('000000'),
           throwsA(isA<ResetCodeWrongException>()),
@@ -581,9 +631,10 @@ void main() {
       await api.requestPasswordReset(email: FakeAuthApi.demoEmail);
       final good = api.demoInboxCodeFor(FakeAuthApi.demoEmail)!;
       final bad = good == '000000' ? '000001' : '000000';
-      // Count restarted: wrong #1 and #2 start no wait, #3 waits 30 s.
-      await expectLater(wrong(bad), throwsA(isA<ResetCodeWrongException>()));
-      await expectLater(wrong(bad), throwsA(isA<ResetCodeWrongException>()));
+      // Count restarted: wrongs #1 to #4 start no wait.
+      for (var i = 0; i < 4; i++) {
+        await expectLater(wrong(bad), throwsA(isA<ResetCodeWrongException>()));
+      }
       await wrong(good);
     });
   });

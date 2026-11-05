@@ -29,6 +29,8 @@ class ApiConfig {
   // PIYA-303/304 — same caveat: assumed paths, reconcile in PIYA-214.
   static const String passwordResetRequestPath =
       '/api/auth/password-reset/request';
+  static const String passwordResetVerifyPath =
+      '/api/auth/password-reset/verify';
   static const String passwordResetConfirmPath =
       '/api/auth/password-reset/confirm';
   // PIYA-322 pins this path (all Module 3 routes sit under `/api`), so

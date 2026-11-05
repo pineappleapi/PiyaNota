@@ -75,8 +75,13 @@ class ResetCodeInvalidException extends AuthException {
 /// PIYA-204-V2.4): the code is wrong, but the reset is still alive. Kept
 /// apart from [ResetCodeInvalidException] (410, expired or used) because
 /// the user retypes a wrong code but must request a new expired one.
+///
+/// From the 5th wrong code on the server also sends [retryAfterSeconds]
+/// (D0.2); the app starts its countdown from it.
 class ResetCodeWrongException extends AuthException {
-  const ResetCodeWrongException();
+  const ResetCodeWrongException({this.retryAfterSeconds});
+
+  final int? retryAfterSeconds;
 }
 
 /// Backend note B4's `error.code` for a wrong reset code.
@@ -136,6 +141,16 @@ abstract interface class AuthApi {
     required String newPasswordConfirmation,
   });
 
+  /// Checks [code] for [email] without spending it (contract J1, B1), so a
+  /// wrong code is caught on the Enter Code step. Shares the wrong-code
+  /// ladder with [confirmPasswordReset]. Throws [ResetCodeWrongException]
+  /// (400), [ResetCodeInvalidException] (410) or [AuthRateLimitedException]
+  /// (429); returning normally is the only way to the new-password step.
+  Future<void> verifyPasswordReset({
+    required String email,
+    required String code,
+  });
+
   /// PIYA-322. [token] is the current session's and stays valid on success
   /// (other sessions are revoked). A wrong [currentPassword] is
   /// [CurrentPasswordIncorrectException], any 401
@@ -191,6 +206,17 @@ class HttpAuthApi implements AuthApi {
     // The 200 body's `message` is deliberately ignored: the UI owns the
     // confirmation copy.
     await _post(ApiConfig.passwordResetRequestPath, {'email': email});
+  }
+
+  @override
+  Future<void> verifyPasswordReset({
+    required String email,
+    required String code,
+  }) async {
+    await _post(ApiConfig.passwordResetVerifyPath, {
+      'email': email,
+      'code': code,
+    });
   }
 
   @override
@@ -298,7 +324,9 @@ class HttpAuthApi implements AuthApi {
         retryAfterSeconds: retryAfterSecondsOf(response),
       ),
       _badRequest when _errorCode(response?.data) == resetCodeWrongCode =>
-        const ResetCodeWrongException(),
+        ResetCodeWrongException(
+          retryAfterSeconds: retryAfterSecondsOf(response),
+        ),
       _badRequest => _validationFailure(response),
       _ => const AuthServerException(),
     };

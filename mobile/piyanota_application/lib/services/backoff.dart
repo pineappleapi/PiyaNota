@@ -11,9 +11,10 @@ const Duration _maxWait = Duration(minutes: 15);
 /// exponent here keeps the shift from overflowing for any failure count.
 const int _maxDoublings = 5;
 
-/// Wrong reset codes that start no wait (PIYA-204-V2.4 AC2, backend note
-/// B4.4): the 3rd is the first counted by [backoffAfter], so it waits 30 s.
-const int resetCodeFreeAttempts = 2;
+/// Wrong reset codes that start no wait (contract J1/D0.2): the 5th is the
+/// first counted by [backoffAfter], so it waits 30 s. The server owns the
+/// real count; this only mirrors it for the fake and the fallback wait.
+const int resetCodeFreeAttempts = 4;
 
 /// A wrong-attempt count starts again from 0 once this long has passed since
 /// the last wrong attempt (PIYA-202-V2.1 AC8, PIYA-204-V2.4 AC6; backend
