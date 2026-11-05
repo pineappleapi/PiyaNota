@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from typing import cast
 
+import psycopg.errors
 from flask import Blueprint, Response, current_app, g
 
 from backend import background, db, security, throttle
@@ -19,6 +20,7 @@ account_bp = Blueprint("account", __name__, url_prefix="/api/account")
 # gates, so guesses against either must draw from the same budget.
 CHANGE_PW_BUCKET = "change_pw"
 _WRONG_PASSWORD = "Current password is incorrect"
+_DELETE_ATTEMPTS = 2
 
 
 def check_current_password(
@@ -77,12 +79,20 @@ def account_info() -> tuple[Response, int]:
 def delete_account() -> tuple[Response, int]:
     password = require_str(json_body(), "password")
     failure: ApiError | None = None
-    with db.transaction() as conn:
-        failure = check_current_password(conn, g.user.id, password)
-        if failure is None:
-            # Inline so users.email UNIQUE frees at once; the background loop stays as a safety
-            # net. Sessions cascade with the user row. Any failure rolls the whole delete back.
-            background.purge_user(conn, g.user.id)
+    # A purge can deadlock against the worker finishing a job for the same user (opposite row
+    # order); the whole transaction rolled back, so one retry is safe and turns a rare 500 into 200.
+    for attempt in range(_DELETE_ATTEMPTS):
+        try:
+            with db.transaction() as conn:
+                failure = check_current_password(conn, g.user.id, password)
+                if failure is None:
+                    # Inline so users.email UNIQUE frees at once; the background loop stays as a safety
+                    # net. Sessions cascade with the user row. Any failure rolls the whole delete back.
+                    background.purge_user(conn, g.user.id)
+            break
+        except psycopg.errors.DeadlockDetected:
+            if attempt == _DELETE_ATTEMPTS - 1:
+                raise
     if failure is not None:
         raise failure
-    return ok(None, 200, "Account deletion initiated")
+    return ok(None, 200, "Account deleted")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import psycopg.errors
 import pytest
 from flask import Flask
 from flask.testing import FlaskClient
@@ -110,3 +111,22 @@ def test_inline_purge_failure_rolls_back(
         row = conn.execute("SELECT deleted_at FROM users WHERE email = %s", (EMAIL,)).fetchone()
     assert row is not None and row["deleted_at"] is None
     assert client.get("/api/account", headers=_auth(token)).status_code == 200
+
+
+def test_delete_retries_once_on_deadlock(client: FlaskClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    token = _signup(client)
+    real = background.purge_user
+    calls: list[int] = []
+
+    def flaky(conn: background.Conn, user_id: int) -> None:
+        calls.append(user_id)
+        if len(calls) == 1:
+            raise psycopg.errors.DeadlockDetected("simulated")
+        real(conn, user_id)
+
+    monkeypatch.setattr(background, "purge_user", flaky)
+    assert _delete(client, token).status_code == 200
+    assert len(calls) == 2
+    monkeypatch.undo()
+    with db.transaction() as conn:
+        assert conn.execute("SELECT 1 FROM users WHERE email = %s", (EMAIL,)).fetchone() is None

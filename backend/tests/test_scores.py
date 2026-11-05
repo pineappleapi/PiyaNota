@@ -326,3 +326,19 @@ def test_result_filters_old_review_rows_on_read(client: FlaskClient, headers: di
         conn.execute("UPDATE scores SET review = %s WHERE id = %s", (Jsonb(old), sid))
     review = client.get(f"/api/scores/{sid}/result", headers=headers).get_json()["data"]["review"]
     assert review["reviewNeeded"] is False and review["items"] == []
+
+
+def test_client_review_codes_match_stage5() -> None:
+    """The API venv cannot import stage5 (cv2/torch), so read the constant from source."""
+    import ast
+    from pathlib import Path
+
+    from backend.routes_scores import CLIENT_REVIEW_CODES
+
+    tree = ast.parse((Path(__file__).resolve().parents[2] / "stage5_synthesis.py").read_text(encoding="utf-8"))
+    for node in tree.body:
+        target = node.target if isinstance(node, ast.AnnAssign) else None
+        if isinstance(target, ast.Name) and target.id == "CLIENT_REVIEW_CODES" and node.value is not None:
+            assert CLIENT_REVIEW_CODES == frozenset(ast.literal_eval(node.value.args[0]))
+            return
+    raise AssertionError("CLIENT_REVIEW_CODES not found in stage5_synthesis.py")
