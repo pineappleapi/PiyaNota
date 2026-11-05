@@ -7,7 +7,7 @@ from typing import cast
 
 from flask import Blueprint, Response, current_app, g
 
-from backend import db, security, throttle
+from backend import background, db, security, throttle
 from backend.config import SETTINGS_KEY, Settings
 
 from backend.envelope import ApiError, iso_z, ok
@@ -80,12 +80,9 @@ def delete_account() -> tuple[Response, int]:
     with db.transaction() as conn:
         failure = check_current_password(conn, g.user.id, password)
         if failure is None:
-            # Purge of the data itself is a later job; this only blocks the account immediately.
-            conn.execute(
-                "UPDATE users SET deleted_at = now(), updated_at = now() WHERE id = %s",
-                (g.user.id,),
-            )
-            security.revoke_user_sessions(conn, g.user.id)
+            # Inline so users.email UNIQUE frees at once; the background loop stays as a safety
+            # net. Sessions cascade with the user row. Any failure rolls the whole delete back.
+            background.purge_user(conn, g.user.id)
     if failure is not None:
         raise failure
     return ok(None, 200, "Account deletion initiated")

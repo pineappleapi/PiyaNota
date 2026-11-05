@@ -114,14 +114,14 @@ def test_delete_account_requires_password(client: FlaskClient) -> None:
     assert res.get_json()["error"]["code"] == "missing_field"
 
 
-def test_delete_account_marks_and_revokes(client: FlaskClient) -> None:
+def test_delete_account_purges_and_revokes(client: FlaskClient) -> None:
     token = _signup(client)
     res = client.delete("/api/account", json={"password": PASSWORD}, headers=_auth(token))
     assert res.status_code == 200
     assert res.get_json()["data"] is None
     with db.transaction() as conn:
-        row = conn.execute("SELECT deleted_at FROM users WHERE email = %s", (EMAIL,)).fetchone()
-    assert row is not None and row["deleted_at"] is not None
+        row = conn.execute("SELECT id FROM users WHERE email = %s", (EMAIL,)).fetchone()
+    assert row is None  # purged inline (B3)
     assert client.get("/api/account", headers=_auth(token)).status_code == 401
     res = _login(client)
     assert res.status_code == 401
@@ -130,7 +130,7 @@ def test_delete_account_marks_and_revokes(client: FlaskClient) -> None:
         "/api/auth/signup",
         json={"email": EMAIL, "password": PASSWORD, "passwordConfirmation": PASSWORD},
     )
-    assert res.status_code == 409
+    assert res.status_code == 201
 
 
 def test_delete_account_rate_limit(client: FlaskClient) -> None:
