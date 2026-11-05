@@ -12,7 +12,7 @@ import pytest
 from flask import Flask
 from PIL import Image
 
-from backend import db
+from backend import db, migrate
 from backend.config import Settings
 from backend.storage import MemoryStorage
 from backend.worker import health
@@ -394,12 +394,10 @@ def test_runner_progress_is_stored_and_job_completes_at_100(
     assert seen == [17, 25] and _job(job_id)["percent_complete"] == 100
 
 
-def test_check_schema_passes_when_applied_and_raises_when_behind(app: Flask) -> None:
+def test_check_schema_passes_when_applied_and_raises_when_behind(app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
     with db.transaction() as conn:
         check_schema(conn)
-        conn.execute("DELETE FROM schema_migrations WHERE version = (SELECT max(version) FROM schema_migrations)")
-        try:
-            with pytest.raises(RuntimeError, match="unapplied migrations"):
-                check_schema(conn)
-        finally:
-            conn.rollback()  # the delete must not outlive the test: later tests need the real schema
+    # Fake the status list instead of deleting a schema_migrations row: no shared state is touched.
+    monkeypatch.setattr(migrate, "status", lambda conn: [("0001_x", True), ("0006_y", False)])
+    with db.transaction() as conn, pytest.raises(RuntimeError, match="unapplied migrations: 0006_y"):
+        check_schema(conn)
