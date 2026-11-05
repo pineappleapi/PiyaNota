@@ -294,7 +294,8 @@ def run_pipeline(
         raise PipelineError(NO_VOICES_REASON)  # fixed text: reasons reach clients
     satb, report = st.reconstruct(events)
     _flag_blank_pages(satb, report["flags"], len(page_jpegs))
-    review, _detail = st.review(events, report["flags"])
+    review, detail = st.review(events, report["flags"])
+    LOG.info("review flags full_count=%s", len(detail))  # the uncapped list is log-only, never stored
     seconds["reconstructing"] = monotonic() - t
 
     t = begin("synthesizing")

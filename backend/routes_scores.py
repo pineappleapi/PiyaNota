@@ -20,8 +20,19 @@ LOG = logging.getLogger(__name__)
 scores_bp = Blueprint("scores", __name__, url_prefix="/api/scores")
 
 MAX_SEARCH_LENGTH = 100
+# Mirror of stage5_synthesis.CLIENT_REVIEW_CODES: the API venv cannot import stage5 (cv2/torch).
+CLIENT_REVIEW_CODES = frozenset({"voice_unreadable", "voice_dropped"})
 _FINISHED = ("complete", "failed", "cancelled")
 Conn = psycopg.Connection[dict[str, Any]]
+
+
+def _client_review(review: Any) -> Any:
+    """Apply the write-time client filter to rows stored before it existed (read-only)."""
+    if not isinstance(review, dict) or "items" not in review or "reasons" not in review:
+        return review
+    reasons = sorted(set(review["reasons"]) & CLIENT_REVIEW_CODES)
+    items = [i for i in review["items"] if isinstance(i, dict) and i.get("code") in CLIENT_REVIEW_CODES]
+    return {**review, "reviewNeeded": bool(reasons), "reasons": reasons, "items": items}
 
 
 def _settings() -> Settings:
@@ -112,7 +123,7 @@ def result(score_id: int) -> tuple[Response, int]:
         "pageFiles": [file(p["object_key"]) for p in pages],
         "timingFile": file(timing["metadata_key"]) if timing else None,
         "midiTracks": midi or None,  # null for scores converted before MIDI existed
-        "review": score["review"],
+        "review": _client_review(score["review"]),
         "mutedMeasures": score["muted_measures"],
         "failedVoices": score["failed_voices"],
         "failedVoiceCauses": score["failed_voice_causes"],

@@ -319,3 +319,19 @@ def test_delete_cancels_running_retake(client: FlaskClient, headers: dict[str, s
         status = conn.execute("SELECT status FROM jobs WHERE id = %s", (rid,)).fetchone()["status"]
         queued = {r["object_key"] for r in conn.execute("SELECT object_key FROM storage_deletions")}
     assert status == "cancelled" and "pages/retake0.jpg" in queued
+
+
+def test_result_filters_old_review_rows_on_read(client: FlaskClient, headers: dict[str, str]) -> None:
+    sid, _ = _score(_uid())
+    old = {"reviewNeeded": True, "reasons": ["voice_unreadable", "meter_change"], "truncated": False,
+           "items": [{"code": "meter_change", "bar": 2}, {"code": "voice_unreadable", "voice": "alto"}]}
+    with db.transaction() as conn:
+        conn.execute("UPDATE scores SET review = %s WHERE id = %s", (Jsonb(old), sid))
+    review = client.get(f"/api/scores/{sid}/result", headers=headers).get_json()["data"]["review"]
+    assert review == {"reviewNeeded": True, "reasons": ["voice_unreadable"], "truncated": False,
+                      "items": [{"code": "voice_unreadable", "voice": "alto"}]}
+    old["reasons"], old["items"] = ["meter_change"], [{"code": "meter_change"}]
+    with db.transaction() as conn:
+        conn.execute("UPDATE scores SET review = %s WHERE id = %s", (Jsonb(old), sid))
+    review = client.get(f"/api/scores/{sid}/result", headers=headers).get_json()["data"]["review"]
+    assert review["reviewNeeded"] is False and review["items"] == []

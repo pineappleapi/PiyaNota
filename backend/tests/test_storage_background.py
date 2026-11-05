@@ -262,3 +262,36 @@ def test_purge_skips_user_locked_elsewhere(app: Flask) -> None:
         assert _count("purge_log") == 0
     assert background.run_purges(MemoryStorage()) == 1
     assert _count("purge_log") == 1
+
+
+def _seed_failed_job(email: str, age: str, *, status: str = "failed", retaken: bool = False) -> tuple[int, str]:
+    """A job in ``status`` last touched ``age`` ago with one page; returns (job id, page key)."""
+    key = f"pages/{email}.jpg"
+    cols = ("INSERT INTO jobs (user_id, status, source, page_count, title, tempo_source, updated_at) "
+            "VALUES (%s, %s, 'images', 1, 't', 'user', now() - %s::interval) RETURNING id")
+    with db.transaction() as conn:
+        uid = conn.execute(
+            "INSERT INTO users (email, password_hash) VALUES (%s, 'h') RETURNING id", (email,)
+        ).fetchone()["id"]
+        jid = conn.execute(cols, (uid, status, age)).fetchone()["id"]
+        conn.execute("INSERT INTO job_pages (job_id, page_index, object_key, width, height) "
+                     "VALUES (%s, 0, %s, 10, 10)", (jid, key))
+        if retaken:
+            conn.execute("INSERT INTO jobs (user_id, status, source, page_count, title, tempo_source, "
+                         "replaces_job_id) VALUES (%s, 'queued', 'images', 1, 't', 'user', %s)", (uid, jid))
+    return jid, key
+
+
+def test_prune_failed_job_pages(app: Flask) -> None:
+    _, old_key = _seed_failed_job("old@example.com", "8 days")
+    _seed_failed_job("recent@example.com", "6 days")
+    _seed_failed_job("retaken@example.com", "8 days", retaken=True)
+    _seed_failed_job("done@example.com", "8 days", status="complete")
+    _seed_failed_job("busy@example.com", "8 days", status="transcribing")
+    with db.transaction() as conn:
+        assert background.prune_failed_job_pages(conn) == 1
+    assert _queued_keys() == {old_key}
+    with db.transaction() as conn:
+        assert background.prune_failed_job_pages(conn) == 0  # rows gone: no second queueing
+    assert _queued_keys() == {old_key}
+    assert _count("job_pages") == 4

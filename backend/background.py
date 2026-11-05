@@ -24,6 +24,7 @@ RESERVE_GRACE_S = 3600
 THROTTLE_HIT_MAX_AGE_S = 3600
 STALE_ROW_GRACE_S = 86400
 BACKOFF_IDLE_S = 86400
+FAILED_JOB_PAGE_RETENTION_S = 7 * 24 * 3600
 Conn = psycopg.Connection[dict[str, Any]]
 
 
@@ -173,6 +174,32 @@ def run_prune(conn: Conn, hit_max_age_s: int = THROTTLE_HIT_MAX_AGE_S) -> int:
     return sum(conn.execute(sql, {"s": secs}).rowcount for sql, secs in statements)
 
 
+def prune_failed_job_pages(conn: Conn, retention_s: int = FAILED_JOB_PAGE_RETENTION_S) -> int:
+    """Queue page blobs of failed jobs nobody retook, a week after they failed.
+
+    Retaken means a newer job replaces it (``replaces_job_id``) or it is marked superseded. Only
+    ``failed`` is pruned: cancel already queues its pages, and queued/processing/complete jobs still
+    need theirs. The ``job_pages`` rows are deleted in the same statement, which also makes a second
+    run a no-op. ``updated_at`` is the end time: nothing touches a failed job afterwards.
+
+    Returns:
+        Number of page blobs queued for deletion.
+    """
+    keys = [
+        r["object_key"]
+        for r in conn.execute(
+            "DELETE FROM job_pages WHERE job_id IN ("
+            " SELECT j.id FROM jobs j WHERE j.status = 'failed' AND j.superseded_by_job_id IS NULL"
+            " AND j.updated_at < now() - make_interval(secs => %s)"
+            " AND NOT EXISTS (SELECT 1 FROM jobs r WHERE r.replaces_job_id = j.id)"
+            ") RETURNING object_key",
+            (retention_s,),
+        ).fetchall()
+    ]
+    queue_deletion(conn, keys)
+    return len(keys)
+
+
 def start_loop(app: Flask) -> threading.Thread:
     """Start the daemon thread that runs purge, deletion and prune every interval."""
     cfg: Settings = app.config[SETTINGS_KEY]
@@ -194,6 +221,10 @@ def start_loop(app: Flask) -> threading.Thread:
         with db.transaction() as conn:
             run_prune(conn, hit_max_age_s)
 
+    def _prune_failed() -> None:
+        with db.transaction() as conn:
+            prune_failed_job_pages(conn)
+
     def _loop() -> None:
         storage: Storage = app.extensions["storage"]
         while True:
@@ -201,6 +232,7 @@ def start_loop(app: Flask) -> threading.Thread:
                 _step("purges", lambda: run_purges(storage))
                 _step("deletions", lambda: run_deletions(storage))
                 _step("prune", _prune)
+                _step("failed job pages", _prune_failed)
             time.sleep(interval)
 
     thread = threading.Thread(target=_loop, name="piya-background", daemon=True)
