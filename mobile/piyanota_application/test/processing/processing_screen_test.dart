@@ -105,6 +105,33 @@ void main() {
       expect(find.text(ProcessingMessages.heading), findsNothing);
     });
 
+    testWidgets('an older job with no percentComplete shows the stage band', (
+      tester,
+    ) async {
+      // A null value is an older server; the card shows the stage's band
+      // start and never steps back when a later stage reports a lower band.
+      ProcessingStatus unreported(ProcessingStage stage) => ProcessingStatus(
+        stage: stage,
+        currentPage: 2,
+        totalPages: 3,
+        estimatedRemainingSeconds: 120,
+      );
+      final h = ProcessingHarness(
+        ScriptedProcessingApi([
+          unreported(ProcessingStage.transcribing),
+          unreported(ProcessingStage.detectingStaff),
+          running(60),
+        ]),
+      );
+      await pumpProcessing(tester, h);
+
+      expect(find.text('40%'), findsOneWidget);
+
+      await _nextPoll(tester);
+      expect(find.text('40%'), findsOneWidget);
+      expect(find.text('25%'), findsNothing);
+    });
+
     testWidgets('a job already complete on arrival opens Playback at once', (
       tester,
     ) async {
