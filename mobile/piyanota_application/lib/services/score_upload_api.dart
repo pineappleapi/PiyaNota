@@ -41,6 +41,13 @@ class ResubmittedJob {
   final int pageIndex;
 }
 
+/// J8: most scores one account may hold; the server's 409 and the app's
+/// pre-check both use it.
+const int maxScoresPerUser = 20;
+
+/// J8 error code for a create at [maxScoresPerUser].
+const String scoreLimitReachedCode = 'score_limit_reached';
+
 /// Typed failures so the Capture screen owns the wording (PIYA-215 AC3).
 sealed class ScoreUploadException implements Exception {
   const ScoreUploadException();
@@ -79,6 +86,7 @@ class UploadRejectedException extends ScoreUploadException {
     this.field,
     this.pageIndex,
     this.retryAfter,
+    this.limit,
   });
 
   final int? statusCode;
@@ -86,6 +94,11 @@ class UploadRejectedException extends ScoreUploadException {
   final String? field;
   final int? pageIndex;
   final Duration? retryAfter;
+
+  /// `error.limit` of a [scoreLimitReachedCode] 409.
+  final int? limit;
+
+  bool get isScoreLimit => code == scoreLimitReachedCode;
 }
 
 abstract interface class ScoreUploadApi {
@@ -187,11 +200,13 @@ class HttpScoreUploadApi implements ScoreUploadApi {
   }) async {
     // Part order is page order (PIYA-101 context note).
     final form = FormData()
-      ..fields.addAll(scoreFormFields(
+      ..fields.addAll(
+        scoreFormFields(
           details,
           replacesJobId: replacesJobId,
           fallbackTempoBpm: fallbackTempoBpm,
-        ));
+        ),
+      );
     for (var i = 0; i < imagePaths.length; i++) {
       form.files.add(
         MapEntry(
@@ -264,11 +279,13 @@ class HttpScoreUploadApi implements ScoreUploadApi {
     int? fallbackTempoBpm,
   }) async {
     final form = FormData()
-      ..fields.addAll(scoreFormFields(
+      ..fields.addAll(
+        scoreFormFields(
           details,
           replacesJobId: replacesJobId,
           fallbackTempoBpm: fallbackTempoBpm,
-        ))
+        ),
+      )
       ..files.add(
         MapEntry(
           'file',
@@ -486,6 +503,7 @@ class HttpScoreUploadApi implements ScoreUploadApi {
       field: field is String ? field : null,
       pageIndex: pageIndex is int ? pageIndex : null,
       retryAfter: retrySeconds == null ? null : Duration(seconds: retrySeconds),
+      limit: fields['limit'] is int ? fields['limit'] as int : null,
     );
   }
 }

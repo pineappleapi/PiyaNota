@@ -199,6 +199,10 @@ class CaptureMessages {
     };
   }
 
+  static const String scoreLimitBody =
+      'You have $maxScoresPerUser scores, the maximum. Delete a score to '
+      'upload a new one.';
+  static const String library = 'Library';
   static const String cancelUpload = 'Cancel sending';
   static const String uploadCancelled =
       'Sending cancelled. Your pages are still here.';

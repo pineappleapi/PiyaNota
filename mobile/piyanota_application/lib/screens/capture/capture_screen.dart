@@ -1,3 +1,5 @@
+import 'dart:async' show unawaited;
+
 import 'package:dio/dio.dart' show CancelToken;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -682,10 +684,51 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     if (!found) navigator.pushReplacementNamed(AppRoutes.scoreLibrary);
   }
 
+  /// J8. The Library button leaves Capture the way a dead retake does.
+  Future<void> _showScoreLimit() async {
+    final toLibrary = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        content: const Text(CaptureMessages.scoreLimitBody),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text(CaptureMessages.cancel),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text(CaptureMessages.library),
+          ),
+        ],
+      ),
+    );
+    if (toLibrary != true || !mounted) return;
+    final navigator = Navigator.of(context);
+    var found = false;
+    navigator.popUntil((route) {
+      if (route.settings.name == AppRoutes.scoreLibrary) {
+        found = true;
+        return true;
+      }
+      return route.isFirst;
+    });
+    if (!found) navigator.pushReplacementNamed(AppRoutes.scoreLibrary);
+  }
+
   void _cancelSubmit() => _cancelToken?.cancel();
 
   Future<void> _submit() async {
     if (_submitting || _session.isEmpty || _busy > 0) return;
+    // J8 pre-check; unknown count (Library not loaded) is left to the 409.
+    if (widget.retake == null &&
+        widget.wholeRetake == null &&
+        // exists: reading would start a fetch when nothing has loaded it.
+        ref.exists(scoreLibraryProvider) &&
+        (ref.read(scoreLibraryProvider).value?.length ?? 0) >=
+            maxScoresPerUser) {
+      await _showScoreLimit();
+      return;
+    }
     final cancelToken = CancelToken();
     setState(() {
       _submitting = true;
@@ -782,6 +825,13 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
       );
     } on UploadCancelledException {
       _snack(CaptureMessages.uploadCancelled);
+    } on UploadRejectedException catch (e) {
+      if (!mounted) return;
+      if (e.isScoreLimit) {
+        unawaited(_showScoreLimit());
+      } else {
+        setState(() => _uploadError = e);
+      }
     } on ScoreUploadException catch (e) {
       if (mounted) setState(() => _uploadError = e);
     } catch (e, stack) {
