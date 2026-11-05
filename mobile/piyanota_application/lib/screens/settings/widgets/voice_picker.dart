@@ -29,9 +29,10 @@ class VoicePicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Wrap(
+    // One per line so choosing a voice never moves the others.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       spacing: _gap,
-      runSpacing: _gap,
       children: [
         _VoicePill(
           label: SettingsMessages.allVoices,
@@ -106,6 +107,7 @@ class _VoicePill extends StatelessWidget {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(minHeight: _height),
                 child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if (selected) ...[

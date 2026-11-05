@@ -18,6 +18,7 @@ import 'widgets/help_button.dart';
 import 'widgets/log_out_dialog.dart';
 import 'widgets/settings_section.dart';
 import 'widgets/tempo_stepper.dart';
+import 'widgets/unsaved_changes_dialog.dart';
 import 'widgets/voice_picker.dart';
 
 /// PIYA-212 AC5: Settings opens only on a live session. The check runs
@@ -90,19 +91,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   static const double _rowIconSize = 22;
   static const double _logOutRadius = 16;
 
+  /// What the pickers show (the draft) and what is on disk. They differ
+  /// until "Save changes" succeeds; [_dirty] drives the leave prompt.
   VoicePart? _voice;
+  VoicePart? _savedVoice;
   int _tempo = ScoreDetails.defaultTempo;
   int _savedTempo = ScoreDetails.defaultTempo;
-  int _tempoSaveSeq = 0;
-
-  /// The attempt [_savedTempo] came from, so an older save finishing late
-  /// cannot overwrite a newer one that already succeeded.
-  int _savedTempoSeq = 0;
-
-  /// The gesture whose failure last rolled the field back, so an older
-  /// save that lands after that rollback can still correct the field.
-  int _rolledBackSeq = 0;
   bool _prefsLoaded = false;
+  bool _saving = false;
+
+  bool get _dirty => _voice != _savedVoice || _tempo != _savedTempo;
 
   @override
   void initState() {
@@ -125,59 +123,60 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (!mounted) return;
     setState(() {
       _voice = voice;
+      _savedVoice = voice;
       _tempo = tempo;
       _savedTempo = tempo;
       _prefsLoaded = true;
     });
   }
 
-  Future<void> _setVoice(VoicePart? voice) async {
-    final previous = _voice;
-    if (voice == previous) return;
-    setState(() => _voice = voice);
+  /// Writes only what changed. A field that fails stays unsaved (and the
+  /// screen stays dirty) so the user can retry; false on any failure.
+  Future<bool> _save() async {
+    if (_saving) return false;
+    setState(() => _saving = true);
+    var ok = true;
+    final voice = _voice;
+    final tempo = _tempo;
     try {
-      await ref.read(onboardingPrefsServiceProvider).setDefaultVoicePart(voice);
-    } catch (e, stack) {
-      debugPrint('Default voice not saved: $e\n$stack');
-      if (!mounted) return;
-      setState(() => _voice = previous);
-      _showSnackBar(SettingsMessages.saveFailed);
-    }
-  }
-
-  /// Every step of a held button: display only, so a hold saves once.
-  void _showTempo(int bpm) => setState(() => _tempo = bpm);
-
-  /// Once per tap or per hold. A failure rolls back to [_savedTempo], the
-  /// last value known to be on disk, not to the value before this gesture,
-  /// which may itself never have saved.
-  Future<void> _commitTempo(int bpm) async {
-    final attempt = ++_tempoSaveSeq;
-    try {
-      await ref.read(settingsPrefsServiceProvider).setDefaultTempo(bpm);
-      // SharedPreferences applies writes in call order, so a success here
-      // means bpm is on disk at least until a later save lands. Recorded
-      // even while a newer save is in flight: if that one fails, this is
-      // the value to roll back to.
-      if (attempt > _savedTempoSeq) {
-        _savedTempoSeq = attempt;
-        _savedTempo = bpm;
-        // L-d: the latest gesture failed first and rolled back to an older
-        // value; this older save has now landed, so the field must show
-        // what is actually on disk.
-        if (mounted && _rolledBackSeq == _tempoSaveSeq) {
-          setState(() => _tempo = bpm);
+      if (voice != _savedVoice) {
+        try {
+          await ref
+              .read(onboardingPrefsServiceProvider)
+              .setDefaultVoicePart(voice);
+          _savedVoice = voice;
+        } catch (e, stack) {
+          debugPrint('Default voice not saved: $e\n$stack');
+          ok = false;
         }
       }
-    } catch (e, stack) {
-      debugPrint('Default tempo not saved: $e\n$stack');
-      // Only the latest gesture may roll back; an older failure must not
-      // undo a newer value the user is now looking at.
-      if (!mounted || attempt != _tempoSaveSeq) return;
-      _rolledBackSeq = attempt;
-      setState(() => _tempo = _savedTempo);
-      _showSnackBar(SettingsMessages.saveFailed);
+      if (tempo != _savedTempo) {
+        try {
+          await ref.read(settingsPrefsServiceProvider).setDefaultTempo(tempo);
+          _savedTempo = tempo;
+        } catch (e, stack) {
+          debugPrint('Default tempo not saved: $e\n$stack');
+          ok = false;
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
+    if (!ok && mounted) _showSnackBar(SettingsMessages.saveFailed);
+    return ok;
+  }
+
+  /// Runs [action] now, or after the user settles unsaved changes. Every
+  /// way out of Settings goes through here (Capture tab, Log out; F9 adds
+  /// Delete account) except the Library tab and system back, which reach it
+  /// through PopScope. Dismissing the prompt stays on Settings.
+  Future<void> _leave(Future<void> Function() action) async {
+    if (!_dirty) return action();
+    final choice = await confirmUnsavedChanges(context);
+    if (!mounted || choice == null) return;
+    if (choice == UnsavedChoice.save && !await _save()) return;
+    if (!mounted) return;
+    await action();
   }
 
   Future<void> _changePassword() async {
@@ -238,55 +237,67 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       MediaQuery.paddingOf(context).bottom,
     );
 
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
-      child: Scaffold(
-        backgroundColor: AppTheme.libraryBackground,
-        resizeToAvoidBottomInset: false,
-        body: Stack(
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _SettingsHeader(
-                  horizontalPadding: margin - _headerInsetFromCards,
-                ),
-                Expanded(
-                  child: ListView(
-                    padding: EdgeInsets.fromLTRB(
-                      margin,
-                      _listTopGap,
-                      margin,
-                      navHeight + _bottomGap,
-                    ),
-                    children: [
-                      _accountSection(context),
-                      const SizedBox(height: _groupGap),
-                      _playbackSection(context),
-                      const SizedBox(height: _groupGap),
-                      _aboutSection(context),
-                      const SizedBox(height: _groupGap),
-                      _logOutRow(context),
-                    ],
+    return PopScope(
+      canPop: !_dirty,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        // pop() ignores PopScope, so this cannot loop back into the prompt.
+        _leave(() async => Navigator.of(context).pop());
+      },
+      child: AnnotatedRegion<SystemUiOverlayStyle>(
+        value: SystemUiOverlayStyle.light,
+        child: Scaffold(
+          backgroundColor: AppTheme.libraryBackground,
+          resizeToAvoidBottomInset: false,
+          body: Stack(
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _SettingsHeader(
+                    horizontalPadding: margin - _headerInsetFromCards,
                   ),
-                ),
-              ],
-            ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: LibraryBottomNav(
-                selected: LibraryNavTab.settings,
-                // Settings is always pushed over the Library.
-                onLibrary: () => Navigator.of(context).maybePop(),
-                onCapture: () =>
-                    Navigator.of(context)
-                        .pushReplacementNamed(AppRoutes.capture),
-                onSettings: () {},
+                  Expanded(
+                    child: ListView(
+                      padding: EdgeInsets.fromLTRB(
+                        margin,
+                        _listTopGap,
+                        margin,
+                        navHeight + _bottomGap,
+                      ),
+                      children: [
+                        _accountSection(context),
+                        const SizedBox(height: _groupGap),
+                        _playbackSection(context),
+                        const SizedBox(height: _groupGap),
+                        _aboutSection(context),
+                        const SizedBox(height: _groupGap),
+                        _logOutRow(context),
+                        const SizedBox(height: _groupGap),
+                        _saveButton(),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-            ),
-          ],
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: LibraryBottomNav(
+                  selected: LibraryNavTab.settings,
+                  // Settings is always pushed over the Library.
+                  // maybePop reaches PopScope, which asks about unsaved changes.
+                  onLibrary: () => Navigator.of(context).maybePop(),
+                  onCapture: () => _leave(() async {
+                    await Navigator.of(context)
+                        .pushReplacementNamed(AppRoutes.capture);
+                  }),
+                  onSettings: () {},
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -374,7 +385,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             body: SettingsMessages.voiceHelpBody,
           ),
           control: _prefsLoaded
-              ? VoicePicker(selected: _voice, onChanged: _setVoice)
+              ? VoicePicker(
+                  selected: _voice,
+                  onChanged: (voice) => setState(() => _voice = voice),
+                )
               : null,
           controlGap: _controlGap,
         ),
@@ -390,8 +404,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           control: _prefsLoaded
               ? TempoStepper(
                   value: _tempo,
-                  onChanged: _showTempo,
-                  onCommit: _commitTempo,
+                  onChanged: (bpm) => setState(() => _tempo = bpm),
+                  // Saving waits for "Save changes"; nothing to do per gesture.
+                  onCommit: (_) {},
                 )
               : null,
           controlGap: _controlGap,
@@ -435,13 +450,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
+  Widget _saveButton() {
+    return ElevatedButton(
+      key: const ValueKey('settings-save'),
+      onPressed: _dirty && !_saving && _prefsLoaded ? _save : null,
+      child: const Text(SettingsMessages.saveChanges),
+    );
+  }
+
   Widget _logOutRow(BuildContext context) {
     return Material(
       color: AppTheme.settingsSurface,
       borderRadius: BorderRadius.circular(_logOutRadius),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: _logOut,
+        onTap: () => _leave(_logOut),
         child: Padding(
           padding: kSettingsRowPadding,
           child: Row(

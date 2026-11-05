@@ -92,6 +92,14 @@ class SettingsMessages {
       'and password to log back in.';
   static const String cancel = 'Cancel';
 
+  // F6: one Save for the whole screen, and the prompt on leaving unsaved.
+  static const String saveChanges = 'Save changes';
+  static const String unsavedTitle = 'Save your changes?';
+  static const String unsavedBody =
+      'You changed your playback defaults but have not saved them.';
+  static const String discard = 'Discard';
+  static const String save = 'Save';
+
   static const String saveFailed =
       "Couldn't save that setting. Please try again.";
 }
