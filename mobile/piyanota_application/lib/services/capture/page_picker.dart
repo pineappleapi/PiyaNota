@@ -55,6 +55,9 @@ bool looksLikePdf(List<int> bytes) {
   return false;
 }
 
+const double _pickMaxSide = 4032; // = maxLongSide in page_image_processor
+const int _pickQuality = 90;
+
 class PluginPagePicker implements PagePicker {
   PluginPagePicker(this._outputDir, {ImagePicker? imagePicker})
     : _imagePicker = imagePicker ?? ImagePicker();
@@ -67,7 +70,14 @@ class PluginPagePicker implements PagePicker {
     // Full metadata off: on Android 13+ this keeps the permission-less
     // system photo picker (AC3); orientation is still read from the file.
     final files = await withoutSplash(
-      () => _imagePicker.pickMultiImage(requestFullMetadata: false),
+      // Native downscale of oversize photos (cheap); the plugin keeps EXIF
+      // tags incl. GPS on resize, so the app still strips them in prepare.
+      () => _imagePicker.pickMultiImage(
+        maxWidth: _pickMaxSide,
+        maxHeight: _pickMaxSide,
+        imageQuality: _pickQuality,
+        requestFullMetadata: false,
+      ),
     );
     return [for (final file in files) file.path];
   }

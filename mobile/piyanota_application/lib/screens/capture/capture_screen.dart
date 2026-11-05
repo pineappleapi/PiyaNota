@@ -305,26 +305,25 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     setState(() => _busy++);
     final prepared = <String>[];
     var unreadable = 0;
-    var skipped = 0;
     final replacePdf = room == _PhotoRoom.replacePdf;
+    final photoRoom = replacePdf ? CaptureSession.maxPages : _photoRoom;
+    final take = picked.take(photoRoom).toList();
+    final skipped = picked.length - take.length;
     try {
-      final processor = ref.read(pageImageProcessorProvider);
-      for (final path in picked) {
-        final photoRoom = replacePdf ? CaptureSession.maxPages : _photoRoom;
-        try {
-          if (prepared.length >= photoRoom) {
-            skipped++;
-            continue;
-          }
-          prepared.add(await processor.prepare(path));
-        } on UnreadableImageException {
+      final results = await prepareInParallel(
+        ref.read(pageImageProcessorProvider),
+        take,
+      );
+      for (final result in results) {
+        if (result == null) {
           unreadable++;
-        } finally {
-          // image_picker hands over cache copies; ours is the prepared JPEG.
-          _store.delete(path);
+        } else {
+          prepared.add(result);
         }
       }
     } finally {
+      // image_picker hands over cache copies; ours is the prepared JPEG.
+      picked.forEach(_store.delete);
       if (mounted) setState(() => _busy--);
     }
     if (!mounted) {
