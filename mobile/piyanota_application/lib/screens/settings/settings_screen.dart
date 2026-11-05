@@ -14,6 +14,7 @@ import '../library/widgets/library_bottom_nav.dart';
 import '../library/widgets/library_header.dart';
 import 'settings_messages.dart';
 import 'widgets/change_password_sheet.dart';
+import 'widgets/delete_account_dialog.dart';
 import 'widgets/help_button.dart';
 import 'widgets/log_out_dialog.dart';
 import 'widgets/settings_section.dart';
@@ -167,8 +168,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   /// Runs [action] now, or after the user settles unsaved changes. Every
-  /// way out of Settings goes through here (Capture tab, Log out; F9 adds
-  /// Delete account) except the Library tab and system back, which reach it
+  /// way out of Settings goes through here (Capture tab, Log out, Delete
+  /// account) except the Library tab and system back, which reach it
   /// through PopScope. Dismissing the prompt stays on Settings.
   Future<void> _leave(Future<void> Function() action) async {
     if (!_dirty) return action();
@@ -197,6 +198,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     // PIYA-305 (server logout) is wired by PIYA-217; until then the token
     // is only dropped here and lapses server-side at its own expiry.
     await _toLogin();
+  }
+
+  Future<void> _deleteAccount() async {
+    final result = await showDeleteAccountDialog(context);
+    if (!mounted) return;
+    switch (result) {
+      case DeleteAccountResult.deleted:
+        // The server said 200 first; only now is local data wiped.
+        await wipeAccountLocalData(ref);
+        if (!mounted) return;
+        Navigator.of(context)
+            .pushNamedAndRemoveUntil(AppRoutes.login, (_) => false);
+      case DeleteAccountResult.sessionExpired:
+        await _toLogin();
+      case null:
+        break;
+    }
   }
 
   Future<void> _toLogin() async {
@@ -275,6 +293,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         _aboutSection(context),
                         const SizedBox(height: _groupGap),
                         _logOutRow(context),
+                        const SizedBox(height: _controlGap),
+                        _deleteAccountRow(context),
                         const SizedBox(height: _groupGap),
                         _saveButton(),
                       ],
@@ -457,6 +477,38 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       key: const ValueKey('settings-save'),
       onPressed: _dirty && !_saving && _prefsLoaded ? _save : null,
       child: const Text(SettingsMessages.saveChanges),
+    );
+  }
+
+  Widget _deleteAccountRow(BuildContext context) {
+    return Material(
+      color: AppTheme.settingsSurface,
+      borderRadius: BorderRadius.circular(_logOutRadius),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => _leave(_deleteAccount),
+        child: Padding(
+          padding: kSettingsRowPadding,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.delete_forever_rounded,
+                size: _rowIconSize,
+                color: AppTheme.settingsLogOut,
+              ),
+              const SizedBox(width: _controlGap),
+              Flexible(
+                child: Text(
+                  SettingsMessages.deleteAccount,
+                  style: SettingsText.label(context)
+                      ?.copyWith(color: AppTheme.settingsLogOut),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

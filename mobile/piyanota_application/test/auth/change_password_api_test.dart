@@ -382,4 +382,39 @@ void main() {
       },
     );
   });
+  group('deleteAccount (J3)', () {
+    test(
+      'sends DELETE /api/account with the password and bearer token',
+      () async {
+        final adapter = _StubAdapter(body: {'data': {}});
+        await _apiWith(adapter).deleteAccount(token: 't0k', password: 'pw');
+        final request = adapter.lastRequest!;
+        expect(request.method, 'DELETE');
+        expect(request.path, ApiConfig.deleteAccountPath);
+        expect(request.data, {'password': 'pw'});
+        expect(request.headers['Authorization'], 'Bearer t0k');
+      },
+    );
+
+    test('403 is a wrong password, 401 a dead session', () async {
+      await expectLater(
+        _apiWith(_StubAdapter(status: 403, body: {'error': 'x'}))
+            .deleteAccount(token: 't', password: 'p'),
+        throwsA(isA<CurrentPasswordIncorrectException>()),
+      );
+      await expectLater(
+        _apiWith(_StubAdapter(status: 401, body: {'error': 'x'}))
+            .deleteAccount(token: 't', password: 'p'),
+        throwsA(isA<AuthSessionExpiredException>()),
+      );
+    });
+
+    test('a dropped connection is a network failure', () async {
+      await expectLater(
+        _apiWith(_StubAdapter(connectionFails: true))
+            .deleteAccount(token: 't', password: 'p'),
+        throwsA(isA<AuthNetworkException>()),
+      );
+    });
+  });
 }

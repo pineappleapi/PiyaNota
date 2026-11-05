@@ -54,6 +54,27 @@ Future<void> endLocalSession(WidgetRef ref) async {
   }
 }
 
+/// F10 hook: removes the local copy of converted results (audio, pages,
+/// timing) once that folder exists. Empty until F10 lands; Delete account
+/// calls it so the wipe is complete the day the folder appears.
+Future<void> deleteLocalResultsFolder() async {}
+
+/// Delete account's local half, run only after the server returned 200.
+/// [endLocalSession] stops scan polling and the background service, forgets
+/// the stored scans and clears secure storage; this adds the login-wait
+/// keys and the results folder. Never throws: the account is already gone
+/// server-side, so a failed local step must not trap the user.
+Future<void> wipeAccountLocalData(WidgetRef ref) async {
+  final throttle = ref.read(loginThrottleProvider);
+  await endLocalSession(ref);
+  try {
+    await throttle.clearAll();
+    await deleteLocalResultsFolder();
+  } catch (e, stack) {
+    debugPrint('Account wipe incomplete: $e\n$stack');
+  }
+}
+
 /// Stores a freshly issued session. Work kept on the device (stored scans,
 /// a background export) is kept when it is this account's, which is the
 /// normal case: the same person logging in again after their session

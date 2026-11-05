@@ -638,4 +638,48 @@ void main() {
       await wrong(good);
     });
   });
+  group('deleteAccount (J3)', () {
+    test('wrong password is 403 and keeps the account', () async {
+      final api = _api();
+      final session = await api.login(
+        email: FakeAuthApi.demoEmail,
+        password: FakeAuthApi.demoPassword,
+      );
+      await expectLater(
+        api.deleteAccount(token: session.sessionToken, password: 'nope1234'),
+        throwsA(isA<CurrentPasswordIncorrectException>()),
+      );
+      // Still there, and the login ladder was not touched.
+      await api.login(
+        email: FakeAuthApi.demoEmail,
+        password: FakeAuthApi.demoPassword,
+      );
+    });
+
+    test(
+      'success purges, ends sessions, and the email can sign up again',
+      () async {
+        final api = _api();
+        final session = await api.signUp(
+          email: 'gone@example.com',
+          password: 'secret123',
+          passwordConfirmation: 'secret123',
+        );
+        await api.deleteAccount(
+          token: session.sessionToken,
+          password: 'secret123',
+        );
+        expect(api.accountForToken(session.sessionToken), isNull);
+        await expectLater(
+          api.login(email: 'gone@example.com', password: 'secret123'),
+          throwsA(isA<InvalidCredentialsException>()),
+        );
+        await api.signUp(
+          email: 'gone@example.com',
+          password: 'secret123',
+          passwordConfirmation: 'secret123',
+        );
+      },
+    );
+  });
 }

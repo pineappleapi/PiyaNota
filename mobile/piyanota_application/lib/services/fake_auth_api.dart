@@ -326,6 +326,40 @@ class FakeAuthApi implements AuthApi {
     );
   }
 
+  /// J3 stand-in: shares Change Password's wrong-password window, never the
+  /// login ladder. Success forgets the account entirely, so the same email
+  /// can sign up again at once and a login returns the unknown-account 401.
+  @override
+  Future<void> deleteAccount({
+    required String token,
+    required String password,
+  }) async {
+    await Future<void>.delayed(latency);
+    final email = accountForToken(token);
+    if (email == null) throw const AuthSessionExpiredException();
+    if (email.endsWith(offlineDomain)) throw const AuthNetworkException();
+
+    final now = _now();
+    final failures = _changePasswordFailures.putIfAbsent(email, () => [])
+      ..removeWhere((at) => !now.isBefore(at.add(changePasswordFailureWindow)));
+    if (failures.length >= changePasswordMaxFailures) {
+      final freesAt = failures.first.add(changePasswordFailureWindow);
+      throw AuthRateLimitedException(
+        retryAfterSeconds: freesAt.difference(now).inSeconds,
+      );
+    }
+    if (_passwordsByEmail[email] != password) {
+      failures.add(now);
+      throw const CurrentPasswordIncorrectException();
+    }
+    _passwordsByEmail.remove(email);
+    _userIdsByEmail.remove(email);
+    _emailsByToken.removeWhere((_, owner) => owner == email);
+    _grantsByEmail.remove(email);
+    _changePasswordFailures.remove(email);
+    _clearLogin(email);
+  }
+
   /// The code most recently "emailed" to [email], or null if nothing was
   /// sent (unregistered address) or it expired. Debug demo aid only — the
   /// real API never returns the code to the client.

@@ -162,6 +162,14 @@ abstract interface class AuthApi {
     required String currentPassword,
     required String newPassword,
   });
+
+  /// Contract J3. Purges the account and its data on the server and revokes
+  /// every session, so a normal return means the app must now wipe locally.
+  /// A wrong [password] is [CurrentPasswordIncorrectException] (403, not a
+  /// dead session), a 401 [AuthSessionExpiredException], too many wrong
+  /// attempts [AuthRateLimitedException]. A wrong password here is not a
+  /// login failure and must never reach the login throttle.
+  Future<void> deleteAccount({required String token, required String password});
 }
 
 /// Talks to the Module 3 Flask API. Request/response shapes follow the
@@ -246,6 +254,24 @@ class HttpAuthApi implements AuthApi {
       headers: {'Authorization': 'Bearer $token'},
       mapStatus: _mapChangePasswordStatus,
     );
+  }
+
+  @override
+  Future<void> deleteAccount({
+    required String token,
+    required String password,
+  }) async {
+    try {
+      await _dio.delete<Map<String, dynamic>>(
+        ApiConfig.deleteAccountPath,
+        data: {'password': password},
+        options: Options(headers: {'Authorization': 'Bearer $token'}),
+      );
+    } on DioException catch (e) {
+      // Same status meanings as Change Password: 401 dead session, 403
+      // wrong password, 429 wait.
+      throw _mapDioError(e, _mapChangePasswordStatus);
+    }
   }
 
   Future<AuthSession> _postForSession(

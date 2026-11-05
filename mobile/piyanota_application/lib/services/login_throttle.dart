@@ -55,6 +55,17 @@ class LoginThrottle {
     (now ?? _clock()).add(wait).millisecondsSinceEpoch,
   );
 
+  /// Removes every stored wait, for Delete account: the addresses on this
+  /// device no longer belong to anyone.
+  Future<void> clearAll() async {
+    final prefs = await SharedPreferences.getInstance();
+    for (final key in prefs.getKeys().where(
+      (k) => k.startsWith(_untilKeyPrefix),
+    )) {
+      await prefs.remove(key);
+    }
+  }
+
   /// Same normalisation as the fake backend, so a differently-cased or
   /// padded address shares one count.
   String _key(String email) => email.trim().toLowerCase();

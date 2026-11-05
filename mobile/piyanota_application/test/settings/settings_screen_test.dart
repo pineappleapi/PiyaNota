@@ -1100,4 +1100,143 @@ void main() {
       },
     );
   });
+  group('delete account (F9)', () {
+    const throttleKey = 'login_throttle.until.$_email';
+
+    Finder confirmButton() =>
+        find.byKey(const ValueKey('delete-account-confirm'));
+
+    Future<void> openDialog(WidgetTester tester) async {
+      await _scrollTo(tester, find.text(SettingsMessages.deleteAccount));
+      await tester.tap(find.text(SettingsMessages.deleteAccount));
+      await tester.pumpAndSettle();
+    }
+
+    /// Types [password] and taps through both confirmation steps.
+    Future<void> confirmDelete(WidgetTester tester, String password) async {
+      await tester.enterText(
+        find.descendant(of: _prompt, matching: find.byType(EditableText)),
+        password,
+      );
+      await tester.tap(confirmButton());
+      await tester.pumpAndSettle();
+      expect(find.text(SettingsMessages.deleteConfirmBody), findsOneWidget);
+      await tester.tap(confirmButton());
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('says what is lost and sends nothing on the first tap', (
+      tester,
+    ) async {
+      final harness = _Harness(session: _liveSession());
+      await harness.pump(tester);
+      await openDialog(tester);
+      expect(find.text(SettingsMessages.deleteAccountBody), findsOneWidget);
+      await tester.enterText(
+        find.descendant(of: _prompt, matching: find.byType(EditableText)),
+        'pw',
+      );
+      await tester.tap(confirmButton());
+      await tester.pumpAndSettle();
+      expect(harness.api.deleteAccountCalls, 0);
+      expect(find.text(SettingsMessages.deleteConfirmBody), findsOneWidget);
+    });
+
+    testWidgets('cancel keeps the account and the session', (tester) async {
+      final harness = _Harness(session: _liveSession());
+      await harness.pump(tester);
+      await openDialog(tester);
+      await tester.tap(_promptButton(SettingsMessages.cancel));
+      await tester.pumpAndSettle();
+      expect(_prompt, findsNothing);
+      expect(harness.api.deleteAccountCalls, 0);
+      expect(find.text(loginMarker), findsNothing);
+      expect(harness.storage.values['session_token'], _token);
+    });
+
+    testWidgets('wrong password says so and keeps account and session', (
+      tester,
+    ) async {
+      final harness = _Harness(
+        session: _liveSession(),
+        prefs: {throttleKey: 1},
+      );
+      harness.api.onDeleteAccount = () async =>
+          throw const CurrentPasswordIncorrectException();
+      await harness.pump(tester);
+      await openDialog(tester);
+      await confirmDelete(tester, 'wrong');
+      expect(find.text(SettingsMessages.wrongPassword), findsOneWidget);
+      expect(find.text(loginMarker), findsNothing);
+      expect(harness.storage.values['session_token'], _token);
+      // Not a login failure: the login wait is untouched.
+      expect((await SharedPreferences.getInstance()).getInt(throttleKey), 1);
+    });
+
+    testWidgets('network failure keeps the account and the session', (
+      tester,
+    ) async {
+      final harness = _Harness(session: _liveSession());
+      harness.api.onDeleteAccount = () async =>
+          throw const AuthNetworkException();
+      await harness.pump(tester);
+      await openDialog(tester);
+      await confirmDelete(tester, 'pw');
+      expect(find.text(AuthMessages.network), findsOneWidget);
+      expect(find.text(loginMarker), findsNothing);
+      expect(harness.storage.values['session_token'], _token);
+    });
+
+    testWidgets('success wipes local data and goes to Login', (tester) async {
+      final harness = _Harness(
+        session: _liveSession(),
+        prefs: {throttleKey: 1, 'work_owner_v1': 7},
+      );
+      harness.api.onDeleteAccount = () async {};
+      await harness.pump(tester);
+      await openDialog(tester);
+      await confirmDelete(tester, 'RightPassw0rd!');
+      expect(harness.api.deleteAccountCalls, 1);
+      expect(harness.api.lastToken, _token);
+      expect(harness.api.lastDeletePassword, 'RightPassw0rd!');
+      expect(find.text(loginMarker), findsOneWidget);
+      expect(harness.storage.values, isEmpty);
+      final prefs = await SharedPreferences.getInstance();
+      expect(
+        prefs.getKeys().where((k) => k.startsWith('login_throttle')),
+        isEmpty,
+      );
+      expect(prefs.getInt('work_owner_v1'), isNull);
+    });
+
+    for (final scale in const [1.0, 2.0]) {
+      testWidgets('no overflow at 320 dp, ${scale}x text incl. dialog', (
+        tester,
+      ) async {
+        final harness = _Harness(session: _liveSession());
+        harness.api.onDeleteAccount = () async =>
+            throw const AuthNetworkException();
+        await harness.pump(
+          tester,
+          logicalSize: const Size(320, 568),
+          textScale: scale,
+        );
+        await _scrollTo(tester, find.text(SettingsMessages.deleteAccount));
+        expect(tester.takeException(), isNull);
+        await openDialog(tester);
+        expect(tester.takeException(), isNull);
+        await confirmDelete(tester, 'pw');
+        expect(find.text(AuthMessages.network), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        // The last-confirmation step is the other dialog layout.
+        await tester.enterText(
+          find.descendant(of: _prompt, matching: find.byType(EditableText)),
+          'pw',
+        );
+        await tester.tap(confirmButton());
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      });
+    }
+  });
 }

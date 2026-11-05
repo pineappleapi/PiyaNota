@@ -90,6 +90,21 @@ class ScriptedAuthApi implements AuthApi {
     return onChangePassword!();
   }
 
+  Future<void> Function()? onDeleteAccount;
+  int deleteAccountCalls = 0;
+  String? lastDeletePassword;
+
+  @override
+  Future<void> deleteAccount({
+    required String token,
+    required String password,
+  }) {
+    deleteAccountCalls++;
+    lastToken = token;
+    lastDeletePassword = password;
+    return onDeleteAccount!();
+  }
+
   @override
   Future<AuthSession> login({required String email, required String password}) {
     loginCalls++;
