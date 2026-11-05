@@ -19,3 +19,16 @@ Sources:
 - Each voice stem on its own starts near -18 LUFS, so one soloed voice is not louder than the four together.
 - These are starting values. B10 measures the real LUFS and true peak of the rendered stems and the sum, and records them in joint-contract.md J7. The user adjusts by ear on the phone with headphones and with the speaker.
 - Metronome click: peaks lowered in the app (F8c) so the click at its slider maximum sits well below a voice at its maximum.
+
+## B10 measured (2026-11-05)
+Primary source added: https://artists.spotify.com/help/article/loudness-normalization (Spotify states -14 LUFS and 1 dB headroom for lossy formats). The AES TD1008 figures (-16 LUFS, -1 dBTP) were seen only on secondary pages, not verified against the standard.
+
+Method: `_render_to_mp3` (fluidsynth, piano.sf2, ffmpeg 192k MP3) on a hand-built 8-bar 4/4 SATB piece (no saved Moonriver events exist locally). Levels measured with ffmpeg `ebur128=peak=true`; the sum is `amix=inputs=4:normalize=0` of the four MP3s decoded to float.
+
+| STEM_TARGET_LUFS | stems LUFS | stem true peaks (dBTP) | sum LUFS | sum true peak (dBTP) | clips |
+|---|---|---|---|---|---|
+| -18 | -18.2 to -18.3 | -5.9 to -8.0 | -11.8 | +0.8 | yes (max 1.09) |
+| -19 | -19.2 | -6.9 to -9.0 | -12.8 | -0.2 | no |
+| -20 | -20.2 | -7.9 to -10.0 | -13.8 | -1.2 | no |
+
+Result: STEM_TARGET_LUFS = -20.0, the first step where the sum true peak is at or below -1 dBTP. Trade-off: the sum is -13.8 LUFS, about the -14 reference and not the "a bit louder, about -12" the user wanted. Reaching -12 needs a limiter on the sum, which the app does not have (it mixes four stems). One synthetic chord piece; real choral material may differ by a few dB, so tune by ear on the phone.

@@ -11,6 +11,7 @@ Dependencies:
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -26,6 +27,12 @@ from stage4_reconstruction import TICKS_PER_QUARTER
 
 # FluidSynth output sample rate (midi2audio's former default).
 RENDER_SAMPLE_RATE = 44100
+
+# Loudness baked into every stem (the app player volume is capped at 1.0). Values and sources:
+# docs/decisions/audio-loudness-2026-11.md.
+STEM_TARGET_LUFS = -20.0
+STEM_TRUE_PEAK_CEILING_DBTP = -2.0   # headroom for MP3 re-encode overshoot
+MIN_MEASURABLE_LUFS = -70.0          # at or below this the stem is silent: no gain
 
 # ── MIDI constants ────────────────────────────────────────────────────────────
 PPQ          = 480          # pulses per quarter note (ticks per beat)
@@ -209,6 +216,47 @@ def build_voice_midi(events: list, bpm: int, total_ticks: int) -> MIDIFile:
 
 # ── Audio rendering ───────────────────────────────────────────────────────────
 
+_LUFS_RE = re.compile(r"^\s*I:\s*(-?[\d.]+|-inf)\s+LUFS", re.MULTILINE)
+_PEAK_RE = re.compile(r"^\s*Peak:\s*(-?[\d.]+|-inf)\s+dBFS", re.MULTILINE)
+
+
+def _measure_loudness(wav_path: Path) -> Optional[tuple[float, float]]:
+    """Measures integrated LUFS and true peak (dBTP) with ffmpeg's ebur128 filter.
+
+    ffmpeg is already required for MP3 export, so this avoids a new dependency.
+
+    Args:
+        wav_path: WAV file to measure.
+
+    Returns:
+        (integrated LUFS, true peak dBTP), or None if ffmpeg failed or its output was unparseable.
+    """
+    try:
+        proc = subprocess.run(
+            ["ffmpeg", "-nostats", "-i", str(wav_path), "-af", "ebur128=peak=true", "-f", "null", "-"],
+            check=True, capture_output=True, text=True,
+        )
+        # Parse only the final Summary block; earlier lines are per-frame values.
+        summary = proc.stderr.rsplit("Summary:", 1)[1]
+        lufs = _LUFS_RE.search(summary)
+        peak = _PEAK_RE.search(summary)
+        if lufs is None or peak is None:
+            raise ValueError("no I:/Peak: in ebur128 summary")
+        return float(lufs.group(1)), float(peak.group(1))
+    except (OSError, subprocess.CalledProcessError, IndexError, ValueError) as e:
+        print(f"  [Stage 5] WARNING: loudness measurement failed for {wav_path}: {e}")
+        return None
+
+
+def _loudness_gain_db(lufs: float, true_peak_db: float) -> float:
+    """Gain that brings a stem to STEM_TARGET_LUFS without exceeding the true-peak ceiling.
+
+    A peaky stem is left quieter than target rather than clipped after MP3 encoding.
+    """
+    gain = STEM_TARGET_LUFS - lufs
+    return min(gain, STEM_TRUE_PEAK_CEILING_DBTP - true_peak_db)
+
+
 def _render_to_mp3(
     midi_path:     Path,
     wav_path:      Path,
@@ -253,6 +301,9 @@ def _render_to_mp3(
 
         # WAV → MP3 via pydub + ffmpeg
         audio = AudioSegment.from_wav(str(wav_path))
+        loudness = _measure_loudness(wav_path)
+        if loudness is not None and loudness[0] > MIN_MEASURABLE_LUFS:
+            audio = audio.apply_gain(_loudness_gain_db(*loudness))
         audio.export(str(mp3_path), format="mp3", bitrate="192k")
 
         # Clean up WAV
