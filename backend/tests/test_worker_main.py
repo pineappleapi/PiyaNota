@@ -53,7 +53,8 @@ def _seed_job(storage: MemoryStorage, pages: int = 2) -> tuple[int, list[str]]:
 
 def _result(voices: tuple[str, ...] = VOICES, failed: list[str] | None = None, pages: int = 2) -> PipelineResult:
     return PipelineResult(
-        mp3={v: b"mp3-" + v.encode() for v in voices}, failed_voices=failed or [],
+        mp3={v: b"mp3-" + v.encode() for v in voices}, midi={v: b"mid-" + v.encode() for v in voices},
+        failed_voices=failed or [],
         failed_voice_causes={v: "unreadable" for v in failed or []},
         review={"reviewNeeded": False, "reasons": [], "items": [], "truncated": False}, muted_measures=[],
         pages=[CleanPage(_jpeg((40, 30)), 40, 30) for _ in range(pages)], events={}, stage_seconds={},
@@ -91,11 +92,13 @@ def test_happy_path_completes_job_and_replaces_pages_with_cleaned_ones(app: Flas
     with db.transaction() as conn:
         pages = conn.execute("SELECT * FROM job_pages WHERE job_id = %s ORDER BY page_index", (job_id,)).fetchall()
         tracks = conn.execute("SELECT voice, file_key FROM audio_tracks").fetchall()
+        midi_rows = conn.execute("SELECT voice, midi_key FROM audio_tracks").fetchall()
         timing = conn.execute("SELECT metadata_key FROM timing_metadata").fetchone()
         reserved = conn.execute("SELECT count(*) AS n FROM storage_deletions").fetchone()["n"]
     assert [(p["width"], p["height"]) for p in pages] == [(40, 30), (40, 30)]
     assert not {p["object_key"] for p in pages} & set(old_keys)
     assert len(tracks) == 4 and storage.get(timing["metadata_key"]) == b'{"events": []}'
+    assert {t["voice"]: storage.get(t["midi_key"]) for t in midi_rows} == {v: b"mid-" + v.encode() for v in VOICES}
     assert all(p["object_key"] in storage.objects for p in pages)
     assert reserved == len(old_keys)  # only the old page blobs wait in the deletion queue
 

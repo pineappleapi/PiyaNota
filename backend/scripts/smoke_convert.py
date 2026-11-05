@@ -233,6 +233,8 @@ def run(photos: list[Path]) -> int:
 
     with db.transaction() as conn:
         keys = [r["file_key"] for r in conn.execute("SELECT file_key FROM audio_tracks").fetchall()]
+        keys += [r["midi_key"] for r in conn.execute("SELECT midi_key FROM audio_tracks").fetchall()
+                 if r["midi_key"]]
         keys += [r["metadata_key"] for r in conn.execute("SELECT metadata_key FROM timing_metadata").fetchall()]
         keys += [r["object_key"] for r in conn.execute("SELECT object_key FROM job_pages").fetchall()]
         keys += [r["thumbnail_key"] for r in conn.execute("SELECT thumbnail_key FROM scores").fetchall()

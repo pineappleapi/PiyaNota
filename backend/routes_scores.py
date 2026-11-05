@@ -76,7 +76,7 @@ def result(score_id: int) -> tuple[Response, int]:
         ).fetchone()
         job_id = job["id"] if job else None
         tracks = conn.execute(
-            "SELECT voice, file_key FROM audio_tracks WHERE score_id = %s", (score_id,)
+            "SELECT voice, file_key, midi_key FROM audio_tracks WHERE score_id = %s", (score_id,)
         ).fetchall()
         timing = conn.execute(
             "SELECT metadata_key FROM timing_metadata WHERE score_id = %s", (score_id,)
@@ -85,6 +85,16 @@ def result(score_id: int) -> tuple[Response, int]:
             "SELECT object_key, width, height FROM job_pages WHERE job_id = %s ORDER BY page_index",
             (job_id,),
         ).fetchall()
+    def file(key: str) -> dict[str, Any]:
+        # fileId is the object key: keys are random per publish and never rewritten (J4).
+        try:
+            size: int | None = storage.size(key)
+        except Exception as exc:  # a missing or unreachable blob must not fail the whole result
+            LOG.warning("size lookup failed score_id=%s: %s", score_id, type(exc).__name__)
+            size = None
+        return {"url": storage.signed_url(key, ttl_seconds=ttl), "fileId": key, "sizeBytes": size}
+
+    midi = {t["voice"]: file(t["midi_key"]) for t in tracks if t["midi_key"]}
     data: dict[str, Any] = {
         "jobId": job_ref(job_id) if job_id is not None else None,
         "scoreId": score["id"],
@@ -98,6 +108,10 @@ def result(score_id: int) -> tuple[Response, int]:
         "timingMetadataUrl": (
             storage.signed_url(timing["metadata_key"], ttl_seconds=ttl) if timing else None
         ),
+        "audioFiles": {t["voice"]: file(t["file_key"]) for t in tracks},
+        "pageFiles": [file(p["object_key"]) for p in pages],
+        "timingFile": file(timing["metadata_key"]) if timing else None,
+        "midiTracks": midi or None,  # null for scores converted before MIDI existed
         "review": score["review"],
         "mutedMeasures": score["muted_measures"],
         "failedVoices": score["failed_voices"],
@@ -177,6 +191,7 @@ def delete(score_id: int) -> tuple[Response, int]:
             r["k"]
             for r in conn.execute(
                 "SELECT file_key AS k FROM audio_tracks WHERE score_id = %(s)s "
+                "UNION SELECT midi_key FROM audio_tracks WHERE score_id = %(s)s AND midi_key IS NOT NULL "
                 "UNION SELECT metadata_key FROM timing_metadata WHERE score_id = %(s)s "
                 "UNION SELECT object_key FROM job_pages WHERE job_id = ANY(%(j)s)",
                 {"s": score_id, "j": [*job_ids, *retakes]},

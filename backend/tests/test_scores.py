@@ -34,6 +34,7 @@ def _score(
     thumb: bool = True,
     tag: str = "",
     failed: tuple[str, ...] = (),
+    midi: bool = False,
 ) -> tuple[int, int]:
     """A finished score with job, 2 pages, tracks and timing; returns (score_id, job_id)."""
     with db.transaction() as conn:
@@ -56,8 +57,8 @@ def _score(
         for v in VOICES:
             if v not in failed:
                 conn.execute(
-                    "INSERT INTO audio_tracks (score_id, voice, file_key) VALUES (%s, %s, %s)",
-                    (s["id"], v, f"audio/{tag}{v}.mp3"),
+                    "INSERT INTO audio_tracks (score_id, voice, file_key, midi_key) VALUES (%s, %s, %s, %s)",
+                    (s["id"], v, f"audio/{tag}{v}.mp3", f"midi/{tag}{v}.mid" if midi else None),
                 )
         conn.execute(
             "INSERT INTO timing_metadata (score_id, metadata_key) VALUES (%s, %s)",
@@ -157,6 +158,58 @@ def test_result_shape_and_touch(client: FlaskClient, headers: dict[str, str]) ->
     assert row["last_accessed_at"] is not None
 
 
+def test_result_lists_file_ids_sizes_and_midi(client: FlaskClient, headers: dict[str, str]) -> None:
+    sid, _ = _score(_uid(), tag="m", midi=True)
+    storage = _storage(client.application)
+    keys = ["timing/m.json", "pages/m0.jpg", "pages/m1.jpg",
+            *(f"audio/m{v}.mp3" for v in VOICES), *(f"midi/m{v}.mid" for v in VOICES)]
+    for i, k in enumerate(keys):
+        storage.put(k, b"x" * (i + 1), "x")
+    data = client.get(f"/api/scores/{sid}/result", headers=headers).get_json()["data"]
+
+    def entry(k: str) -> dict[str, Any]:
+        return {"url": f"https://storage.test/{k}?sig=fake", "fileId": k, "sizeBytes": keys.index(k) + 1}
+
+    assert data["audioFiles"] == {v: entry(f"audio/m{v}.mp3") for v in VOICES}
+    assert data["midiTracks"] == {v: entry(f"midi/m{v}.mid") for v in VOICES}
+    assert data["pageFiles"] == [entry("pages/m0.jpg"), entry("pages/m1.jpg")]
+    assert data["timingFile"] == entry("timing/m.json")
+    assert data["audioTracks"]["alto"] == entry("audio/malto.mp3")["url"]  # old fields unchanged
+
+
+def test_result_size_failure_gives_null_size_not_500(
+    client: FlaskClient, headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sid, _ = _score(_uid(), tag="f")
+
+    def boom(key: str) -> int:
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(_storage(client.application), "size", boom)
+    res = client.get(f"/api/scores/{sid}/result", headers=headers)
+    assert res.status_code == 200
+    alto = res.get_json()["data"]["audioFiles"]["alto"]
+    assert alto["sizeBytes"] is None and alto["fileId"] == "audio/falto.mp3" and alto["url"]
+
+
+def test_result_partial_midi_lists_only_voices_with_midi(
+    client: FlaskClient, headers: dict[str, str]
+) -> None:
+    sid, _ = _score(_uid(), tag="p", midi=True)
+    with db.transaction() as conn:
+        conn.execute("UPDATE audio_tracks SET midi_key = NULL WHERE score_id = %s AND voice IN ('tenor', 'bass')", (sid,))
+    data = client.get(f"/api/scores/{sid}/result", headers=headers).get_json()["data"]
+    assert set(data["midiTracks"]) == {"soprano", "alto"}
+
+
+def test_result_old_score_without_midi_has_null_midi_tracks(
+    client: FlaskClient, headers: dict[str, str]
+) -> None:
+    sid, _ = _score(_uid())
+    data = client.get(f"/api/scores/{sid}/result", headers=headers).get_json()["data"]
+    assert data["midiTracks"] is None and set(data["audioFiles"]) == set(VOICES)
+
+
 def test_result_failed_voice_has_no_track(client: FlaskClient, headers: dict[str, str]) -> None:
     sid, _ = _score(_uid(), failed=("tenor",))
     data = client.get(f"/api/scores/{sid}/result", headers=headers).get_json()["data"]
@@ -229,11 +282,11 @@ def test_patch_errors(client: FlaskClient, headers: dict[str, str]) -> None:
 def test_delete_removes_and_queues(
     client: FlaskClient, app: Flask, headers: dict[str, str]
 ) -> None:
-    sid, jid = _score(_uid(), tag="d")
+    sid, jid = _score(_uid(), tag="d", midi=True)
     keep, _ = _score(_uid(), "Keep", tag="k")
     storage = _storage(app)
     keys = {f"thumbs/dt.jpg", "timing/d.json", "pages/d0.jpg", "pages/d1.jpg",
-            *(f"audio/d{v}.mp3" for v in VOICES)}
+            *(f"audio/d{v}.mp3" for v in VOICES), *(f"midi/d{v}.mid" for v in VOICES)}
     for k in keys:
         storage.put(k, b"x", "x")
     res = client.delete(f"/api/scores/{sid}", headers=headers)

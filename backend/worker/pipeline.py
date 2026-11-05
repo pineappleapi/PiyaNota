@@ -113,6 +113,7 @@ class Stages:
 @dataclass
 class PipelineResult:
     mp3: dict[str, bytes]
+    midi: dict[str, bytes]
     failed_voices: list[str]
     failed_voice_causes: dict[str, str]
     review: dict[str, Any]
@@ -303,6 +304,9 @@ def run_pipeline(
     # Stage 5 falls back to a .mid when rendering fails; an unreadable voice is a silent MP3 and
     # is listed by Stage 4, not inferred from a missing file.
     mp3 = {v.lower(): Path(p).read_bytes() for v, p in paths.items() if Path(p).suffix == ".mp3"}
+    # Stage 5 writes every voice's .mid before rendering, so these exist even for fallback voices.
+    midi = {v.lower(): (out / f"{v.lower()}.mid").read_bytes() for v in VOICES
+            if (out / f"{v.lower()}.mid").is_file()}
     shutil.rmtree(out, ignore_errors=True)
     if not mp3:
         raise PipelineError("audio rendering failed")
@@ -311,6 +315,7 @@ def run_pipeline(
               if v in report.get("failed_voices", []) or v.lower() not in mp3]
     return PipelineResult(
         mp3=mp3,
+        midi={v: b for v, b in midi.items() if v not in failed},
         failed_voices=failed,
         failed_voice_causes={v: FAILED_VOICE_CAUSE for v in failed},
         review=review,

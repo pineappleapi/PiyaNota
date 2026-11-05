@@ -38,6 +38,8 @@ def _fake_stages(missing: tuple[str, ...] = (), midi_only: bool = False) -> Stag
         for voice in satb:  # an unreadable voice is a silent track, never a missing file
             p = Path(out_dir) / f"{voice.lower()}.{'mid' if midi_only else 'mp3'}"
             p.write_bytes(b"mp3-" + voice.encode())
+            if not midi_only:  # real Stage 5 writes the .mid first and renders the MP3 from it
+                (Path(out_dir) / f"{voice.lower()}.mid").write_bytes(b"mid-" + voice.encode())
             paths[voice] = str(p)
         return paths
 
@@ -111,6 +113,8 @@ def test_result_maps_voices_and_lowercases_keys(tmp_path: Path) -> None:
     result = _run(tmp_path, _fake_stages())
     assert result.mp3 == {"soprano": b"mp3-Soprano", "alto": b"mp3-Alto",
                           "tenor": b"mp3-Tenor", "bass": b"mp3-Bass"}
+    assert result.midi == {"soprano": b"mid-Soprano", "alto": b"mid-Alto",
+                           "tenor": b"mid-Tenor", "bass": b"mid-Bass"}
     assert result.failed_voices == []
     assert set(result.events) == {"soprano", "alto", "tenor", "bass"}
     assert result.pages == [CleanPage(b"jpg", 10, 20)]

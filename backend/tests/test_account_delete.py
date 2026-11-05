@@ -20,7 +20,7 @@ def _seed_blobs(app: Flask, email: str) -> tuple[int, set[str]]:
     storage = app.extensions["storage"]
     assert isinstance(storage, MemoryStorage)
     tag = email.split("@")[0]
-    keys = {f"pages/{tag}.jpg", f"thumbs/{tag}.jpg", f"audio/{tag}.mp3", f"timing/{tag}.json"}
+    keys = {f"pages/{tag}.jpg", f"thumbs/{tag}.jpg", f"audio/{tag}.mp3", f"midi/{tag}.mid", f"timing/{tag}.json"}
     for k in keys:
         storage.put(k, b"x", "application/octet-stream")
     with db.transaction() as conn:
@@ -41,8 +41,8 @@ def _seed_blobs(app: Flask, email: str) -> tuple[int, set[str]]:
             (jid, f"pages/{tag}.jpg"),
         )
         conn.execute(
-            "INSERT INTO audio_tracks (score_id, voice, file_key) VALUES (%s, 'soprano', %s)",
-            (sid, f"audio/{tag}.mp3"),
+            "INSERT INTO audio_tracks (score_id, voice, file_key, midi_key) VALUES (%s, 'soprano', %s, %s)",
+            (sid, f"audio/{tag}.mp3", f"midi/{tag}.mid"),
         )
         conn.execute(
             "INSERT INTO timing_metadata (score_id, metadata_key) VALUES (%s, %s)",

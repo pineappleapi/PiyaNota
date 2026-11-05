@@ -18,7 +18,7 @@ from flask import current_app
 from backend import db
 from backend.config import Settings
 
-KeyPrefix = Literal["pages", "thumbs", "audio", "timing"]
+KeyPrefix = Literal["pages", "thumbs", "audio", "timing", "midi"]
 _NOT_FOUND_CODES = frozenset({"NoSuchKey", "404", "NotFound"})
 # B2 S3 endpoints look like https://s3.us-west-004.backblazeb2.com
 B2_CONNECT_TIMEOUT_S = 5
@@ -36,6 +36,9 @@ class Storage(Protocol):
 
     def delete(self, key: str) -> None:
         """Remove ``key``; a missing key is not an error."""
+
+    def size(self, key: str) -> int:
+        """Stored byte length of ``key``."""
 
     def signed_url(self, key: str, *, ttl_seconds: int | None = None) -> str: ...
 
@@ -68,6 +71,9 @@ class MemoryStorage:
 
     def delete(self, key: str) -> None:
         self.objects.pop(key, None)
+
+    def size(self, key: str) -> int:
+        return len(self.objects.get(key, b""))  # unknown key is 0: tests seed rows without blobs
 
     def signed_url(self, key: str, *, ttl_seconds: int | None = None) -> str:
         self.ttls[key] = ttl_seconds if ttl_seconds is not None else self._default_ttl
@@ -109,6 +115,13 @@ class DbStorage:
     def delete(self, key: str) -> None:
         with db.transaction() as conn:
             conn.execute("DELETE FROM blobs WHERE key = %s", (key,))
+
+    def size(self, key: str) -> int:
+        with db.transaction() as conn:
+            row = conn.execute("SELECT octet_length(data) AS n FROM blobs WHERE key = %s", (key,)).fetchone()
+        if row is None:
+            raise KeyError(key)
+        return int(row["n"])
 
     def signed_url(self, key: str, *, ttl_seconds: int | None = None) -> str:
         exp = int(time.time()) + (ttl_seconds if ttl_seconds is not None else self._default_ttl)
@@ -153,6 +166,9 @@ class B2Storage:
         except ClientError as exc:
             if exc.response.get("Error", {}).get("Code") not in _NOT_FOUND_CODES:
                 raise
+
+    def size(self, key: str) -> int:
+        return int(self._client.head_object(Bucket=self._bucket, Key=key)["ContentLength"])
 
     def signed_url(self, key: str, *, ttl_seconds: int | None = None) -> str:
         url: str = self._client.generate_presigned_url(

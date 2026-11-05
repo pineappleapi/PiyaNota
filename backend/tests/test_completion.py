@@ -61,6 +61,7 @@ def _args(tag: str = "") -> dict[str, Any]:
         audio_keys={v: f"audio/{tag}{v}.mp3" for v in VOICES}, timing_key=f"timing/{tag}t.json",
         failed_voices=[], failed_voice_causes={}, review=REVIEW, muted_measures=[],
         thumbnail_key=f"thumbs/{tag}t.jpg",
+        midi_keys={v: f"midi/{tag}{v}.mid" for v in VOICES},
     )
 
 
@@ -114,10 +115,14 @@ def test_retake_completion_updates_same_score(app: Flask) -> None:
         old = conn.execute("SELECT * FROM jobs WHERE id = %s", (old_job,)).fetchone()
         new = conn.execute("SELECT * FROM jobs WHERE id = %s", (retake,)).fetchone()
         rows = conn.execute("SELECT file_key FROM audio_tracks WHERE score_id = %s", (score_id,)).fetchall()
+        midi_rows = conn.execute("SELECT midi_key FROM audio_tracks WHERE score_id = %s", (score_id,)).fetchall()
         queued = {r["object_key"] for r in conn.execute("SELECT object_key FROM storage_deletions").fetchall()}
     assert score["title"] == "Bayan Ko 2" and score["last_accessed_at"].year == 2026
     assert {r["file_key"] for r in rows} == {f"audio/new-{v}.mp3" for v in VOICES}
     assert {"audio/old-soprano.mp3", "timing/old-t.json", "thumbs/old-t.jpg", "pages/old.jpg"} <= queued
+    assert {f"midi/old-{v}.mid" for v in VOICES} <= queued  # no MIDI blob left behind by the replace
+    assert not {f"midi/new-{v}.mid" for v in VOICES} & queued
+    assert {r["midi_key"] for r in midi_rows} == {f"midi/new-{v}.mid" for v in VOICES}
     assert (old["superseded_by_job_id"], old["score_id"]) == (retake, None)
     assert (new["status"], new["score_id"]) == ("complete", score_id)
 

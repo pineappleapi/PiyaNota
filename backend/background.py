@@ -98,6 +98,7 @@ _USER_KEYS_SQL = """
 SELECT jp.object_key AS k FROM job_pages jp JOIN jobs j ON j.id = jp.job_id WHERE j.user_id = %(u)s
 UNION SELECT thumbnail_key FROM scores WHERE user_id = %(u)s AND thumbnail_key IS NOT NULL
 UNION SELECT a.file_key FROM audio_tracks a JOIN scores s ON s.id = a.score_id WHERE s.user_id = %(u)s
+UNION SELECT a.midi_key FROM audio_tracks a JOIN scores s ON s.id = a.score_id WHERE s.user_id = %(u)s AND a.midi_key IS NOT NULL
 UNION SELECT t.metadata_key FROM timing_metadata t JOIN scores s ON s.id = t.score_id WHERE s.user_id = %(u)s
 """
 

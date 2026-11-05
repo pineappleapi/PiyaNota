@@ -27,6 +27,7 @@ def test_put_get_roundtrip_and_content_type(storage: DbStorage) -> None:
     storage.put("audio/a.mp3", b"\x00\x01abc", "audio/mpeg")
     assert storage.get("audio/a.mp3") == b"\x00\x01abc"
     assert _content_type("audio/a.mp3") == "audio/mpeg"
+    assert storage.size("audio/a.mp3") == 5
 
 
 def test_delete_missing_key_is_not_an_error(storage: DbStorage) -> None:

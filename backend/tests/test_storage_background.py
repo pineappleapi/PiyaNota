@@ -115,7 +115,7 @@ def test_deletion_queue_deletes_and_retries(app: Flask) -> None:
 
 def _seed_user(email: str = EMAIL) -> tuple[int, set[str]]:
     """Insert a deleted user owning every kind of user-linked row; returns (id, object keys)."""
-    keys = {"pages/p1.jpg", "thumbs/t.jpg", "audio/s.mp3", "timing/m.json"}
+    keys = {"pages/p1.jpg", "thumbs/t.jpg", "audio/s.mp3", "midi/s.mid", "timing/m.json"}
     with db.transaction() as conn:
         row = conn.execute(
             "INSERT INTO users (email, password_hash, deleted_at) VALUES (%s, 'h', now()) RETURNING id",
@@ -141,7 +141,8 @@ def _seed_user(email: str = EMAIL) -> tuple[int, set[str]]:
             (job["id"],),
         )
         conn.execute(
-            "INSERT INTO audio_tracks (score_id, voice, file_key) VALUES (%s, 'soprano', 'audio/s.mp3')",
+            "INSERT INTO audio_tracks (score_id, voice, file_key, midi_key) "
+            "VALUES (%s, 'soprano', 'audio/s.mp3', 'midi/s.mid')",
             (score["id"],),
         )
         conn.execute(

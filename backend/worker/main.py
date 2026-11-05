@@ -162,15 +162,17 @@ def _publish(job_id: int, result: PipelineResult, storage: Storage, settings: Se
         _Cancelled: complete_job refused (job cancelled or purged); the page swap is rolled back.
     """
     audio = {voice: new_key("audio", "mp3") for voice in result.mp3}
+    midi = {voice: new_key("midi", "mid") for voice in result.midi}
     timing_key = new_key("timing", "json")
     thumb_key = new_key("thumbs", "jpg")
     page_keys = [new_key("pages", "jpg") for _ in result.pages]
     thumb = completion.make_thumbnail(result.pages[0].jpeg)
     timing = _timing_bytes(result, settings)
-    all_keys = [*audio.values(), timing_key, thumb_key, *page_keys]
+    all_keys = [*audio.values(), *midi.values(), timing_key, thumb_key, *page_keys]
     uploaded.extend(all_keys)  # tracked before the puts: a failed put may still have written the object
     background.reserve_keys(all_keys)  # committed first so a crash mid-upload leaves a reaper row
     uploads = [(audio[v], result.mp3[v], "audio/mpeg") for v in audio]
+    uploads += [(midi[v], result.midi[v], "audio/midi") for v in midi]
     uploads += [(timing_key, timing, "application/json"), (thumb_key, thumb, "image/jpeg")]
     uploads += [(k, p.jpeg, "image/jpeg") for k, p in zip(page_keys, result.pages)]
     for key, data, content_type in uploads:
@@ -187,7 +189,7 @@ def _publish(job_id: int, result: PipelineResult, storage: Storage, settings: Se
         score_id = completion.complete_job(
             conn, job_id, audio_keys=audio, timing_key=timing_key, failed_voices=result.failed_voices,
             failed_voice_causes=result.failed_voice_causes, review=result.review,
-            muted_measures=result.muted_measures, thumbnail_key=thumb_key)
+            muted_measures=result.muted_measures, thumbnail_key=thumb_key, midi_keys=midi)
         if score_id is None:
             raise _Cancelled  # rolls back the page swap too
         background.release_keys(conn, page_keys)

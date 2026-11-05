@@ -47,6 +47,7 @@ def complete_job(
     review: Mapping[str, object],
     muted_measures: Sequence[Mapping[str, object]],
     thumbnail_key: str | None,
+    midi_keys: Mapping[str, str] | None = None,
 ) -> int | None:
     """Turn a job into a finished score in the caller's transaction (PIYA-321 AC4/AC5).
 
@@ -99,6 +100,7 @@ def complete_job(
             r["k"]
             for r in conn.execute(
                 "SELECT file_key AS k FROM audio_tracks WHERE score_id = %(s)s "
+                "UNION SELECT midi_key FROM audio_tracks WHERE score_id = %(s)s AND midi_key IS NOT NULL "
                 "UNION SELECT metadata_key FROM timing_metadata WHERE score_id = %(s)s "
                 "UNION SELECT object_key FROM job_pages WHERE job_id = %(j)s",
                 {"s": score_id, "j": old_job["id"]},
@@ -127,8 +129,8 @@ def complete_job(
 
     with conn.cursor() as cur:
         cur.executemany(
-            "INSERT INTO audio_tracks (score_id, voice, file_key) VALUES (%s, %s, %s)",
-            [(score_id, voice, key) for voice, key in audio_keys.items()],
+            "INSERT INTO audio_tracks (score_id, voice, file_key, midi_key) VALUES (%s, %s, %s, %s)",
+            [(score_id, voice, key, (midi_keys or {}).get(voice)) for voice, key in audio_keys.items()],
         )
     conn.execute("INSERT INTO timing_metadata (score_id, metadata_key) VALUES (%s, %s)", (score_id, timing_key))
     conn.execute(
@@ -136,7 +138,7 @@ def complete_job(
         "failed_voices = %s, failed_voice_causes = %s WHERE id = %s",
         (score_id, Jsonb(list(failed_voices)), Jsonb(dict(failed_voice_causes)), job_id),
     )
-    new_keys = [*audio_keys.values(), timing_key] + ([thumbnail_key] if thumbnail_key else [])
+    new_keys = [*audio_keys.values(), *(midi_keys or {}).values(), timing_key] + ([thumbnail_key] if thumbnail_key else [])
     background.release_keys(conn, new_keys)
     return score_id
 

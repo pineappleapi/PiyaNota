@@ -93,7 +93,7 @@ def _job(conn: psycopg.Connection[tuple[Any, ...]], user_id: int, **overrides: A
 
 
 def test_up_fresh_db_creates_all_tables(conn: psycopg.Connection[tuple[Any, ...]]) -> None:
-    assert migrate.up(conn) == ["0001", "0002", "0003"]
+    assert migrate.up(conn) == ["0001", "0002", "0003", "0004"]
     assert _tables(conn) == ERD_TABLES
 
 
@@ -103,17 +103,17 @@ def test_up_is_idempotent(conn: psycopg.Connection[tuple[Any, ...]]) -> None:
 
 
 def test_status_reports_pending_and_applied(conn: psycopg.Connection[tuple[Any, ...]]) -> None:
-    assert migrate.status(conn) == [("0001", False), ("0002", False), ("0003", False)]
+    assert migrate.status(conn) == [("0001", False), ("0002", False), ("0003", False), ("0004", False)]
     migrate.up(conn)
-    assert migrate.status(conn) == [("0001", True), ("0002", True), ("0003", True)]
+    assert migrate.status(conn) == [("0001", True), ("0002", True), ("0003", True), ("0004", True)]
 
 
 def test_down_then_up_roundtrip(conn: psycopg.Connection[tuple[Any, ...]]) -> None:
     migrate.up(conn)
-    assert migrate.down(conn, to="0000") == ["0003", "0002", "0001"]
+    assert migrate.down(conn, to="0000") == ["0004", "0003", "0002", "0001"]
     assert _tables(conn) <= {"schema_migrations"}
-    assert migrate.status(conn) == [("0001", False), ("0002", False), ("0003", False)]
-    assert migrate.up(conn) == ["0001", "0002", "0003"]
+    assert migrate.status(conn) == [("0001", False), ("0002", False), ("0003", False), ("0004", False)]
+    assert migrate.up(conn) == ["0001", "0002", "0003", "0004"]
     assert _tables(conn) == ERD_TABLES
 
 
