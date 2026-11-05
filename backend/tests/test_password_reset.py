@@ -72,6 +72,37 @@ def _confirm(
     )
 
 
+def _verify(client: FlaskClient, code: str, email: str = EMAIL, ip: str = "10.0.0.1") -> Any:
+    return client.post(
+        "/api/auth/password-reset/verify",
+        json={"email": email, "code": code},
+        environ_overrides={"REMOTE_ADDR": ip},
+    )
+
+
+def _skip_wait() -> None:
+    with db.transaction() as conn:
+        conn.execute("UPDATE throttle_backoff SET wait_until = now() - interval '1 second'")
+
+
+def _count(bucket: str) -> int:
+    with db.transaction() as conn:
+        row = conn.execute(
+            "SELECT count(*) AS n FROM throttle_hits WHERE bucket = %s", (bucket,)
+        ).fetchone()
+    assert row is not None
+    return int(row["n"])
+
+
+def _failures() -> int:
+    with db.transaction() as conn:
+        row = conn.execute(
+            "SELECT coalesce(max(failures), 0) AS n FROM throttle_backoff WHERE scope = 'reset_code'"
+        ).fetchone()
+    assert row is not None
+    return int(row["n"])
+
+
 def _live_rows() -> int:
     with db.transaction() as conn:
         row = conn.execute(
@@ -162,7 +193,7 @@ def test_reset_confirm_hashes_only_on_success(
         security, "hash_password", lambda pw: (calls.append(1), real(pw))[1]
     )
     assert _confirm(client, "x@x", email="nobody@example.com").status_code == 410
-    for _ in range(3):
+    for _ in range(5):
         assert _confirm(client, _wrong(code)).status_code == 400
     assert _confirm(client, code).status_code == 429
     assert calls == []
@@ -260,10 +291,15 @@ def test_wrong_code_backoff(client: FlaskClient, mail: MemoryMailer) -> None:
     _signup(client)
     _request(client)
     code = mail.sent[0][1]
-    for _ in range(3):
+    for _ in range(4):
         res = _confirm(client, _wrong(code))
         assert res.status_code == 400
         assert res.get_json()["error"]["code"] == "reset_code_invalid"
+        assert "Retry-After" not in res.headers
+    res = _confirm(client, _wrong(code))
+    assert res.status_code == 400
+    assert res.get_json()["error"]["retryAfterSeconds"] == 30
+    assert int(res.headers["Retry-After"]) == 30
     res = _confirm(client, code)
     assert res.status_code == 429
     assert 25 <= int(res.headers["Retry-After"]) <= 30
@@ -362,3 +398,133 @@ def test_brevo_mailer_failure_raises_mailerror(
 def test_get_mailer_returns_app_mailer(app: Flask, mail: MemoryMailer) -> None:
     with app.app_context():
         assert mailer.get_mailer() is mail
+
+
+def test_verify_wrong_code_400_counts_once_and_keeps_code_live(
+    client: FlaskClient, mail: MemoryMailer
+) -> None:
+    _signup(client)
+    _request(client)
+    res = _verify(client, _wrong(mail.sent[0][1]))
+    assert res.status_code == 400
+    err = res.get_json()["error"]
+    assert err["code"] == "reset_code_invalid" and err["field"] == "resetToken"
+    assert _failures() == 1 and _live_rows() == 1
+
+
+def test_verify_right_code_then_confirm_same_code(client: FlaskClient, mail: MemoryMailer) -> None:
+    _signup(client)
+    _request(client)
+    code = mail.sent[0][1]
+    _verify(client, _wrong(code))
+    res = _verify(client, code)
+    assert res.status_code == 200
+    assert 1 <= res.get_json()["data"]["expiresInSeconds"] <= 1800
+    assert _live_rows() == 1 and _failures() == 1  # not consumed, count not cleared
+    assert _confirm(client, code).status_code == 200
+
+
+def test_verify_and_confirm_share_one_counter(client: FlaskClient, mail: MemoryMailer) -> None:
+    _signup(client)
+    _request(client)
+    code = mail.sent[0][1]
+    for i in range(4):
+        assert (_verify if i % 2 else _confirm)(client, _wrong(code)).status_code == 400
+    assert _failures() == 4
+    res = _verify(client, _wrong(code))
+    assert res.status_code == 400
+    assert res.get_json()["error"]["retryAfterSeconds"] == 30
+    assert _verify(client, code).status_code == 429
+    assert _confirm(client, code).status_code == 429
+
+
+def test_verify_no_live_code_410(client: FlaskClient, mail: MemoryMailer) -> None:
+    _signup(client)
+    res = _verify(client, "123456")
+    assert res.status_code == 410
+    assert res.get_json()["error"]["code"] == "reset_token_expired_or_invalid"
+    _request(client)
+    with db.transaction() as conn:
+        conn.execute("UPDATE password_reset_tokens SET expires_at = now() - interval '1 minute'")
+    assert _verify(client, mail.sent[0][1]).status_code == 410
+    assert _failures() == 0
+
+
+def test_verify_unknown_email_410_records_ip_hit(client: FlaskClient) -> None:
+    assert _verify(client, "123456", email="nobody@example.com").status_code == 410
+    assert _count("reset_code_ip") == 1
+    assert _count("reset_code_email") == 0
+
+
+def test_confirm_410_records_no_ip_hit(client: FlaskClient) -> None:
+    assert _confirm(client, "123456", email="nobody@example.com").status_code == 410
+    assert _count("reset_code_ip") == 0
+
+
+def test_request_resets_counter_not_hourly_window(client: FlaskClient, mail: MemoryMailer) -> None:
+    _signup(client)
+    _request(client)
+    for _ in range(3):
+        _verify(client, _wrong(mail.sent[0][1]))
+    assert _failures() == 3
+    _request(client)
+    assert _failures() == 0
+    assert _count("reset_code_email") == 3
+
+
+def test_hourly_email_window_blocks_11th_wrong(client: FlaskClient, mail: MemoryMailer) -> None:
+    _signup(client)
+    _request(client)
+    code = mail.sent[0][1]
+    for _ in range(10):
+        _skip_wait()
+        assert _verify(client, _wrong(code)).status_code == 400
+    _skip_wait()
+    res = _verify(client, _wrong(code))
+    assert res.status_code == 429 and int(res.headers["Retry-After"]) > 0
+    assert _verify(client, code).status_code == 429  # even the right code is blocked
+
+
+def test_confirm_with_superseded_code_is_counted_400(
+    client: FlaskClient, mail: MemoryMailer
+) -> None:
+    _signup(client)
+    _request(client)
+    _request(client)
+    first, second = mail.sent[0][1], mail.sent[1][1]
+    if first == second:
+        pytest.skip("1-in-10^6 code collision")
+    res = _confirm(client, first)
+    assert res.status_code == 400 and res.get_json()["error"]["code"] == "reset_code_invalid"
+    assert _failures() == 1
+    assert _confirm(client, second).status_code == 200
+    # Sequential only: the /request-vs-confirm advisory-lock race itself is not exercised.
+
+
+def test_failed_mail_send_keeps_failure_count(client: FlaskClient, app: Flask) -> None:
+    class Failing:
+        def send_reset_code(self, to: str, code: str) -> None:
+            raise MailError("boom")
+
+    _signup(client)
+    assert _request(client).status_code == 200
+    code = app.extensions["mailer"].sent[0][1]
+    for _ in range(2):
+        assert _verify(client, _wrong(code)).status_code == 400
+    app.extensions["mailer"] = Failing()
+    assert _request(client).status_code == 500
+    assert _failures() == 2
+    assert _live_rows() == 1  # the earlier code survives; the new one was rolled back
+
+
+def test_verify_during_wait_is_429_and_not_counted(client: FlaskClient, mail: MemoryMailer) -> None:
+    _signup(client)
+    _request(client)
+    code = mail.sent[0][1]
+    for _ in range(5):
+        _verify(client, _wrong(code))
+    ip_hits, email_hits = _count("reset_code_ip"), _count("reset_code_email")
+    res = _verify(client, _wrong(code))
+    assert res.status_code == 429 and int(res.headers["Retry-After"]) > 0
+    assert _failures() == 5
+    assert (_count("reset_code_ip"), _count("reset_code_email")) == (ip_hits, email_hits)

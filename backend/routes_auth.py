@@ -6,7 +6,7 @@ import hashlib
 import hmac
 import logging
 import secrets
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from typing import Any, cast
 
@@ -167,7 +167,9 @@ _RESET_CODE_SCOPE = "reset_code"
 _RESET_CODE_IP_BUCKET = "reset_code_ip"
 _RESET_WINDOW_S = 3600
 _RESET_CODE_DIGITS = 6
-_RESET_FREE_FAILURES = 2
+_RESET_FREE_FAILURES = 4
+_RESET_CODE_EMAIL_BUCKET = "reset_code_email"
+_RESET_CODE_EMAIL_PER_HOUR = 10
 _RESET_REQUEST_MESSAGE = "If this email is registered, a reset link has been sent"
 
 
@@ -191,6 +193,8 @@ def password_reset_request() -> tuple[Response, int]:
     with db.transaction() as conn:
         throttle.lock_subject(conn, _RESET_REQ_EMAIL_BUCKET, email_key)
         throttle.lock_subject(conn, _RESET_REQ_IP_BUCKET, ip_key)
+        # Same lock as verify/confirm so a concurrent confirm cannot accept the superseded code.
+        throttle.lock_subject(conn, _RESET_CODE_SCOPE, email_key)
         waits = [
             throttle.window_retry_after(
                 conn,
@@ -235,6 +239,7 @@ def password_reset_request() -> tuple[Response, int]:
                         )
                         # Inside the savepoint so no live code exists for a mail never sent.
                         get_mailer().send_reset_code(email, code)
+                        throttle.clear_failures(conn, _RESET_CODE_SCOPE, email_key)
                 except MailError as exc:
                     LOG.error("reset mail failed email=%s: %s", email_key, exc)
                     failure = ApiError(500, "internal_error", "Internal server error")
@@ -243,74 +248,126 @@ def password_reset_request() -> tuple[Response, int]:
     return ok(None, 200, _RESET_REQUEST_MESSAGE)
 
 
+def _check_reset_code(
+    conn: throttle.Conn,
+    email: str,
+    code: str,
+    *,
+    hit_on_gone: bool,
+    precheck: Callable[[], None] | None = None,
+) -> tuple[ApiError | None, Mapping[str, Any] | None]:
+    """Shared by verify and confirm: locks, waits, token lookup, wrong-code bookkeeping.
+
+    Returns ``(failure, row)``; exactly one is set. ``precheck`` runs after the wait check but
+    before the code is looked at, so a typo neither consumes the code nor counts as a guess.
+    Verify records a ``reset_code_ip`` hit on every 410 (``hit_on_gone``) because an unknown
+    email and a missing live code look identical to the caller.
+    """
+    cfg = _settings()
+    email_key = security.keyed_hash(email)
+    ip_key = security.keyed_hash(security.client_ip())
+    throttle.lock_subject(conn, _RESET_CODE_SCOPE, email_key)
+    throttle.lock_subject(conn, _RESET_CODE_IP_BUCKET, ip_key)
+    waits = [
+        throttle.backoff_wait(conn, _RESET_CODE_SCOPE, email_key),
+        throttle.window_retry_after(
+            conn, _RESET_CODE_IP_BUCKET, ip_key, cfg.reset_code_ip_per_hour, _RESET_WINDOW_S
+        ),
+        throttle.window_retry_after(
+            conn,
+            _RESET_CODE_EMAIL_BUCKET,
+            email_key,
+            _RESET_CODE_EMAIL_PER_HOUR,
+            _RESET_WINDOW_S,
+        ),
+    ]
+    active = [w for w in waits if w is not None]
+    if active:
+        return throttle.too_many(max(active)), None
+    if precheck is not None:
+        precheck()
+    row = conn.execute(
+        "SELECT u.id AS user_id, t.id AS token_id, t.token_hash, "
+        "GREATEST(1, CEIL(EXTRACT(EPOCH FROM t.expires_at - now())))::int AS expires_in "
+        "FROM users u JOIN password_reset_tokens t ON t.user_id = u.id "
+        "WHERE u.email = %s AND u.deleted_at IS NULL "
+        "AND t.used_at IS NULL AND t.expires_at > now() FOR UPDATE OF u",
+        (email,),
+    ).fetchone()
+    if row is None:
+        if hit_on_gone:
+            throttle.record_hit(conn, _RESET_CODE_IP_BUCKET, ip_key)
+        return (
+            ApiError(410, "reset_token_expired_or_invalid", "Reset code expired or invalid"),
+            None,
+        )
+    if hmac.compare_digest(bytes(row["token_hash"]), _code_digest(code)):
+        return None, row
+    # V2 B4.8: the IP window counts wrong codes only; so does the hourly per-email window.
+    throttle.record_failure(
+        conn, _RESET_CODE_SCOPE, email_key, free_failures=_RESET_FREE_FAILURES
+    )
+    throttle.record_hit(conn, _RESET_CODE_IP_BUCKET, ip_key)
+    throttle.record_hit(conn, _RESET_CODE_EMAIL_BUCKET, email_key)
+    return (
+        ApiError(
+            400,
+            "reset_code_invalid",
+            "Reset code is incorrect",
+            field="resetToken",
+            retry_after=throttle.backoff_wait(conn, _RESET_CODE_SCOPE, email_key),
+        ),
+        None,
+    )
+
+
+@auth_bp.post("/password-reset/verify")
+def password_reset_verify() -> tuple[Response, int]:
+    body = json_body()
+    email = normalize_email(body.get("email"))
+    code = require_str(body, "code").strip()
+    with db.transaction() as conn:
+        failure, row = _check_reset_code(conn, email, code, hit_on_gone=True)
+    if failure is not None:
+        raise failure
+    if row is None:
+        raise RuntimeError("verify finished without a result or an error")
+    return ok({"expiresInSeconds": int(row["expires_in"])}, 200, "Reset code verified")
+
+
 @auth_bp.post("/password-reset/confirm")
 def password_reset_confirm() -> tuple[Response, int]:
-    cfg = _settings()
     body = json_body()
     email = normalize_email(body.get("email"))
     code = require_str(body, "resetToken").strip()
     password = require_str(body, "newPassword")
     confirmation = require_str(body, "newPasswordConfirmation")
-    email_key = security.keyed_hash(email)
-    ip_key = security.keyed_hash(security.client_ip())
 
-    failure: ApiError | None = None
+    def precheck() -> None:
+        if password != confirmation:
+            raise ApiError(
+                400, "password_mismatch", "Passwords do not match", field="newPasswordConfirmation"
+            )
+        check_password_policy(password, "newPassword")
+
     with db.transaction() as conn:
-        throttle.lock_subject(conn, _RESET_CODE_SCOPE, email_key)
-        throttle.lock_subject(conn, _RESET_CODE_IP_BUCKET, ip_key)
-        waits = [
-            throttle.backoff_wait(conn, _RESET_CODE_SCOPE, email_key),
-            throttle.window_retry_after(
-                conn, _RESET_CODE_IP_BUCKET, ip_key, cfg.reset_code_ip_per_hour, _RESET_WINDOW_S
-            ),
-        ]
-        active = [w for w in waits if w is not None]
-        if active:
-            failure = throttle.too_many(max(active))
-        else:
-            # After the wait check (a wait always yields 429) but before the code is looked at,
-            # so a typo neither consumes the code nor counts as a wrong guess.
-            if password != confirmation:
-                raise ApiError(
-                    400,
-                    "password_mismatch",
-                    "Passwords do not match",
-                    field="newPasswordConfirmation",
-                )
-            check_password_policy(password, "newPassword")
-            row = conn.execute(
-                "SELECT u.id AS user_id, t.id AS token_id, t.token_hash "
-                "FROM users u JOIN password_reset_tokens t ON t.user_id = u.id "
-                "WHERE u.email = %s AND u.deleted_at IS NULL "
-                "AND t.used_at IS NULL AND t.expires_at > now() FOR UPDATE OF u",
-                (email,),
-            ).fetchone()
-            if row is None:
-                failure = ApiError(
-                    410, "reset_token_expired_or_invalid", "Reset code expired or invalid"
-                )
-            elif not hmac.compare_digest(bytes(row["token_hash"]), _code_digest(code)):
-                # V2 B4.8: the IP window counts wrong codes only.
-                throttle.record_failure(
-                    conn, _RESET_CODE_SCOPE, email_key, free_failures=_RESET_FREE_FAILURES
-                )
-                throttle.record_hit(conn, _RESET_CODE_IP_BUCKET, ip_key)
-                failure = ApiError(
-                    400, "reset_code_invalid", "Reset code is incorrect", field="resetToken"
-                )
-            else:
-                # Hashed only once the code verified, so unauthenticated callers cannot burn CPU.
-                conn.execute(
-                    "UPDATE users SET password_hash = %s, updated_at = now() WHERE id = %s",
-                    (security.hash_password(password), row["user_id"]),
-                )
-                conn.execute(
-                    "UPDATE password_reset_tokens SET used_at = now() WHERE id = %s",
-                    (row["token_id"],),
-                )
-                security.revoke_user_sessions(conn, row["user_id"])
-                throttle.clear_failures(conn, _RESET_CODE_SCOPE, email_key)
-                throttle.clear_failures(conn, _LOGIN_EMAIL_SCOPE, email_key)
+        failure, row = _check_reset_code(
+            conn, email, code, hit_on_gone=False, precheck=precheck
+        )
+        if failure is None and row is not None:
+            # Hashed only once the code verified, so unauthenticated callers cannot burn CPU.
+            email_key = security.keyed_hash(email)
+            conn.execute(
+                "UPDATE users SET password_hash = %s, updated_at = now() WHERE id = %s",
+                (security.hash_password(password), row["user_id"]),
+            )
+            conn.execute(
+                "UPDATE password_reset_tokens SET used_at = now() WHERE id = %s",
+                (row["token_id"],),
+            )
+            security.revoke_user_sessions(conn, row["user_id"])
+            throttle.clear_failures(conn, _RESET_CODE_SCOPE, email_key)
+            throttle.clear_failures(conn, _LOGIN_EMAIL_SCOPE, email_key)
     if failure is not None:
         raise failure
     return ok(None, 200, "Password reset successful")
