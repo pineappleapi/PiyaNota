@@ -55,7 +55,7 @@ void main() {
       expect(find.byKey(const ValueKey('score-scroll')), findsOneWidget);
       for (final voice in VoicePart.values) {
         expect(chipSelected(tester, voice), isTrue, reason: voice.name);
-        expect(harness.engine.volumes[voice], 1);
+        expect(harness.engine.volumes[voice], 0.8);
       }
       expect(find.byKey(const ValueKey('time-duration')), findsOneWidget);
       expect(find.text('0:10'), findsOneWidget);
@@ -76,7 +76,7 @@ void main() {
         expect(chipSelected(tester, voice), isFalse);
         expect(harness.engine.volumes[voice], 0);
       }
-      expect(harness.engine.volumes[VoicePart.alto], 1);
+      expect(harness.engine.volumes[VoicePart.alto], 0.8);
     });
 
     testWidgets('onboarding voice missing from the score: all available', (
@@ -109,7 +109,7 @@ void main() {
       await tester.tap(chip(VoicePart.bass));
       await tester.pump();
       expect(chipSelected(tester, VoicePart.bass), isTrue);
-      expect(harness.engine.volumes[VoicePart.bass], 1);
+      expect(harness.engine.volumes[VoicePart.bass], 0.8);
 
       await tester.tap(chip(VoicePart.soprano));
       await tester.pump();
@@ -120,7 +120,7 @@ void main() {
       await tester.tap(chip(VoicePart.bass));
       await tester.pump();
       expect(chipSelected(tester, VoicePart.bass), isTrue);
-      expect(harness.engine.volumes[VoicePart.bass], 1);
+      expect(harness.engine.volumes[VoicePart.bass], 0.8);
       // findsWidgets: ScaffoldMessenger also mirrors it onto the library
       // Scaffold underneath.
       expect(find.text(PlaybackMessages.keepOneVoice), findsWidgets);
@@ -799,7 +799,7 @@ void main() {
         VoicePart.tenor,
       ]) {
         expect(chipSelected(tester, voice), isTrue, reason: voice.name);
-        expect(harness.engine.volumes[voice], 1, reason: voice.name);
+        expect(harness.engine.volumes[voice], 0.8, reason: voice.name);
       }
 
       // Still at least one voice: the last one stays on.

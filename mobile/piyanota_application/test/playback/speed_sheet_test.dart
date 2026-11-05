@@ -194,7 +194,7 @@ void main() {
       await tester.tap(toggle);
       await tester.pump();
       expect(tester.widget<SheetCheckbox>(toggle).value, isTrue);
-      expect(harness.engine.clickVolume, 1);
+      expect(harness.engine.clickVolume, 0.5);
 
       await tester.tap(toggle);
       await tester.pump();
@@ -214,7 +214,7 @@ void main() {
       expect(harness.engine.clickVolume, 0);
       // ...and unmuting there doesn't need the toggle again.
       c.setClickMuted(muted: false);
-      expect(harness.engine.clickVolume, 1);
+      expect(harness.engine.clickVolume, 0.5);
       // Turning it off here leaves the mixer's level alone.
       c.setClickVolume(0.4);
       await tester.tap(toggle);

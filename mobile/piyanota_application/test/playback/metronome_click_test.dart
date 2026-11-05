@@ -609,6 +609,35 @@ void main() {
       expect(sampleAt(data, const Duration(milliseconds: 950)), 0);
     });
 
+    test('F8c: click peaks are 0.25 / 0.2 / 0.18 / 0.1 of full scale', () {
+      expect(
+        [downbeatPeak, secondaryPeak, beatPeak, subdivisionPeak],
+        [0.25, 0.2, 0.18, 0.1],
+      );
+      const at = [0, 250, 500, 750];
+      final data = ByteData.sublistView(
+        renderClickWav(
+          ClickPlan(
+            clicks: [for (final ms in at) Duration(milliseconds: ms)],
+            levels: const [_d, _s, _b, _u],
+            length: const Duration(seconds: 1),
+          ),
+        ),
+      );
+      const limits = [0.25, 0.2, 0.18, 0.1];
+      for (var i = 0; i < 4; i++) {
+        final p = peak(data, Duration(milliseconds: at[i]));
+        expect(p, lessThanOrEqualTo((limits[i] * 32767).round()));
+        expect(p, greaterThan((limits[i] * 32767 * 0.5).round()));
+      }
+    });
+
+    test('F8c: slider defaults are voices 0.8 and click 0.5', () {
+      expect(PlaybackController.defaultVoiceVolume, 0.8);
+      expect(PlaybackController.defaultClickVolume, 0.5);
+      expect(const PlaybackState().clickVolume, 0.5);
+    });
+
     test('each level has its own pitch, highest for the downbeat', () {
       const at = [0, 250, 500, 750];
       final data = ByteData.sublistView(
@@ -724,7 +753,7 @@ void main() {
 
         await tester.tap(finder);
         await tester.pump();
-        expect(harness.engine.clickVolume, 1);
+        expect(harness.engine.clickVolume, 0.5);
         expectTransportUntouched(harness, before);
 
         // AC3: off is silent at once.
@@ -744,7 +773,7 @@ void main() {
       expect(c.state.clickMuted, isFalse);
       final before = await startPlaying(tester, harness);
       c.setMetronomeOn(on: true);
-      expect(harness.engine.clickVolume, 1);
+      expect(harness.engine.clickVolume, 0.5);
       expectTransportUntouched(harness, before);
     });
 
@@ -756,7 +785,7 @@ void main() {
       c.setMetronomeOn(on: true);
       expect(harness.engine.clickVolume, 0);
       expect(c.state.clickMuted, isTrue);
-      expect(c.state.clickVolume, 1);
+      expect(c.state.clickVolume, 0.5);
     });
 
     testWidgets('AC2: row at 0 stays silent and keeps its level', (
@@ -790,7 +819,7 @@ void main() {
       expect(harness.clickPlans.single.length, const Duration(minutes: 5));
       expect(c.state.duration, const Duration(minutes: 5));
       expect(c.state.clickStatus, ClickStatus.ready);
-      expect(harness.engine.clickVolume, 1);
+      expect(harness.engine.clickVolume, 0.5);
     });
 
     testWidgets('track length never known: the click is unavailable, never '
@@ -821,7 +850,7 @@ void main() {
       gate.complete(true);
       await tester.pump();
       expect(c.state.clickStatus, ClickStatus.ready);
-      expect(harness.engine.clickVolume, 1);
+      expect(harness.engine.clickVolume, 0.5);
       expectTransportUntouched(harness, before);
     });
   });

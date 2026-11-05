@@ -645,7 +645,7 @@ void main() {
       expect(gains(buildExportJob(playback(tester), all, kTitle)), {
         'soprano.mp3': 0.5,
         'alto.mp3': exportDefaultLevel,
-        'tenor.mp3': 1.0,
+        'tenor.mp3': 0.8,
         'bass.mp3': exportDefaultLevel,
       });
 
@@ -798,9 +798,9 @@ void main() {
       await tester.tap(download);
       await settle(tester);
       expect(gains(service.exports.single.$1), {
-        'soprano.mp3': 1.0,
+        'soprano.mp3': 0.8,
         'alto.mp3': exportDefaultLevel,
-        'tenor.mp3': 1.0,
+        'tenor.mp3': 0.8,
         'bass.mp3': exportDefaultLevel,
       });
     });

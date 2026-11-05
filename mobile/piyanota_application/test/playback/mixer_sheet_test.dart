@@ -88,12 +88,12 @@ void main() {
 
       expect(controller(tester).state.muted, others.toSet());
       for (final voice in VoicePart.values) {
-        expect(sliderValue(tester, voiceRow(voice)), 1);
+        expect(sliderValue(tester, voiceRow(voice)), 0.8);
       }
       for (final voice in others) {
         expect(harness.engine.volumes[voice], 0, reason: voice.name);
       }
-      expect(harness.engine.volumes[VoicePart.alto], 1);
+      expect(harness.engine.volumes[VoicePart.alto], 0.8);
     });
 
     testWidgets('no default voice: nothing muted, all four heard', (
@@ -102,7 +102,7 @@ void main() {
       final harness = ready();
       await pumpPlayback(tester, harness);
       expect(controller(tester).state.muted, isEmpty);
-      expect(harness.engine.volumes.values.every((v) => v == 1), isTrue);
+      expect(harness.engine.volumes.values.every((v) => v == 0.8), isTrue);
     });
 
     testWidgets('PIYA-212-V2.1 AC2: after All voices is chosen in Settings, '
@@ -119,7 +119,7 @@ void main() {
         prefs: {for (final k in store.getKeys()) k: store.get(k)!},
       );
       expect(controller(tester).state.muted, isEmpty);
-      expect(harness.engine.volumes.values.every((v) => v == 1), isTrue);
+      expect(harness.engine.volumes.values.every((v) => v == 0.8), isTrue);
     });
 
     testWidgets('default Alto failed: fallback voices all heard, none muted', (
@@ -129,7 +129,7 @@ void main() {
       await pumpPlayback(tester, harness, defaultVoice: VoicePart.alto);
       expect(controller(tester).state.muted, isEmpty);
       for (final voice in others) {
-        expect(harness.engine.volumes[voice], 1, reason: voice.name);
+        expect(harness.engine.volumes[voice], 0.8, reason: voice.name);
       }
     });
 
@@ -140,7 +140,7 @@ void main() {
       await pumpPlayback(tester, harness, defaultVoice: VoicePart.alto);
       await tapIn(tester, chipOf(VoicePart.soprano));
 
-      expect(harness.engine.volumes[VoicePart.soprano], 1);
+      expect(harness.engine.volumes[VoicePart.soprano], 0.8);
       expect(controller(tester).state.muted, {VoicePart.tenor, VoicePart.bass});
     });
 
@@ -156,7 +156,7 @@ void main() {
       );
       await pumpPlayback(tester, harness, defaultVoice: VoicePart.tenor);
       expect(controller(tester).state.muted, isEmpty);
-      expect(harness.engine.volumes[VoicePart.alto], 1);
+      expect(harness.engine.volumes[VoicePart.alto], 0.8);
     });
 
     testWidgets(
@@ -172,8 +172,8 @@ void main() {
         await tester.pump();
 
         expect(harness.engine.volumes[VoicePart.tenor], 0);
-        expect(harness.engine.volumes[VoicePart.soprano], 1);
-        expect(harness.engine.volumes[VoicePart.bass], 1);
+        expect(harness.engine.volumes[VoicePart.soprano], 0.8);
+        expect(harness.engine.volumes[VoicePart.bass], 0.8);
       },
     );
 
@@ -190,8 +190,8 @@ void main() {
       await tester.pump();
 
       expect(harness.engine.volumes[VoicePart.tenor], 0);
-      expect(harness.engine.volumes[VoicePart.soprano], 1);
-      expect(harness.engine.volumes[VoicePart.bass], 1);
+      expect(harness.engine.volumes[VoicePart.soprano], 0.8);
+      expect(harness.engine.volumes[VoicePart.bass], 0.8);
     });
 
     testWidgets('default Alto, Mixer Unmute on Soprano: heard, chip on', (
@@ -204,7 +204,7 @@ void main() {
       final state = controller(tester).state;
       expect(state.voiceGain(VoicePart.soprano), greaterThan(0));
       expect(state.selected, contains(VoicePart.soprano));
-      expect(harness.engine.volumes[VoicePart.soprano], 1);
+      expect(harness.engine.volumes[VoicePart.soprano], 0.8);
     });
 
     testWidgets('default Alto, tap Unmute on Soprano row: chip on, undimmed', (
@@ -265,11 +265,11 @@ void main() {
         expect(sliderIn(r), findsOneWidget);
         expect(checkIn(r), findsOneWidget);
         expect(muteIn(r), findsOneWidget);
-        expect(sliderValue(tester, r), 1);
+        expect(sliderValue(tester, r), r == metronomeRow ? 0.5 : 0.8);
       }
       for (final voice in VoicePart.values) {
         expect(find.text(voice.label), findsWidgets);
-        expect(harness.engine.volumes[voice], 1);
+        expect(harness.engine.volumes[voice], 0.8);
       }
       for (final voice in VoicePart.values) {
         expect(
@@ -324,7 +324,7 @@ void main() {
       final level = sliderValue(tester, voiceRow(VoicePart.alto));
       expect(level, closeTo(0.25, 0.05));
       expect(harness.engine.volumes[VoicePart.alto], level);
-      expect(harness.engine.volumes[VoicePart.soprano], 1);
+      expect(harness.engine.volumes[VoicePart.soprano], 0.8);
     });
 
     testWidgets('every volume slider fills green-to-blue (PIYA-209-V2.4)', (
@@ -495,10 +495,10 @@ void main() {
         isNot(contains(VoicePart.alto)),
       );
       expect(harness.engine.volumes[VoicePart.alto], 0);
-      expect(harness.engine.volumes[VoicePart.bass], 1);
+      expect(harness.engine.volumes[VoicePart.bass], 0.8);
       await tapIn(tester, checkIn(voiceRow(VoicePart.alto)));
       expect(controller(tester).state.selected, contains(VoicePart.alto));
-      expect(harness.engine.volumes[VoicePart.alto], 1);
+      expect(harness.engine.volumes[VoicePart.alto], 0.8);
     });
 
     testWidgets('the last voice cannot be unchecked', (tester) async {
@@ -542,7 +542,7 @@ void main() {
       await pumpPlayback(tester, harness);
       final engine = harness.engine;
       controller(tester).setMetronomeOn(on: true);
-      expect(engine.clickVolume, 1);
+      expect(engine.clickVolume, 0.5);
       await openMixer(tester);
 
       await setSlider(tester, metronomeRow, 0.5);
@@ -622,13 +622,13 @@ void main() {
         tester.widget<Slider>(sliderIn(metronomeRow)).onChanged,
         isNotNull,
       );
-      expect(engine.volumes.values.every((v) => v == 1), isTrue);
+      expect(engine.volumes.values.every((v) => v == 0.8), isTrue);
 
       // Off again from the checkbox: voices unchanged, click silent.
       await tester.tap(toggle);
       await tester.pump();
       expect(controller(tester).state.metronomeOn, isFalse);
-      expect(engine.volumes.values.every((v) => v == 1), isTrue);
+      expect(engine.volumes.values.every((v) => v == 0.8), isTrue);
       expect(engine.clickVolume, 0);
     });
 
@@ -715,7 +715,7 @@ void main() {
         tester.widget<SheetCheckbox>(checkIn(metronomeRow)).onChanged,
         isNull,
       );
-      expect(harness.engine.volumes.values.every((v) => v == 1), isTrue);
+      expect(harness.engine.volumes.values.every((v) => v == 0.8), isTrue);
       expect(harness.engine.clickVolume, 0);
       expect(harness.engine.playing, isTrue);
       // Voice rows are untouched.
@@ -740,7 +740,7 @@ void main() {
           findsOneWidget,
         );
         expect(tester.widget<Slider>(sliderIn(metronomeRow)).onChanged, isNull);
-        expect(h.engine.volumes.values.every((v) => v == 1), isTrue);
+        expect(h.engine.volumes.values.every((v) => v == 0.8), isTrue);
         expect(find.text(kTitle), findsOneWidget);
       });
     }
@@ -830,10 +830,10 @@ void main() {
       expect(harness.engines.single.disposed, isTrue);
       await reopenPlayback(tester);
       expect(harness.engines, hasLength(2));
-      expect(harness.engine.volumes.values.every((v) => v == 1), isTrue);
+      expect(harness.engine.volumes.values.every((v) => v == 0.8), isTrue);
       await openMixer(tester);
       for (final voice in VoicePart.values) {
-        expect(sliderValue(tester, voiceRow(voice)), 1);
+        expect(sliderValue(tester, voiceRow(voice)), 0.8);
         expect(
           tester.widget<SheetCheckbox>(checkIn(voiceRow(voice))).value,
           isTrue,

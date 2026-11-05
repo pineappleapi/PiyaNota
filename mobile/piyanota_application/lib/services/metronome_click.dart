@@ -320,14 +320,21 @@ const double _clickSeconds = 0.04;
 const double _decaySeconds = 0.008;
 const double _fadeSeconds = 0.002;
 
+/// Click peaks (0-1 of full scale), kept well under the voice stems
+/// (-20 LUFS) so the click at its slider maximum never covers the voices.
+const double downbeatPeak = 0.25;
+const double secondaryPeak = 0.2;
+const double beatPeak = 0.18;
+const double subdivisionPeak = 0.1;
+
 /// (Hz, level 0-1) per click level: higher and louder for stronger ones.
 const Map<ClickLevel, (double, double)> _voicing = {
-  ClickLevel.downbeat: (1600, 0.9),
+  ClickLevel.downbeat: (1600, downbeatPeak),
   // Close to the beat, so beat 3 of 4/4 isn't heard as a new bar; the
   // downbeat alone is high and loud.
-  ClickLevel.secondary: (1100, 0.62),
-  ClickLevel.beat: (1000, 0.55),
-  ClickLevel.subdivision: (800, 0.3),
+  ClickLevel.secondary: (1100, secondaryPeak),
+  ClickLevel.beat: (1000, beatPeak),
+  ClickLevel.subdivision: (800, subdivisionPeak),
 };
 const int _pcmMax = 32767;
 

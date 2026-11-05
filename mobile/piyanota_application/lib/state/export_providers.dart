@@ -29,8 +29,8 @@ final notificationPermissionProvider = Provider<NotificationPermission>(
 /// The level a ticked voice or click gets when the Voice Mixer does not
 /// let it be heard (muted or its slider at 0): 80%, not full
 /// (user decision 2026-10-21, kept 2026-10-22 when unmute stopped
-/// resetting the level). Not the Mixer's reset level, which stays at
-/// [PlaybackController.fullVolume] (PIYA-209 AC5).
+/// resetting the level). Equals the Mixer's voice default,
+/// [PlaybackController.defaultVoiceVolume] (F8c).
 const double exportDefaultLevel = 0.8;
 
 // The Export sheet only reads Playback (user decision 2026-10-21): it
@@ -60,7 +60,7 @@ bool _clickSilencedInMixer(PlaybackState state) =>
 
 bool _voiceSilencedInMixer(PlaybackState state, VoicePart voice) =>
     state.muted.contains(voice) ||
-    (state.volumes[voice] ?? PlaybackController.fullVolume) <= 0;
+    (state.volumes[voice] ?? PlaybackController.defaultVoiceVolume) <= 0;
 
 /// What the sheet starts with: the voices that can be heard, and the click
 /// if it can be heard. A voice whose chip is off starts unticked.
@@ -83,7 +83,7 @@ ExportSelection initialExportSelection(PlaybackState state) {
 double exportVoiceGain(PlaybackState state, VoicePart voice) =>
     _voiceSilencedInMixer(state, voice)
     ? exportDefaultLevel
-    : state.volumes[voice] ?? PlaybackController.fullVolume;
+    : state.volumes[voice] ?? PlaybackController.defaultVoiceVolume;
 
 /// The ticked click's level: the Metronome row's, or [exportDefaultLevel]
 /// when the Mixer silences it (muted or slider at 0), exactly as for a voice (user decision 2026-10-21).

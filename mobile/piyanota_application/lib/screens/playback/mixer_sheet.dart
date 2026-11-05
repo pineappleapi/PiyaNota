@@ -67,7 +67,8 @@ class VoiceMixerSheet extends ConsumerWidget {
             disabledNote: PlaybackMessages.rowUnavailable(voice.label),
             checked: state.selected.contains(voice),
             muted: state.muted.contains(voice),
-            volume: state.volumes[voice] ?? PlaybackController.fullVolume,
+            volume:
+                state.volumes[voice] ?? PlaybackController.defaultVoiceVolume,
             onChecked: (_) => controller.toggleVoice(voice),
             onMute: (on) => controller.setVoiceMuted(voice, muted: on),
             onVolume: (level) => controller.setVoiceVolume(voice, level),

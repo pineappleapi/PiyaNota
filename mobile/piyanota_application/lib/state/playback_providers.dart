@@ -100,7 +100,7 @@ class PlaybackState {
     this.selected = const {},
     this.volumes = const {},
     this.muted = const {},
-    this.clickVolume = PlaybackController.fullVolume,
+    this.clickVolume = PlaybackController.defaultClickVolume,
     this.clickMuted = false,
     this.metronomeOn = false,
     this.clickStatus = ClickStatus.preparing,
@@ -189,7 +189,7 @@ class PlaybackState {
         muted.contains(voice)) {
       return 0;
     }
-    return volumes[voice] ?? PlaybackController.fullVolume;
+    return volumes[voice] ?? PlaybackController.defaultVoiceVolume;
   }
 
   /// The click: only while it is live (Speed toggle on, track loaded) and
@@ -260,6 +260,10 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// ⟲5 / ⟳5 (user decision 2026-10-09).
   static const Duration skipStep = Duration(seconds: 5);
   static const double fullVolume = 1;
+
+  /// Slider defaults (F8c): voices leave headroom, the click starts at half.
+  static const double defaultVoiceVolume = 0.8;
+  static const double defaultClickVolume = 0.5;
 
   PlaybackEngine? _engine;
   StreamSubscription<bool>? _playingSub;
@@ -376,14 +380,14 @@ class PlaybackController extends Notifier<PlaybackState> {
     });
     _failureSub = engine.failures.listen(_onFailure);
     _clickFailureSub = engine.clickFailures.listen(_onClickFailure);
-    // PIYA-209-V2.2 replaces 209 AC5: every slider at full volume,
+    // PIYA-209-V2.2 replaces 209 AC5: voice sliders at 0.8, click at 0.5,
     // metronome off, speed at the score's tempo; the voices the
     // default selection left out start muted so the Mixer shows what is
     // heard. A fresh controller (autoDispose) means a reopened score starts
     // here again (209 AC6).
     _mixMuted = playable.difference(selected);
     final volumes = {
-      for (final voice in result.audioTracks.keys) voice: fullVolume,
+      for (final voice in result.audioTracks.keys) voice: defaultVoiceVolume,
     };
     state = PlaybackState(
       phase: PlaybackPhase.ready,
