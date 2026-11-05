@@ -1,74 +1,84 @@
-# Backend plan — V2 check and test findings (2026-11-05)
+# Backend plan, V2 check and test findings (revision 2, 2026-11-05)
 
-Branch: feature/module3-backend (HEAD 5ff8d17 pushed). Source of findings: the user's "VERSION 2 Frontend CHECKS" and "BACKEND TESTING" notes of 2026-11-05. Ledger: `.superpowers/sdd/2026-11-05-v2-checks/ledger.md`. Joint contract: `.superpowers/sdd/2026-11-05-v2-checks/joint-contract.md`.
+Branch: feature/module3-backend (HEAD at the time of writing: dd0495a; pushed up to 5ff8d17). Source: the user's "VERSION 2 Frontend CHECKS" and "BACKEND TESTING" notes of 2026-11-05, the user's answers A1 to A6, and the reviews by senior-reviewer, backend-lead and frontend-lead. Revision 2 replaces revision 1 completely.
 
-## Rules (from CLAUDE.md and the user)
-- State the planned change and a one-line risk before editing. Do not commit or push without the user's approval; never push or merge without asking. Module 3 changes need a `backend-lead` review before merge. Final merge proposal needs `senior-reviewer`.
-- Tests: start local Postgres 55432 (check with pg_isready), then `CUDA_VISIBLE_DEVICES=-1 backend/.venv/Scripts/python -m pytest backend/tests -q -W error`.
+Shared files (absolute paths, because the frontend runs in another worktree):
+- Joint contract: D:/PiyaNota/.claude/worktrees/module3-backend/.superpowers/sdd/2026-11-05-v2-checks/joint-contract.md (owner: the backend session; the frontend session only reads it).
+- Backend ledger: .../ledger-backend.md. Frontend ledger: .../ledger-frontend.md. Shared status and open questions: .../ledger.md. Resume prompts: .../resume-prompts.md.
+
+## Rules
+- State the planned change and a one-line risk before editing. No commit or push without the user's approval. Never push or merge without asking.
+- Module 3 changes need a `backend-lead` review before merge. The final merge proposal needs `senior-reviewer`. ML-facing changes (B5 callback signature) need `ml-cv-lead` sign-off.
+- Tests: check Postgres on port 55432 with pg_isready, then `CUDA_VISIBLE_DEVICES=-1 backend/.venv/Scripts/python -m pytest backend/tests -q -W error`. Record the pytest pass count as the baseline in the ledger before B1 (the flutter baseline is 1215).
 - Never read or print `C:/Users/paul_/start-piyanota-worker.ps1`.
-- Clear the session after every 3 completed tasks (see "Session protocol").
+- The deployed worker is the user's PC process. After B5, B6, B10 land, the worker must be restarted before any phone test. Say so in the acceptance of those tasks.
+- Backend tasks run one at a time (one CPU box, one test database, one worktree). Only documentation tasks may overlap with a code task.
+- Every task brief lists its "files touched" first. The controller checks that list before it runs two things at once.
 
 ## Token-saving method
-- Controller stays thin: it hands work to subagents as files (task brief, report path, diff package), never pastes reports.
-- One subagent per task, with an explicit `model:` on every Agent call. Reviews are task-scoped, and one broad review runs at the end.
-- Model per task weight: haiku for doc, wording and ledger edits and for scoped re-reviews of tiny diffs; sonnet for implementation and routine review; opus only for security-sensitive design (B1, B2) or when a fix loop reaches round 4. `backend-lead` (sonnet) reviews B1, B2, B3, B5. `ml-cv-lead` reviews B8 only.
-- Fix rounds 1-3 resume the implementer with SendMessage; rounds 4-5 use a fresh implementer on a stronger model. Minor findings go to the ledger as deferred, not into the loop.
+- The controller stays thin. Each task goes to one subagent with an explicit `model:` on the Agent call, with the brief and report as files, never pasted text.
+- Models: haiku only for pure mechanical edits (none planned in this plan); sonnet for all implementation, tests and routine reviews; opus for the one design pass (D0); `backend-lead` reviews run on sonnet. Tiny tasks (B4, B9) skip a separate task review; the final review covers them.
+- The controller appends ledger lines itself. It does not start a subagent for a ledger line.
+- Fix rounds 1 to 3 resume the implementer with SendMessage. Round 4 or 5 uses a fresh implementer on a stronger model. Minor findings go to the ledger as deferred.
 
 ## Tasks
 
-### B1 — Password-reset code verification step (JOINT J1) — opus design, sonnet implement
-Finding: a wrong code still reaches the New Password screen and fails only at confirm. Cause: the API has only `/password-reset/request` and `/password-reset/confirm` (`backend/routes_auth.py:180`, `:246`), so the code is checked only when the new password is sent.
-Change: add `POST /api/auth/password-reset/verify` taking `{email, code}`. It checks the code without consuming it, returns 200 on a match and the standard 400 `invalid_code` on a mismatch, and counts the failure against the same per-email attempt budget as `/confirm`. After the budget is spent it returns 429 with a Retry-After matching the app's wait ladder (see B2). `/confirm` keeps requiring the code, so verify cannot be skipped. Uniform responses for unknown emails (no account enumeration beyond what `/request` already allows; the app already shows "Email has not yet been registered", so keep that behavior unchanged).
-Acceptance: wrong code returns 400 and does not advance; right code returns 200 and a following `/confirm` with the same code still succeeds; verify attempts and confirm attempts share one counter; tests for each.
-Risk: the shared counter could lock out a valid user who mistypes; the test must cover the reset after a good code.
+### D0. Auth design pass for B1 and B2 (opus). Files touched: none (writes a design section).
+Read `backend/throttle.py`, `backend/routes_auth.py` (login near line 151, reset request near 180, confirm near 246 to 313), `backend/security.py`, `backend/tests/test_auth_signup_login.py`. Produce a design section appended to the joint contract that confirms or corrects J1 and J2: the ladder parameter on `record_failure` (`step_s`, `cap_s`, `free_failures`), where `attemptsRemaining` is computed, the lock order, the verify race with confirm and a new `/request`, and the optional hard cap (10 or more wrong on the live code treats it as expired). Also check that `security.client_ip()` honors the proxy header on the VPS. Acceptance: the contract has two tables (login ladder, reset ladder) and no open design question.
 
-### B2 — Login lockout: 5 wrong passwords before a wait (JOINT J2) — opus design, sonnet implement
-Finding: the user wants 5 wrong attempts before the wait starts (the app currently starts a 30 s wait after the first wrong password, then 1:00).
-Change: confirm where the wait lives (`backend/throttle.py` for the server, client-side for the fake backend). Server: count consecutive failures per email; no wait for failures 1-4; from failure 5 return 429 with Retry-After 30 s, then 60 s, then keep doubling to a documented cap. A success resets the count. Wrong password in airplane mode never counts (client concern). Write the exact ladder into the joint contract so the app and the server agree.
-Open question for the user (ask before implementing): after the 5th failure, is the ladder 0:30, 1:00, 2:00 ..., and does the 5-attempt allowance refill after a wait or only after a success?
-Acceptance: 4 failures give 401 with no Retry-After; the 5th gives 429; success resets; a different email is independent; tests including time travel through the clock fake.
+### B1. Password-reset `/verify` endpoint (J1). Sonnet. Files touched: `backend/routes_auth.py`, `backend/throttle.py` (only if D0 says so), new and existing tests under `backend/tests/`.
+Implement exactly J1. Acceptance: wrong code returns 400 `reset_code_invalid` and does not advance; right code returns 200 `{expiresInSeconds}` and a following `/confirm` with the same code still succeeds; verify and confirm failures share one counter; the 5th wrong code across both gets the wait; no live code returns 410; unknown email returns 410 and records an IP hit; `/request` resets the counter; a successful confirm clears the reset count and the login count. Review: `backend-lead`.
+Risk: the shared counter could lock out a user who mistypes; the test must cover the reset after a good code.
 
-### B3 — Delete account end-to-end (JOINT J3) — sonnet
-Finding: tests 21 and 22 failed only because the app has no UI. `DELETE /account` exists (`backend/routes_account.py:75`).
-Change: verify against the real database that deletion removes the user, scores, jobs, job pages, media blobs and sessions, and that a later login returns the same error as an unknown account. Add the missing test if absent. Report whether stored blobs are removed (storage space matters: about 14.5 MB per score).
-Acceptance: after DELETE, login fails, `/scores` returns 401 with the old token, no orphan rows or blobs remain.
+### B2. Login ladder: 5 free wrong passwords, then +30 s each (J2). Sonnet. Files touched: `backend/routes_auth.py`, `backend/throttle.py`, `backend/tests/test_auth_signup_login.py`. Runs after B1 (same files).
+Mostly built: login already uses durable per-email backoff. Change `free_failures` to 4 and the ladder to the three stages in J2 (wrongs 1 to 4 free; wrongs 5 to 9 wait `30 * (N - 4)` seconds; wrong 10 and later start a 3600 s lock), return the 5th wrong password as 401 with `retryAfterSeconds` and `Retry-After`, add `attemptsRemaining` to the 401 detail for failures 1 to 4, and replace the `step_s`/`cap_s`/`free_failures` parameters of `record_failure` (doubling with a 900 s cap at `throttle.py:19,83`, which cannot express three stages) with an explicit per-scope schedule: login scope uses the three-stage schedule; reset scope keeps doubling, cap 900 s and the raised free failures from B1, so `test_throttle.py:30-68` stays valid. Do not reuse `background.BACKOFF_CAP_S` (that is the deletion queue). Known cost, accepted and stated in J2: every wrong password at N of 10 or more starts a new 3600 s lock (`throttle.py:82-83`), so one wrong guess per hour keeps an account locked until the owner resets the password; add a test that a wrong password right after the lock ends relocks, and an assert that the lock length is below the 24 h idle window. Rewrite the existing tests that assume the first failure waits (`test_auth_signup_login.py` near lines 170, 178, 185: the unknown-email second call is no longer a 429). Acceptance: failures 1 to 4 give 401 with the right `attemptsRemaining` and no wait; the 5th gives 401 with 30 s; a request during the wait gives 429; after the wait the next wrong password counts as N=6 (60 s); N=9 gives 150 s; N=10 and later give 3600 s; a correct password during a wait or lock gives 429, and a correct password after the wait is accepted and clears the count; a successful password reset clears the count; 24 h idle clears; a different email is independent; time travel uses the clock fake. The 3600 s lock length is a single named constant (user may choose 5 hours). Review: `backend-lead`.
 
-### B4 — No score left behind after a failed upload (JOINT J6) — sonnet
-Finding: creating a score and then failing the image upload leaves an empty score in the library.
-Change: check whether the score row is created before the upload completes. Server side: create the score and its job in one transaction only after all pages are accepted, or mark scores with no pages as `draft` and exclude them from the library list; add a janitor that deletes drafts older than a documented age. Tell the frontend which behavior was chosen through the joint contract (the app also removes its own local card on failure, F-task).
-Acceptance: an upload that fails halfway leaves no visible score and no orphan job row; test with a simulated failure.
+### B3. Delete account end to end (J3). Sonnet. Files touched: `backend/routes_account.py`, `backend/background.py` (reuse of purge helpers), tests.
+`DELETE /api/account` already requires `password`, throttles wrong passwords, returns 403 `invalid_current_password`, revokes sessions, and the later purge cascades. Defect to fix: the purge runs only every 600 s (`background_interval_s`), and until then the soft-deleted row keeps `users.email UNIQUE`, so signing up again with the same email returns 409 for up to 10 minutes. Fix: purge that one user inline in `delete_account` in the same transaction (reuse `_USER_KEYS_SQL`, `queue_deletion`, `DELETE FROM users`, the purge log). Keep the loop as a safety net. Enumerate blob keys by owner, not by type, so the check can be re-run after B6 adds MIDI keys. Acceptance: after DELETE, the old token gets 401 on `/api/scores`; login gives the unknown-account 401; signing up again with the same email returns 201 immediately; after `run_deletions` no blob key of that user remains; wrong password returns 403 and changes nothing; a wrong password here does not touch the login lockout. Review: `backend-lead`.
 
-### B5 — Finer progress (JOINT J5) — sonnet
-Finding: the processing percentage should be more dynamic and accurate, for example advancing when a strip finishes.
-Change: today the worker sets a stage (`set_stage`). Add a `progress` value (0-100 integer, monotonic) updated on the heartbeat path: a weighted stage table (preprocess, detect, transcribe per strip, reconstruct, synth per voice) and a within-stage fraction (page i of n, strip j of m). Expose it on the existing job status response as `progress` (additive field). Weights come from the measured smoke timing (Moonriver 104 s total: preprocessing is over half of Stage 1-2 time), so state the weights in a constant with a comment.
-Acceptance: progress never decreases, reaches 100 only on completion, field is additive (old app ignores it), tests with a fake pipeline reporting callbacks.
-Risk: touching `worker/pipeline.py` callbacks; keep the callback optional.
+### B4. Failed upload leaves nothing (J6). Sonnet, one test only. Files touched: new test file only.
+The server already satisfies this. Add one test: when `storage.put` raises during `create_job`, there is no job row, no score row, no blob and no reservation left. Acceptance: the test passes against the real code. If it fails, stop and report to the user: that means a real server bug and a design change. Record "no draft state needed" in the ledger.
 
-### B6 — Result payload for local saving (JOINT J4) — sonnet
-Finding: converted audio and pages should be saved on the phone for offline use and faster playback.
-Change: no new endpoint expected. Confirm `GET /api/scores/{id}/result` returns stable content identifiers: add `etag`/`sha256` and byte size per file (additive), make `/media` honor `If-None-Match` and long cache headers, and keep signed URLs refreshable (the app must be able to re-request `/result` for fresh URLs without re-converting). Document the file list: 4 MP3s, cleaned pages, timing JSON, thumbnail. Also decide whether to offer the MIDI per voice (the user wrote "midi and audio"): ask the user.
-Acceptance: result lists size and hash for every file; conditional GET returns 304; tests.
+### B5. Finer progress (J5). Sonnet. Files touched: `backend/worker/pipeline.py`, `backend/worker/queue.py`, `backend/worker/main.py` if needed, `stage3_transcription.py` and the preprocess entry point (optional kwarg only), worker `Stages` fakes, tests.
+Reuse `percentComplete`. Add an optional `progress: Callable[[int, int], None] | None = None` kwarg to the Stage 3 transcribe call (strip j of m) and the preprocess call (page i of n). Default None, so existing callers are unchanged. `ml-cv-lead` signs off on the signature before the edit (it touches Module 1). Write at most once per 2 seconds and only when the integer rises; SQL uses `percent_complete = GREATEST(percent_complete, %s)`. Weights as in J5, stated in one constant with a comment citing the Moonriver smoke timing (preprocessing 52.7 s of 212.8 s in the 2026-11-05 run; 104 s in the 2026-11-04 run, so the weights are approximate). Acceptance: progress never decreases, including after a reclaimed retry; it reaches 100 only in `complete_job`; the field set on the status response is unchanged; tests with a fake pipeline reporting callbacks. After this task the user restarts the worker. Review: `backend-lead` and `ml-cv-lead` (signature only).
 
-### B7 — Deferred backend items from the merge review — sonnet, run in parallel with B1-B6 when files do not overlap
-From the ledger and `review-final.md`: (a) `review-t1-2-4` deferred minors 1-7; (b) blob cap or retention policy (about 14.5 MB per score, Neon free tier holds about 30); (c) old stored review rows unfiltered on read; (d) the `review-final.md` Minor list; (e) Moonriver smoke rerun, expect 40 bars (needs a quiet CPU); (f) unseeded `finetune_train_loader` is out of scope here.
-Acceptance: each item either fixed with a test or recorded in the ledger as deferred with a reason.
+### B6. Result payload for local saving, plus MIDI (J4). Sonnet. Files touched: `backend/worker/pipeline.py`, `backend/worker/main.py`, `backend/storage.py` (KeyPrefix), `backend/migrations/0004_*.sql`, `backend/routes_scores.py`, `backend/background.py`, `backend/completion.py`, tests. Runs after B5 (same worker files). Uses migration 0004.
+- `PipelineResult.midi: dict[str, bytes]`, read from the Stage 5 `.mid` files before the folder is removed (`pipeline.py` near lines 286-287). Skip voices in `failed`.
+- `KeyPrefix` gets "midi"; `worker/main.py:_publish` uploads with `audio/midi`; new nullable column `audio_tracks.midi_key`.
+- `/result` returns `fileId` (the object key) and `sizeBytes` per file, and `midiTracks`, as in J4. No sha256, no ETag, no 304, no cache header changes.
+- The blob key lists are written by hand in three places and each needs `UNION SELECT midi_key`: `routes_scores.py` (score delete, near line 176), `background.py` (user purge, near line 97) and `completion.py` (retake replace, near line 101). One test per place proves MIDI blobs are removed; re-run the B3 owner-enumeration test.
+- Old scores have no MIDI: `midiTracks` is null and nothing fails.
+Acceptance: `/result` lists `fileId` and `sizeBytes` for every file; a new conversion stores four MIDI files; deleting a score, purging a user and replacing on retake leave no MIDI blob; an old score returns `midiTracks: null`. Review: `backend-lead`. After this task the user restarts the worker.
 
-### B8 — Camera-PrIMuS regression for Stage 3/4 changes — sonnet runs, `ml-cv-lead` reviews
-Merge precondition from the handoff (open item 2). Run the existing evaluation on CPU only, compare to the recorded baseline (clean 98.118% pitch accuracy, distorted 86.983%). Report numbers and whether they match. Do not treat any number from the dev GPU as verified (BUG-013).
-Acceptance: numbers recorded in `docs/decisions/` with the command used; no drop beyond the agreed tolerance (ask the user for a tolerance if none is on record).
+### B10. Louder voices and a safe mix (J7). Sonnet. Files touched: `stage5_synthesis.py` (and its helpers), tests. Runs after B6 (same pipeline outputs). Joint with F8c.
+Step 0: look up recommended loudness on the web (target LUFS, true peak, mobile and streaming references) and write the findings with source links in `docs/decisions/audio-loudness-2026-11.md` (A6). Then bake the levels into the rendered MP3s: normalize each voice stem and apply a limiter with headroom for four summed voices. Starting values are in J7 and are replaced by the lookup. Voices end a bit louder than the suggested reference, as the user asked. Check a four-voice loud bar for clipping. Acceptance: measured LUFS and true peak of each stem and of the four-voice sum are recorded; no clipping; the numbers are written into J7. The user confirms by ear on the phone after the worker restart; the final numbers go in the ledger. Old scores keep their old level (accepted).
 
-### B9 — Backend-side items to hand to the frontend plan — haiku (documentation only)
-Write the joint contract file (J1-J6 request and response shapes, ladders, error codes) before B1 starts so the frontend can work in parallel. Update it as tasks finish.
+### B7. Deferred backend items (sonnet). Files touched: listed by the subagent first, before any edit.
+(a) The deferred minors from `review-t1-2-4` items 1 to 7 and the Minor list of `review-final.md`. (b) Prune failed or cancelled jobs that nobody retook: after 7 days (DECIDED by the user) call `queue_deletion` on their `job_pages` blobs (`run_prune` in `background.py` never touches jobs today). (c) Old stored review rows are unfiltered on read. Acceptance: each item is fixed with a test or recorded in the ledger as deferred with a reason.
 
-## Order and parallelism
-1. B9 first (contract; cheap, unblocks the frontend).
-2. Batch 1 (parallel, disjoint files): B1 (routes_auth), B3 (routes_account, tests), B7 (misc).
-3. Batch 2: B2 (throttle; touches routes_auth, so after B1), B4 (routes_scores/routes_jobs), B5 (worker).
-4. Batch 3: B6, B8.
-5. Final: backend-lead review of the whole set, one fix dispatch, then `senior-reviewer`, then ask the user about push and merge.
-The frontend plan runs at the same time in its own worktree against the joint contract and the fake backend; integration tests against the real backend happen after B1, B2, B4, B5, B6 land.
+### B11. Score limit of 20 and 7-day recovery window (J8). Sonnet. Files touched: `backend/routes_jobs.py` (create_job), `backend/routes_scores.py` (delete and list), `backend/background.py` (purge after 7 days), `backend/migrations/0005_*.sql`, tests. After B6 (same SQL key lists) and B3. Uses migration 0005. Review: `backend-lead`.
+Create job returns 409 `score_limit_reached` with `{limit: 20}` when the user has 20 scores plus converting jobs; retake (replace) is not blocked. Score delete becomes soft delete (`scores.deleted_at`): hidden from the library, not counted toward the limit, and a background pass physically removes the rows and all blobs (audio, MIDI, timing, pages, thumbnails) once `deleted_at` is older than 7 days. Rules from the backend-lead review (`review-plan2-backend.md`):
+- Soft delete only sets `deleted_at`; it keeps jobs and blobs, and keeps the retake cancel (`routes_scores.py:170-175`). Do not copy the current delete at `routes_scores.py:176-189`. The 7-day purge pass runs the old logic: queue the keys of audio, timing, thumbnail, MIDI and job_pages (including retake jobs), then delete the jobs, then the score (`jobs.score_id` is ON DELETE SET NULL, so deleting only the score would orphan page blobs).
+- Filter `deleted_at IS NULL` in: `backend/access.py:40` `owned_score` (covers result, edit, delete; a second delete then 404s), `routes_scores.py:54` library, `completion.py:72` old-score lookup, `_check_retake` (`routes_jobs.py:100-121`, join `jobs.score_id` to `scores`), and the cap count. `job_status` may keep returning `scoreId` for a deleted score (the app then gets 404 on `/result`) or return null.
+- Do NOT filter `_USER_KEYS_SQL` (`background.py:97-102`): account deletion must still purge soft-deleted blobs. Add a test. The purge pass selects `deleted_at < now() - 7 days`.
+- Cap count: one SQL statement inside the `create_job` transaction after `throttle.lock_subject` (`routes_jobs.py:171`), counting scores with `deleted_at IS NULL` plus unfinished jobs that are not a replace of a complete score. One statement, because `completion.py:134-139` flips a job to complete and inserts the score without that lock, and two separate counts could see neither.
+- Retake exemption applies only when the old job's status is `complete` (replace). A retake of a FAILED job inserts a new score on completion (`completion.py:117-126`) and must count.
+- Add a lock-free fail-fast count in `_submit` (near `routes_jobs.py:346-351`) so the 409 comes before page uploads; the locked count stays the authority. Keep the idempotent replay lookup (`:298`) first.
+- Migration 0005: add `scores.deleted_at`, a partial index on `scores(user_id) WHERE deleted_at IS NULL`, an index on `deleted_at` for the purge, and a `.down.sql` (0001 to 0003 have both). Acceptance: the 21st upload gets 409; deleting one score lets the next upload through; a deleted score is invisible at once, its blobs still exist on day 6 and are queued for deletion on day 7 (clock fake); account purge removes soft-deleted scores too; no leftover blobs after the pass. Interpretation to confirm with the user: "deleted in Neon after 7 days" is read as a soft delete with a 7-day window; if the user wants immediate removal, only the limit is built.
+
+### J-int. Contract tests against the real backend. Sonnet. Files touched: new tests only. After B1 to B6 and B10.
+One test per joint item (J1 to J6) asserting the response shapes in the contract against the real Flask app and the local database, not against any fake. The frontend session runs the same shapes against the fake backend.
+
+### Final
+`backend-lead` reviews the whole set, one fix dispatch, then `senior-reviewer`, then ask the user about push and merge.
+
+## Order
+D0, B1, B2 (auth block, one design pass). Then B3, B4. Then B5, B6, B10 (worker block; restart the worker after each). Then B7, then B11 (needs B6 and B3). Then J-int. Then final review.
+Already done and recorded: the Camera-PrIMuS regression (PASS, commit 6b70cd9) and the Moonriver rerun (PASS, 40 bars). The contract file is written (this plan's companion), so the old B9 is closed.
+Parallelism with the frontend: the frontend builds against the contract and its fake backend at the same time. The frontend needs B1 for F3, B2 for F2, B3 for F9, B5 for F13, B6 for F10, B10 for F8c only for the real-backend checks.
 
 ## Session protocol (clear every 3 tasks)
-- After each task: append one line to the ledger (task id, commit, tests, review verdict, deferred minors, rulings).
-- After every 3 completed tasks: rewrite `.superpowers/sdd/2026-11-05-v2-checks/handoff-backend.md` (CURRENT state only), then tell the user to run /clear and paste the backend resume prompt from `resume-prompts.md`.
-- Never keep state only in the conversation.
+- Count only tasks logged as complete. After each task the controller appends one line to ledger-backend.md: id, commit, pytest count, review verdict, migration number used, deferred minors, rulings.
+- After every 3 completed tasks, or earlier if the context is large: rewrite handoff-backend.md (CURRENT state only; list any in-flight agent ids and the path of the next task brief), update "N tasks since last clear" in ledger.md, then tell the user to /clear and paste the backend resume prompt.
+- Never /clear while a subagent is still running: its report would be lost. Clear at a task boundary when idle.
+- State lives in files, not in the conversation.
