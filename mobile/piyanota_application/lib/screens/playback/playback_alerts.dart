@@ -110,33 +110,6 @@ Future<bool> showMutedMeasuresAlert(
   return hide;
 }
 
-/// Solo was ticked on [voice] while its chip is off. True for "Turn
-/// `<Voice>` on", false for Cancel or a dismiss.
-Future<bool> showSoloChipOffAlert(
-  BuildContext context, {
-  required VoicePart voice,
-}) async {
-  final turnOn = await showDialog<bool>(
-    context: context,
-    builder: (context) => AlertDialog(
-      key: const ValueKey('solo-chip-off-alert'),
-      title: Text(PlaybackMessages.soloChipOffTitle(voice)),
-      content: Text(PlaybackMessages.soloChipOffBody(voice)),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          child: const Text(PlaybackMessages.cancel),
-        ),
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(true),
-          child: Text(PlaybackMessages.turnOn(voice)),
-        ),
-      ],
-    ),
-  );
-  return turnOn ?? false;
-}
-
 /// "Don't show again for this score", per `jobId` on the device
 /// (PIYA-207 AC12: a whole-score retake is a new job, so its muted
 /// measures are listed again). A storage failure reads as "not hidden" and

@@ -50,13 +50,6 @@ class PlaybackMessages {
         : '${measure.voice.label}: page $page, system ${system + 1}';
   }
 
-  // Solo on a voice whose chip is off (PIYA-209, user decision 2026-10-09).
-  static String soloChipOffTitle(VoicePart voice) =>
-      '${voice.label} is turned off';
-  static String soloChipOffBody(VoicePart voice) =>
-      'You won’t hear ${voice.label} while its voice button on the '
-      'Playback screen is off, even when it’s soloed.';
-  static String turnOn(VoicePart voice) => 'Turn ${voice.label} on';
   static const String cancel = 'Cancel';
 
   static String _names(List<VoicePart> voices) {
@@ -99,7 +92,7 @@ class PlaybackMessages {
   static const String mute = 'Mute';
 
   /// Screen-reader labels; the row's name is not repeated on screen.
-  static String soloLabel(String row) => 'Solo $row';
+  static String playLabel(String row) => 'Play $row';
   static String muteLabel(String row) => 'Mute $row';
   static String volumeLabel(String row) => '$row volume';
   static String volumeValue(double level) => '${(level * 100).round()}%';
@@ -111,17 +104,10 @@ class PlaybackMessages {
       'Metronome needs the score tempo, which this score doesn’t have. '
       'The voices still play.';
 
-  /// Under the Mixer's metronome row while it is off: level, Mute and
-  /// Solo wait until it is switched on, here or in Speed (same toggle).
+  /// Under the Mixer's metronome row while it is off: level and Mute
+  /// wait until it is switched on, here or in Speed (same toggle).
   static const String metronomeOff =
       'Off. Switch it on to hear it and change its level.';
-
-  /// The Mixer metronome row's on/off switch (user decision 2026-10-21).
-  /// Just the name: the switch itself says on or off (2026-10-22), so it
-  /// never reads as "Metronome Click on, off".
-  static const String metronomeSwitchLabel = 'Metronome Click';
-  static const String on = 'On';
-  static const String off = 'Off';
 
   /// Shown on both sheets when the click track couldn't be made or played.
   static const String metronomeUnavailable =

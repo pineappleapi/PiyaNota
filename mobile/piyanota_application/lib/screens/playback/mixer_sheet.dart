@@ -5,12 +5,12 @@ import '../../models/voice_part.dart';
 import '../../state/playback_providers.dart';
 import '../../theme/app_theme.dart';
 import '../retake/rephotograph.dart';
-import 'playback_alerts.dart';
 import 'playback_messages.dart';
 import 'sheet_parts.dart';
 
-/// Voice Mixer (PIYA-209): per row a Solo checkbox, the voice (or the
-/// Metronome Click), a volume slider and a Mute pill. Reads and writes the
+/// Voice Mixer (PIYA-209): per row a checkbox, the voice (or the Metronome
+/// Click), a volume slider and a Mute pill. A voice's checkbox is the same
+/// state as its Playback chip; the Metronome row's is the Speed sheet's. Reads and writes the
 /// Playback controller, so its settings last for the Playback session and
 /// reset when the score is reopened (AC6).
 class VoiceMixerSheet extends ConsumerWidget {
@@ -40,9 +40,8 @@ class VoiceMixerSheet extends ConsumerWidget {
     final state = ref.watch(provider);
     final controller = ref.read(provider.notifier);
     final clickUsable = state.clickStatus != ClickStatus.unavailable;
-    // Off: the row's own on/off switch still works (it is the Speed
-    // sheet's toggle, user decision 2026-10-21); level, Mute and Solo are
-    // locked until it is on.
+    // Off: the row's checkbox still works (it is the Speed sheet's toggle,
+    // user decision 2026-10-21); level and Mute are locked until it is on.
     final clickOff = clickUsable && !state.metronomeOn;
     final unavailableNote = state.clickNeedsTempo
         ? PlaybackMessages.metronomeNeedsTempo
@@ -66,10 +65,10 @@ class VoiceMixerSheet extends ConsumerWidget {
             label: SheetPill(label: voice.label, color: pillColors[voice]!),
             enabled: usable,
             disabledNote: PlaybackMessages.rowUnavailable(voice.label),
-            soloed: state.soloed.contains(voice),
+            checked: state.selected.contains(voice),
             muted: state.muted.contains(voice),
             volume: state.volumes[voice] ?? PlaybackController.fullVolume,
-            onSolo: (on) => _solo(context, ref, scoreId, voice, soloed: on),
+            onChecked: (_) => controller.toggleVoice(voice),
             onMute: (on) => controller.setVoiceMuted(voice, muted: on),
             onVolume: (level) => controller.setVoiceVolume(voice, level),
             onDisabledTap: unreadable
@@ -83,32 +82,20 @@ class VoiceMixerSheet extends ConsumerWidget {
       _MixerRow(
         key: const ValueKey('mixer-row-metronome'),
         name: PlaybackMessages.metronomeClick,
-        label: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              PlaybackMessages.metronomeClick,
-              // Same style on or off (PIYA-209-V2.1): only the controls dim.
-              style: Theme.of(context).textTheme.bodyMedium
-                  ?.copyWith(color: AppTheme.sheetText),
-            ),
-            _MetronomeSwitch(
-              on: state.metronomeOn,
-              onChanged: clickUsable
-                  ? (on) => controller.setMetronomeOn(on: on)
-                  : null,
-            ),
-          ],
+        label: Text(
+          PlaybackMessages.metronomeClick,
+          // Same style on or off (PIYA-209-V2.1): only the controls dim.
+          style: Theme.of(context).textTheme.bodyMedium
+              ?.copyWith(color: AppTheme.sheetText),
         ),
         enabled: clickUsable,
         inactive: clickOff,
         locked: clickOff,
         disabledNote: unavailableNote,
-        soloed: state.clickSoloed,
+        checked: state.metronomeOn,
         muted: state.clickMuted,
         volume: state.clickVolume,
-        onSolo: (on) => controller.setClickSoloed(soloed: on),
+        onChecked: (on) => controller.setMetronomeOn(on: on),
         onMute: (on) => controller.setClickMuted(muted: on),
         onVolume: controller.setClickVolume,
       ),
@@ -132,32 +119,6 @@ class VoiceMixerSheet extends ConsumerWidget {
   }
 }
 
-/// Solo on a voice whose Playback chip is off would be silent, so it asks
-/// first (PIYA-209, user decision 2026-10-09: a system alert, not just a
-/// hint). "Turn `<Voice>` on" turns the chip on and solos; Cancel leaves
-/// both as they were.
-Future<void> _solo(
-  BuildContext context,
-  WidgetRef ref,
-  int scoreId,
-  VoicePart voice, {
-  required bool soloed,
-}) async {
-  final provider = playbackControllerProvider(scoreId);
-  final controller = ref.read(provider.notifier);
-  if (!soloed || ref.read(provider).selected.contains(voice)) {
-    controller.setVoiceSoloed(voice, soloed: soloed);
-    return;
-  }
-  final turnOn = await showSoloChipOffAlert(context, voice: voice);
-  if (!turnOn || !context.mounted) return;
-  // The sheet may have closed, or the voice failed, while it was open.
-  final state = ref.read(provider);
-  if (!state.available.contains(voice)) return;
-  if (!state.selected.contains(voice)) controller.toggleVoice(voice);
-  controller.setVoiceSoloed(voice, soloed: true);
-}
-
 extension on VoiceMixerSheet {
   /// "Re-photograph" closes the Mixer and leaves Playback for Capture
   /// (PIYA-209); Cancel leaves everything as it was.
@@ -176,10 +137,10 @@ class _MixerRow extends StatelessWidget {
     required this.label,
     required this.enabled,
     required this.disabledNote,
-    required this.soloed,
+    required this.checked,
     required this.muted,
     required this.volume,
-    required this.onSolo,
+    required this.onChecked,
     required this.onMute,
     required this.onVolume,
     this.inactive = false,
@@ -195,10 +156,10 @@ class _MixerRow extends StatelessWidget {
   final Widget label;
   final bool enabled;
   final String disabledNote;
-  final bool soloed;
+  final bool checked;
   final bool muted;
   final double volume;
-  final ValueChanged<bool> onSolo;
+  final ValueChanged<bool> onChecked;
   final ValueChanged<bool> onMute;
   final ValueChanged<double> onVolume;
 
@@ -206,8 +167,8 @@ class _MixerRow extends StatelessWidget {
   /// off): the slider is drawn faded. Icon and text stay fully opaque.
   final bool inactive;
 
-  /// Solo, slider and Mute are disabled but the row (its label, which may
-  /// hold a control of its own) is not faded or blocked.
+  /// Slider and Mute are disabled but the row (and its checkbox) is not
+  /// faded or blocked.
   final bool locked;
 
   /// Fixed so every row's slider starts at the same x, as in the mockup.
@@ -216,10 +177,10 @@ class _MixerRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final usable = enabled && !locked;
-    final solo = SheetCheckbox(
-      value: soloed,
-      label: PlaybackMessages.soloLabel(name),
-      onChanged: usable ? onSolo : null,
+    final check = SheetCheckbox(
+      value: checked,
+      label: PlaybackMessages.playLabel(name),
+      onChanged: enabled ? onChecked : null,
     );
     final slider = Opacity(
       key: const ValueKey('mixer-slider-fade'),
@@ -262,7 +223,7 @@ class _MixerRow extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  solo,
+                  check,
                   Expanded(
                     child: Align(alignment: Alignment.centerLeft, child: label),
                   ),
@@ -278,7 +239,7 @@ class _MixerRow extends StatelessWidget {
         }
         return Row(
           children: [
-            solo,
+            check,
             SizedBox(
               width: labelWidth,
               child: Align(alignment: Alignment.centerLeft, child: label),
@@ -303,52 +264,6 @@ class _MixerRow extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       onTap: onDisabledTap,
       child: faded,
-    );
-  }
-}
-
-/// The Metronome Click row's on/off: the same state as the Speed sheet's
-/// toggle (`PlaybackState.metronomeOn`, user decision 2026-10-21). A
-/// switch with an "On"/"Off" word, not a box, so it never reads as the
-/// row's Solo checkbox, which sits at the start of the row.
-class _MetronomeSwitch extends StatelessWidget {
-  const _MetronomeSwitch({required this.on, required this.onChanged});
-
-  final bool on;
-
-  /// Null disables it (the click can't play).
-  final ValueChanged<bool>? onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return MergeSemantics(
-      child: Semantics(
-        label: PlaybackMessages.metronomeSwitchLabel,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Switch(
-              key: const ValueKey('mixer-metronome-switch'),
-              value: on,
-              onChanged: onChanged,
-              activeThumbColor: Colors.white,
-              activeTrackColor: AppTheme.sheetCheckOn,
-              inactiveThumbColor: Colors.white,
-              inactiveTrackColor: AppTheme.sheetCheckBorder,
-              trackOutlineColor: const WidgetStatePropertyAll(
-                Colors.transparent,
-              ),
-            ),
-            ExcludeSemantics(
-              child: Text(
-                on ? PlaybackMessages.on : PlaybackMessages.off,
-                style: Theme.of(context).textTheme.bodySmall
-                    ?.copyWith(color: AppTheme.sheetSubtle),
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

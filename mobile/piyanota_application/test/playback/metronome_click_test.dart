@@ -8,6 +8,7 @@ import 'package:piyanota_application/models/measure_table.dart';
 import 'package:piyanota_application/models/score_result.dart';
 import 'package:piyanota_application/models/voice_part.dart';
 import 'package:piyanota_application/screens/playback/playback_messages.dart';
+import 'package:piyanota_application/screens/playback/sheet_parts.dart';
 import 'package:piyanota_application/services/metronome_click.dart';
 import 'package:piyanota_application/state/playback_providers.dart';
 
@@ -668,7 +669,10 @@ void main() {
     PlaybackController controller(WidgetTester tester) =>
         appContainer(tester)
             .read(playbackControllerProvider(kScoreId).notifier);
-    final mixerSwitch = find.byKey(const ValueKey('mixer-metronome-switch'));
+    final mixerBox = find.descendant(
+      of: find.byKey(const ValueKey('mixer-row-metronome')),
+      matching: find.byType(SheetCheckbox),
+    );
     final speedBox = find.byKey(const ValueKey('metronome-toggle'));
 
     /// Plays, then snapshots the transport calls so a later pause, seek or
@@ -706,7 +710,7 @@ void main() {
 
     // AC1, both entry points.
     for (final (name, label, finder) in [
-      ('Mixer switch', PlaybackMessages.voiceMixer, mixerSwitch),
+      ('Mixer checkbox', PlaybackMessages.voiceMixer, mixerBox),
       ('Speed checkbox', PlaybackMessages.speed, speedBox),
     ]) {
       testWidgets('$name: heard at the next frame, transport untouched', (
@@ -766,20 +770,6 @@ void main() {
       expect(harness.engine.clickVolume, 0);
       expect(c.state.clickVolume, 0);
       expect(c.state.clickMuted, isFalse);
-    });
-
-    testWidgets('AC2: another row soloed keeps the click silent', (
-      tester,
-    ) async {
-      final harness = ready();
-      await pumpPlayback(tester, harness);
-      final c = controller(tester)
-        ..setVoiceSoloed(VoicePart.soprano, soloed: true);
-      await startPlaying(tester, harness);
-      c.setMetronomeOn(on: true);
-      expect(harness.engine.clickVolume, 0);
-      expect(c.state.clickMuted, isFalse);
-      expect(c.state.clickVolume, 1);
     });
 
     testWidgets('track length unknown at load: the click waits for it, '

@@ -1351,6 +1351,21 @@ void main() {
   });
 
   group('layout', () {
+    testWidgets('voice chips do not overflow at 320 dp and 2x text', (
+      tester,
+    ) async {
+      await pumpPlayback(
+        tester,
+        ready(),
+        size: const Size(320, 800),
+        textScale: 2,
+      );
+      expect(tester.takeException(), isNull);
+      for (final v in VoicePart.values) {
+        expect(chip(v), findsOneWidget);
+      }
+    });
+
     for (final (name, size, scale) in [
       ('360 dp', const Size(360, 640), 1.0),
       ('360 dp at 1.3x text', const Size(360, 740), 1.3),
@@ -1460,6 +1475,30 @@ void main() {
         expect(tester.getSize(chip(v)).height, greaterThanOrEqualTo(48));
       }
       expect(tester.takeException(), isNull);
+    }, skip: fontsSkip != null);
+
+    testWidgets('F7: one line at 320 dp; chips are longer on a wider row', (
+      tester,
+    ) async {
+      await pumpPlayback(tester, ready(), size: const Size(320, 568));
+      final narrow = [
+        for (final v in VoicePart.values) tester.getRect(chip(v)),
+      ];
+      for (final r in narrow) {
+        expect(r.top, narrow.first.top, reason: 'one line');
+      }
+      expect(narrow.last.right, lessThanOrEqualTo(320 - 16));
+      expect(tester.takeException(), isNull);
+
+      tester.view.physicalSize = const Size(412, 917);
+      await tester.pump();
+      for (final v in VoicePart.values) {
+        expect(
+          tester.getSize(chip(v)).width,
+          greaterThan(narrow[v.index].width),
+          reason: v.name,
+        );
+      }
     }, skip: fontsSkip != null);
 
     testWidgets('AC1: large text wraps instead of overflowing', (tester) async {

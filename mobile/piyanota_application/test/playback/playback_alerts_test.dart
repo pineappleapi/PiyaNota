@@ -12,7 +12,6 @@ import 'package:piyanota_application/models/score_result.dart';
 import 'package:piyanota_application/models/voice_part.dart';
 import 'package:piyanota_application/screens/playback/playback_alerts.dart';
 import 'package:piyanota_application/screens/playback/playback_messages.dart';
-import 'package:piyanota_application/screens/playback/sheet_parts.dart';
 import 'package:piyanota_application/state/playback_providers.dart';
 
 import 'playback_fakes.dart';
@@ -63,7 +62,6 @@ void main() {
 
   final failedAlert = find.byKey(const ValueKey('failed-voices-alert'));
   final mutedAlert = find.byKey(const ValueKey('muted-measures-alert'));
-  final soloAlert = find.byKey(const ValueKey('solo-chip-off-alert'));
 
   // What debugPrint printed during a [testWidgetsPrinting] test. Restored
   // inside the test body: the binding checks debugPrint before tear-down.
@@ -334,59 +332,6 @@ void main() {
         ),
         'Alto: page 2, system 3',
       );
-    });
-  });
-
-  group('solo on a voice whose chip is off (PIYA-209)', () {
-    Future<void> soloAlto(WidgetTester tester) async {
-      await tester.tap(find.bySemanticsLabel(PlaybackMessages.voiceMixer));
-      await settle(tester);
-      await tester.tap(
-        find.descendant(
-          of: find.byKey(const ValueKey('mixer-row-alto')),
-          matching: find.byType(SheetCheckbox),
-        ),
-      );
-      await settle(tester);
-    }
-
-    testWidgets('Cancel leaves the chip off and the voice unsoloed', (
-      tester,
-    ) async {
-      await pumpPlayback(tester, harness(), defaultVoice: VoicePart.soprano);
-      expect(controller(tester).state.selected, {VoicePart.soprano});
-      await soloAlto(tester);
-      expect(soloAlert, findsOneWidget);
-      expect(
-        find.text(PlaybackMessages.soloChipOffTitle(VoicePart.alto)),
-        findsOneWidget,
-      );
-      await tester.tap(find.text(PlaybackMessages.cancel));
-      await settle(tester);
-      expect(soloAlert, findsNothing);
-      expect(controller(tester).state.soloed, isEmpty);
-      expect(controller(tester).state.selected, {VoicePart.soprano});
-    });
-
-    testWidgets('Turn on: the chip comes on and the voice is soloed', (
-      tester,
-    ) async {
-      await pumpPlayback(tester, harness(), defaultVoice: VoicePart.soprano);
-      await soloAlto(tester);
-      await tester.tap(find.text(PlaybackMessages.turnOn(VoicePart.alto)));
-      await settle(tester);
-      final state = controller(tester).state;
-      expect(state.selected, containsAll([VoicePart.soprano, VoicePart.alto]));
-      expect(state.soloed, {VoicePart.alto});
-    });
-
-    testWidgets('a voice whose chip is on solos without asking', (
-      tester,
-    ) async {
-      await pumpPlayback(tester, harness());
-      await soloAlto(tester);
-      expect(soloAlert, findsNothing);
-      expect(controller(tester).state.soloed, {VoicePart.alto});
     });
   });
 

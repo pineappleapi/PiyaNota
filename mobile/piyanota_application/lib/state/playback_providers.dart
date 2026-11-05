@@ -98,10 +98,8 @@ class PlaybackState {
     this.selected = const {},
     this.volumes = const {},
     this.muted = const {},
-    this.soloed = const {},
     this.clickVolume = PlaybackController.fullVolume,
     this.clickMuted = false,
-    this.clickSoloed = false,
     this.metronomeOn = false,
     this.clickStatus = ClickStatus.preparing,
     this.bpm,
@@ -129,15 +127,11 @@ class PlaybackState {
   /// Mixer Mute per voice; independent of the slider (AC2).
   final Set<VoicePart> muted;
 
-  /// Mixer Solo per voice. While any row (voice or click) is soloed, only
-  /// soloed rows are heard; Mute still wins (design decision 2026-10-09).
-  final Set<VoicePart> soloed;
-
-  /// The Mixer's Metronome Click row: level, Mute and Solo. Whether the
-  /// click plays at all is [metronomeOn], the Speed modal's toggle.
+  /// The Mixer's Metronome Click row: level and Mute. Whether the click
+  /// plays at all is [metronomeOn], the Speed modal's toggle, which the
+  /// row's checkbox also drives.
   final double clickVolume;
   final bool clickMuted;
-  final bool clickSoloed;
 
   /// The Speed modal's Metronome Click checkbox (PIYA-210 AC3); off by
   /// default.
@@ -184,28 +178,22 @@ class PlaybackState {
   /// The click can sound: the Speed toggle is on and the track is loaded.
   bool get clickLive => metronomeOn && clickStatus == ClickStatus.ready;
 
-  /// A soloed metronome row counts only while the click can sound, so
-  /// soloing it with the Speed toggle off never silences the voices
-  /// (coordinator decision 2026-10-09).
-  bool get anySoloed => soloed.isNotEmpty || (clickSoloed && clickLive);
-
   /// What [voice] is played at: silent if it can't play, its chip is off
-  /// (PIYA-208 chips stack with the mixer), it is muted, or another row is
-  /// soloed; else its slider level.
+  /// (the Mixer checkbox is the same state), or it is muted; else its slider
+  /// level.
   double voiceGain(VoicePart voice) {
     if (!available.contains(voice) ||
         !selected.contains(voice) ||
-        muted.contains(voice) ||
-        (anySoloed && !soloed.contains(voice))) {
+        muted.contains(voice)) {
       return 0;
     }
     return volumes[voice] ?? PlaybackController.fullVolume;
   }
 
-  /// The click: only while it is live (Speed toggle on, track loaded), not
-  /// muted, and not left out by a solo; then the Metronome row's level.
+  /// The click: only while it is live (Speed toggle on, track loaded) and
+  /// not muted; then the Metronome row's level.
   double get clickGain {
-    if (!clickLive || clickMuted || (anySoloed && !clickSoloed)) {
+    if (!clickLive || clickMuted) {
       return 0;
     }
     return clickVolume;
@@ -226,10 +214,8 @@ class PlaybackState {
     Set<VoicePart>? selected,
     Map<VoicePart, double>? volumes,
     Set<VoicePart>? muted,
-    Set<VoicePart>? soloed,
     double? clickVolume,
     bool? clickMuted,
-    bool? clickSoloed,
     bool? metronomeOn,
     ClickStatus? clickStatus,
     int? bpm,
@@ -246,10 +232,8 @@ class PlaybackState {
     selected: selected ?? this.selected,
     volumes: volumes ?? this.volumes,
     muted: muted ?? this.muted,
-    soloed: soloed ?? this.soloed,
     clickVolume: clickVolume ?? this.clickVolume,
     clickMuted: clickMuted ?? this.clickMuted,
-    clickSoloed: clickSoloed ?? this.clickSoloed,
     metronomeOn: metronomeOn ?? this.metronomeOn,
     clickStatus: clickStatus ?? this.clickStatus,
     bpm: bpm ?? this.bpm,
@@ -390,8 +374,8 @@ class PlaybackController extends Notifier<PlaybackState> {
     });
     _failureSub = engine.failures.listen(_onFailure);
     _clickFailureSub = engine.clickFailures.listen(_onClickFailure);
-    // PIYA-209-V2.2 replaces 209 AC5: every slider at full volume, nothing
-    // soloed, metronome off, speed at the score's tempo; the voices the
+    // PIYA-209-V2.2 replaces 209 AC5: every slider at full volume,
+    // metronome off, speed at the score's tempo; the voices the
     // default selection left out start muted so the Mixer shows what is
     // heard. A fresh controller (autoDispose) means a reopened score starts
     // here again (209 AC6).
@@ -432,8 +416,8 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// [replace]: a re-plan after a speed change (see [commitBpm]); only
   /// started once a click is attached and ready. The old click keeps
   /// playing until the new file is written, then is swapped out; the
-  /// status stays ready throughout, so a soloed click doesn't hand the
-  /// voices back for the moment of the swap. A re-plan that fails (not
+  /// status stays ready throughout, so the click does not drop out for the
+  /// moment of the swap. A re-plan that fails (not
   /// written, or not attached) keeps the old click: it is still in time,
   /// only its subdivision is out of date, and the next release of the
   /// slider tries again. The click is marked unavailable only when there
@@ -577,11 +561,7 @@ class PlaybackController extends Notifier<PlaybackState> {
   void _clickFailed() {
     if (!ref.mounted || state.phase != PlaybackPhase.ready) return;
     if (state.clickStatus == ClickStatus.unavailable) return;
-    state = state.copyWith(
-      clickStatus: ClickStatus.unavailable,
-      // A solo on a click that can't play would silence every voice.
-      clickSoloed: false,
-    );
+    state = state.copyWith(clickStatus: ClickStatus.unavailable);
     _applyGains();
   }
 
@@ -673,8 +653,6 @@ class PlaybackController extends Notifier<PlaybackState> {
       muted: muted,
       failedVoices: {...state.failedVoices, failure.voice},
       selected: selected,
-      // A solo on a voice that can't play would silence the rest.
-      soloed: state.soloed.difference({failure.voice}),
       // The new master may be a shorter track.
       duration: _engine?.duration,
     );
@@ -853,16 +831,6 @@ class PlaybackController extends Notifier<PlaybackState> {
     _applyGains();
   }
 
-  void setVoiceSoloed(VoicePart voice, {required bool soloed}) {
-    if (!state.available.contains(voice)) return;
-    state = state.copyWith(
-      soloed: soloed
-          ? {...state.soloed, voice}
-          : state.soloed.difference({voice}),
-    );
-    _applyGains();
-  }
-
   /// The click row follows the voices' rule: level and Mute independent.
   void setClickVolume(double volume) {
     if (state.clickStatus == ClickStatus.unavailable) return;
@@ -874,12 +842,6 @@ class PlaybackController extends Notifier<PlaybackState> {
   void setClickMuted({required bool muted}) {
     if (state.clickStatus == ClickStatus.unavailable) return;
     state = state.copyWith(clickMuted: muted);
-    _applyGains();
-  }
-
-  void setClickSoloed({required bool soloed}) {
-    if (state.clickStatus == ClickStatus.unavailable) return;
-    state = state.copyWith(clickSoloed: soloed);
     _applyGains();
   }
 
