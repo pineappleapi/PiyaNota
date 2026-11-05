@@ -22,8 +22,9 @@ class NotAPdfException implements Exception {
 /// Gallery and document pickers for Capture.
 abstract interface class PagePicker {
   /// Photos chosen in the gallery, in the order the picker returns them.
-  /// Empty when the user backs out.
-  Future<List<String>> pickGalleryImages();
+  /// Empty when the user backs out. [single] opens the one-photo picker
+  /// (a retake replaces exactly one page).
+  Future<List<String>> pickGalleryImages({bool single = false});
 
   /// Null when the user backs out. Throws [NotAPdfException].
   Future<PickedPdf?> pickPdf();
@@ -66,7 +67,19 @@ class PluginPagePicker implements PagePicker {
   final ImagePicker _imagePicker;
 
   @override
-  Future<List<String>> pickGalleryImages() async {
+  Future<List<String>> pickGalleryImages({bool single = false}) async {
+    if (single) {
+      final file = await withoutSplash(
+        () => _imagePicker.pickImage(
+          source: ImageSource.gallery,
+          maxWidth: _pickMaxSide,
+          maxHeight: _pickMaxSide,
+          imageQuality: _pickQuality,
+          requestFullMetadata: false,
+        ),
+      );
+      return [if (file != null) file.path];
+    }
     // Full metadata off: on Android 13+ this keeps the permission-less
     // system photo picker (AC3); orientation is still read from the file.
     final files = await withoutSplash(

@@ -56,6 +56,7 @@ dependencies:
   # Settings shows the installed build's version (PIYA-212 AC2), read from
   # the APK so it can never drift from pubspec's `version:`.
   package_info_plus: ^10.2.2
+  pdfx: ^2.11.0
 
 dev_dependencies:
   flutter_test:

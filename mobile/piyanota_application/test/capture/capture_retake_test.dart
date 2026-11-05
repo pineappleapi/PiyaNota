@@ -43,31 +43,43 @@ void main() {
     expect(find.text(CaptureMessages.sendRetake(2)), findsOneWidget);
   });
 
-  /// PIYA-206-V2.4 AC1: only the one page can be captured or picked.
-  testWidgets('no add tile; Gallery and PDF are off before and after', (
+  /// F12: a retake may use the gallery, but still adds exactly one photo.
+  testWidgets('Gallery gives one photo through prepare; PDF stays off', (
     tester,
   ) async {
     final h = CaptureHarness();
     h.picker.gallery = ['g0.jpg', 'g1.jpg'];
     await pumpCapture(tester, h, retake: _retake);
 
-    for (var round = 0; round < 2; round++) {
-      expect(find.bySemanticsLabel(CaptureMessages.addPages), findsNothing);
-      for (final label in [CaptureMessages.gallery, CaptureMessages.pdf]) {
-        if (find.text(label).evaluate().isNotEmpty) {
-          await tester.tap(find.text(label), warnIfMissed: false);
-          await tester.pumpAndSettle();
-        }
-      }
-      expect(
-        h.processor.prepared,
-        hasLength(round),
-        reason: 'only the camera shot was prepared; Gallery added nothing',
-      );
-      expect(find.text(CaptureMessages.replacePdfTitle), findsNothing);
-      if (round == 0) await _shoot(tester);
-    }
-    expect(h.processor.prepared, ['raw-0.jpg']);
+    expect(find.bySemanticsLabel(CaptureMessages.addPages), findsNothing);
+    await tester.tap(find.text(CaptureMessages.pdf), warnIfMissed: false);
+    await tester.pumpAndSettle();
+    expect(find.text(CaptureMessages.replacePdfTitle), findsNothing);
+    expect(h.picker.pdfPicks, 0);
+
+    await tester.tap(find.text(CaptureMessages.gallery));
+    await tester.pumpAndSettle();
+    expect(h.picker.singlePicks, 1);
+    expect(h.processor.prepared, ['g0.jpg']);
+
+    // Room is used up: a second pick or shot adds nothing.
+    await tester.tap(find.text(CaptureMessages.gallery));
+    await tester.pumpAndSettle();
+    await _shoot(tester);
+    expect(h.processor.prepared, ['g0.jpg']);
+    expect(find.text(CaptureMessages.sendRetake(2)), findsOneWidget);
+  });
+
+  testWidgets('Gallery retake fits 320 dp at 2.0x text', (tester) async {
+    final h = CaptureHarness();
+    await pumpCapture(
+      tester,
+      h,
+      retake: _retake,
+      size: const Size(320, 568),
+      textScale: 2,
+    );
+    expect(tester.takeException(), isNull);
   });
 
   /// PIYA-206-V2.4 AC2: one photo replaces the page; the shutter is then off.

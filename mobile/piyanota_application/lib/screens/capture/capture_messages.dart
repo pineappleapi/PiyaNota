@@ -125,6 +125,7 @@ class CaptureMessages {
       'try again.';
   static const String pdfCorrupt =
       'This PDF couldn\'t be opened. It may be damaged. Try another copy.';
+  static const String pageNotShown = "This page couldn't be shown.";
   static const String pdfEmpty = 'This PDF has no pages.';
   static String unreadablePhotos(int n) => n == 1
       ? 'One photo couldn\'t be read, so it wasn\'t added. Use a JPEG or '

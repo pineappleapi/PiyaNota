@@ -300,7 +300,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
       await _explainGalleryDenied();
       return;
     }
-    final picked = await ref.read(pagePickerProvider).pickGalleryImages();
+    final picked = await ref
+        .read(pagePickerProvider)
+        .pickGalleryImages(single: widget.retake != null);
     if (!mounted || picked.isEmpty) return;
     setState(() => _busy++);
     final prepared = <String>[];
@@ -918,12 +920,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                         ),
                         const SizedBox(height: 12),
                         _InputRow(
-                          // V2.4: a retake is one camera shot. PagePicker only
-                          // offers multi-select, so Gallery is off rather
-                          // than able to bring in several pages.
-                          onGallery: _canAct && widget.retake == null
-                              ? _pickGallery
-                              : null,
+                          // A retake picks one photo (single picker), and
+                          // _pickGallery caps at the one page of room.
+                          onGallery: _canAct ? _pickGallery : null,
                           onShutter:
                               _camera != null &&
                                   _canAct &&

@@ -662,6 +662,51 @@ void main() {
       expect(find.text(CaptureMessages.pdfRemoved), findsOneWidget);
     });
 
+    testWidgets('a PDF opens a lazy page preview and closes it', (
+      tester,
+    ) async {
+      final h = CaptureHarness(device: FakeDeviceChannel(pages: 12));
+      await pumpCapture(tester, h);
+      h.picker.pdf = const PickedPdf(path: 'x.pdf', name: 'Misa.pdf');
+      await _pickPdf(tester);
+      await tester.tap(_label(CaptureMessages.pdfSemantics('Misa.pdf', 12)));
+      await tester.pumpAndSettle();
+
+      final doc = h.pdfRenderer.document;
+      expect(doc.rendered, isNotEmpty);
+      expect(doc.rendered.length, lessThan(30), reason: 'only visible pages');
+      for (var i = 0; i < 4; i++) {
+        await tester.drag(find.byType(ListView), const Offset(0, -20000));
+        await tester.pumpAndSettle();
+      }
+      expect(doc.rendered, contains(29));
+      expect(tester.takeException(), isNull);
+
+      await _closePreview(tester);
+      expect(doc.closed, isTrue);
+    });
+
+    testWidgets('a corrupt PDF preview says so in plain words', (tester) async {
+      final h = CaptureHarness(device: FakeDeviceChannel(pages: 3));
+      h.pdfRenderer.problem = PdfProblem.corrupt;
+      await pumpCapture(tester, h);
+      h.picker.pdf = const PickedPdf(path: 'x.pdf', name: 'Misa.pdf');
+      await _pickPdf(tester);
+      await tester.tap(_label(CaptureMessages.pdfSemantics('Misa.pdf', 3)));
+      await tester.pumpAndSettle();
+      expect(find.text(CaptureMessages.pdfCorrupt), findsOneWidget);
+    });
+
+    testWidgets('PDF preview fits 320 dp at 2.0x text', (tester) async {
+      final h = CaptureHarness(device: FakeDeviceChannel(pages: 3));
+      await pumpCapture(tester, h, size: const Size(320, 568), textScale: 2);
+      h.picker.pdf = const PickedPdf(path: 'x.pdf', name: 'Misa.pdf');
+      await _pickPdf(tester);
+      await tester.tap(_label(CaptureMessages.pdfSemantics('Misa.pdf', 3)));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('edit replaces the page file after Done', (tester) async {
       final h = CaptureHarness();
       await pumpCapture(tester, h);
