@@ -14,14 +14,17 @@ class LibraryHeader extends StatelessWidget {
   const LibraryHeader({
     super.key,
     required this.subtitle,
-    required this.searchController,
-    required this.onSearchChanged,
+    this.title = LibraryMessages.title,
+    this.searchController,
+    this.onSearchChanged,
     required this.horizontalPadding,
   });
 
+  final String title;
   final String subtitle;
-  final TextEditingController searchController;
-  final ValueChanged<String> onSearchChanged;
+  // Settings passes neither: no search field, same header otherwise.
+  final TextEditingController? searchController;
+  final ValueChanged<String>? onSearchChanged;
   final double horizontalPadding;
 
   static const String _logoAsset = 'assets/branding/Piyanota_App_Logo.png';
@@ -146,7 +149,7 @@ class LibraryHeader extends StatelessWidget {
                               child: Semantics(
                                 header: true,
                                 child: Text(
-                                  LibraryMessages.title,
+                                  title,
                                   style: textTheme.headlineLarge?.copyWith(
                                     fontSize: titleFontSize,
                                     fontWeight: FontWeight.w700,
@@ -167,11 +170,14 @@ class LibraryHeader extends StatelessWidget {
                           ],
                         ),
                       ),
-                      const SizedBox(height: _subtitleToSearchGap),
-                      LibrarySearchField(
-                        controller: searchController,
-                        onChanged: onSearchChanged,
-                      ),
+                      if (searchController != null &&
+                          onSearchChanged != null) ...[
+                        const SizedBox(height: _subtitleToSearchGap),
+                        LibrarySearchField(
+                          controller: searchController!,
+                          onChanged: onSearchChanged!,
+                        ),
+                      ],
                     ],
                   ),
                 ],

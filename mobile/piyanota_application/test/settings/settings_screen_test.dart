@@ -13,6 +13,8 @@ import 'package:piyanota_application/screens/auth/auth_messages.dart';
 import 'package:piyanota_application/screens/playback/playback_messages.dart';
 import 'package:piyanota_application/screens/settings/settings_messages.dart';
 import 'package:piyanota_application/screens/settings/settings_screen.dart';
+import 'package:piyanota_application/screens/library/widgets/library_header.dart';
+import 'package:piyanota_application/screens/scan_status/scan_bell.dart';
 import 'package:piyanota_application/services/auth_api.dart';
 import 'package:piyanota_application/services/onboarding_prefs_service.dart';
 import 'package:piyanota_application/services/session_storage.dart';
@@ -996,6 +998,30 @@ void main() {
         'Too many attempts. Try again later.',
       );
     });
+  });
+
+  group('F5 header matches Library', () {
+    for (final size in const [Size(320, 568), Size(412, 915)]) {
+      testWidgets(
+        'backdrop logo at left edge, bell top-right at ${size.width.toInt()} dp',
+        (tester) async {
+          await _Harness(session: _liveSession())
+              .pump(tester, logicalSize: size, textScale: 1.0);
+          final logo = find.byKey(
+            const ValueKey('library-header-backdrop-logo'),
+          );
+          expect(logo, findsOneWidget);
+          expect(tester.getTopLeft(logo).dx, 0);
+          expect(find.byType(ScanBell), findsOneWidget);
+          expect(
+            tester.getTopRight(find.byType(ScanBell)).dx,
+            greaterThan(size.width - 40),
+          );
+          expect(find.byType(LibrarySearchField), findsNothing);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
   });
 
   group('NFR-10 layout', () {

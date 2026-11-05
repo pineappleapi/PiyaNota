@@ -254,7 +254,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _SettingsHeader(
+                  LibraryHeader(
+                    title: SettingsMessages.title,
+                    subtitle: SettingsMessages.subtitle,
                     horizontalPadding: margin - _headerInsetFromCards,
                   ),
                   Expanded(
@@ -543,90 +545,6 @@ class _PreferenceRow extends StatelessWidget {
             Padding(padding: const EdgeInsets.only(right: 12), child: control),
           ],
         ],
-      ),
-    );
-  }
-}
-
-/// The Library header's gradient, mark and title metrics, without the
-/// search field or bell, which Settings has no use for.
-class _SettingsHeader extends StatelessWidget {
-  const _SettingsHeader({required this.horizontalPadding});
-
-  final double horizontalPadding;
-
-  @override
-  Widget build(BuildContext context) {
-    final textTheme = Theme.of(context).textTheme;
-    final textScale =
-        MediaQuery.textScalerOf(context).scale(LibraryHeader.subtitleFontSize) /
-        LibraryHeader.subtitleFontSize;
-    final showLogo = textScale <= LibraryHeader.logoMaxTextScale;
-
-    return DecoratedBox(
-      decoration: const BoxDecoration(gradient: AppTheme.libraryHeaderGradient),
-      child: SafeArea(
-        bottom: false,
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(
-            horizontalPadding,
-            LibraryHeader.topGap,
-            horizontalPadding,
-            LibraryHeader.bottomGap,
-          ),
-          child: Stack(
-            children: [
-              if (showLogo)
-                const Positioned(top: 0, right: 0, child: LibraryHeaderLogo()),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  SizedBox(
-                    height: showLogo
-                        ? LibraryHeader.titleTop - LibraryHeader.topGap
-                        : 0,
-                  ),
-                  MediaQuery.withClampedTextScaling(
-                    maxScaleFactor: LibraryHeader.headingMaxTextScale,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Padding(
-                          padding: EdgeInsets.only(
-                            right: showLogo
-                                ? LibraryHeader.logoMarkWidth +
-                                      LibraryHeader.titleToLogoGap
-                                : 0,
-                          ),
-                          child: Semantics(
-                            header: true,
-                            child: Text(
-                              SettingsMessages.title,
-                              style: textTheme.headlineLarge?.copyWith(
-                                fontSize: LibraryHeader.titleFontSize,
-                                fontWeight: FontWeight.w700,
-                                height: LibraryHeader.titleLineHeight,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                        ),
-                        Text(
-                          SettingsMessages.subtitle,
-                          style: textTheme.bodyLarge?.copyWith(
-                            fontSize: LibraryHeader.subtitleFontSize,
-                            height: LibraryHeader.subtitleLineHeight,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
