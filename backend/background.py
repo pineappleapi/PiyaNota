@@ -25,6 +25,8 @@ THROTTLE_HIT_MAX_AGE_S = 3600
 STALE_ROW_GRACE_S = 86400
 BACKOFF_IDLE_S = 86400
 FAILED_JOB_PAGE_RETENTION_S = 7 * 24 * 3600
+SOFT_DELETE_RETENTION_S = 7 * 24 * 3600
+SOFT_DELETE_PURGE_BATCH = 50
 Conn = psycopg.Connection[dict[str, Any]]
 
 
@@ -200,6 +202,63 @@ def prune_failed_job_pages(conn: Conn, retention_s: int = FAILED_JOB_PAGE_RETENT
     return len(keys)
 
 
+def purge_deleted_scores(
+    conn: Conn, retention_s: int = SOFT_DELETE_RETENTION_S, limit: int = SOFT_DELETE_PURGE_BATCH
+) -> int:
+    """Physically remove scores soft-deleted longer than the retention window.
+
+    Per score: queue the blobs of its audio, MIDI, timing, thumbnail and the pages of every job
+    that points at it or retakes it, then delete those jobs, then the score. Jobs go first because
+    ``jobs.score_id`` is ON DELETE SET NULL, so deleting only the score would orphan page blobs.
+    Rows are locked SKIP LOCKED and removed in the same transaction, so a rerun finds nothing.
+    At most ``limit`` scores per call keep the transaction short; each score runs in a savepoint so
+    one failure is logged and skipped without blocking the rest.
+
+    Returns:
+        Number of scores removed.
+    """
+    scores = conn.execute(
+        "SELECT id, thumbnail_key FROM scores WHERE deleted_at < now() - make_interval(secs => %s) "
+        "ORDER BY id LIMIT %s FOR UPDATE SKIP LOCKED",
+        (retention_s, limit),
+    ).fetchall()
+    purged = 0
+    for score in scores:
+        try:
+            with conn.transaction():
+                _purge_score(conn, score)
+        except Exception as exc:  # noqa: BLE001 - one score's failure must not block the others
+            LOG.error("soft-deleted score purge failed score_id=%s (%s)", score["id"], type(exc).__name__)
+            continue
+        purged += 1
+    return purged
+
+
+def _purge_score(conn: Conn, score: dict[str, Any]) -> None:
+    """Queue one soft-deleted score's blobs and delete its jobs and row (caller sets the savepoint)."""
+    jobs = conn.execute(
+        "SELECT id FROM jobs WHERE score_id = %(s)s "
+        "OR replaces_job_id IN (SELECT id FROM jobs WHERE score_id = %(s)s) ORDER BY id FOR UPDATE",
+        {"s": score["id"]},
+    ).fetchall()
+    job_ids = [j["id"] for j in jobs]
+    keys = [
+        r["k"]
+        for r in conn.execute(
+            "SELECT file_key AS k FROM audio_tracks WHERE score_id = %(s)s "
+            "UNION SELECT midi_key FROM audio_tracks WHERE score_id = %(s)s AND midi_key IS NOT NULL "
+            "UNION SELECT metadata_key FROM timing_metadata WHERE score_id = %(s)s "
+            "UNION SELECT object_key FROM job_pages WHERE job_id = ANY(%(j)s)",
+            {"s": score["id"], "j": job_ids},
+        ).fetchall()
+    ]
+    if score["thumbnail_key"] is not None:
+        keys.append(score["thumbnail_key"])
+    queue_deletion(conn, keys)
+    conn.execute("DELETE FROM jobs WHERE id = ANY(%s)", (job_ids,))
+    conn.execute("DELETE FROM scores WHERE id = %s", (score["id"],))
+
+
 def start_loop(app: Flask) -> threading.Thread:
     """Start the daemon thread that runs purge, deletion and prune every interval."""
     cfg: Settings = app.config[SETTINGS_KEY]
@@ -225,6 +284,10 @@ def start_loop(app: Flask) -> threading.Thread:
         with db.transaction() as conn:
             prune_failed_job_pages(conn)
 
+    def _purge_deleted() -> None:
+        with db.transaction() as conn:
+            purge_deleted_scores(conn)
+
     def _loop() -> None:
         storage: Storage = app.extensions["storage"]
         while True:
@@ -233,6 +296,7 @@ def start_loop(app: Flask) -> threading.Thread:
                 _step("deletions", lambda: run_deletions(storage))
                 _step("prune", _prune)
                 _step("failed job pages", _prune_failed)
+                _step("soft-deleted scores", _purge_deleted)
             time.sleep(interval)
 
     thread = threading.Thread(target=_loop, name="piya-background", daemon=True)

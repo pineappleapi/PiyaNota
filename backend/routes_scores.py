@@ -9,7 +9,7 @@ from typing import Any, cast
 import psycopg
 from flask import Blueprint, Response, current_app, g, request
 
-from backend import access, background, db, security
+from backend import access, db, security
 from backend.config import SETTINGS_KEY, Settings
 from backend.envelope import ApiError, iso_z, ok
 from backend.routes_jobs import job_ref
@@ -62,7 +62,7 @@ def library() -> tuple[Response, int]:
     search = request.args.get("search", "").strip()
     if len(search) > MAX_SEARCH_LENGTH:
         raise ApiError(400, "search_too_long", "search is too long", field="search")
-    sql = "SELECT * FROM scores WHERE user_id = %s"
+    sql = "SELECT * FROM scores WHERE user_id = %s AND deleted_at IS NULL"
     params: list[Any] = [g.user.id]
     if search:
         escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -190,27 +190,16 @@ def edit(score_id: int) -> tuple[Response, int]:
 @scores_bp.delete("/<int:score_id>")
 @security.require_auth
 def delete(score_id: int) -> tuple[Response, int]:
+    """Soft delete: hide the score now; background.purge_deleted_scores removes data after 7 days."""
     with db.transaction() as conn:
-        score, job_ids = _lock_score_and_jobs(conn, score_id)
+        _, job_ids = _lock_score_and_jobs(conn, score_id)
         retakes = _unfinished_retakes(conn, job_ids)
-        if retakes:
+        if retakes:  # a running retake would otherwise complete into a hidden score
             conn.execute(
                 "UPDATE jobs SET status = 'cancelled', updated_at = now() WHERE id = ANY(%s)",
                 (retakes,),
             )
-        keys = [
-            r["k"]
-            for r in conn.execute(
-                "SELECT file_key AS k FROM audio_tracks WHERE score_id = %(s)s "
-                "UNION SELECT midi_key FROM audio_tracks WHERE score_id = %(s)s AND midi_key IS NOT NULL "
-                "UNION SELECT metadata_key FROM timing_metadata WHERE score_id = %(s)s "
-                "UNION SELECT object_key FROM job_pages WHERE job_id = ANY(%(j)s)",
-                {"s": score_id, "j": [*job_ids, *retakes]},
-            ).fetchall()
-        ]
-        if score["thumbnail_key"] is not None:
-            keys.append(score["thumbnail_key"])
-        background.queue_deletion(conn, keys)
-        conn.execute("DELETE FROM jobs WHERE id = ANY(%s) AND user_id = %s", (job_ids, g.user.id))
-        conn.execute("DELETE FROM scores WHERE id = %s AND user_id = %s", (score_id, g.user.id))
+        conn.execute(
+            "UPDATE scores SET deleted_at = now() WHERE id = %s AND user_id = %s", (score_id, g.user.id)
+        )
     return ok({"scoreId": score_id}, 200, "Score deleted")

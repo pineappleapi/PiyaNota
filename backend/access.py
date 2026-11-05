@@ -37,7 +37,8 @@ def owned_score(conn: Conn, score_id: int, *, for_update: bool = False) -> dict[
         ApiError: 404 ``score_not_found``.
     """
     row: dict[str, Any] | None = conn.execute(
-        "SELECT * FROM scores WHERE id = %s AND user_id = %s" + (" FOR UPDATE" if for_update else ""),
+        "SELECT * FROM scores WHERE id = %s AND user_id = %s AND deleted_at IS NULL"
+        + (" FOR UPDATE" if for_update else ""),
         (score_id, g.user.id),
     ).fetchone()
     if row is None:

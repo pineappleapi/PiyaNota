@@ -23,6 +23,7 @@ class ApiError(Exception):
         page_index: int | None = None,
         retry_after: int | None = None,
         attempts_remaining: int | None = None,
+        limit: int | None = None,
     ) -> None:
         super().__init__(message)
         self.status = status
@@ -32,6 +33,7 @@ class ApiError(Exception):
         self.page_index = page_index
         self.retry_after = retry_after
         self.attempts_remaining = attempts_remaining
+        self.limit = limit
 
 
 def ok(data: object, status: int, message: str) -> tuple[Response, int]:
@@ -50,6 +52,8 @@ def error_response(exc: ApiError) -> tuple[Response, int]:
         detail["retryAfterSeconds"] = exc.retry_after
     if exc.attempts_remaining is not None:
         detail["attemptsRemaining"] = exc.attempts_remaining
+    if exc.limit is not None:
+        detail["limit"] = exc.limit
     response = jsonify(
         {
             "data": None,

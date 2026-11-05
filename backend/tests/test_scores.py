@@ -279,28 +279,19 @@ def test_patch_errors(client: FlaskClient, headers: dict[str, str]) -> None:
     assert row["title"] == "Bayan Ko"
 
 
-def test_delete_removes_and_queues(
+def test_delete_hides_but_keeps_data(
     client: FlaskClient, app: Flask, headers: dict[str, str]
 ) -> None:
     sid, jid = _score(_uid(), tag="d", midi=True)
     keep, _ = _score(_uid(), "Keep", tag="k")
-    storage = _storage(app)
-    keys = {f"thumbs/dt.jpg", "timing/d.json", "pages/d0.jpg", "pages/d1.jpg",
-            *(f"audio/d{v}.mp3" for v in VOICES), *(f"midi/d{v}.mid" for v in VOICES)}
-    for k in keys:
-        storage.put(k, b"x", "x")
     res = client.delete(f"/api/scores/{sid}", headers=headers)
     assert res.status_code == 200 and res.get_json()["message"] == "Score deleted"
     listed = client.get("/api/scores", headers=headers).get_json()["data"]["scores"]
-    ids = [s["scoreId"] for s in listed]
-    assert ids == [keep]
+    assert [s["scoreId"] for s in listed] == [keep]
     _err(client.get(f"/api/scores/{sid}/result", headers=headers), 404, "score_not_found")
     with db.transaction() as conn:
-        queued = {r["object_key"] for r in conn.execute("SELECT object_key FROM storage_deletions")}
-        assert conn.execute("SELECT 1 FROM jobs WHERE id = %s", (jid,)).fetchone() is None
-    assert queued == keys
-    background.run_deletions(storage)
-    assert not (keys & set(storage.objects))
+        assert conn.execute("SELECT count(*) AS n FROM storage_deletions").fetchone()["n"] == 0
+        assert conn.execute("SELECT 1 FROM jobs WHERE id = %s", (jid,)).fetchone() is not None
 
 
 def test_delete_other_user_404(client: FlaskClient, headers: dict[str, str]) -> None:
@@ -318,7 +309,7 @@ def test_delete_cancels_running_retake(client: FlaskClient, headers: dict[str, s
     with db.transaction() as conn:
         status = conn.execute("SELECT status FROM jobs WHERE id = %s", (rid,)).fetchone()["status"]
         queued = {r["object_key"] for r in conn.execute("SELECT object_key FROM storage_deletions")}
-    assert status == "cancelled" and "pages/retake0.jpg" in queued
+    assert status == "cancelled" and not queued  # its pages are queued by the day-7 purge
 
 
 def test_result_filters_old_review_rows_on_read(client: FlaskClient, headers: dict[str, str]) -> None:

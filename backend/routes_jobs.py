@@ -2,7 +2,7 @@
 
 Error precedence (PIYA-101 AC9) is implemented by the order of the steps in ``_submit``: 401,
 replay of a known ``clientSubmissionId``, 429 rate_limited, 413, 400 field errors, 400 input-shape
-errors, 415, 422, 400 too_many_pages, retake checks, 429 queue_full.
+errors, 415, 422, 400 too_many_pages, retake checks, 409 score_limit_reached, 429 queue_full.
 """
 
 from __future__ import annotations
@@ -46,6 +46,7 @@ _CSID_INDEX = "jobs_user_client_submission_idx"
 _FINISHED = ("complete", "failed", "cancelled")
 _RETAKEABLE_FAILURE = "incomplete_voice_sequence"
 _UNREADABLE = "unreadable"
+MAX_SCORES_PER_USER = 20
 Source = Literal["images", "pdf"]
 Conn = psycopg.Connection[dict[str, Any]]
 
@@ -104,6 +105,10 @@ def _check_retake(conn: Conn, old_id: int, *, lock: bool) -> str:
         ApiError: 404 ``job_not_found``, 409 ``retake_in_progress``, 409 ``not_retakeable``.
     """
     old = access.owned_job(conn, old_id, for_update=lock)
+    if old["score_id"] is not None and conn.execute(
+        "SELECT 1 FROM scores WHERE id = %s AND deleted_at IS NULL", (old["score_id"],)
+    ).fetchone() is None:
+        raise ApiError(404, "job_not_found", "Job not found")  # its score is in the recovery window
     running = conn.execute(
         "SELECT 1 FROM jobs WHERE replaces_job_id = %s AND status <> ALL(%s)", (old_id, list(_FINISHED))
     ).fetchone()
@@ -119,6 +124,28 @@ def _check_retake(conn: Conn, old_id: int, *, lock: bool) -> str:
         raise ApiError(409, "not_retakeable", "This job cannot be retaken")
     status: str = old["status"]
     return status
+
+
+def _check_score_limit(conn: Conn, user_id: int) -> None:
+    """Raise 409 when live scores plus converting jobs reach the cap.
+
+    One statement: completion flips a job to complete and inserts its score without our lock, so
+    two separate counts could each miss it. A retake of a complete job is excluded because its
+    score is already counted; a retake of a failed job is not, since it inserts a new score.
+
+    Raises:
+        ApiError: 409 ``score_limit_reached``.
+    """
+    row = conn.execute(
+        "SELECT (SELECT count(*) FROM scores WHERE user_id = %(u)s AND deleted_at IS NULL)"
+        " + (SELECT count(*) FROM jobs j LEFT JOIN jobs old ON old.id = j.replaces_job_id"
+        "    WHERE j.user_id = %(u)s AND j.status <> ALL(%(f)s)"
+        "    AND COALESCE(old.status, '') <> 'complete') AS n",
+        {"u": user_id, "f": list(_FINISHED)},
+    ).fetchone()
+    if row is not None and row["n"] >= MAX_SCORES_PER_USER:
+        raise ApiError(409, "score_limit_reached", "You have reached the maximum number of scores",
+                       limit=MAX_SCORES_PER_USER)
 
 
 def _discard(keys: list[str]) -> None:
@@ -177,6 +204,8 @@ def create_job(
             old_status = None
             if meta.replaces_job_id is not None:
                 old_status = _check_retake(conn, meta.replaces_job_id, lock=True)
+            if old_status != "complete":  # replacing a complete score never adds one
+                _check_score_limit(conn, user_id)
             row = conn.execute(
                 "INSERT INTO jobs (user_id, status, source, page_count, title, arranger, tempo_bpm, "
                 "tempo_source, key_signature, time_signature, replaces_job_id, client_submission_id) "
@@ -346,8 +375,11 @@ def _submit(source: Source) -> tuple[Response, int]:
     with db.transaction() as conn:
         if meta.replaces_ref_invalid:
             raise ApiError(404, "job_not_found", "Job not found")
+        old_status = None
         if meta.replaces_job_id is not None:
-            _check_retake(conn, meta.replaces_job_id, lock=False)
+            old_status = _check_retake(conn, meta.replaces_job_id, lock=False)
+        if old_status != "complete":  # lock-free fail-fast; create_job's locked check decides
+            _check_score_limit(conn, user_id)
         queued = conn.execute("SELECT count(*) AS n FROM jobs WHERE status = 'queued'").fetchone()
     if queued is not None and queued["n"] >= cfg.queue_capacity:
         raise ApiError(429, "queue_full", "The processing queue is full",

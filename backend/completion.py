@@ -70,7 +70,9 @@ def complete_job(
     old_score_id = old_peek["score_id"] if old_peek else None
     old_score = None
     if old_score_id is not None:
-        old_score = conn.execute("SELECT * FROM scores WHERE id = %s FOR UPDATE", (old_score_id,)).fetchone()
+        old_score = conn.execute(
+            "SELECT * FROM scores WHERE id = %s AND deleted_at IS NULL FOR UPDATE", (old_score_id,)
+        ).fetchone()
     job = conn.execute("SELECT * FROM jobs WHERE id = %s FOR UPDATE", (job_id,)).fetchone()
     if job is None or job["status"] in _FINISHED:  # re-completing would orphan the first score
         return None
