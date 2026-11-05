@@ -45,9 +45,19 @@ def set_stage(conn: _Conn, job_id: int, status: str, percent: int, current_page:
     Run in a short committed transaction so the clock_timestamp() heartbeat is visible promptly.
     """
     cur = conn.execute(
-        "UPDATE jobs SET status = %s, percent_complete = %s, current_page = %s, heartbeat_at = clock_timestamp(), "
+        "UPDATE jobs SET status = %s, percent_complete = GREATEST(percent_complete, %s), current_page = %s, heartbeat_at = clock_timestamp(), "
         "updated_at = clock_timestamp() WHERE id = %s AND status = ANY(%s)",
         (status, percent, current_page, job_id, list(_WORKING_STATUSES)),
+    )
+    return cur.rowcount == 1
+
+
+def set_progress(conn: _Conn, job_id: int, percent: int) -> bool:
+    """Raise percent_complete within a stage (never lowers it); False means the job left the working statuses."""
+    cur = conn.execute(
+        "UPDATE jobs SET percent_complete = GREATEST(percent_complete, %s), heartbeat_at = clock_timestamp(), "
+        "updated_at = clock_timestamp() WHERE id = %s AND status = ANY(%s)",
+        (percent, job_id, list(_WORKING_STATUSES)),
     )
     return cur.rowcount == 1
 

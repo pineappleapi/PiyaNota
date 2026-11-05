@@ -13,6 +13,7 @@ import tempfile
 import threading
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from time import monotonic
 from typing import Any
 
 import psycopg
@@ -28,6 +29,7 @@ LOG = logging.getLogger(__name__)
 
 UNEXPECTED_FAILURE_REASON = "conversion failed"  # fixed text: reasons reach clients, details go to the log
 HEARTBEAT_JOIN_TIMEOUT_S = 10.0
+PROGRESS_WRITE_INTERVAL_S = 2.0
 EMPTY_TIMING: dict[str, Any] = {"events": []}
 
 Runner = Callable[..., PipelineResult]
@@ -35,6 +37,30 @@ Runner = Callable[..., PipelineResult]
 
 class _Cancelled(Exception):
     """The job left the working statuses (user cancel or reclaim); stop without failing it."""
+
+
+def make_progress_writer(write: Callable[[int], None], *, clock: Callable[[], float] = monotonic,
+                         interval_s: float = PROGRESS_WRITE_INTERVAL_S) -> Callable[[int], None]:
+    """Wrap ``write`` so it runs at most once per ``interval_s`` and only when the percent rises.
+
+    Progress is cosmetic: any exception from ``write`` is logged and swallowed, never failing the job.
+    """
+    last_percent = -1
+    last_at = float("-inf")
+
+    def report(percent: int) -> None:
+        nonlocal last_percent, last_at
+        now = clock()
+        if percent <= last_percent or now - last_at < interval_s:
+            return
+        try:
+            write(percent)
+        except Exception as exc:  # noqa: BLE001 - progress must never fail a conversion
+            LOG.warning("progress write failed: %s", type(exc).__name__)
+            return
+        last_percent, last_at = percent, now
+
+    return report
 
 
 def _heartbeat(url: str, job_id: int, interval_s: float, stop: threading.Event,
@@ -207,9 +233,14 @@ def process_one(*, storage: Storage, runner: Runner, settings: Settings,
                 if not queue.set_stage(conn, job_id, status, percent, None):
                     raise _Cancelled
 
+        def write_progress(percent: int) -> None:
+            with db.transaction() as conn:
+                queue.set_progress(conn, job_id, percent)  # a cancelled job is noticed at the next stage start
+
         try:
             result = runner([storage.get(p["object_key"]) for p in pages], tempo_bpm=job["tempo_bpm"],
-                            work_dir=work_dir, on_stage=on_stage, timing=settings.timing_enabled)
+                            work_dir=work_dir, on_stage=on_stage, timing=settings.timing_enabled,
+                            on_progress=make_progress_writer(write_progress))
             _publish(job_id, result, storage, settings, uploaded)
         except _Cancelled:
             LOG.info("job cancelled job_id=%s", job_id)

@@ -44,11 +44,11 @@ def _fake_stages(missing: tuple[str, ...] = (), midi_only: bool = False) -> Stag
     satb = {v: ([] if v in missing else [EVENT]) for v in pipeline.VOICES}
     flags = [{"kind": "x", "start_tick": 0, "end_tick": 5}, {"kind": "y"}]
     return Stages(
-        preprocess=lambda i, p, k: [("img", 1, None)],
+        preprocess=lambda i, p, k, pr: [("img", 1, None)],
         clean_page=lambda page: CleanPage(b"jpg", 10, 20),
         detect=lambda pages, y, s, m, g: {},
         clef_key=lambda pages, m, w: None,
-        transcribe=lambda v, w, d, e, b: {"Soprano": [{"type": "note"}]},
+        transcribe=lambda v, w, d, e, b, pr: {"Soprano": [{"type": "note"}]},
         reconstruct=lambda ev: (satb, {"flags": flags, "failed_voices": list(missing)}),
         review=lambda ev, f: ({"reviewNeeded": False}, []),
         synthesize=synthesize,
@@ -56,9 +56,10 @@ def _fake_stages(missing: tuple[str, ...] = (), midi_only: bool = False) -> Stag
     )
 
 
-def _run(tmp_path: Path, stages: Stages, on_stage: Any = lambda s, p: None) -> pipeline.PipelineResult:
+def _run(tmp_path: Path, stages: Stages, on_stage: Any = lambda s, p: None,
+         on_progress: Any = None) -> pipeline.PipelineResult:
     return run_pipeline([_jpeg()], tempo_bpm=90, work_dir=tmp_path / "w", config=_config(tmp_path),
-                        on_stage=on_stage, stages=stages)
+                        on_stage=on_stage, stages=stages, on_progress=on_progress)
 
 
 def test_stage_callbacks_fire_in_order(tmp_path: Path) -> None:
@@ -69,6 +70,41 @@ def test_stage_callbacks_fire_in_order(tmp_path: Path) -> None:
     percents = [p for _, p in seen]
     assert percents == sorted(percents)
     assert set(result.stage_seconds) == set(names)
+
+
+def test_in_stage_progress_rises_between_bands_and_stays_below_100(tmp_path: Path) -> None:
+    seen: list[tuple[str, int]] = []
+
+    def pre(i: str, p: str, k: bool, pr: Any) -> list[Any]:
+        for n in (1, 2):
+            pr(n, 2)
+        return [("img", 1, None)]
+
+    def tr(v: Any, w: str, d: Any, e: str, b: Any, pr: Any) -> dict[str, list[dict[str, Any]]]:
+        for n in range(0, 9):
+            pr(n, 8)
+        return {"Soprano": [{"type": "note"}]}
+
+    stages = replace(_fake_stages(), preprocess=pre, transcribe=tr)
+    _run(tmp_path, stages, lambda s, p: seen.append((s, p)), on_progress=lambda p: seen.append(("p", p)))
+    values = [p for _, p in seen]
+    assert values == sorted(values) and max(values) < 100
+    assert seen[:4] == [("preprocessing", 5), ("p", 14), ("p", 24), ("detecting_staff", 25)]
+    assert ("p", 40) in seen and ("p", 80) in seen and ("p", 85) not in seen
+
+
+def test_progress_hooks_default_to_none() -> None:
+    import inspect
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    try:
+        import stage1_preprocessing
+        import stage3_transcription
+    except ImportError:
+        pytest.skip("cv2/torch not installed")
+    for fn in (stage1_preprocessing.preprocess_batch, stage3_transcription.transcribe_voice_sequences):
+        assert inspect.signature(fn).parameters["progress"].default is None
 
 
 def test_result_maps_voices_and_lowercases_keys(tmp_path: Path) -> None:
@@ -124,7 +160,7 @@ def test_voice_whose_render_fell_back_to_midi_is_failed(tmp_path: Path) -> None:
 
 
 def test_all_empty_fails_with_retake_message(tmp_path: Path) -> None:
-    stages = replace(_fake_stages(), transcribe=lambda v, w, d, e, b: {})
+    stages = replace(_fake_stages(), transcribe=lambda v, w, d, e, b, pr: {})
     with pytest.raises(PipelineError, match="retake"):
         _run(tmp_path, stages)
 
@@ -179,7 +215,7 @@ def test_input_errors_map_to_fixed_reasons(tmp_path: Path) -> None:
 
 
 def test_all_voices_empty_uses_fixed_reason(tmp_path: Path) -> None:
-    stages = replace(_fake_stages(), transcribe=lambda v, w, d, e, b: {"Soprano": [], "Alto": []})
+    stages = replace(_fake_stages(), transcribe=lambda v, w, d, e, b, pr: {"Soprano": [], "Alto": []})
     with pytest.raises(PipelineError) as info:
         _run(tmp_path, stages)
     assert info.value.reason == pipeline.NO_VOICES_REASON

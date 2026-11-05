@@ -61,7 +61,7 @@ def _result(voices: tuple[str, ...] = VOICES, failed: list[str] | None = None, p
 
 
 def _runner(result: PipelineResult | None = None, raises: Exception | None = None, stages: bool = True) -> Any:
-    def run(page_jpegs: list[bytes], *, tempo_bpm: int, work_dir: Path, on_stage: Any, timing: bool) -> PipelineResult:
+    def run(page_jpegs: list[bytes], *, tempo_bpm: int, work_dir: Path, on_stage: Any, timing: bool, on_progress: Any = None) -> PipelineResult:
         assert tempo_bpm == 100 and page_jpegs and work_dir.is_dir()
         if stages:
             on_stage("preprocessing", 5)
@@ -133,7 +133,7 @@ def test_job_cancelled_mid_run_discards_uploads_and_creates_no_score(app: Flask,
     storage = MemoryStorage()
     job_id, old_keys = _seed_job(storage)
 
-    def cancelling(page_jpegs: list[bytes], *, tempo_bpm: int, work_dir: Path, on_stage: Any, timing: bool) -> PipelineResult:
+    def cancelling(page_jpegs: list[bytes], *, tempo_bpm: int, work_dir: Path, on_stage: Any, timing: bool, on_progress: Any = None) -> PipelineResult:
         on_stage("preprocessing", 5)
         with db.transaction() as conn:
             conn.execute("UPDATE jobs SET status = 'cancelled' WHERE id = %s", (job_id,))
@@ -149,7 +149,7 @@ def test_cancel_during_publish_discards_uploads_and_keeps_old_pages(app: Flask, 
     storage = MemoryStorage()
     job_id, old_keys = _seed_job(storage)
 
-    def late_cancel(page_jpegs: list[bytes], *, tempo_bpm: int, work_dir: Path, on_stage: Any, timing: bool) -> PipelineResult:
+    def late_cancel(page_jpegs: list[bytes], *, tempo_bpm: int, work_dir: Path, on_stage: Any, timing: bool, on_progress: Any = None) -> PipelineResult:
         on_stage("synthesizing", 92)
         with db.transaction() as conn:
             conn.execute("UPDATE jobs SET status = 'cancelled' WHERE id = %s", (job_id,))
@@ -187,7 +187,7 @@ def test_heartbeat_updates_while_runner_blocks(app: Flask, settings: Settings) -
     job_id, _ = _seed_job(storage)
     seen: list[Any] = []
 
-    def slow(page_jpegs: list[bytes], *, tempo_bpm: int, work_dir: Path, on_stage: Any, timing: bool) -> PipelineResult:
+    def slow(page_jpegs: list[bytes], *, tempo_bpm: int, work_dir: Path, on_stage: Any, timing: bool, on_progress: Any = None) -> PipelineResult:
         on_stage("preprocessing", 5)
         seen.append(_job(job_id)["heartbeat_at"])
         time.sleep(HEARTBEAT_TEST_RUN_S)  # several intervals with no stage call
@@ -335,3 +335,57 @@ def test_timing_scaled_to_served_page_and_missing_size_is_safe() -> None:
     assert timing["bars"][0] == {**bar, "x": 187.5, "systemTopY": 240.0, "systemBottomY": 360.0}
     assert timing["bars"][1] == bar_other  # zero detection width: unscaled
     _scale_to_served_pages({"events": []}, result)  # no bars key
+
+
+def test_progress_writer_throttles_and_only_rises() -> None:
+    from backend.worker.main import make_progress_writer
+
+    now = [0.0]
+    written: list[int] = []
+    report = make_progress_writer(written.append, clock=lambda: now[0], interval_s=2.0)
+    report(10)
+    now[0] = 1.0
+    report(20)  # inside 2 s: dropped
+    now[0] = 2.5
+    report(10)  # not a rise: dropped
+    report(30)
+    now[0] = 5.0
+    report(30)  # same value: dropped
+    report(31)
+    assert written == [10, 30, 31]
+
+
+def test_progress_writer_swallows_write_errors() -> None:
+    from backend.worker.main import make_progress_writer
+
+    def boom(percent: int) -> None:
+        raise RuntimeError("db down")
+
+    make_progress_writer(boom)(50)  # must not raise
+
+
+def test_runner_progress_is_stored_and_job_completes_at_100(
+        app: Flask, settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    import functools
+
+    from backend.worker import main as worker_main
+
+    # Frozen clock: the second on_progress call is always inside the 2 s throttle window.
+    monkeypatch.setattr(worker_main, "make_progress_writer",
+                        functools.partial(worker_main.make_progress_writer, clock=lambda: 0.0))
+    storage = MemoryStorage()
+    job_id, _ = _seed_job(storage)
+    seen: list[int] = []
+
+    def run(page_jpegs: list[bytes], *, tempo_bpm: int, work_dir: Path, on_stage: Any, timing: bool,
+            on_progress: Any) -> PipelineResult:
+        on_stage("preprocessing", 5)
+        on_progress(17)
+        seen.append(_job(job_id)["percent_complete"])
+        on_stage("detecting_staff", 25)
+        on_progress(99)  # callback itself is throttled; this one is inside 2 s so dropped
+        seen.append(_job(job_id)["percent_complete"])
+        return _result()
+
+    assert process_one(storage=storage, runner=run, settings=settings) is True
+    assert seen == [17, 25] and _job(job_id)["percent_complete"] == 100

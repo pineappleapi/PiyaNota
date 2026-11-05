@@ -4,7 +4,9 @@ PiyaNota - Stage 1: Image Preprocessing Pipeline
 
 import logging
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Optional
 
 import cv2
 import numpy as np
@@ -1695,12 +1697,15 @@ def blank_lyrics_regions(binary: np.ndarray) -> np.ndarray:
 
 
 def preprocess_batch(image_dir: str, output_dir: str, save_debug: bool = False,
-                     keep_unmasked: bool = False) -> list:
+                     keep_unmasked: bool = False,
+                     progress: Optional[Callable[[int, int], None]] = None) -> list:
     """Runs Stage 1 on every image in ``image_dir``.
 
     Args:
         keep_unmasked: Also keep each page's unmasked native image and tracked staves and append the
             PreprocessedPage as a 4th tuple element; ClefKeyNet crops from it (stage3_clefkey).
+        progress: Called as progress(pages_done, pages_total) after each page. Must not raise; the
+            stage does not catch callback exceptions.
 
     Returns:
         (detection page, page index, native strip source or None[, PreprocessedPage]) per image.
@@ -1731,6 +1736,8 @@ def preprocess_batch(image_dir: str, output_dir: str, save_debug: bool = False,
         # ignores the 4th element.
         results.append((page.detect, i, page.strip_source, page) if keep_unmasked
                        else (page.detect, i, page.strip_source))
+        if progress is not None:
+            progress(i, len(image_files))
 
     print(f"\n[Stage 1] Preprocessed {len(results)} page(s). Output: {output_dir}")
     return results

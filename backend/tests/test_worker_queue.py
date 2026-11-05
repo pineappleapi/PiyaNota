@@ -127,6 +127,22 @@ def test_set_stage_returns_false_when_cancelled(app: Flask) -> None:
         assert _row(conn, cancelled)["status"] == "cancelled"
 
 
+def test_progress_never_decreases_even_on_reclaimed_retry(app: Flask) -> None:
+    with db.transaction() as conn:
+        job_id = _job(conn, _user(conn), "preprocessing")
+        assert queue.set_stage(conn, job_id, "transcribing", 40, None)
+        assert queue.set_progress(conn, job_id, 63) and _row(conn, job_id)["percent_complete"] == 63
+        assert queue.set_progress(conn, job_id, 50) and _row(conn, job_id)["percent_complete"] == 63
+        assert queue.set_stage(conn, job_id, "preprocessing", 5, None)  # retry restarts at stage 1
+        row = _row(conn, job_id)
+        assert (row["status"], row["percent_complete"]) == ("preprocessing", 63)
+
+
+def test_set_progress_returns_false_when_cancelled(app: Flask) -> None:
+    with db.transaction() as conn:
+        assert queue.set_progress(conn, _job(conn, _user(conn), "cancelled"), 50) is False
+
+
 def test_reclaim_requeues_stale_job(app: Flask) -> None:
     with db.transaction() as conn:
         job_id = _job(conn, _user(conn))

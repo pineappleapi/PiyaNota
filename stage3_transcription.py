@@ -82,6 +82,7 @@ from torchvision import transforms
 import cv2
 import numpy as np
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, List, Mapping, NamedTuple, Optional, Tuple, Union
 import json
@@ -3086,6 +3087,7 @@ def transcribe_voice_sequences(
     clef_key_decisions: Optional[dict[str, "StripDecision"]] = None,
     header_filter:   bool = True,
     barlines_out:    Optional[dict[Tuple[int, int, str], List[float]]] = None,
+    progress:        Optional[Callable[[int, int], None]] = None,
 ) -> dict:
     """
     Processes all voice strips from Stage 2 and returns event sequences.
@@ -3118,6 +3120,10 @@ def transcribe_voice_sequences(
           note/rest event gets ``ctc_x`` and ``barlines_out[(page_index, sys_idx, voice)]`` receives the
           strip-pixel x of that strip's barlines. None (default) leaves events byte-identical.
 
+        progress: Called as progress(strips_done, strips_total) once before Pass 1 and after each
+          decoded strip (Pass 1 only, the CRNN forward). Not called when there are no strips. Must
+          not raise; the stage does not catch callback exceptions.
+
     Raises:
         ValueError: clef_key_decisions is given but lacks a strip.
 
@@ -3137,6 +3143,10 @@ def transcribe_voice_sequences(
  
     # Pass 1: decode every strip. The header filter needs all voices of a system at once (quorum).
     decoded: dict[str, dict[str, Any]] = {}
+    total_strips = sum(len(s) for s in voice_sequences.values())
+    done_strips = 0
+    if progress is not None and total_strips > 0:
+        progress(0, total_strips)
     for voice, strips in voice_sequences.items():
         for strip, page_index, sys_idx, voice_label, v_idx in strips:
             strip_id = f"page{page_index:03d}_sys{sys_idx:02d}_{voice_label}_vidx{v_idx}"
@@ -3152,6 +3162,9 @@ def transcribe_voice_sequences(
                                      voice_label=voice_label, v_idx=v_idx, decision=decision,
                                      symbols=[s for s, _ in scored], confs=[c for _, c in scored],
                                      spans=spans, header_flags=[])
+            done_strips += 1
+            if progress is not None:
+                progress(done_strips, total_strips)
 
     meter_change_systems: set[tuple[int, int]] = set()
     if header_filter and decoded:

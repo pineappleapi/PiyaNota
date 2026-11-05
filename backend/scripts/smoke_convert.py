@@ -90,7 +90,7 @@ def _child(args_path: str, out_path: str) -> int:
 def _make_runner() -> Any:
     python = os.environ["PIYA_PIPELINE_PYTHON"]
 
-    def runner(page_jpegs: list[bytes], *, tempo_bpm: int, work_dir: Path, on_stage: Any, timing: bool) -> Any:
+    def runner(page_jpegs: list[bytes], *, tempo_bpm: int, work_dir: Path, on_stage: Any, timing: bool, on_progress: Any = None) -> Any:
         tmp = Path(tempfile.mkdtemp(prefix="piya-smoke-child-"))
         args, out = tmp / "args.pkl", tmp / "out.pkl"
         args.write_bytes(pickle.dumps({"jpegs": page_jpegs, "tempo_bpm": tempo_bpm,

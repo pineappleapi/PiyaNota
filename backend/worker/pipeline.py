@@ -29,6 +29,14 @@ STRIPS_MANIFEST = "manifest.json"
 STAGE_PERCENT = (("preprocessing", 5), ("detecting_staff", 25), ("transcribing", 40),
                  ("reconstructing", 85), ("synthesizing", 92))
 
+# In-stage progress bands (lo, hi) in percent. Weights are approximate: Moonriver smoke preprocessing took
+# 52.7 s of 212.8 s in the 2026-11-05 run and 104 s in the 2026-11-04 run. hi stays below the next stage's
+# start (25 / 85) so a stage never reports the next band before it ends; 100 is written only by complete_job.
+PREPROCESS_BAND = (5, 24)
+TRANSCRIBE_BAND = (40, 80)  # Stage 3 Pass 1 (CRNN forward) only; Pass 2 and the system checks are fast
+
+ProgressFn = Callable[[int, int], None]
+
 CLEF_KEY_DEFAULT = "training/clef_key_artifacts/t4_full_seed20260926_runA/clef_key_classifier.pt"
 STAGE_FAILURE_REASONS = {"preprocessing": "no readable page", "detecting_staff": "no readable staves",
                          "transcribing": "could not read the notation"}
@@ -89,11 +97,11 @@ class PipelineConfig:
 class Stages:
     """One callable per pipeline step so tests can inject fakes."""
 
-    preprocess: Callable[[str, str, bool], list[Any]]
+    preprocess: Callable[[str, str, bool, ProgressFn | None], list[Any]]
     clean_page: Callable[[Any], CleanPage]
     detect: Callable[[list[Any], str, str, str, list[Any] | None], dict[str, Any]]
     clef_key: Callable[[list[Any], str, str], Any]
-    transcribe: Callable[[dict[str, Any], str, Any, str, dict[Any, list[float]] | None],
+    transcribe: Callable[[dict[str, Any], str, Any, str, dict[Any, list[float]] | None, ProgressFn | None],
                          dict[str, list[dict[str, Any]]]]
     reconstruct: Callable[[dict[str, Any]], tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]]
     review: Callable[[dict[str, Any], list[dict[str, Any]]], tuple[dict[str, Any], list[dict[str, Any]]]]
@@ -132,8 +140,9 @@ def real_stages() -> Stages:
     from stage4_reconstruction import reconstruct_satb_with_report
     from stage5_synthesis import build_review, synthesize_satb
 
-    def preprocess(in_dir: str, prep_dir: str, keep_unmasked: bool) -> list[Any]:
-        return preprocess_batch(in_dir, prep_dir, save_debug=False, keep_unmasked=keep_unmasked)
+    def preprocess(in_dir: str, prep_dir: str, keep_unmasked: bool, progress: ProgressFn | None) -> list[Any]:
+        return preprocess_batch(in_dir, prep_dir, save_debug=False, keep_unmasked=keep_unmasked,
+                                progress=progress)
 
     def clean_page(page: Any) -> CleanPage:
         # The native strip source is the best cleaned view; the 1600 px binary is the fallback.
@@ -153,10 +162,11 @@ def real_stages() -> Stages:
         return stage3_clefkey.decisions_for_pages(pages, manifest, model)[0]
 
     def transcribe(voices: dict[str, Any], weights: str, decisions: Any, events_dir: str,
-                   barlines_out: dict[Any, list[float]] | None) -> Any:
+                   barlines_out: dict[Any, list[float]] | None, progress: ProgressFn | None) -> Any:
         return s3.transcribe_voice_sequences(
             voices, model_weights=weights, img_height=CRNN_STRIP_HEIGHT, viz_dir=events_dir + "_viz",
-            events_dir=events_dir, clef_key_decisions=decisions, barlines_out=barlines_out)
+            events_dir=events_dir, clef_key_decisions=decisions, barlines_out=barlines_out,
+            progress=progress)
 
     def synthesize(satb: dict[str, Any], out_dir: str, bpm: int, soundfont: str) -> dict[str, str]:
         return synthesize_satb(satb, output_dir=out_dir, bpm=bpm, soundfont_path=soundfont)
@@ -227,10 +237,12 @@ def run_pipeline(
     on_stage: Callable[[str, int], None],
     stages: Stages | None = None,
     timing: bool = True,
+    on_progress: Callable[[int], None] | None = None,
 ) -> PipelineResult:
     """Run Stages 1-5 on the page photos; all temporary files stay under ``work_dir``.
 
     ``timing`` makes Stages 2 and 3 record strip geometry and barline positions for the timing export.
+    ``on_progress`` gets an overall percent inside the preprocessing and transcribing bands; it must not raise.
     """
     _validate_inputs(page_jpegs, config)
     st = stages or real_stages()
@@ -244,13 +256,19 @@ def run_pipeline(
     barlines: dict[Any, list[float]] | None = {} if timing else None
     percent = dict(STAGE_PERCENT)
 
+    def band(lo_hi: tuple[int, int]) -> ProgressFn | None:
+        if on_progress is None:
+            return None
+        lo, hi = lo_hi
+        return lambda done, total: on_progress(lo + (hi - lo) * done // max(total, 1))
+
     def begin(status: str) -> float:
         on_stage(status, percent[status])
         return monotonic()
 
     t = begin("preprocessing")
     use_ck = config.clef_key_weights is not None
-    pages = _guard("preprocessing", lambda: st.preprocess(str(in_dir), str(prep), use_ck))
+    pages = _guard("preprocessing", lambda: st.preprocess(str(in_dir), str(prep), use_ck, band(PREPROCESS_BAND)))
     clean = [st.clean_page(p) for p in pages]
     seconds["preprocessing"] = monotonic() - t
 
@@ -262,7 +280,8 @@ def run_pipeline(
     t = begin("transcribing")
     def transcribe() -> dict[str, list[dict[str, Any]]]:
         decisions = st.clef_key(pages, manifest, str(config.clef_key_weights)) if use_ck else None
-        return st.transcribe(voices, str(config.crnn_weights), decisions, str(work_dir / "stage3"), barlines)
+        return st.transcribe(voices, str(config.crnn_weights), decisions, str(work_dir / "stage3"), barlines,
+                             band(TRANSCRIBE_BAND))
 
     events = _guard("transcribing", transcribe)
     seconds["transcribing"] = monotonic() - t
