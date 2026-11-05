@@ -13,8 +13,7 @@ import 'package:piyanota_application/screens/onboarding/widgets/splash_overlay.d
 import 'package:piyanota_application/services/leaving_app.dart';
 import 'package:piyanota_application/splash_gate.dart';
 
-/// PIYA-201-V2.2: the splash plays on every cold start and warm resume,
-/// except when the app itself sent the user out.
+/// V3 F1: the splash plays on a cold start only, never on resume.
 void main() {
   setUp(resetLeavingApp);
 
@@ -87,8 +86,8 @@ void main() {
     expect(find.byType(LoginScreen), findsOneWidget);
   });
 
-  testWidgets('AC2: resume after paused plays the splash over the same '
-      'screen and keeps its state', (tester) async {
+  testWidgets('F1: paused then resumed shows no splash and keeps the '
+      'screen state', (tester) async {
     await pumpGated(tester);
     await pumpPastSplash(tester);
     await tester.enterText(find.byType(TextField), 'Bahay Kubo');
@@ -98,30 +97,50 @@ void main() {
     foreground(tester);
     await tester.pump();
 
-    expect(splash, findsOneWidget);
-
-    await pumpPastSplash(tester);
-
     expect(splash, findsNothing);
     expect(find.text('Bahay Kubo'), findsOneWidget);
-    // Same State object: the screen was covered, never rebuilt from scratch.
     expect(tester.state(find.byType(EditableText)), same(fieldState));
   });
 
-  testWidgets('AC2 ruling: inactive alone (a system sheet) does not replay', (
-    tester,
-  ) async {
-    await pumpGated(tester);
+  testWidgets('F1: an open sheet and the scroll position survive '
+      'paused then resumed', (tester) async {
+    final controller = ScrollController();
+    await tester.pumpWidget(
+      SplashGate(
+        child: MaterialApp(
+          home: Scaffold(
+            body: ListView(
+              controller: controller,
+              children: [
+                for (var i = 0; i < 60; i++) ListTile(title: Text('Row $i')),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
     await pumpPastSplash(tester);
+    controller.jumpTo(400);
+    await tester.pump();
+    final context = tester.element(find.byType(ListView));
+    unawaited(
+      showModalBottomSheet<void>(
+        context: context,
+        builder: (_) => const SizedBox(height: 100, child: Text('Open sheet')),
+      ),
+    );
+    await tester.pumpAndSettle();
 
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    background(tester);
+    foreground(tester);
     await tester.pump();
 
     expect(splash, findsNothing);
+    expect(find.text('Open sheet'), findsOneWidget);
+    expect(controller.offset, 400);
   });
 
-  testWidgets('AC3: a resume inside withoutSplash shows no splash', (
+  testWidgets('F1: leaving for a picker and coming back shows no splash', (
     tester,
   ) async {
     await pumpGated(tester);
@@ -132,90 +151,36 @@ void main() {
     background(tester);
     foreground(tester);
     picker.complete('page.jpg');
-    expect(await picked, 'page.jpg');
+    await picked;
     await tester.pump();
 
     expect(splash, findsNothing);
-
-    // Leaving the app on its own afterwards still replays it.
-    background(tester);
-    foreground(tester);
-    await tester.pump();
-    expect(splash, findsOneWidget);
   });
 
-  testWidgets('AC3: the picker result arriving before resumed still skips', (
+  testWidgets('F1: a cold start plays the splash exactly once', (
     tester,
   ) async {
     await pumpGated(tester);
-    await pumpPastSplash(tester);
-
-    final picker = Completer<void>();
-    final picked = withoutSplash(() => picker.future);
-    background(tester);
-    picker.complete();
-    await picked;
-    foreground(tester);
     await tester.pump();
-
-    expect(splash, findsNothing);
-  });
-
-  testWidgets('AC3: a fire-and-forget launch (returns before paused) '
-      'still skips', (tester) async {
-    await pumpGated(tester);
-    await pumpPastSplash(tester);
-
-    // openAppSettings / openFolder: startActivity, then the future ends.
-    expect(await withoutSplash(() async => true), isTrue);
-    background(tester);
-    foreground(tester);
-    await tester.pump();
-
-    expect(splash, findsNothing);
-  });
-
-  testWidgets('AC3: a launch that opened nothing (false) leaves the next '
-      'real background replaying', (tester) async {
-    await pumpGated(tester);
-    await pumpPastSplash(tester);
-
-    expect(await withoutSplash(() async => false), isFalse);
-    background(tester);
-    foreground(tester);
-    await tester.pump();
-
     expect(splash, findsOneWidget);
-  });
-
-  testWidgets('AC3: a launch that never paused the app stops counting after '
-      'leaveAppGrace', (tester) async {
-    await pumpGated(tester);
     await pumpPastSplash(tester);
+    expect(splash, findsNothing);
 
-    await withoutSplash(() async => true);
-    await tester.pump(leaveAppGrace);
     background(tester);
     foreground(tester);
-    await tester.pump();
-
-    expect(splash, findsOneWidget);
+    await tester.pump(splashIntroDuration);
+    expect(splash, findsNothing);
   });
 
   testWidgets('AC2: Android back during the splash does not pop the screen '
       'beneath it', (tester) async {
     await pumpGated(tester);
-    await pumpPastSplash(tester);
     final navigator = tester.state<NavigatorState>(find.byType(Navigator));
     navigator.push(
       MaterialPageRoute<void>(
         builder: (_) => const Scaffold(body: Text('Pushed page')),
       ),
     );
-    await tester.pumpAndSettle();
-
-    background(tester);
-    foreground(tester);
     await tester.pump();
     expect(splash, findsOneWidget);
 
