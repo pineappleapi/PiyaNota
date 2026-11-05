@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -42,7 +43,8 @@ final scoreResultApiProvider = Provider<ScoreResultApi>((ref) {
 
 /// Makes a fresh engine per opened score; tests override it with a fake.
 final playbackEngineFactoryProvider = Provider<PlaybackEngine Function()>(
-  (ref) => JustAudioPlaybackEngine.new,
+  (ref) =>
+      () => JustAudioPlaybackEngine(audioSession: AudioSession.instance),
 );
 
 /// Writes the metronome click track; tests override it with a fake (or a
@@ -537,9 +539,14 @@ class PlaybackController extends Notifier<PlaybackState> {
   /// minute (PIYA-210 "Speed changes"): that is the only time the click
   /// pattern changes, and re-planning on every drag tick would swap the
   /// click track dozens of times a second.
+  ///
+  /// The speed reaches the engine only here (F8a): each speed change is a
+  /// pause, re-align and restart of every player, which mid-drag would
+  /// stutter dozens of times a second.
   void commitBpm() {
     final engine = _engine;
     if (engine == null || state.phase != PlaybackPhase.ready) return;
+    unawaited(engine.setSpeed(state.speed));
     if (state.clickStatus == ClickStatus.unavailable) return;
     if (_clickBusy) {
       // Re-checked once the plan in progress ends.
@@ -852,17 +859,16 @@ class PlaybackController extends Notifier<PlaybackState> {
     _applyGains();
   }
 
-  /// PIYA-210: the Speed slider, in whole BPM from 30 to 240. Applied to
-  /// the engine at once, also while playing (AC4); the engine keeps pitch
-  /// (FR-9). The indicator reads the engine's audio position, so it needs
-  /// no change when the speed does.
+  /// PIYA-210: the Speed slider, in whole BPM from 30 to 240. Moves the
+  /// shown value only; the engine gets the speed when the drag ends, in
+  /// [commitBpm] (F8a). The engine keeps pitch (FR-9). The indicator reads
+  /// the engine's audio position, so it needs no change when the speed
+  /// does.
   void setBpm(int bpm) {
     if (state.phase != PlaybackPhase.ready) return;
     final clamped = bpm.clamp(ScoreDetails.minTempo, ScoreDetails.maxTempo);
     if (clamped == state.chosenBpm) return;
     state = state.copyWith(bpm: clamped);
-    final engine = _engine;
-    if (engine != null) unawaited(engine.setSpeed(state.speed));
   }
 
   void dismissReview() => state = state.copyWith(reviewDismissed: true);

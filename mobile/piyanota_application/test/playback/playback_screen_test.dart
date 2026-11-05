@@ -526,7 +526,9 @@ void main() {
       final harness = ready();
       await pumpPlayback(tester, harness);
       final container = appContainer(tester);
-      container.read(playbackControllerProvider(kScoreId).notifier).setBpm(180);
+      container.read(playbackControllerProvider(kScoreId).notifier)
+        ..setBpm(180)
+        ..commitBpm();
       expect(harness.engine.speed, 2);
 
       await tester.tap(find.byKey(const ValueKey('play-pause')));
