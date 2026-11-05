@@ -51,8 +51,16 @@ def _settings() -> Settings:
     return cast(Settings, current_app.config[SETTINGS_KEY])
 
 
-def _invalid_credentials() -> ApiError:
-    return ApiError(401, "invalid_credentials", _INVALID_CREDENTIALS)
+def _invalid_credentials(
+    *, attempts_remaining: int | None = None, retry_after: int | None = None
+) -> ApiError:
+    return ApiError(
+        401,
+        "invalid_credentials",
+        _INVALID_CREDENTIALS,
+        attempts_remaining=attempts_remaining,
+        retry_after=retry_after,
+    )
 
 
 @auth_bp.post("/signup")
@@ -125,6 +133,9 @@ def login() -> tuple[Response, int]:
         active = [w for w in waits if w is not None]
         if active:
             failure = throttle.too_many(max(active))
+            LOG.info(
+                "login throttled email=%s ip=%s retry_after=%d", email_key, ip_key, max(active)
+            )
         else:
             user = conn.execute(
                 "SELECT id, email, role, password_hash FROM users "
@@ -148,12 +159,22 @@ def login() -> tuple[Response, int]:
                 token, expires_at = security.issue_session(conn, user["id"])
                 result = (user, token, expires_at)
             else:
-                throttle.record_failure(conn, _LOGIN_EMAIL_SCOPE, email_key, free_failures=0)
+                count = throttle.record_failure(
+                    conn, _LOGIN_EMAIL_SCOPE, email_key, ladder=throttle.LOGIN_LADDER
+                )
                 throttle.record_hit(conn, _LOGIN_IP_BUCKET, ip_key)
                 LOG.info(
                     "login failed email=%s at=%s", email_key, iso_z(datetime.now(timezone.utc))
                 )
-                failure = _invalid_credentials()
+                free = throttle.LOGIN_LADDER.free
+                failure = _invalid_credentials(
+                    attempts_remaining=free + 1 - count if count <= free else None,
+                    retry_after=(
+                        throttle.backoff_wait(conn, _LOGIN_EMAIL_SCOPE, email_key)
+                        if count > free
+                        else None
+                    ),
+                )
     if failure is not None:
         raise failure
     if result is None:

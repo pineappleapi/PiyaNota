@@ -167,29 +167,129 @@ def test_login_generic_401(client: FlaskClient) -> None:
     assert wrong.data == unknown.data
 
 
-def test_login_backoff_429(client: FlaskClient) -> None:
+def _wrong(client: FlaskClient, email: str = "a@example.com", ip: str = "10.0.0.1") -> Any:
+    return _login(client, email=email, password="Wrong12345", ip=ip)
+
+
+def _shift_clock(seconds: int) -> None:
+    """Move the stored failure clock back, which is how the DB-side now() 'advances'."""
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE throttle_backoff SET last_failure_at = last_failure_at - make_interval(secs => %s), "
+            "wait_until = wait_until - make_interval(secs => %s)",
+            (seconds, seconds),
+        )
+
+
+def _state() -> Any:
+    with db.transaction() as conn:
+        return conn.execute("SELECT failures, last_failure_at FROM throttle_backoff").fetchone()
+
+
+def _fail_to(client: FlaskClient, n: int) -> Any:
+    """Make n wrong logins, skipping the waits; returns the last response."""
+    res = None
+    for _ in range(n):
+        _expire_waits()
+        res = _wrong(client)
+    return res
+
+
+def test_login_attempts_remaining_then_wait(client: FlaskClient) -> None:
     _signup(client)
-    assert _login(client, password="Wrong12345").status_code == 401
-    res = _login(client)
-    assert res.status_code == 429
+    for expected in (4, 3, 2, 1):
+        res = _wrong(client)
+        assert res.status_code == 401
+        error = res.get_json()["error"]
+        assert error["attemptsRemaining"] == expected and "retryAfterSeconds" not in error
+        assert "Retry-After" not in res.headers
+    res = _wrong(client)
     error = res.get_json()["error"]
-    assert error["code"] == "rate_limited" and isinstance(error["retryAfterSeconds"], int)
-    assert 25 <= int(res.headers["Retry-After"]) <= 30
+    assert res.status_code == 401 and "attemptsRemaining" not in error
+    assert error["retryAfterSeconds"] == 30 and res.headers["Retry-After"] == "30"
+    assert _wrong(client).status_code == 429
 
 
-def test_login_unknown_email_also_backs_off(client: FlaskClient) -> None:
-    assert _login(client, email="ghost@example.com").status_code == 401
-    assert _login(client, email="ghost@example.com").status_code == 429
-
-
-def test_login_success_clears_backoff(client: FlaskClient) -> None:
+def test_login_ladder_waits(client: FlaskClient) -> None:
     _signup(client)
-    _login(client, password="Wrong12345")
+    _fail_to(client, 4)
+    for expected in (30, 60, 90, 120, 150, 3600):
+        _expire_waits()
+        res = _wrong(client)
+        assert res.status_code == 401
+        assert res.get_json()["error"]["retryAfterSeconds"] == expected
+        assert res.headers["Retry-After"] == str(expected)
+
+
+def test_login_step_down_after_lock(client: FlaskClient) -> None:
+    _signup(client)
+    _fail_to(client, 10)
+    assert _login(client).status_code == 429
+    _expire_waits()
+    res = _wrong(client)
+    assert res.status_code == 401 and res.get_json()["error"]["retryAfterSeconds"] == 30
+    assert _state()["failures"] == 5
+
+
+def test_login_correct_password_during_wait_is_429_and_keeps_count(client: FlaskClient) -> None:
+    _signup(client)
+    _fail_to(client, 10)
+    before = _state()
+    res = _login(client)
+    assert res.status_code == 429 and 3590 <= int(res.headers["Retry-After"]) <= 3600
+    assert _wrong(client).status_code == 429
+    after = _state()
+    assert after["failures"] == before["failures"] == 10
+    assert after["last_failure_at"] == before["last_failure_at"]
+
+
+def test_login_success_after_wait_clears_count(client: FlaskClient) -> None:
+    _signup(client)
+    _fail_to(client, 7)
     _expire_waits()
     assert _login(client).status_code == 200
-    assert _login(client, password="Wrong12345").status_code == 401
-    res = _login(client)
-    assert res.status_code == 429 and 25 <= int(res.headers["Retry-After"]) <= 30
+    assert _state() is None
+    assert _wrong(client).get_json()["error"]["attemptsRemaining"] == 4
+
+
+def test_login_idle_24h_clears_count(client: FlaskClient) -> None:
+    _signup(client)
+    _fail_to(client, 7)
+    _shift_clock(25 * 3600)
+    assert _wrong(client).get_json()["error"]["attemptsRemaining"] == 4
+
+
+def test_login_other_email_independent(client: FlaskClient) -> None:
+    _signup(client)
+    _fail_to(client, 5)
+    assert _wrong(client).status_code == 429
+    res = _wrong(client, email="b@example.com", ip="10.0.0.2")
+    assert res.status_code == 401 and res.get_json()["error"]["attemptsRemaining"] == 4
+
+
+def test_lock_shorter_than_idle_reset() -> None:
+    from backend import background
+
+    assert throttle.LOGIN_LADDER.lock_s < 24 * 3600
+    assert background.BACKOFF_IDLE_S >= 24 * 3600
+
+
+def test_login_unknown_email_counts_like_known(client: FlaskClient) -> None:
+    res = _login(client, email="ghost@example.com")
+    assert res.status_code == 401 and res.get_json()["error"]["attemptsRemaining"] == 4
+    for _ in range(3):
+        _login(client, email="ghost@example.com")
+    assert _login(client, email="ghost@example.com").get_json()["error"]["retryAfterSeconds"] == 30
+
+
+def test_login_429_logs_keys_only(client: FlaskClient, caplog: pytest.LogCaptureFixture) -> None:
+    _signup(client)
+    _fail_to(client, 5)
+    with caplog.at_level(logging.INFO, logger="backend.routes_auth"):
+        assert _login(client).status_code == 429
+    text = caplog.text
+    assert "login throttled" in text and "retry_after=" in text
+    assert "a@example.com" not in text and PASSWORD not in text
 
 
 def test_login_ip_limit(client: FlaskClient) -> None:

@@ -245,7 +245,7 @@ def test_confirm_success_revokes_sessions(
 
 def test_confirm_clears_login_backoff(client: FlaskClient, mail: MemoryMailer) -> None:
     _signup(client)
-    for _ in range(2):
+    for _ in range(5):
         client.post("/api/auth/login", json={"email": EMAIL, "password": "wrong-pass-1"})
     blocked = client.post("/api/auth/login", json={"email": EMAIL, "password": NEW_PASSWORD})
     assert blocked.status_code == 429

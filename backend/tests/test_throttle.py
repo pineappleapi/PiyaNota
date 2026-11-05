@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from flask import Flask
 
 from backend import db, throttle
@@ -71,3 +72,27 @@ def test_clear_failures_and_expired_wait(app: Flask, db_clean: None) -> None:
 def test_too_many() -> None:
     err = throttle.too_many(42)
     assert (err.status, err.code, err.retry_after) == (429, "rate_limited", 42)
+
+
+def _ladder_failure() -> tuple[int, int | None]:
+    with db.transaction() as conn:
+        n = throttle.record_failure(conn, "s", "k", ladder=throttle.LOGIN_LADDER)
+        return n, throttle.backoff_wait(conn, "s", "k")
+
+
+def test_ladder_schedule_and_step_down(app: Flask, db_clean: None) -> None:
+    waits = [_ladder_failure()[1] for _ in range(10)]
+    got = [None if w is None else round(w, -1) for w in waits]
+    assert got == [None] * 4 + [30, 60, 90, 120, 150, 3600]
+    assert _ladder_failure() == (11, 3600)  # lock still active: counts on, no step-down
+    with db.transaction() as conn:
+        conn.execute("UPDATE throttle_backoff SET wait_until = now() - interval '1 second'")
+    n, wait = _ladder_failure()
+    assert n == 5 and wait is not None and 28 <= wait <= 30
+
+
+def test_record_failure_needs_exactly_one_schedule(app: Flask, db_clean: None) -> None:
+    with db.transaction() as conn:
+        for kwargs in ({}, {"free_failures": 0, "ladder": throttle.LOGIN_LADDER}):
+            with pytest.raises(ValueError):
+                throttle.record_failure(conn, "s", "k", **kwargs)
