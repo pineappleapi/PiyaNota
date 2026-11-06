@@ -43,7 +43,8 @@ def make_progress_writer(write: Callable[[int], None], *, clock: Callable[[], fl
                          interval_s: float = PROGRESS_WRITE_INTERVAL_S) -> Callable[[int], None]:
     """Wrap ``write`` so it runs at most once per ``interval_s`` and only when the percent rises.
 
-    Progress is cosmetic: any exception from ``write`` is logged and swallowed, never failing the job.
+    Progress is cosmetic: any exception from ``write`` is logged and swallowed, never failing the job,
+    except ``_Cancelled``, which must reach the pipeline so a cancelled job stops early.
     """
     last_percent = -1
     last_at = float("-inf")
@@ -55,6 +56,8 @@ def make_progress_writer(write: Callable[[int], None], *, clock: Callable[[], fl
             return
         try:
             write(percent)
+        except _Cancelled:
+            raise
         except Exception as exc:  # noqa: BLE001 - progress must never fail a conversion
             LOG.warning("progress write failed: %s", type(exc).__name__)
             return
@@ -240,7 +243,8 @@ def process_one(*, storage: Storage, runner: Runner, settings: Settings,
 
         def write_progress(percent: int) -> None:
             with db.transaction() as conn:
-                queue.set_progress(conn, job_id, percent)  # a cancelled job is noticed at the next stage start
+                if not queue.set_progress(conn, job_id, percent):
+                    raise _Cancelled  # stops the pipeline at its next progress report
 
         try:
             result = runner([storage.get(p["object_key"]) for p in pages], tempo_bpm=job["tempo_bpm"],

@@ -367,6 +367,30 @@ def test_progress_writer_swallows_write_errors() -> None:
     make_progress_writer(boom)(50)  # must not raise
 
 
+def test_cancel_noticed_at_progress_write_stops_pipeline_and_logs(
+        app: Flask, settings: Settings, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    import functools
+
+    from backend.worker import main as worker_main
+
+    monkeypatch.setattr(worker_main, "make_progress_writer",
+                        functools.partial(worker_main.make_progress_writer, clock=lambda: 0.0))
+    caplog.set_level("INFO")
+    storage = MemoryStorage()
+    job_id, old_keys = _seed_job(storage)
+
+    def run(page_jpegs: list[bytes], *, tempo_bpm: int, work_dir: Path, on_stage: Any, timing: bool, on_progress: Any = None) -> PipelineResult:
+        on_stage("preprocessing", 5)
+        with db.transaction() as conn:
+            conn.execute("UPDATE jobs SET status = 'cancelled' WHERE id = %s", (job_id,))
+        on_progress(17)  # inside a stage: must raise, not wait for the next stage start
+        raise AssertionError("pipeline must stop at the progress write after cancel")
+
+    assert process_one(storage=storage, runner=run, settings=settings) is True
+    assert f"job cancelled job_id={job_id}" in caplog.text and "job timing" in caplog.text
+    assert _job(job_id)["status"] == "cancelled" and set(storage.objects) == set(old_keys)
+
+
 def test_runner_progress_is_stored_and_job_completes_at_100(
         app: Flask, settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
     import functools

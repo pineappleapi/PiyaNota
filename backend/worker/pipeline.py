@@ -243,7 +243,8 @@ def run_pipeline(
     """Run Stages 1-5 on the page photos; all temporary files stay under ``work_dir``.
 
     ``timing`` makes Stages 2 and 3 record strip geometry and barline positions for the timing export.
-    ``on_progress`` gets an overall percent inside the preprocessing and transcribing bands; it must not raise.
+    ``on_progress`` gets an overall percent inside the preprocessing and transcribing bands; it may raise to abort a cancelled job,
+    so nothing here may swallow its exception.
     """
     _validate_inputs(page_jpegs, config)
     st = stages or real_stages()
