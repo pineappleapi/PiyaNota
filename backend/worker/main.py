@@ -229,8 +229,11 @@ def process_one(*, storage: Storage, runner: Runner, settings: Settings,
     beat.start()
     uploaded: list[str] = []
     failure: tuple[str, int | None] | None = None
+    started = monotonic()
+    marks: list[tuple[str, float]] = []  # (stage, start time); timing only, never read by logic
     try:
         def on_stage(status: str, percent: int) -> None:
+            marks.append((status, monotonic()))
             with db.transaction() as conn:  # committed per stage so the status and heartbeat are visible
                 if not queue.set_stage(conn, job_id, status, percent, None):
                     raise _Cancelled
@@ -243,6 +246,7 @@ def process_one(*, storage: Storage, runner: Runner, settings: Settings,
             result = runner([storage.get(p["object_key"]) for p in pages], tempo_bpm=job["tempo_bpm"],
                             work_dir=work_dir, on_stage=on_stage, timing=settings.timing_enabled,
                             on_progress=make_progress_writer(write_progress))
+            marks.append(("publish", monotonic()))
             _publish(job_id, result, storage, settings, uploaded)
         except _Cancelled:
             LOG.info("job cancelled job_id=%s", job_id)
@@ -261,7 +265,15 @@ def process_one(*, storage: Storage, runner: Runner, settings: Settings,
         stop.set()
         beat.join(HEARTBEAT_JOIN_TIMEOUT_S)
         shutil.rmtree(work_dir, ignore_errors=True)
+        _log_timing(job_id, len(pages), started, marks)
     return True
+
+
+def _log_timing(job_id: int, page_count: int, started: float, marks: list[tuple[str, float]]) -> None:
+    """Log total and per-stage seconds so slow stages can be found from the worker log alone."""
+    end = monotonic()
+    stages = {name: round(nxt - t, 1) for (name, t), (_, nxt) in zip(marks, [*marks[1:], ("end", end)])}
+    LOG.info("job timing job_id=%s pages=%s total_s=%.1f stages=%s", job_id, page_count, end - started, stages)
 
 
 def run_loop(*, storage: Storage, runner: Runner, settings: Settings, stop: threading.Event) -> None:

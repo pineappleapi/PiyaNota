@@ -280,3 +280,15 @@ def test_proxy_for_count_env_and_default() -> None:
     assert load_settings({"PIYA_ENV": "test"}).trusted_proxy_for_count is None
     cfg = load_settings({"PIYA_ENV": "test", "PIYA_TRUSTED_PROXY_FOR_COUNT": "3"})
     assert cfg.trusted_proxy_for_count == 3
+
+
+def test_request_log_has_timing_and_no_raw_path(client, caplog):
+    """Timing log names the route template and sizes, so ids and query tokens never reach the log."""
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="backend.app"):
+        client.get("/nope/12345?token=secret")
+        client.get("/healthz")
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("req ")]
+    assert len(lines) == 1  # healthz skipped
+    assert "ms=" in lines[0] and "12345" not in lines[0] and "secret" not in lines[0]

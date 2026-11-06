@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+import time
 
-from flask import Flask, Response, request
+from flask import Flask, Response, g, request
 from werkzeug.exceptions import HTTPException, MethodNotAllowed
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -28,6 +29,8 @@ _HTTP_ERROR_CODES: dict[int, str] = {
 }
 _INTERNAL_MESSAGE = "Internal server error"
 _DEBUG_HEADER_NAMES = ("X-Forwarded-For", "True-Client-IP", "CF-Connecting-IP")
+_MS_PER_S = 1000
+_UNROUTED = "-"
 
 
 def create_app(settings: Settings | None = None) -> Flask:
@@ -94,6 +97,23 @@ def create_app(settings: Settings | None = None) -> Flask:
             # Runs before auth so a plaintext request never gets as far as a token check.
             if request.scheme != "https" and request.path != "/healthz":
                 raise ApiError(400, "https_required", "HTTPS is required")
+
+    @app.before_request
+    def _start_timer() -> None:
+        g.request_started = time.perf_counter()
+
+    @app.after_request
+    def _log_request(response: Response) -> Response:
+        # Rule template, never the raw path or query: ids stay out and signed media tokens never leak.
+        started = g.get("request_started")
+        if started is not None and request.path != "/healthz":
+            LOG.info(
+                "req %s %s status=%s ms=%.0f in_bytes=%s out_bytes=%s",
+                request.method, request.url_rule.rule if request.url_rule else _UNROUTED,
+                response.status_code, (time.perf_counter() - started) * _MS_PER_S,
+                request.content_length or 0, response.content_length,
+            )
+        return response
 
     @app.get("/healthz")
     def healthz() -> tuple[Response, int]:
