@@ -26,15 +26,15 @@ startup error that names it.
 | `PIYA_ENV` | render.yaml value | `prod` |
 | `PIYA_REQUIRE_HTTPS` | render.yaml value | `true` |
 | `PIYA_STORAGE_BACKEND` | render.yaml value | `memory` now; `b2` later |
-| `PIYA_MAIL_BACKEND` | render.yaml value | `log` now; `brevo` later |
-| `PIYA_MAIL_FROM` | render.yaml value | required in prod; use the verified Brevo sender later |
+| `PIYA_MAIL_BACKEND` | render.yaml value | `brevo` (live); `log` prints codes to the Render log |
+| `PIYA_MAIL_FROM` | dashboard | required in prod; the verified Brevo sender |
 | `PIYA_TRUSTED_PROXY_COUNT` | render.yaml value | `1`; hops for `X-Forwarded-Proto`/`Host` |
 | `PIYA_TRUSTED_PROXY_FOR_COUNT` | render.yaml value | `3`; hops for `X-Forwarded-For` (client IP), see the measurement below |
 | `DATABASE_URL` | dashboard (`sync: false`) | Neon **direct (unpooled)** connection string (host without `-pooler`), because migrations run DDL on it at every boot and the backend already uses direct connections. `config.py` reads `PIYA_DATABASE_URL`, falling back to `DATABASE_URL`; `python -m backend.migrate` reads `DATABASE_URL` only, so use that name for both |
 | `PIYA_RESET_CODE_HMAC_KEY` | dashboard (`sync: false`) | long random string, e.g. `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
 | `PIYA_LOG_HASH_KEY` | dashboard (`sync: false`) | another long random string |
 | `PIYA_B2_ENDPOINT`, `PIYA_B2_BUCKET`, `PIYA_B2_KEY_ID`, `PIYA_B2_APP_KEY` | dashboard | only with `b2` |
-| `PIYA_BREVO_API_KEY` | dashboard | only with `brevo` |
+| `PIYA_BREVO_API_KEY` | dashboard | required with `brevo` |
 | `PIYA_RUN_BACKGROUND` | Dockerfile | `1`; one gunicorn worker means one background loop |
 | `PIYA_DEBUG_HEADERS` | dashboard, temporary | `1` only while doing the proxy check below |
 

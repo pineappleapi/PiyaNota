@@ -14,8 +14,9 @@ services:
       - key: PIYA_REQUIRE_HTTPS
         value: "true"
       # Backends: db stores media in Neon so the Space worker and this API share it (needs the two
-      # sync: false vars below, identical on the Space). log prints reset codes to the Render log.
-      # To switch: b2 (also set the PIYA_B2_* vars below) and brevo (also set PIYA_BREVO_API_KEY).
+      # sync: false vars below, identical on the Space). Mail is Brevo (live since 2026-11-02);
+      # dashboard-only values for sync: false vars survive a Blueprint sync, plain values do not.
+      # To switch storage to b2, also set the PIYA_B2_* vars below.
       - key: PIYA_STORAGE_BACKEND
         value: db
       - key: PIYA_MEDIA_HMAC_KEY
@@ -23,9 +24,13 @@ services:
       - key: PIYA_PUBLIC_BASE_URL
         sync: false
       - key: PIYA_MAIL_BACKEND
-        value: log
+        value: brevo
+      # Verified Brevo sender (set in the dashboard); sync: false so a Blueprint sync cannot
+      # overwrite it with a placeholder.
       - key: PIYA_MAIL_FROM
-        value: noreply@piyanota.invalid
+        sync: false
+      - key: PIYA_BREVO_API_KEY
+        sync: false
       # One proxy hop (Render's) until the debug-headers check in deploy.md says otherwise.
       - key: PIYA_TRUSTED_PROXY_COUNT
         value: "1"
@@ -43,4 +48,3 @@ services:
         sync: false
       # Needed only after switching PIYA_STORAGE_BACKEND to b2:
       #   PIYA_B2_ENDPOINT, PIYA_B2_BUCKET, PIYA_B2_KEY_ID, PIYA_B2_APP_KEY (all sync: false)
-      # Needed only after switching PIYA_MAIL_BACKEND to brevo: PIYA_BREVO_API_KEY (sync: false)
