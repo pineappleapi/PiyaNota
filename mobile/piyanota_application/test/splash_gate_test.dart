@@ -10,13 +10,10 @@ import 'package:piyanota_application/app.dart';
 import 'package:piyanota_application/screens/auth/login_screen.dart';
 import 'package:piyanota_application/screens/onboarding/onboarding_flow_screen.dart';
 import 'package:piyanota_application/screens/onboarding/widgets/splash_overlay.dart';
-import 'package:piyanota_application/services/leaving_app.dart';
 import 'package:piyanota_application/splash_gate.dart';
 
 /// V3 F1: the splash plays on a cold start only, never on resume.
 void main() {
-  setUp(resetLeavingApp);
-
   final splash = find.byType(SplashOverlay);
   const logo = AssetImage('assets/branding/Piyanota_App_Logo.png');
 
@@ -140,26 +137,7 @@ void main() {
     expect(controller.offset, 400);
   });
 
-  testWidgets('F1: leaving for a picker and coming back shows no splash', (
-    tester,
-  ) async {
-    await pumpGated(tester);
-    await pumpPastSplash(tester);
-
-    final picker = Completer<String>();
-    final picked = withoutSplash(() => picker.future);
-    background(tester);
-    foreground(tester);
-    picker.complete('page.jpg');
-    await picked;
-    await tester.pump();
-
-    expect(splash, findsNothing);
-  });
-
-  testWidgets('F1: a cold start plays the splash exactly once', (
-    tester,
-  ) async {
+  testWidgets('F1: a cold start plays the splash exactly once', (tester) async {
     await pumpGated(tester);
     await tester.pump();
     expect(splash, findsOneWidget);

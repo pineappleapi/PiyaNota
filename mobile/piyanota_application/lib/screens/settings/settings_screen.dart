@@ -197,7 +197,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (!await confirmLogOut(context) || !mounted) return;
     // PIYA-305 (server logout) is wired by PIYA-217; until then the token
     // is only dropped here and lapses server-side at its own expiry.
-    await _toLogin();
+    await _toLogin(wipeResults: true);
   }
 
   Future<void> _deleteAccount() async {
@@ -217,8 +217,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
   }
 
-  Future<void> _toLogin() async {
-    await endLocalSession(ref);
+  Future<void> _toLogin({bool wipeResults = false}) async {
+    await endLocalSession(ref, wipeResults: wipeResults);
     if (!mounted) return;
     Navigator.of(context)
         .pushNamedAndRemoveUntil(AppRoutes.login, (_) => false);

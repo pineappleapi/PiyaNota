@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:piyanota_application/services/export_service.dart';
 import 'package:piyanota_application/services/local_results_store.dart';
@@ -152,15 +153,69 @@ void main() {
     });
   }
 
-  testWidgets('endLocalSession forgets the owner and signs out', (
+  testWidgets('endLocalSession on expiry signs out but keeps the offline '
+      'results and the owner', (tester) async {
+    await pump(tester, owner: testSession().userId);
+    container.read(signedInProvider.notifier).set(true);
+    await endLocalSession(ref);
+    expect(container.read(signedInProvider), isFalse);
+    expect(results.deleteAllCalls, 0);
+    expect(owners.owner, testSession().userId);
+  });
+
+  testWidgets('logout (wipeResults) wipes the results and forgets the owner', (
     tester,
   ) async {
     await pump(tester, owner: testSession().userId);
     container.read(signedInProvider.notifier).set(true);
-    await endLocalSession(ref);
+    await endLocalSession(ref, wipeResults: true);
     expect(owners.owner, isNull);
     expect(container.read(signedInProvider), isFalse);
     expect(results.deleteAllCalls, 1, reason: 'next account sees no scores');
+  });
+
+  testWidgets('wipeAccountLocalData (delete account) wipes the results', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    await pump(tester, owner: testSession().userId);
+    await wipeAccountLocalData(ref);
+    expect(results.deleteAllCalls, 1);
+    expect(owners.owner, isNull);
+  });
+
+  testWidgets('expiry then the same account logging in keeps the results', (
+    tester,
+  ) async {
+    await pump(tester, owner: testSession().userId);
+    await endLocalSession(ref);
+    await startSession(ref, testSession());
+    expect(results.deleteAllCalls, 0);
+  });
+
+  testWidgets('expiry then another account logging in wipes the results', (
+    tester,
+  ) async {
+    await pump(tester, owner: other);
+    await endLocalSession(ref);
+    await startSession(ref, testSession());
+    expect(results.deleteAllCalls, 1);
+  });
+
+  testWidgets('startSession as the same account keeps the results', (
+    tester,
+  ) async {
+    await pump(tester, owner: testSession().userId);
+    await startSession(ref, testSession());
+    expect(results.deleteAllCalls, 0);
+  });
+
+  testWidgets('startSession as another account wipes the results', (
+    tester,
+  ) async {
+    await pump(tester, owner: other);
+    await startSession(ref, testSession());
+    expect(results.deleteAllCalls, 1);
   });
 
   testWidgets('startSession as the same account keeps the export, the '
