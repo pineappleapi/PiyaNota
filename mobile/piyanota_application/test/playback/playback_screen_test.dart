@@ -923,18 +923,10 @@ void main() {
     });
   });
 
-  test('page images: file only in the demo build', () {
-    final file = Uri.parse('file:///data/p1.png');
-    expect(scoreImageFor(file, allowLocalFiles: false), isNull);
-    expect(scoreImageFor(file, allowLocalFiles: true), isA<FileImage>());
-    expect(
-      scoreImageFor(Uri.parse('https://cdn/p1.png'), allowLocalFiles: false),
-      isA<NetworkImage>(),
-    );
-    expect(
-      scoreImageFor(Uri.parse('content://x/p1'), allowLocalFiles: true),
-      isNull,
-    );
+  test('page images: local copies (file) and network pages both load', () {
+    expect(scoreImageFor(Uri.parse('file:///data/p1.png')), isA<FileImage>());
+    expect(scoreImageFor(Uri.parse('https://cdn/p1.png')), isA<NetworkImage>());
+    expect(scoreImageFor(Uri.parse('content://x/p1')), isNull);
   });
 
   group('timing pages', () {

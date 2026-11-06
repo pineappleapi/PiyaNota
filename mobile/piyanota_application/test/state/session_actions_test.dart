@@ -1,14 +1,17 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:piyanota_application/services/export_service.dart';
+import 'package:piyanota_application/services/local_results_store.dart';
 import 'package:piyanota_application/services/session_storage.dart';
 import 'package:piyanota_application/state/auth_providers.dart';
 import 'package:piyanota_application/state/export_jobs.dart';
 import 'package:piyanota_application/state/export_providers.dart';
+import 'package:piyanota_application/state/playback_providers.dart';
 import 'package:piyanota_application/state/processing_providers.dart';
 import 'package:piyanota_application/state/session_actions.dart';
 import 'package:piyanota_application/state/work_owner.dart';
@@ -22,7 +25,21 @@ import '../processing/processing_fakes.dart';
 /// and takes the scans' background service and notifications away
 /// (PIYA-218). The same account logging in again (every cold start, no
 /// auto-login yet) keeps all of it (review H1).
+class _RecordingResultsStore extends LocalResultsStore {
+  _RecordingResultsStore()
+    : super(
+        rootProvider: () async => throw UnimplementedError(),
+        downloader: DioFileDownloader(Dio()),
+      );
+
+  int deleteAllCalls = 0;
+
+  @override
+  Future<void> deleteAll() async => deleteAllCalls++;
+}
+
 void main() {
+  final results = _RecordingResultsStore();
   late FakeExportService exports;
   late FakeScanTrackingService scans;
   late MemoryWorkOwnerStore owners;
@@ -31,6 +48,7 @@ void main() {
   late ProviderContainer container;
 
   Future<void> pump(WidgetTester tester, {int? owner}) async {
+    results.deleteAllCalls = 0;
     exports = FakeExportService();
     scans = FakeScanTrackingService();
     owners = MemoryWorkOwnerStore(owner);
@@ -48,6 +66,7 @@ void main() {
           ),
           scanTrackingServiceProvider.overrideWithValue(scans),
           workOwnerStoreProvider.overrideWithValue(owners),
+          localResultsStoreProvider.overrideWithValue(results),
         ],
         child: MaterialApp(
           home: Consumer(
@@ -141,6 +160,7 @@ void main() {
     await endLocalSession(ref);
     expect(owners.owner, isNull);
     expect(container.read(signedInProvider), isFalse);
+    expect(results.deleteAllCalls, 1, reason: 'next account sees no scores');
   });
 
   testWidgets('startSession as the same account keeps the export, the '

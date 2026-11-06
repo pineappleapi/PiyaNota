@@ -7,6 +7,7 @@ import '../models/auth_session.dart';
 import 'auth_providers.dart';
 import 'export_jobs.dart';
 import 'export_providers.dart';
+import 'playback_providers.dart';
 import 'processing_providers.dart';
 import 'work_owner.dart';
 
@@ -44,8 +45,14 @@ void Function() _accountWorkForgetter(WidgetRef ref) {
 Future<void> endLocalSession(WidgetRef ref) async {
   ref.read(signedInProvider.notifier).set(false);
   _accountWorkForgetter(ref)();
+  final results = ref.read(localResultsStoreProvider);
   final owners = ref.read(workOwnerStoreProvider);
   final storage = ref.read(sessionStorageProvider);
+  // Results are keyed by score id only, so the next account must not see
+  // this one's scores offline.
+  // Not awaited and never throws: like the native stops above, logging out
+  // must not wait on file IO.
+  unawaited(results.deleteAll());
   await owners.clear();
   try {
     await storage.clear();
@@ -53,11 +60,6 @@ Future<void> endLocalSession(WidgetRef ref) async {
     debugPrint('Session clear failed: $e');
   }
 }
-
-/// F10 hook: removes the local copy of converted results (audio, pages,
-/// timing) once that folder exists. Empty until F10 lands; Delete account
-/// calls it so the wipe is complete the day the folder appears.
-Future<void> deleteLocalResultsFolder() async {}
 
 /// Delete account's local half, run only after the server returned 200.
 /// [endLocalSession] stops scan polling and the background service, forgets
@@ -69,7 +71,6 @@ Future<void> wipeAccountLocalData(WidgetRef ref) async {
   await endLocalSession(ref);
   try {
     await throttle.clearAll();
-    await deleteLocalResultsFolder();
   } catch (e, stack) {
     debugPrint('Account wipe incomplete: $e\n$stack');
   }

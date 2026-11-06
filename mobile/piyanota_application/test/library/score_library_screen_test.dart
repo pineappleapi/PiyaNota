@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,7 +19,9 @@ import 'package:piyanota_application/screens/library/score_library_screen.dart';
 import 'package:piyanota_application/screens/library/widgets/library_bottom_nav.dart';
 import 'package:piyanota_application/screens/library/widgets/library_header.dart';
 import 'package:piyanota_application/screens/library/widgets/score_cards.dart';
+import 'package:piyanota_application/services/local_results_store.dart';
 import 'package:piyanota_application/services/score_library_api.dart';
+import 'package:piyanota_application/state/playback_providers.dart';
 import 'package:piyanota_application/state/processing_providers.dart';
 import 'package:piyanota_application/state/score_library_providers.dart';
 import 'package:piyanota_application/theme/app_theme.dart';
@@ -97,6 +101,19 @@ Future<void> _scrollListUntilBuilt(WidgetTester tester, Finder target) async {
     );
     await tester.pump();
   }
+}
+
+class _RecordingResultsStore extends LocalResultsStore {
+  _RecordingResultsStore()
+    : super(
+        rootProvider: () async => throw UnimplementedError(),
+        downloader: DioFileDownloader(Dio()),
+      );
+
+  final List<int> deleted = [];
+
+  @override
+  Future<void> deleteScore(int scoreId) async => deleted.add(scoreId);
 }
 
 final _scores = [
@@ -569,6 +586,25 @@ void main() {
       expect(find.text('Paraiso'), findsNothing);
       expect(find.text(LibraryMessages.deleted('Paraiso')), findsOneWidget);
       expect(find.text('2 Scores • Tap to Listen'), findsOneWidget);
+    });
+
+    testWidgets('a deleted score takes its local results folder with it', (
+      tester,
+    ) async {
+      final store = _RecordingResultsStore();
+      final api = _apiReturning(_scores)..onDelete = (_) async {};
+      await _pumpLibrary(
+        tester,
+        api,
+        extraOverrides: [localResultsStoreProvider.overrideWithValue(store)],
+      );
+      await tester.pumpAndSettle();
+
+      await _tapDelete(tester, 'Paraiso');
+      await tester.tap(find.text(LibraryMessages.deleteConfirm));
+      await tester.pumpAndSettle();
+
+      expect(store.deleted, [102]);
     });
 
     testWidgets('server failure keeps the row and shows an error', (

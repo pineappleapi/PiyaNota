@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../config/api_config.dart';
 import '../models/measure_table.dart';
@@ -13,6 +14,7 @@ import '../models/score_timeline.dart';
 import '../models/voice_part.dart';
 import '../services/fake_score_library_api.dart';
 import '../services/fake_score_result_api.dart';
+import '../services/local_results_store.dart';
 import '../services/metronome_click.dart';
 import '../services/playback_engine.dart';
 import '../services/score_result_api.dart';
@@ -20,6 +22,19 @@ import 'auth_providers.dart';
 import 'onboarding_providers.dart';
 import 'processing_providers.dart';
 import 'score_library_providers.dart';
+
+/// F10: where converted results are kept. Application support, not the temp
+/// folder, which the system may clear; excluded from backup by
+/// data_extraction_rules.xml (domain `file`) and allowBackup=false.
+final localResultsStoreProvider = Provider<LocalResultsStore>(
+  (ref) => LocalResultsStore(
+    rootProvider: () async {
+      final support = await getApplicationSupportDirectory();
+      return Directory('${support.path}${Platform.pathSeparator}results');
+    },
+    downloader: DioFileDownloader(ref.watch(dioProvider)),
+  ),
+);
 
 /// PIYA-103. Fake until Module 3 is deployed, under the same flag as the
 /// other fakes.
@@ -38,7 +53,10 @@ final scoreResultApiProvider = Provider<ScoreResultApi>((ref) {
   }
   final configError = ApiConfig.configurationError();
   if (configError != null) throw StateError(configError);
-  return HttpScoreResultApi(ref.watch(dioProvider), sessionStorage);
+  return LocalFirstScoreResultApi(
+    HttpScoreResultApi(ref.watch(dioProvider), sessionStorage),
+    ref.watch(localResultsStoreProvider),
+  );
 });
 
 /// Makes a fresh engine per opened score; tests override it with a fake.

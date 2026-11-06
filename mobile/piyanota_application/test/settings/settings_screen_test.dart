@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,10 +17,12 @@ import 'package:piyanota_application/screens/settings/settings_screen.dart';
 import 'package:piyanota_application/screens/library/widgets/library_header.dart';
 import 'package:piyanota_application/screens/scan_status/scan_bell.dart';
 import 'package:piyanota_application/services/auth_api.dart';
+import 'package:piyanota_application/services/local_results_store.dart';
 import 'package:piyanota_application/services/onboarding_prefs_service.dart';
 import 'package:piyanota_application/services/session_storage.dart';
 import 'package:piyanota_application/services/settings_prefs_service.dart';
 import 'package:piyanota_application/state/auth_providers.dart';
+import 'package:piyanota_application/state/playback_providers.dart';
 import 'package:piyanota_application/state/settings_providers.dart';
 
 import '../auth/auth_test_harness.dart';
@@ -52,6 +55,19 @@ class _RecordingTempoPrefs extends SettingsPrefsService {
   }
 }
 
+class _RecordingResultsStore extends LocalResultsStore {
+  _RecordingResultsStore()
+    : super(
+        rootProvider: () async => throw UnimplementedError(),
+        downloader: DioFileDownloader(Dio()),
+      );
+
+  int deleteAllCalls = 0;
+
+  @override
+  Future<void> deleteAll() async => deleteAllCalls++;
+}
+
 class _Harness {
   _Harness({
     this.session,
@@ -65,6 +81,7 @@ class _Harness {
 
   final AuthSession? session;
   final _RecordingTempoPrefs tempoPrefs = _RecordingTempoPrefs();
+  final _RecordingResultsStore resultsStore = _RecordingResultsStore();
 
   /// Null makes the version lookup fail.
   final String? version;
@@ -93,6 +110,7 @@ class _Harness {
       ProviderScope(
         overrides: [
           authApiProvider.overrideWithValue(api),
+          localResultsStoreProvider.overrideWithValue(resultsStore),
           sessionStorageProvider.overrideWithValue(sessionStorage),
           settingsPrefsServiceProvider.overrideWithValue(tempoPrefs),
           appVersionProvider.overrideWith(
@@ -1207,6 +1225,7 @@ void main() {
         isEmpty,
       );
       expect(prefs.getInt('work_owner_v1'), isNull);
+      expect(harness.resultsStore.deleteAllCalls, 1);
     });
 
     for (final scale in const [1.0, 2.0]) {

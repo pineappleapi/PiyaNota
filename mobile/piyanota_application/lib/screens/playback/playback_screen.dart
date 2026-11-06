@@ -7,7 +7,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../config/api_config.dart';
 import '../../models/score_result.dart';
 import '../../models/score_timeline.dart';
 import '../../models/voice_part.dart';
@@ -1846,15 +1845,12 @@ class _MetronomePainter extends CustomPainter {
   bool shouldRepaint(_MetronomePainter oldDelegate) => false;
 }
 
-/// A score page's image. `file:` only in the debug-only fake build (the
-/// demo page is generated into the cache dir); ScoreResult already drops
-/// such URLs otherwise, and this keeps the screen safe on its own.
+/// A score page's image. A `file:` URI reaches here only from the local
+/// results store (F10, which checks it lies in the results folder) or the
+/// debug fake build: ScoreResult drops server-sent `file:` URLs.
 @visibleForTesting
-ImageProvider? scoreImageFor(
-  Uri uri, {
-  bool allowLocalFiles = ApiConfig.useFakeAuth,
-}) => switch (uri.scheme) {
-  'file' when allowLocalFiles => FileImage(File(uri.toFilePath())),
+ImageProvider? scoreImageFor(Uri uri) => switch (uri.scheme) {
+  'file' => FileImage(File(uri.toFilePath())),
   'http' || 'https' => NetworkImage(uri.toString()),
   _ => null,
 };
