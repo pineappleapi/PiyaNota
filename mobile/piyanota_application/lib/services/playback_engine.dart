@@ -99,7 +99,7 @@ abstract interface class PlaybackEngine {
   Future<void> detachClick();
 
   /// 0 (silent) to 1 (full); the click's gain after the Speed toggle and
-  /// the Mixer's Mute and Solo (see the controller). Remembered if no
+  /// the Mixer's Mute (see the controller). Remembered if no
   /// click is attached yet.
   Future<void> setClickVolume(double volume);
 

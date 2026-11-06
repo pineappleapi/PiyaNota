@@ -2,6 +2,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 const String _untilKeyPrefix = 'login_throttle.until.';
 
+/// Written by builds before the server owned the ladder; nothing reads them
+/// now, but they still hold emails, so Delete account removes them too.
+const List<String> _legacyKeyPrefixes = [
+  'login_throttle.failures.',
+  'login_throttle.last.',
+];
+
 /// Per-email wait deadline after wrong passwords (PIYA-202-V2.1), kept in
 /// shared_preferences so closing the app does not shorten it (AC4).
 ///
@@ -60,7 +67,8 @@ class LoginThrottle {
   Future<void> clearAll() async {
     final prefs = await SharedPreferences.getInstance();
     for (final key in prefs.getKeys().where(
-      (k) => k.startsWith(_untilKeyPrefix),
+      (k) =>
+          k.startsWith(_untilKeyPrefix) || _legacyKeyPrefixes.any(k.startsWith),
     )) {
       await prefs.remove(key);
     }

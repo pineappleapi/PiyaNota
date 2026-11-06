@@ -38,6 +38,44 @@ void main() {
       expect((a.width, a.height), (4032, 3024));
     });
 
+    test('COM, APP3-APP12 and bytes after the first EOI are dropped', () {
+      List<int> seg(int marker, List<int> body) => [
+        0xFF,
+        marker,
+        0,
+        body.length + 2,
+        ...body,
+      ];
+      final sos = upright.length;
+      final noisy = Uint8List.fromList([
+        ...upright.sublist(0, 2),
+        ...seg(0xFE, [1, 2, 3]),
+        ...seg(0xE5, [4, 5]),
+        ...upright.sublist(2),
+        ...seg(0xE1, [9, 9]), // trailer, then it must also end in EOI
+        0xFF,
+        0xD9,
+      ]);
+      expect(sos, greaterThan(0));
+      final out = stripJpegMetadata(noisy)!;
+      expect(out.length, lessThan(upright.length));
+      expect(out.sublist(out.length - 2), [0xFF, 0xD9]);
+      expect(img.decodeJpg(out)!.exif.gpsIfd.isEmpty, isTrue);
+      // No COM/APP5 marker bytes survive in the header area.
+      final head = out.sublist(0, 400);
+      for (var i = 0; i + 1 < head.length; i++) {
+        expect(
+          head[i] == 0xFF && (head[i + 1] == 0xFE || head[i + 1] == 0xE5),
+          isFalse,
+        );
+      }
+    });
+
+    test('a file not ending in EOI takes the full path', () {
+      final cut = Uint8List.sublistView(upright, 0, upright.length - 2);
+      expect(stripJpegMetadata(cut), isNull);
+    });
+
     test('rotated, oversize and non-JPEG inputs take the full path', () {
       expect(stripJpegMetadata(rotated), isNull);
       expect(stripJpegMetadata(Uint8List.fromList([1, 2, 3, 4, 5])), isNull);

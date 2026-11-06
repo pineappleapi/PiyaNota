@@ -6,8 +6,7 @@ import '../../models/voice_part.dart';
 import 'playback_messages.dart';
 
 /// The system alerts Playback shows (user decisions 2026-10-09): a voice
-/// that can't play at all, measures that will be silent, and a Solo that
-/// can't be heard. AlertDialogs like the rest of the app's confirmations.
+/// that can't play at all, and measures that will be silent. AlertDialogs like the rest of the app's confirmations.
 
 /// "Wholly corrupted, the others will play" for [voices] (in SATB order);
 /// [remaining] is how many voices are left to play.

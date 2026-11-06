@@ -183,6 +183,14 @@ void main() {
     expect(timing, isA<TimingFile>());
   });
 
+  test('offline: a missing MIDI file does not block opening', () async {
+    await reopen();
+    for (final e in scoreDir().listSync()) {
+      if (e.path.endsWith('.mid') || e.path.contains('midi_')) e.deleteSync();
+    }
+    expect(await store.loadOffline(_scoreId), isNotNull);
+  });
+
   test('timing read from a local file', () async {
     final file = File('${root.path}${Platform.pathSeparator}t.json');
     await file.writeAsString(jsonEncode({'events': [], 'bars': []}));

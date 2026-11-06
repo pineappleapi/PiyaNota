@@ -172,6 +172,8 @@ class LocalResultsStore {
       final data = jsonDecode(await manifest.readAsString());
       if (data is! Map<String, dynamic>) return null;
       for (final MapEntry(:key, :value) in _entries(data).entries) {
+        // MIDI has no reader yet, so a missing .mid must not block opening.
+        if (key.startsWith('midi_')) continue;
         if (!await File(_path(dir, _fileName(key, value))).exists()) {
           return null;
         }
@@ -253,10 +255,16 @@ class LocalResultsStore {
   /// Removes [scoreId]'s folder (score deleted). Never throws.
   Future<void> deleteScore(int scoreId) async {
     try {
-      await _running[scoreId];
       final root = await _rootProvider();
       final dir = Directory('${root.path}${Platform.pathSeparator}$scoreId');
+      // Delete first so a swiped-away app still wiped; the wait then
+      // removes what a running download recreated.
       if (await dir.exists()) await dir.delete(recursive: true);
+      final running = _running[scoreId];
+      if (running != null) {
+        await running;
+        if (await dir.exists()) await dir.delete(recursive: true);
+      }
     } on Object catch (e) {
       debugPrint('Local results: delete of $scoreId failed: $e');
     }
@@ -265,9 +273,15 @@ class LocalResultsStore {
   /// Removes every score's folder (account deleted). Never throws.
   Future<void> deleteAll() async {
     try {
-      await Future.wait(_running.values);
       final root = await _rootProvider();
+      final running = _running.values.toList();
+      // Delete first so a swiped-away app still wiped; the wait then
+      // removes what a running download recreated.
       if (await root.exists()) await root.delete(recursive: true);
+      if (running.isNotEmpty) {
+        await Future.wait(running);
+        if (await root.exists()) await root.delete(recursive: true);
+      }
     } on Object catch (e) {
       debugPrint('Local results: wipe failed: $e');
     }

@@ -36,4 +36,16 @@ void main() {
     await throttle.reset(email);
     expect(await throttle.remaining(email), Duration.zero);
   });
+
+  test('clearAll also removes legacy failure keys', () async {
+    SharedPreferences.setMockInitialValues({
+      'login_throttle.failures.a@b.c': 3,
+      'login_throttle.last.a@b.c': 1,
+      'login_throttle.until.a@b.c': 2,
+      'other': 1,
+    });
+    await LoginThrottle().clearAll();
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getKeys(), {'other'});
+  });
 }
