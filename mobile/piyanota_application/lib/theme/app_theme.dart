@@ -7,6 +7,10 @@ import '../models/voice_part.dart';
 /// screenshots by eye, not an exact eyedropper pick — swap for exact hex
 /// once available (see .claude/agents/frontend-piyanota.md).
 class AppTheme {
+  /// How long every snackbar stays up. SnackBarThemeData has no duration field, so
+  /// each SnackBar passes this; test/snack_bar_duration_test.dart guards the call sites.
+  static const Duration snackBarDuration = Duration(seconds: 10);
+
   AppTheme._();
 
   // Brand gradient — confirmed exact values (see PIYA-201 Figma export).

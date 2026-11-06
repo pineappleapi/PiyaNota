@@ -344,6 +344,7 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
       ..showSnackBar(
         SnackBar(
           content: Text(message),
+          duration: AppTheme.snackBarDuration,
           action: action,
           behavior: SnackBarBehavior.floating,
           // Floats above the custom nav bar, which lives in the body and so

@@ -556,6 +556,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     final messenger = ScaffoldMessenger.of(context)..hideCurrentSnackBar();
     final snack = messenger.showSnackBar(
       SnackBar(
+        duration: AppTheme.snackBarDuration,
         content: Text(
           item is PdfDocument
               ? CaptureMessages.pdfRemoved
@@ -866,7 +867,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message)));
+      ..showSnackBar(
+        SnackBar(content: Text(message), duration: AppTheme.snackBarDuration),
+      );
   }
 
   Future<void> _explain(String body) => showDialog<void>(

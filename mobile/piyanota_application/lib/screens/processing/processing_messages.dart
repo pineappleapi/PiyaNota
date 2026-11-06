@@ -79,7 +79,7 @@ class ProcessingMessages {
       'again.';
   static const String alreadyFinished =
       'This scan finished before it could be cancelled.';
-  static const String scanCancelled = 'Scan cancelled.';
+  static const String scanCancelled = 'Conversion cancelled.';
 
   // Completion without a score id (contract gap; see ProcessingStatus).
   static const String readyInLibrary =

@@ -43,11 +43,11 @@ void main() {
     await settle(tester);
   }
 
-  /// Taps the slider where [bpm] sits on its 30-240 track.
+  /// Taps the slider where [bpm] sits on its 30-180 track.
   Future<void> tapBpm(WidgetTester tester, int bpm) async {
     final rect = tester.getRect(slider);
     const inset = 18.0;
-    final fraction = (bpm - 30) / 210;
+    final fraction = (bpm - 30) / 150;
     await tester.tapAt(
       Offset(
         rect.left + inset + (rect.width - 2 * inset) * fraction,
@@ -70,8 +70,8 @@ void main() {
       expect(bpmText(tester), '♩ = 90');
       final widget = tester.widget<Slider>(slider);
       expect(widget.min, 30);
-      expect(widget.max, 240);
-      expect(widget.divisions, 210);
+      expect(widget.max, 180);
+      expect(widget.divisions, 150);
       expect(harness.engine.speed, 1);
     });
 
@@ -120,7 +120,7 @@ void main() {
       expect(harness.engine.seeks, hasLength(seeksBefore));
     });
 
-    testWidgets('the slider is whole BPM, clamped to 30-240', (tester) async {
+    testWidgets('the slider is whole BPM, clamped to 30-180', (tester) async {
       final harness = ready();
       await pumpPlayback(tester, harness);
       final c = controller(tester);
@@ -132,8 +132,8 @@ void main() {
       c
         ..setBpm(999)
         ..commitBpm();
-      expect(c.state.chosenBpm, 240);
-      expect(harness.engine.speed, 240 / 90);
+      expect(c.state.chosenBpm, 180);
+      expect(harness.engine.speed, 180 / 90);
     });
   });
 

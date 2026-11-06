@@ -47,8 +47,8 @@ class ScanToastHost extends ConsumerStatefulWidget {
   final ScanRouteStack routes;
   final Widget child;
 
-  /// Long enough to read and reach the button; the bell keeps the item.
-  static const Duration showFor = Duration(seconds: 4);
+  /// Same 10 s as snackbars (user decision 2026-11-07); the bell keeps the item.
+  static const Duration showFor = Duration(seconds: 10);
 
   @override
   ConsumerState<ScanToastHost> createState() => _ScanToastHostState();

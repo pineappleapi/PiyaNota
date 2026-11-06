@@ -70,7 +70,12 @@ class _EditPageScreenState extends ConsumerState<EditPageScreen> {
       setState(() => _saving = false);
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text(CaptureMessages.editFailed)));
+      ).showSnackBar(
+        SnackBar(
+          content: const Text(CaptureMessages.editFailed),
+          duration: AppTheme.snackBarDuration,
+        ),
+      );
     }
   }
 

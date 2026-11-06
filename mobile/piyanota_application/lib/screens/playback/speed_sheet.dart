@@ -8,7 +8,7 @@ import 'playback_messages.dart';
 import 'sheet_parts.dart';
 
 /// Playback Speed (PIYA-210): the Metronome Click on/off toggle and a BPM
-/// slider. The slider is in BPM (30-240) and opens at the score's
+/// slider. The slider is in BPM (30-180) and opens at the score's
 /// `tempoBpm`; the audio plays at rate = BPM / tempoBpm through the
 /// engine's pitch-preserving speed (FR-9, PIYA-103 AC8). State lives in the
 /// Playback controller, so it lasts for the session and resets on reopen.
@@ -126,7 +126,10 @@ class PlaybackSpeedSheet extends ConsumerWidget {
             child: SheetSliderTheme(
               child: Slider(
                 key: const ValueKey('speed-slider'),
-                value: bpm.toDouble(),
+                // Clamped: scores rendered above the 180 cap open at their own tempo.
+                value: bpm
+                    .clamp(ScoreDetails.minTempo, ScoreDetails.maxTempo)
+                    .toDouble(),
                 min: ScoreDetails.minTempo.toDouble(),
                 max: ScoreDetails.maxTempo.toDouble(),
                 divisions: ScoreDetails.maxTempo - ScoreDetails.minTempo,

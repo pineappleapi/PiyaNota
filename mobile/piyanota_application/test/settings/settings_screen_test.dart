@@ -506,12 +506,12 @@ void main() {
       expect(harness.tempoPrefs.saves, [89]);
     });
 
-    testWidgets('holding + repeats and stops at 240; one write on Save', (
+    testWidgets('holding + repeats and stops at 180; one write on Save', (
       tester,
     ) async {
       final harness = _Harness(
         session: _liveSession(),
-        prefs: {SettingsPrefsService.defaultTempoKey: 236},
+        prefs: {SettingsPrefsService.defaultTempoKey: 176},
       );
       await harness.pump(tester);
       await _scrollTo(tester, _tempoValue);
@@ -521,7 +521,7 @@ void main() {
       await tester.pump(const Duration(seconds: 2));
       await gesture.up();
       await tester.pumpAndSettle();
-      expect(find.text(SettingsMessages.tempoValue(240)), findsOneWidget);
+      expect(find.text(SettingsMessages.tempoValue(180)), findsOneWidget);
       expect(harness.tempoPrefs.saves, isEmpty);
       await _save(tester);
       expect(
@@ -547,7 +547,7 @@ void main() {
 
       harness.tempoPrefs.fail = false;
       // The snackbar floats over the button until it times out.
-      await tester.pump(const Duration(seconds: 5));
+      await tester.pump(const Duration(seconds: 11));
       await tester.pumpAndSettle();
       await _save(tester);
       expect(await SettingsPrefsService().getDefaultTempo(), 91);

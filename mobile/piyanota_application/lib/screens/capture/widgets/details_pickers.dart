@@ -278,7 +278,11 @@ class _TempoPicker extends StatefulWidget {
 }
 
 class _TempoPickerState extends State<_TempoPicker> {
-  late int _bpm = widget.initial;
+  // Clamped: a retake can seed a tempo above the UI cap, and Slider asserts its range.
+  late int _bpm = widget.initial.clamp(
+    ScoreDetails.minTempo,
+    ScoreDetails.maxTempo,
+  );
 
   static const int _step = 1;
 

@@ -158,7 +158,7 @@ class PlaybackState {
   final bool metronomeOn;
   final ClickStatus clickStatus;
 
-  /// The Speed modal's BPM (PIYA-210), 30 to 240; null until loaded. Read
+  /// The Speed modal's BPM (PIYA-210), 30 to 180; null until loaded. Read
   /// it through [chosenBpm].
   final int? bpm;
   final bool playing;
@@ -881,7 +881,7 @@ class PlaybackController extends Notifier<PlaybackState> {
     _applyGains();
   }
 
-  /// PIYA-210: the Speed slider, in whole BPM from 30 to 240. Moves the
+  /// PIYA-210: the Speed slider, in whole BPM from 30 to 180. Moves the
   /// shown value only; the engine gets the speed when the drag ends, in
   /// [commitBpm] (F8a). The engine keeps pitch (FR-9). The indicator reads
   /// the engine's audio position, so it needs no change when the speed

@@ -202,7 +202,7 @@ class ScoreResult {
   /// PIYA-103 AC8: the tempo the tracks were rendered at, in quarter notes
   /// per minute (PIYA-101 AC8). The Speed modal (PIYA-210) plays at
   /// chosen BPM / this, and the metronome click is laid out on it. Absent,
-  /// not an int, or outside [ScoreDetails.minTempo]–[ScoreDetails.maxTempo]
+  /// not an int, or outside [ScoreDetails.minTempo]–[ScoreDetails.maxRenderedTempo]
   /// reads as [ScoreDetails.defaultTempo] (90), the value the server
   /// renders at when none was submitted.
   final int tempoBpm;
@@ -306,7 +306,7 @@ class ScoreResult {
     final tempoKnown =
         tempo is int &&
         tempo >= ScoreDetails.minTempo &&
-        tempo <= ScoreDetails.maxTempo;
+        tempo <= ScoreDetails.maxRenderedTempo;
     return ScoreResult(
       scoreId: scoreId,
       jobId: jobId is String ? jobId : null,

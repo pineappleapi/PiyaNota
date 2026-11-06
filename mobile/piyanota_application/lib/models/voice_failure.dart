@@ -76,7 +76,7 @@ ScoreDetails? scoreDetailsFromJson(Map<String, dynamic> json) {
     tempoBpm:
         tempo is int &&
             tempo >= ScoreDetails.minTempo &&
-            tempo <= ScoreDetails.maxTempo
+            tempo <= ScoreDetails.maxRenderedTempo
         ? tempo
         : null,
   );

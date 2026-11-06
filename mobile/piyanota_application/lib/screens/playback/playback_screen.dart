@@ -399,7 +399,10 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
-          const SnackBar(content: Text(RephotographMessages.noJob)),
+          SnackBar(
+            content: const Text(RephotographMessages.noJob),
+            duration: AppTheme.snackBarDuration,
+          ),
         );
       return;
     }
@@ -427,7 +430,10 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
-          const SnackBar(content: Text(PlaybackMessages.keepOneVoice)),
+          SnackBar(
+            content: const Text(PlaybackMessages.keepOneVoice),
+            duration: AppTheme.snackBarDuration,
+          ),
         );
     }
   }

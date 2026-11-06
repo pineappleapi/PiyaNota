@@ -233,6 +233,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       ..showSnackBar(
         SnackBar(
           content: Text(message),
+          duration: AppTheme.snackBarDuration,
           behavior: SnackBarBehavior.floating,
           // Above the custom bar, which Scaffold doesn't know about.
           margin: EdgeInsets.fromLTRB(

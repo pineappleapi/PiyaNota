@@ -6,7 +6,7 @@ import '../../../models/score_details.dart';
 import '../../../theme/app_theme.dart';
 import '../settings_messages.dart';
 
-/// PIYA-212 AC8: − [♩ = 90] +, clamped to 30–240. Holding a button keeps
+/// PIYA-212 AC8: − [♩ = 90] +, clamped to 30–180. Holding a button keeps
 /// stepping, so 90 → 200 is one press rather than 110 taps. Exposed to
 /// screen readers as one adjustable value (swipe up/down), not two
 /// unrelated buttons.

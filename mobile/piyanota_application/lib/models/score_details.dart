@@ -34,7 +34,13 @@ class ScoreDetails {
   /// so the limit is checked with `runes.length` (see [codePointLength]).
   static const int maxTextLength = 120;
   static const int minTempo = 30;
-  static const int maxTempo = 240;
+  /// UI cap for the Speed slider, pickers and settings (halved from 240, 2026-11-07).
+  static const int maxTempo = 180;
+
+  /// Highest tempo the server accepts and so the highest a score can have been rendered at.
+  /// Kept apart from [maxTempo] so an older score rendered at 181-240 stays "known" and plays
+  /// at the right speed ratio instead of falling back to the assumed 90.
+  static const int maxRenderedTempo = 240;
   static const int defaultTempo = 90;
 
   static int codePointLength(String text) => text.runes.length;
