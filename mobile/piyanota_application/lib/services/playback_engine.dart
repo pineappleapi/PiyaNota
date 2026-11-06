@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:audio_session/audio_session.dart';
 import 'package:clock/clock.dart';
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
@@ -98,7 +99,7 @@ abstract interface class PlaybackEngine {
   Future<void> detachClick();
 
   /// 0 (silent) to 1 (full); the click's gain after the Speed toggle and
-  /// the Mixer's Mute and Solo (see the controller). Remembered if no
+  /// the Mixer's Mute (see the controller). Remembered if no
   /// click is attached yet.
   Future<void> setClickVolume(double volume);
 
@@ -135,32 +136,56 @@ abstract interface class PlaybackEngine {
 /// correction like a voice, but is never the master, never counts toward
 /// [duration] or a fatal failure, and reports its own failures on
 /// [clickFailures] instead of [failures].
+///
+/// One transport path (F8a): play, seek and speed changes all go through
+/// [_reconcile], which pauses every player, applies the latest wanted
+/// position and speed to all of them while they are stopped, and starts
+/// them together only if nothing newer arrived meanwhile. No player runs
+/// while another is being moved, so they start in step.
+///
+/// Audio focus is the engine's, not each player's: a player handling its
+/// own interruptions pauses and resumes alone, out of step with the rest.
+/// So players are made with `handleInterruptions: false`, and the
+/// [AudioSession]'s interruption and becoming-noisy events pause the whole
+/// engine. The engine also holds the session (focus) itself: active on
+/// play, released on pause and dispose. Players are made with
+/// `handleAudioSessionActivation: false` so each one's play doesn't add
+/// its own activation round-trip, which would stagger the voices' starts.
 class JustAudioPlaybackEngine implements PlaybackEngine {
-  JustAudioPlaybackEngine({AudioPlayer Function()? playerFactory})
-    : _playerFactory = playerFactory ?? AudioPlayer.new;
+  /// [audioSession] is null in tests; then focus events are not watched.
+  JustAudioPlaybackEngine({
+    AudioPlayer Function()? playerFactory,
+    this._audioSession,
+  }) : _playerFactory = playerFactory ?? _newPlayer;
+
+  static AudioPlayer _newPlayer() => AudioPlayer(
+    handleInterruptions: false,
+    handleAudioSessionActivation: false,
+  );
 
   /// A follower read further than this from the master on [resyncStrikes]
   /// checks is re-seeked. The checks need not be consecutive: they count
   /// from when the follower was last within [inStepTolerance], and readings
-  /// in between leave the count alone. ExoPlayer's position reports jitter
-  /// by a few tens of ms, so a lower trigger re-seeks voices that are in
-  /// fact in step, and each re-seek is itself an audible glitch.
+  /// in between leave the count alone.
   ///
-  /// So a follower that sits steadily between [inStepTolerance] and this
-  /// is never corrected: that offset is accepted as the price of not
-  /// glitching on jitter.
-  static const Duration resyncTrigger = Duration(milliseconds: 100);
+  /// 25 ms (F8a, was 100 ms): about where ensemble smear turns audible.
+  /// ExoPlayer's position reports jitter by a few tens of ms, so on a real
+  /// phone this may re-seek voices that are in fact in step (each re-seek
+  /// is a small glitch); the F8 phone drift measurement decides whether it
+  /// holds. A follower that sits steadily between [inStepTolerance] and
+  /// this is never corrected.
+  static const Duration resyncTrigger = Duration(milliseconds: 25);
 
   /// Back under this, a follower counts as in step again and its strikes
   /// reset. Between this and [resyncTrigger] the strikes stay as they are
   /// (hysteresis), so a voice hovering near the trigger isn't re-seeked
   /// on every check.
-  static const Duration inStepTolerance = Duration(milliseconds: 40);
+  static const Duration inStepTolerance = Duration(milliseconds: 15);
 
   /// Over-trigger readings (see [resyncTrigger]) before a re-seek, so one
   /// stale position report doesn't cause one.
   static const int resyncStrikes = 2;
-  static const Duration driftCheckInterval = Duration(milliseconds: 500);
+  static const Duration driftCheckInterval = Duration(milliseconds: 250);
 
   /// Upper bound on the measured seek latency added to a re-seek target
   /// (the master keeps moving while the follower seeks). Keeps one slow
@@ -182,6 +207,7 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
   static const int clickSettleRounds = 3;
 
   final AudioPlayer Function() _playerFactory;
+  final Future<AudioSession>? _audioSession;
   final Map<VoicePart, AudioPlayer> _players = {};
   final Set<VoicePart> _dead = {};
 
@@ -206,16 +232,34 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
   double _clickVolume = 1;
   final StreamController<Object> _clickFailures = StreamController.broadcast();
 
-  /// The master's playing/completion listeners, moved when it changes.
+  /// The master's completion listener, moved when it changes.
   final List<StreamSubscription<Object?>> _masterSubscriptions = [];
   VoicePart? _masterVoice;
   Timer? _driftTimer;
   bool _disposed = false;
+
+  /// The wanted speed; [_appliedSpeed] is what [_reconcile] last gave the
+  /// transported players.
   double _speed = 1;
+  double _appliedSpeed = 1;
   Duration _seekLatency = Duration.zero;
 
-  /// Bumped by every play and pause. A play that is still aligning the
-  /// followers when a pause (or a newer play) arrives must not start them.
+  /// What the user asked for, which is what [playing] reports: a transport
+  /// step pauses every player for a moment, and that must not show.
+  bool _wantPlaying = false;
+
+  /// A seek [_reconcile] has not applied yet. [position] reports it, so
+  /// rapid skips add up from where the last one aimed.
+  Duration? _seekTarget;
+
+  /// Set while [_reconcile]'s loop runs; completes once it has settled.
+  Completer<void>? _settled;
+
+  /// A play, seek or speed change arrived; the loop goes round again.
+  bool _dirty = false;
+
+  /// Bumped by every transport call, so [attachClick] can tell one landed
+  /// while its own catch-up seek was in flight.
   int _transport = 0;
 
   /// Bumped by every [seek], so [attachClick] can tell one landed while
@@ -302,6 +346,30 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
       );
     }
     _attachMaster(master);
+    if (_audioSession case final session?) unawaited(_watchFocus(session));
+  }
+
+  /// Music usage; focus loss (a call, another app) or unplugged headphones
+  /// pause every player at once.
+  Future<void> _watchFocus(Future<AudioSession> pending) async {
+    try {
+      final session = await pending;
+      if (_disposed) return;
+      _subscriptions
+        ..add(
+          session.interruptionEventStream.listen((event) {
+            // shortcut: no auto-resume when the interruption ends (the user
+            // taps Play); add one if testers ask for it after calls.
+            if (event.begin && event.type != AudioInterruptionType.duck) {
+              unawaited(pause());
+            }
+          }),
+        )
+        ..add(session.becomingNoisyEventStream.listen((_) => pause()));
+      await session.configure(const AudioSessionConfiguration.music());
+    } on Object catch (e) {
+      debugPrint('Playback: audio session not set up: $e');
+    }
   }
 
   /// The longest live track (ties in S/A/T/B order), or null if none is
@@ -328,28 +396,26 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
     _masterSubscriptions.clear();
     _masterVoice = voice;
     final master = _players[voice]!;
-    // Each listener checks it still belongs to the master, so a late event
-    // from a replaced master (its own pause as it failed) is ignored.
-    _masterSubscriptions
-      ..add(
-        master.playingStream.listen((playing) {
-          if (voice == _masterVoice) _onPlayingChanged(playing);
-        }),
-      )
-      ..add(
-        master.processingStateStream.listen((state) {
-          if (voice == _masterVoice && state == ProcessingState.completed) {
-            unawaited(_onCompleted());
-          }
-        }),
-      );
+    // The listener checks it still belongs to the master, so a late event
+    // from a replaced master is ignored.
+    _masterSubscriptions.add(
+      master.processingStateStream.listen((state) {
+        if (voice == _masterVoice && state == ProcessingState.completed) {
+          unawaited(_onCompleted());
+        }
+      }),
+    );
   }
 
   static Future<void> _quietly(Future<void> call) =>
       call.catchError((Object e) => debugPrint('Playback: cleanup: $e'));
 
   @override
-  Duration get position => _master?.position ?? Duration.zero;
+  Duration get position {
+    final master = _master;
+    if (master == null) return Duration.zero;
+    return _seekTarget ?? master.position;
+  }
 
   @override
   Duration get duration => _master?.duration ?? Duration.zero;
@@ -367,7 +433,7 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
   }
 
   @override
-  bool get playing => _master?.playing ?? false;
+  bool get playing => _wantPlaying;
 
   @override
   Stream<bool> get playingChanges => _playing.stream;
@@ -377,38 +443,111 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
 
   @override
   Future<void> play() async {
-    final master = _master;
-    if (_disposed || master == null || master.playing) return;
-    final ticket = ++_transport;
+    if (_disposed || _master == null || _wantPlaying) return;
     if (position >= duration && duration > Duration.zero) {
-      await seek(Duration.zero);
+      _seekGeneration++;
+      _seekTarget = Duration.zero;
     }
-    await _alignToMaster();
-    // A pause (or another play) arrived while the followers were seeking.
-    if (_disposed || ticket != _transport) return;
-    // just_audio's play() completes only when playback stops again, so it
-    // must not be awaited.
-    for (final entry in _transported) {
-      unawaited(_guard(entry.key, entry.value.play()));
+    _setPlaying(true);
+    if (!await _setActive(true)) {
+      debugPrint('Playback: audio focus denied; not starting');
+      _setPlaying(false);
+      return;
+    }
+    // A pause or dispose while focus was requested wins.
+    if (_disposed || !_wantPlaying) return;
+    await _reconcile();
+  }
+
+  /// Requests (or releases) audio focus. True when there is no session
+  /// (tests) or the call throws: a broken session shouldn't block playback.
+  Future<bool> _setActive(bool active) async {
+    final pending = _audioSession;
+    if (pending == null) return true;
+    try {
+      return await (await pending).setActive(active);
+    } on Object catch (e) {
+      debugPrint('Playback: audio session setActive($active) failed: $e');
+      return true;
     }
   }
 
+  /// Immediate, not a [_reconcile] step: a step in flight has every player
+  /// paused already, and won't start them once [_wantPlaying] is false.
   @override
   Future<void> pause() async {
     _transport++;
-    await Future.wait([
-      for (final entry in _transported) _guard(entry.key, entry.value.pause()),
-    ]);
+    _setPlaying(false);
+    unawaited(_setActive(false));
+    await _pauseAll();
   }
 
   @override
   Future<void> seek(Duration position) async {
     _seekGeneration++;
+    _seekTarget = position;
+    await _reconcile();
+  }
+
+  Future<void> _pauseAll() => Future.wait([
+    for (final entry in _transported) _guard(entry.key, entry.value.pause()),
+  ]);
+
+  /// The one transport path. Until nothing new has arrived: pause every
+  /// player, give them all the wanted speed and position while stopped,
+  /// then start them together if playing is still wanted. A call made
+  /// while the loop runs only marks it dirty and shares its completion,
+  /// so a stale step never starts players and the latest state wins.
+  Future<void> _reconcile() {
+    _transport++;
+    _dirty = true;
     _strikes.clear();
-    await Future.wait([
-      for (final entry in _transported)
-        _guard(entry.key, entry.value.seek(position)),
-    ]);
+    if (_settled case final running?) return running.future;
+    final settled = _settled = Completer<void>();
+    unawaited(_runSteps(settled));
+    return settled.future;
+  }
+
+  Future<void> _runSteps(Completer<void> settled) async {
+    try {
+      while (_dirty && !_disposed) {
+        _dirty = false;
+        await _pauseAll();
+        if (_dirty || _disposed) continue;
+        final master = _master;
+        if (master == null) break;
+        final speed = _speed;
+        if (speed != _appliedSpeed) {
+          await Future.wait([
+            for (final entry in _transported)
+              _guard(entry.key, entry.value.setSpeed(speed)),
+          ]);
+          _appliedSpeed = speed;
+          if (_dirty || _disposed) continue;
+        }
+        // Paused, so the master's position is exact.
+        final seeks = _seekGeneration;
+        final seekAll = _seekTarget != null;
+        final target = _seekTarget ?? master.position;
+        await Future.wait([
+          for (final entry in _transported)
+            if (seekAll || !identical(entry.value, master))
+              _guard(entry.key, entry.value.seek(target)),
+        ]);
+        if (seeks == _seekGeneration) _seekTarget = null;
+        if (_dirty || _disposed || !_wantPlaying) continue;
+        // just_audio's play() completes only when playback stops again, so
+        // it must not be awaited.
+        for (final entry in _transported) {
+          unawaited(_guard(entry.key, entry.value.play()));
+        }
+      }
+    } finally {
+      // Nothing awaits between the loop's last check and here, so a call
+      // that set _dirty is either seen by the loop or starts a new one.
+      _settled = null;
+      settled.complete();
+    }
   }
 
   @override
@@ -418,13 +557,13 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
     await _guard(voice, player.setVolume(volume.clamp(0.0, 1.0)));
   }
 
+  /// One aligned step (see [_reconcile]): changing the speed of running
+  /// players one after another would leave them out of step.
   @override
   Future<void> setSpeed(double speed) async {
+    if (speed == _speed) return;
     _speed = speed;
-    await Future.wait([
-      for (final entry in _transported)
-        _guard(entry.key, entry.value.setSpeed(speed)),
-    ]);
+    await _reconcile();
   }
 
   @override
@@ -467,7 +606,8 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
       final transport = _transport;
       final wasPlaying = master.playing;
       // Playing, the master moves on while the seek lands: aim ahead.
-      final target = wasPlaying ? master.position + _seekLead : master.position;
+      // [position], not the master's: it includes a seek still landing.
+      final target = wasPlaying ? position + _seekLead : position;
       final watch = clock.stopwatch()..start();
       if (!await _guard(key, player.seek(target))) return false;
       // A completed seek is a latency sample like a resync's, and the
@@ -552,6 +692,7 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
     _disposed = true;
     _transport++;
     _driftTimer?.cancel();
+    unawaited(_setActive(false));
     // Not awaited: the listeners stop at once, and the players must be
     // released even if a source's cancel is slow to settle.
     for (final subscription in [..._subscriptions, ..._masterSubscriptions]) {
@@ -603,8 +744,7 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
         // Nothing left to play.
         fatal = true;
         _transport++;
-        _driftTimer?.cancel();
-        _playing.add(false);
+        _setPlaying(false);
       } else {
         // The others carry on; the longest of them becomes the clock.
         _attachMaster(next);
@@ -620,9 +760,13 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
     _failures.add(PlaybackFailure(voice, error, fatal: fatal));
   }
 
-  void _onPlayingChanged(bool playing) {
-    if (_disposed) return;
+  /// The wanted state changed: tell listeners, and run the drift check only
+  /// while playing is wanted.
+  void _setPlaying(bool playing) {
+    if (_disposed || playing == _wantPlaying) return;
+    _wantPlaying = playing;
     _driftTimer?.cancel();
+    _driftTimer = null;
     _strikes.clear();
     if (playing) {
       _driftTimer = Timer.periodic(driftCheckInterval, (_) => _resync());
@@ -631,28 +775,23 @@ class JustAudioPlaybackEngine implements PlaybackEngine {
   }
 
   /// The master reached the end: stop everyone there, so the next play
-  /// starts again from the top (see [play]).
+  /// starts again from the top (see [play]). A completion seen while a
+  /// transport step is moving the players is stale (the step re-seeks
+  /// them), so it is ignored.
+  ///
+  /// Also stale: one arriving while paused (nothing to stop), or late,
+  /// after a step already moved the master back from the end.
   Future<void> _onCompleted() async {
-    if (_disposed) return;
+    if (_disposed || _settled != null || !_wantPlaying) return;
+    if (_master case final master? when master.position < duration) return;
     await pause();
-    if (!_disposed) _playing.add(false);
-  }
-
-  /// Before play, while the master is paused, so its position is exact.
-  Future<void> _alignToMaster() async {
-    final master = _master;
-    if (master == null) return;
-    final target = master.position;
-    await Future.wait([
-      for (final entry in _transported)
-        if (!identical(entry.value, master))
-          _guard(entry.key, entry.value.seek(target)),
-    ]);
   }
 
   void _resync() {
     final master = _master;
-    if (_disposed || master == null || !master.playing) return;
+    if (_disposed || _settled != null || master == null || !master.playing) {
+      return;
+    }
     final now = master.position;
     for (final entry in _transported) {
       final voice = entry.key;

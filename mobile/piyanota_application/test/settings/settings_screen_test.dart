@@ -1,5 +1,4 @@
-import 'dart:async';
-
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,11 +14,15 @@ import 'package:piyanota_application/screens/auth/auth_messages.dart';
 import 'package:piyanota_application/screens/playback/playback_messages.dart';
 import 'package:piyanota_application/screens/settings/settings_messages.dart';
 import 'package:piyanota_application/screens/settings/settings_screen.dart';
+import 'package:piyanota_application/screens/library/widgets/library_header.dart';
+import 'package:piyanota_application/screens/scan_status/scan_bell.dart';
 import 'package:piyanota_application/services/auth_api.dart';
+import 'package:piyanota_application/services/local_results_store.dart';
 import 'package:piyanota_application/services/onboarding_prefs_service.dart';
 import 'package:piyanota_application/services/session_storage.dart';
 import 'package:piyanota_application/services/settings_prefs_service.dart';
 import 'package:piyanota_application/state/auth_providers.dart';
+import 'package:piyanota_application/state/playback_providers.dart';
 import 'package:piyanota_application/state/settings_providers.dart';
 
 import '../auth/auth_test_harness.dart';
@@ -39,27 +42,30 @@ AuthSession _liveSession() => AuthSession(
 );
 
 /// Records every tempo save, and can fail them, so tests can count writes
-/// per gesture and check the rollback.
+/// and check that a failed save leaves the screen unsaved.
 class _RecordingTempoPrefs extends SettingsPrefsService {
   final List<int> saves = [];
   bool fail = false;
 
-  /// When set, each save waits on its own entry in [held]: completing it
-  /// with true lets the save through, false fails it.
-  bool hold = false;
-  final List<Completer<bool>> held = [];
-
   @override
   Future<void> setDefaultTempo(int bpm) async {
     saves.add(bpm);
-    if (hold) {
-      final gate = Completer<bool>();
-      held.add(gate);
-      if (!await gate.future) throw PlatformException(code: 'disk-full');
-    }
     if (fail) throw PlatformException(code: 'disk-full');
     await super.setDefaultTempo(bpm);
   }
+}
+
+class _RecordingResultsStore extends LocalResultsStore {
+  _RecordingResultsStore()
+    : super(
+        rootProvider: () async => throw UnimplementedError(),
+        downloader: DioFileDownloader(Dio()),
+      );
+
+  int deleteAllCalls = 0;
+
+  @override
+  Future<void> deleteAll() async => deleteAllCalls++;
 }
 
 class _Harness {
@@ -75,6 +81,7 @@ class _Harness {
 
   final AuthSession? session;
   final _RecordingTempoPrefs tempoPrefs = _RecordingTempoPrefs();
+  final _RecordingResultsStore resultsStore = _RecordingResultsStore();
 
   /// Null makes the version lookup fail.
   final String? version;
@@ -103,6 +110,7 @@ class _Harness {
       ProviderScope(
         overrides: [
           authApiProvider.overrideWithValue(api),
+          localResultsStoreProvider.overrideWithValue(resultsStore),
           sessionStorageProvider.overrideWithValue(sessionStorage),
           settingsPrefsServiceProvider.overrideWithValue(tempoPrefs),
           appVersionProvider.overrideWith(
@@ -174,6 +182,24 @@ Future<void> _scrollTo(
     );
   }
   await Scrollable.ensureVisible(tester.element(finder.first), alignment: 0.5);
+  await tester.pumpAndSettle();
+}
+
+Finder get _saveChanges => find.byKey(const ValueKey('settings-save'));
+
+Future<void> _save(WidgetTester tester) async {
+  await _scrollTo(tester, _saveChanges);
+  await tester.tap(_saveChanges);
+  await tester.pumpAndSettle();
+}
+
+Finder get _prompt => find.byType(AlertDialog);
+Finder _promptButton(String label) =>
+    find.descendant(of: _prompt, matching: find.text(label));
+
+/// Makes Settings dirty without saving.
+Future<void> _dirtyVoice(WidgetTester tester) async {
+  await tester.tap(find.text(VoicePart.bass.label));
   await tester.pumpAndSettle();
 }
 
@@ -325,6 +351,12 @@ void main() {
 
       await tester.tap(find.text(VoicePart.bass.label));
       await tester.pumpAndSettle();
+      // Nothing is stored until Save changes.
+      expect(
+        await OnboardingPrefsService().getDefaultVoicePart(),
+        VoicePart.alto,
+      );
+      await _save(tester);
       expect(
         await OnboardingPrefsService().getDefaultVoicePart(),
         VoicePart.bass,
@@ -341,6 +373,29 @@ void main() {
   });
 
   group('All voices (PIYA-212-V2.1)', () {
+    testWidgets('F6a: one voice per line, in order, same left edge', (
+      tester,
+    ) async {
+      await _Harness(session: _liveSession()).pump(tester);
+      final labels = [
+        SettingsMessages.allVoices,
+        for (final v in VoicePart.values) v.label,
+      ];
+      final rects = [for (final l in labels) tester.getRect(find.text(l))];
+      for (var i = 1; i < rects.length; i++) {
+        expect(rects[i].top, greaterThan(rects[i - 1].bottom));
+      }
+      final pills = [
+        for (final l in labels)
+          tester.getRect(
+            find
+                .ancestor(of: find.text(l), matching: find.byType(InkWell))
+                .first,
+          ),
+      ];
+      expect(pills.map((r) => r.left).toSet(), hasLength(1));
+    });
+
     testWidgets('AC1: offered next to the four voices', (tester) async {
       await _Harness(session: _liveSession()).pump(tester);
       expect(find.text(SettingsMessages.allVoices), findsOneWidget);
@@ -376,6 +431,7 @@ void main() {
       ).pump(tester);
       await tester.tap(find.text(SettingsMessages.allVoices));
       await tester.pumpAndSettle();
+      await _save(tester);
 
       expect(await OnboardingPrefsService().getDefaultVoicePart(), isNull);
       expect(
@@ -400,6 +456,7 @@ void main() {
       await _Harness(session: _liveSession()).pump(tester);
       await tester.tap(find.text(VoicePart.tenor.label));
       await tester.pumpAndSettle();
+      await _save(tester);
       expect(
         await OnboardingPrefsService().getDefaultVoicePart(),
         VoicePart.tenor,
@@ -426,7 +483,7 @@ void main() {
   });
 
   group('default tempo (AC8)', () {
-    testWidgets('starts at 90 and steps by one, saving each tap', (
+    testWidgets('starts at 90, steps by one, and saves only on Save changes', (
       tester,
     ) async {
       final harness = _Harness(session: _liveSession());
@@ -437,16 +494,19 @@ void main() {
       await tester.tap(find.byIcon(Icons.add_rounded));
       await tester.pumpAndSettle();
       expect(find.text(SettingsMessages.tempoValue(91)), findsOneWidget);
-      expect(await SettingsPrefsService().getDefaultTempo(), 91);
+      expect(harness.tempoPrefs.saves, isEmpty);
 
       await tester.tap(find.byIcon(Icons.remove_rounded));
       await tester.tap(find.byIcon(Icons.remove_rounded));
       await tester.pumpAndSettle();
+      expect(harness.tempoPrefs.saves, isEmpty);
+
+      await _save(tester);
       expect(await SettingsPrefsService().getDefaultTempo(), 89);
-      expect(harness.tempoPrefs.saves, [91, 90, 89]);
+      expect(harness.tempoPrefs.saves, [89]);
     });
 
-    testWidgets('holding + repeats, stops at 240, and saves once on release', (
+    testWidgets('holding + repeats and stops at 240; one write on Save', (
       tester,
     ) async {
       final harness = _Harness(
@@ -462,6 +522,8 @@ void main() {
       await gesture.up();
       await tester.pumpAndSettle();
       expect(find.text(SettingsMessages.tempoValue(240)), findsOneWidget);
+      expect(harness.tempoPrefs.saves, isEmpty);
+      await _save(tester);
       expect(
         await SettingsPrefsService().getDefaultTempo(),
         ScoreDetails.maxTempo,
@@ -469,114 +531,27 @@ void main() {
       expect(harness.tempoPrefs.saves, [ScoreDetails.maxTempo]);
     });
 
-    testWidgets('a long hold saves nothing until the finger lifts', (
+    testWidgets('a failed save keeps the draft, says so, and can retry', (
       tester,
     ) async {
       final harness = _Harness(session: _liveSession());
       await harness.pump(tester);
       await _scrollTo(tester, _tempoValue);
-      final gesture = await tester.startGesture(
-        tester.getCenter(find.byIcon(Icons.add_rounded)),
-      );
-      await tester.pump(const Duration(seconds: 2));
-      expect(harness.tempoPrefs.saves, isEmpty);
-      final shown = int.parse(
-        RegExp(r'\d+').firstMatch(tester.widget<Text>(_tempoValue).data!)![0]!,
-      );
-      expect(shown, greaterThan(100));
-
-      await gesture.up();
+      await tester.tap(find.byIcon(Icons.add_rounded));
       await tester.pumpAndSettle();
-      expect(harness.tempoPrefs.saves, [shown]);
-    });
-
-    testWidgets('a failed save after a hold rolls back to the saved tempo', (
-      tester,
-    ) async {
-      final harness = _Harness(session: _liveSession());
-      await harness.pump(tester);
-      await _scrollTo(tester, _tempoValue);
       harness.tempoPrefs.fail = true;
-      final gesture = await tester.startGesture(
-        tester.getCenter(find.byIcon(Icons.add_rounded)),
-      );
-      await tester.pump(const Duration(seconds: 1));
-      await gesture.up();
-      await tester.pumpAndSettle();
-
-      expect(harness.tempoPrefs.saves, hasLength(1));
-      expect(find.text(SettingsMessages.tempoValue(90)), findsOneWidget);
+      await _save(tester);
       expect(find.text(SettingsMessages.saveFailed), findsOneWidget);
+      expect(find.text(SettingsMessages.tempoValue(91)), findsOneWidget);
+      expect(tester.widget<ElevatedButton>(_saveChanges).onPressed, isNotNull);
 
-      // The stepper counts on from the rolled-back value, not the lost one.
       harness.tempoPrefs.fail = false;
-      await tester.tap(find.byIcon(Icons.add_rounded));
+      // The snackbar floats over the button until it times out.
+      await tester.pump(const Duration(seconds: 5));
       await tester.pumpAndSettle();
-      expect(find.text(SettingsMessages.tempoValue(91)), findsOneWidget);
+      await _save(tester);
       expect(await SettingsPrefsService().getDefaultTempo(), 91);
-    });
-
-    testWidgets('a failed tap save rolls back to the saved tempo', (
-      tester,
-    ) async {
-      final harness = _Harness(
-        session: _liveSession(),
-        prefs: {SettingsPrefsService.defaultTempoKey: 100},
-      );
-      await harness.pump(tester);
-      await _scrollTo(tester, _tempoValue);
-      harness.tempoPrefs.fail = true;
-      await tester.tap(find.byIcon(Icons.remove_rounded));
-      await tester.pumpAndSettle();
-      expect(find.text(SettingsMessages.tempoValue(100)), findsOneWidget);
-      expect(find.text(SettingsMessages.saveFailed), findsOneWidget);
-    });
-
-    testWidgets('an older save that lands while a newer one is in flight '
-        'is what a later failure rolls back to', (tester) async {
-      final harness = _Harness(session: _liveSession());
-      await harness.pump(tester);
-      await _scrollTo(tester, _tempoValue);
-      harness.tempoPrefs.hold = true;
-      await tester.tap(find.byIcon(Icons.add_rounded));
-      await tester.pump();
-      await tester.tap(find.byIcon(Icons.add_rounded));
-      await tester.pump();
-      expect(harness.tempoPrefs.saves, [91, 92]);
-
-      harness.tempoPrefs.held[0].complete(true);
-      await tester.pumpAndSettle();
-      harness.tempoPrefs.held[1].complete(false);
-      await tester.pumpAndSettle();
-
-      // 91 is on disk, so the failed 92 falls back to it, not to 90.
-      expect(find.text(SettingsMessages.tempoValue(91)), findsOneWidget);
-      expect(find.text(SettingsMessages.saveFailed), findsOneWidget);
-      expect(await SettingsPrefsService().getDefaultTempo(), 91);
-    });
-
-    testWidgets('L-d: an older save that lands after a newer one failed '
-        'and rolled back is what the field shows', (tester) async {
-      final harness = _Harness(session: _liveSession());
-      await harness.pump(tester);
-      await _scrollTo(tester, _tempoValue);
-      harness.tempoPrefs.hold = true;
-      await tester.tap(find.byIcon(Icons.add_rounded));
-      await tester.pump();
-      await tester.tap(find.byIcon(Icons.add_rounded));
-      await tester.pump();
-      expect(harness.tempoPrefs.saves, [91, 92]);
-
-      // The newer save fails first and rolls back to 90...
-      harness.tempoPrefs.held[1].complete(false);
-      await tester.pumpAndSettle();
-      expect(find.text(SettingsMessages.tempoValue(90)), findsOneWidget);
-
-      // ...then the older one lands: 91 is on disk, so 91 is shown.
-      harness.tempoPrefs.held[0].complete(true);
-      await tester.pumpAndSettle();
-      expect(find.text(SettingsMessages.tempoValue(91)), findsOneWidget);
-      expect(await SettingsPrefsService().getDefaultTempo(), 91);
+      expect(tester.widget<ElevatedButton>(_saveChanges).onPressed, isNull);
     });
 
     testWidgets('cannot go below 30', (tester) async {
@@ -610,6 +585,196 @@ void main() {
       expect(find.text(SettingsMessages.tempoValue(91)), findsOneWidget);
       handle.dispose();
     });
+  });
+
+  group('save and leave prompt (F6b)', () {
+    testWidgets('Save changes is disabled until something changes', (
+      tester,
+    ) async {
+      await _Harness(session: _liveSession()).pump(tester);
+      await _scrollTo(tester, _saveChanges);
+      expect(tester.widget<ElevatedButton>(_saveChanges).onPressed, isNull);
+      await _dirtyVoice(tester);
+      await _scrollTo(tester, _saveChanges);
+      expect(tester.widget<ElevatedButton>(_saveChanges).onPressed, isNotNull);
+    });
+
+    testWidgets('no prompt without changes: Library and Capture just go', (
+      tester,
+    ) async {
+      await _Harness(session: _liveSession()).pump(tester);
+      await tester.tap(find.text('Capture'));
+      await tester.pumpAndSettle();
+      expect(_prompt, findsNothing);
+      expect(find.text('ROUTE:capture'), findsOneWidget);
+    });
+
+    testWidgets('no prompt without changes: Library tab and system back', (
+      tester,
+    ) async {
+      await _Harness(session: _liveSession()).pump(tester);
+      await tester.tap(find.text('Library'));
+      await tester.pumpAndSettle();
+      expect(_prompt, findsNothing);
+      expect(find.text(libraryMarker), findsOneWidget);
+    });
+
+    testWidgets('prompt shows Discard on the left, plain, Save on the right, '
+        'coloured', (tester) async {
+      await _Harness(session: _liveSession()).pump(tester);
+      await _dirtyVoice(tester);
+      await tester.tap(find.text('Capture'));
+      await tester.pumpAndSettle();
+
+      final discard = find.widgetWithText(TextButton, SettingsMessages.discard);
+      final save = find.widgetWithText(FilledButton, SettingsMessages.save);
+      expect(discard, findsOneWidget);
+      expect(save, findsOneWidget);
+      expect(tester.getCenter(discard).dx, lessThan(tester.getCenter(save).dx));
+      expect(tester.widget<TextButton>(discard).style?.backgroundColor, isNull);
+      final theme = Theme.of(tester.element(save));
+      final fill = tester
+          .widget<FilledButton>(save)
+          .style
+          ?.backgroundColor
+          ?.resolve({});
+      expect(fill ?? theme.colorScheme.primary, theme.colorScheme.primary);
+    });
+
+    testWidgets('Capture tab: Save stores, then goes', (tester) async {
+      await _Harness(session: _liveSession()).pump(tester);
+      await _dirtyVoice(tester);
+      await tester.tap(find.text('Capture'));
+      await tester.pumpAndSettle();
+      await tester.tap(_promptButton(SettingsMessages.save));
+      await tester.pumpAndSettle();
+      expect(find.text('ROUTE:capture'), findsOneWidget);
+      expect(
+        await OnboardingPrefsService().getDefaultVoicePart(),
+        VoicePart.bass,
+      );
+    });
+
+    testWidgets('Capture tab: Discard drops, then goes', (tester) async {
+      await _Harness(session: _liveSession()).pump(tester);
+      await _dirtyVoice(tester);
+      await tester.tap(find.text('Capture'));
+      await tester.pumpAndSettle();
+      await tester.tap(_promptButton(SettingsMessages.discard));
+      await tester.pumpAndSettle();
+      expect(find.text('ROUTE:capture'), findsOneWidget);
+      expect(await OnboardingPrefsService().getDefaultVoicePart(), isNull);
+    });
+
+    testWidgets('dismissing the prompt stays on Settings with the draft', (
+      tester,
+    ) async {
+      await _Harness(session: _liveSession()).pump(tester);
+      await _dirtyVoice(tester);
+      await tester.tap(find.text('Capture'));
+      await tester.pumpAndSettle();
+      await tester.tapAt(const Offset(5, 5));
+      await tester.pumpAndSettle();
+      expect(_prompt, findsNothing);
+      expect(find.byType(SettingsScreen), findsOneWidget);
+      expect(
+        tester.getSemantics(_pill(VoicePart.bass)),
+        isSemantics(isSelected: true),
+      );
+    });
+
+    testWidgets('Library tab and system back use the same prompt', (
+      tester,
+    ) async {
+      await _Harness(session: _liveSession()).pump(tester);
+      await _dirtyVoice(tester);
+      await tester.tap(find.text('Library'));
+      await tester.pumpAndSettle();
+      expect(_prompt, findsOneWidget);
+      await tester.tap(_promptButton(SettingsMessages.discard));
+      await tester.pumpAndSettle();
+      expect(find.text(libraryMarker), findsOneWidget);
+
+      await tester.tap(find.text(_openSettings));
+      await tester.pumpAndSettle();
+      await _dirtyVoice(tester);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(_prompt, findsOneWidget);
+      await tester.tap(_promptButton(SettingsMessages.save));
+      await tester.pumpAndSettle();
+      expect(find.text(libraryMarker), findsOneWidget);
+      expect(
+        await OnboardingPrefsService().getDefaultVoicePart(),
+        VoicePart.bass,
+      );
+    });
+
+    testWidgets('Log out with unsaved changes asks first, then confirms', (
+      tester,
+    ) async {
+      await _Harness(session: _liveSession()).pump(tester);
+      await _dirtyVoice(tester);
+      await _scrollTo(tester, find.text(SettingsMessages.logOut));
+      await tester.tap(find.text(SettingsMessages.logOut));
+      await tester.pumpAndSettle();
+      expect(find.text(SettingsMessages.unsavedTitle), findsOneWidget);
+      await tester.tap(_promptButton(SettingsMessages.discard));
+      await tester.pumpAndSettle();
+      expect(find.text(SettingsMessages.logOutTitle), findsOneWidget);
+    });
+
+    testWidgets('a failed Save keeps the user on Settings', (tester) async {
+      final harness = _Harness(session: _liveSession());
+      await harness.pump(tester);
+      await _scrollTo(tester, _tempoValue);
+      await tester.tap(find.byIcon(Icons.add_rounded));
+      await tester.pumpAndSettle();
+      harness.tempoPrefs.fail = true;
+      await tester.tap(find.text('Capture'));
+      await tester.pumpAndSettle();
+      await tester.tap(_promptButton(SettingsMessages.save));
+      await tester.pumpAndSettle();
+      expect(find.byType(SettingsScreen), findsOneWidget);
+      expect(find.text(SettingsMessages.saveFailed), findsOneWidget);
+    });
+
+    for (final (size, scale) in const [
+      (Size(320, 568), 2.0),
+      (Size(412, 915), 2.0),
+    ]) {
+      testWidgets('no overflow with the prompt open at ${size.width.toInt()} '
+          'dp, ${scale}x text', (tester) async {
+        await _Harness(session: _liveSession())
+            .pump(tester, logicalSize: size, textScale: scale);
+        await _scrollTo(tester, find.text(VoicePart.bass.label));
+        await _dirtyVoice(tester);
+        await _scrollTo(tester, _saveChanges);
+        expect(tester.takeException(), isNull);
+        await tester.tap(find.text('Capture'));
+        await tester.pumpAndSettle();
+        expect(_prompt, findsOneWidget);
+        expect(tester.takeException(), isNull);
+      });
+    }
+  });
+
+  group('saved defaults reach playback (F6)', () {
+    test(
+      'a saved voice and tempo are what the open-score paths read',
+      () async {
+        SharedPreferences.setMockInitialValues({});
+        await OnboardingPrefsService().setDefaultVoicePart(VoicePart.tenor);
+        await SettingsPrefsService().setDefaultTempo(120);
+        // playback_providers._defaultSelection and readFallbackTempo read
+        // these same services at use time, with no cache in between.
+        expect(
+          await OnboardingPrefsService().getDefaultVoicePart(),
+          VoicePart.tenor,
+        );
+        expect(await readFallbackTempo(SettingsPrefsService()), 120);
+      },
+    );
   });
 
   group('help (AC9)', () {
@@ -853,6 +1018,30 @@ void main() {
     });
   });
 
+  group('F5 header matches Library', () {
+    for (final size in const [Size(320, 568), Size(412, 915)]) {
+      testWidgets(
+        'backdrop logo at left edge, bell top-right at ${size.width.toInt()} dp',
+        (tester) async {
+          await _Harness(session: _liveSession())
+              .pump(tester, logicalSize: size, textScale: 1.0);
+          final logo = find.byKey(
+            const ValueKey('library-header-backdrop-logo'),
+          );
+          expect(logo, findsOneWidget);
+          expect(tester.getTopLeft(logo).dx, 0);
+          expect(find.byType(ScanBell), findsOneWidget);
+          expect(
+            tester.getTopRight(find.byType(ScanBell)).dx,
+            greaterThan(size.width - 40),
+          );
+          expect(find.byType(LibrarySearchField), findsNothing);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  });
+
   group('NFR-10 layout', () {
     for (final (size, scale) in const [
       (Size(320, 568), 2.0),
@@ -928,5 +1117,145 @@ void main() {
         expect(tester.takeException(), isNull);
       },
     );
+  });
+  group('delete account (F9)', () {
+    const throttleKey = 'login_throttle.until.$_email';
+
+    Finder confirmButton() =>
+        find.byKey(const ValueKey('delete-account-confirm'));
+
+    Future<void> openDialog(WidgetTester tester) async {
+      await _scrollTo(tester, find.text(SettingsMessages.deleteAccount));
+      await tester.tap(find.text(SettingsMessages.deleteAccount));
+      await tester.pumpAndSettle();
+    }
+
+    /// Types [password] and taps through both confirmation steps.
+    Future<void> confirmDelete(WidgetTester tester, String password) async {
+      await tester.enterText(
+        find.descendant(of: _prompt, matching: find.byType(EditableText)),
+        password,
+      );
+      await tester.tap(confirmButton());
+      await tester.pumpAndSettle();
+      expect(find.text(SettingsMessages.deleteConfirmBody), findsOneWidget);
+      await tester.tap(confirmButton());
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('says what is lost and sends nothing on the first tap', (
+      tester,
+    ) async {
+      final harness = _Harness(session: _liveSession());
+      await harness.pump(tester);
+      await openDialog(tester);
+      expect(find.text(SettingsMessages.deleteAccountBody), findsOneWidget);
+      await tester.enterText(
+        find.descendant(of: _prompt, matching: find.byType(EditableText)),
+        'pw',
+      );
+      await tester.tap(confirmButton());
+      await tester.pumpAndSettle();
+      expect(harness.api.deleteAccountCalls, 0);
+      expect(find.text(SettingsMessages.deleteConfirmBody), findsOneWidget);
+    });
+
+    testWidgets('cancel keeps the account and the session', (tester) async {
+      final harness = _Harness(session: _liveSession());
+      await harness.pump(tester);
+      await openDialog(tester);
+      await tester.tap(_promptButton(SettingsMessages.cancel));
+      await tester.pumpAndSettle();
+      expect(_prompt, findsNothing);
+      expect(harness.api.deleteAccountCalls, 0);
+      expect(find.text(loginMarker), findsNothing);
+      expect(harness.storage.values['session_token'], _token);
+    });
+
+    testWidgets('wrong password says so and keeps account and session', (
+      tester,
+    ) async {
+      final harness = _Harness(
+        session: _liveSession(),
+        prefs: {throttleKey: 1},
+      );
+      harness.api.onDeleteAccount = () async =>
+          throw const CurrentPasswordIncorrectException();
+      await harness.pump(tester);
+      await openDialog(tester);
+      await confirmDelete(tester, 'wrong');
+      expect(find.text(SettingsMessages.wrongPassword), findsOneWidget);
+      expect(find.text(loginMarker), findsNothing);
+      expect(harness.storage.values['session_token'], _token);
+      // Not a login failure: the login wait is untouched.
+      expect((await SharedPreferences.getInstance()).getInt(throttleKey), 1);
+    });
+
+    testWidgets('network failure keeps the account and the session', (
+      tester,
+    ) async {
+      final harness = _Harness(session: _liveSession());
+      harness.api.onDeleteAccount = () async =>
+          throw const AuthNetworkException();
+      await harness.pump(tester);
+      await openDialog(tester);
+      await confirmDelete(tester, 'pw');
+      expect(find.text(AuthMessages.network), findsOneWidget);
+      expect(find.text(loginMarker), findsNothing);
+      expect(harness.storage.values['session_token'], _token);
+    });
+
+    testWidgets('success wipes local data and goes to Login', (tester) async {
+      final harness = _Harness(
+        session: _liveSession(),
+        prefs: {throttleKey: 1, 'work_owner_v1': 7},
+      );
+      harness.api.onDeleteAccount = () async {};
+      await harness.pump(tester);
+      await openDialog(tester);
+      await confirmDelete(tester, 'RightPassw0rd!');
+      expect(harness.api.deleteAccountCalls, 1);
+      expect(harness.api.lastToken, _token);
+      expect(harness.api.lastDeletePassword, 'RightPassw0rd!');
+      expect(find.text(loginMarker), findsOneWidget);
+      expect(harness.storage.values, isEmpty);
+      final prefs = await SharedPreferences.getInstance();
+      expect(
+        prefs.getKeys().where((k) => k.startsWith('login_throttle')),
+        isEmpty,
+      );
+      expect(prefs.getInt('work_owner_v1'), isNull);
+      expect(harness.resultsStore.deleteAllCalls, 1);
+    });
+
+    for (final scale in const [1.0, 2.0]) {
+      testWidgets('no overflow at 320 dp, ${scale}x text incl. dialog', (
+        tester,
+      ) async {
+        final harness = _Harness(session: _liveSession());
+        harness.api.onDeleteAccount = () async =>
+            throw const AuthNetworkException();
+        await harness.pump(
+          tester,
+          logicalSize: const Size(320, 568),
+          textScale: scale,
+        );
+        await _scrollTo(tester, find.text(SettingsMessages.deleteAccount));
+        expect(tester.takeException(), isNull);
+        await openDialog(tester);
+        expect(tester.takeException(), isNull);
+        await confirmDelete(tester, 'pw');
+        expect(find.text(AuthMessages.network), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        // The last-confirmation step is the other dialog layout.
+        await tester.enterText(
+          find.descendant(of: _prompt, matching: find.byType(EditableText)),
+          'pw',
+        );
+        await tester.tap(confirmButton());
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      });
+    }
   });
 }

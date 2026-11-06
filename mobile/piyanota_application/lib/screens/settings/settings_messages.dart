@@ -92,6 +92,30 @@ class SettingsMessages {
       'and password to log back in.';
   static const String cancel = 'Cancel';
 
+  // F9 / contract J3.
+  static const String deleteAccount = 'Delete account';
+  static const String deleteAccountBody =
+      'This erases your account and every score you converted: the audio, '
+      'the pages and the settings stored with them. This cannot be undone.';
+  static const String deletePasswordPrompt = 'Enter your password to continue.';
+  static const String deletePasswordRequired = 'Enter your password';
+  static const String deleteConfirmTitle = 'Delete everything?';
+  static const String deleteConfirmBody =
+      'Last chance. Tap the button below to erase your account for good.';
+  static const String deleteConfirmButton = 'Yes, delete my account';
+  static const String deletingAccount = 'Deleting…';
+  static const String wrongPassword = 'Wrong password';
+  static const String deleteSessionExpired =
+      'Your session has expired. Log in again to delete your account.';
+
+  // F6: one Save for the whole screen, and the prompt on leaving unsaved.
+  static const String saveChanges = 'Save changes';
+  static const String unsavedTitle = 'Save your changes?';
+  static const String unsavedBody =
+      'You changed your playback defaults but have not saved them.';
+  static const String discard = 'Discard';
+  static const String save = 'Save';
+
   static const String saveFailed =
       "Couldn't save that setting. Please try again.";
 }

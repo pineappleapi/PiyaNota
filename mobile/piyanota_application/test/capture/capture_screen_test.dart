@@ -5,6 +5,7 @@ import 'dart:ui' show Tristate;
 import 'package:flutter/gestures.dart' show kLongPressTimeout;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:piyanota_application/models/score_details.dart';
@@ -13,7 +14,9 @@ import 'package:piyanota_application/screens/capture/edit_page_screen.dart';
 import 'package:piyanota_application/services/capture/capture_permissions.dart';
 import 'package:piyanota_application/services/capture/device_channel.dart';
 import 'package:piyanota_application/services/capture/page_picker.dart';
+import 'package:piyanota_application/screens/capture/capture_screen.dart';
 import 'package:piyanota_application/services/score_upload_api.dart';
+import 'package:piyanota_application/state/processing_providers.dart';
 
 import '../processing/processing_fakes.dart'
     show expectTrackerCleared, seedOldJob;
@@ -659,6 +662,51 @@ void main() {
       expect(find.text(CaptureMessages.pdfRemoved), findsOneWidget);
     });
 
+    testWidgets('a PDF opens a lazy page preview and closes it', (
+      tester,
+    ) async {
+      final h = CaptureHarness(device: FakeDeviceChannel(pages: 12));
+      await pumpCapture(tester, h);
+      h.picker.pdf = const PickedPdf(path: 'x.pdf', name: 'Misa.pdf');
+      await _pickPdf(tester);
+      await tester.tap(_label(CaptureMessages.pdfSemantics('Misa.pdf', 12)));
+      await tester.pumpAndSettle();
+
+      final doc = h.pdfRenderer.document;
+      expect(doc.rendered, isNotEmpty);
+      expect(doc.rendered.length, lessThan(30), reason: 'only visible pages');
+      for (var i = 0; i < 4; i++) {
+        await tester.drag(find.byType(ListView), const Offset(0, -20000));
+        await tester.pumpAndSettle();
+      }
+      expect(doc.rendered, contains(29));
+      expect(tester.takeException(), isNull);
+
+      await _closePreview(tester);
+      expect(doc.closed, isTrue);
+    });
+
+    testWidgets('a corrupt PDF preview says so in plain words', (tester) async {
+      final h = CaptureHarness(device: FakeDeviceChannel(pages: 3));
+      h.pdfRenderer.problem = PdfProblem.corrupt;
+      await pumpCapture(tester, h);
+      h.picker.pdf = const PickedPdf(path: 'x.pdf', name: 'Misa.pdf');
+      await _pickPdf(tester);
+      await tester.tap(_label(CaptureMessages.pdfSemantics('Misa.pdf', 3)));
+      await tester.pumpAndSettle();
+      expect(find.text(CaptureMessages.pdfCorrupt), findsOneWidget);
+    });
+
+    testWidgets('PDF preview fits 320 dp at 2.0x text', (tester) async {
+      final h = CaptureHarness(device: FakeDeviceChannel(pages: 3));
+      await pumpCapture(tester, h, size: const Size(320, 568), textScale: 2);
+      h.picker.pdf = const PickedPdf(path: 'x.pdf', name: 'Misa.pdf');
+      await _pickPdf(tester);
+      await tester.tap(_label(CaptureMessages.pdfSemantics('Misa.pdf', 3)));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('edit replaces the page file after Done', (tester) async {
       final h = CaptureHarness();
       await pumpCapture(tester, h);
@@ -872,6 +920,33 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text(CaptureMessages.uploadError(error)), findsOneWidget);
       expect(CaptureMessages.uploadError(error), contains('Page 2'));
+    });
+
+    testWidgets('a failed upload and a cancelled upload leave no card (J6)', (
+      tester,
+    ) async {
+      final h = CaptureHarness();
+      final never = Completer<SubmittedJob>();
+      var fail = true;
+      h.upload.onSubmit = () =>
+          fail ? Future.error(const UploadNetworkException()) : never.future;
+      await pumpCapture(tester, h);
+      await _shoot(tester, 1);
+      ProviderContainer jobs() =>
+          ProviderScope.containerOf(tester.element(find.byType(CaptureScreen)));
+      await tester.tap(find.text(CaptureMessages.createScoreWith(1)));
+      await tester.pumpAndSettle();
+      expect(find.text(CaptureMessages.network), findsOneWidget);
+      expect(jobs().read(processingJobsProvider), isEmpty);
+
+      fail = false;
+      await tester.tap(find.text(CaptureMessages.createScoreWith(1)));
+      await tester.pump();
+      await tester.tap(find.text(CaptureMessages.cancelUpload));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text(CaptureMessages.uploadCancelled), findsOneWidget);
+      expect(jobs().read(processingJobsProvider), isEmpty);
     });
 
     testWidgets('Cancel sending stops the upload and keeps the pages', (

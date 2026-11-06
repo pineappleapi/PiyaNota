@@ -42,9 +42,9 @@ enum _ResetStep { email, code, newPassword }
 /// Logins), and system back walks the steps in reverse instead of
 /// abandoning a half-finished reset.
 ///
-/// PIYA-303/304 have no "verify code" endpoint — the code is the confirm
-/// call's `resetToken` — so the code step only checks its shape locally,
-/// and a bad code surfaces as a 410 after the new password is submitted.
+/// The code is checked on the Enter Code step by the verify endpoint (J1/B1),
+/// so only a code the server accepted reaches the new-password step. Confirm
+/// still re-checks it, since the server never trusts the earlier call.
 class PasswordResetScreen extends ConsumerStatefulWidget {
   const PasswordResetScreen({super.key});
 
@@ -333,12 +333,82 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
     );
   }
 
-  void _continueWithCode() {
+  /// The server's wait replaces our own count (V2.4 AC5). A wait without
+  /// seconds is still a wait, but not a wrong code (B4.5), so the count stays.
+  void _recordServerWait(AuthRateLimitedException e) {
+    final seconds = e.retryAfterSeconds;
+    final waits = ref.read(resetCodeWaitsProvider.notifier);
+    if (seconds != null && seconds > 0) {
+      waits.recordServerWait(_requestedEmail, Duration(seconds: seconds));
+      return;
+    }
+    waits.recordServerWait(
+      _requestedEmail,
+      backoffAfter(
+        math.max(1, waits.failures(_requestedEmail) - resetCodeFreeAttempts),
+      ),
+    );
+  }
+
+  /// Counts the wrong code; from the 5th on the server's own wait, when it
+  /// sent one, overrides our mirror of the ladder.
+  void _recordWrongCode(ResetCodeWrongException e) {
+    final waits = ref.read(resetCodeWaitsProvider.notifier)
+      ..recordWrong(_requestedEmail);
+    final seconds = e.retryAfterSeconds;
+    if (seconds != null && seconds > 0) {
+      waits.recordServerWait(_requestedEmail, Duration(seconds: seconds));
+    }
+  }
+
+  /// Only a 200 from verify moves on; every failure stays on Enter Code with
+  /// the typed passwords untouched.
+  Future<void> _continueWithCode() async {
     if (!_canContinueWithCode) return;
     setState(() {
+      _isSubmitting = true;
       _errorMessage = null;
       _noticeMessage = null;
-      _step = _ResetStep.newPassword;
+    });
+
+    String? error;
+    var wrongCode = false;
+    var expired = false;
+    var waiting = false;
+    try {
+      await ref
+          .read(authApiProvider)
+          .verifyPasswordReset(email: _requestedEmail, code: _code);
+    } on ResetCodeInvalidException {
+      error = AuthMessages.resetCodeInvalid;
+      expired = true;
+    } on ResetCodeWrongException catch (e) {
+      error = AuthMessages.resetCodeWrong;
+      wrongCode = true;
+      _recordWrongCode(e);
+    } on AuthRateLimitedException catch (e) {
+      waiting = true;
+      _recordServerWait(e);
+    } on AuthNetworkException {
+      error = AuthMessages.network;
+    } on AuthException {
+      error = AuthMessages.serverError;
+    } catch (e, stack) {
+      debugPrint('Password reset verify failed unexpectedly: $e\n$stack');
+      error = AuthMessages.serverError;
+    }
+
+    if (!mounted) return;
+    // Cleared while _isSubmitting is still true, so the change listener
+    // doesn't wipe the new error.
+    if (wrongCode || expired) _codeController.clear();
+    setState(() {
+      _isSubmitting = false;
+      // An expired code is dead; Resend must be usable at once.
+      if (expired) _stopResendCooldown();
+      _errorMessage = error;
+      if (error == null && !waiting) _step = _ResetStep.newPassword;
+      _tickWait(announce: wrongCode || waiting);
     });
   }
 
@@ -370,32 +440,16 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
     } on ResetCodeInvalidException {
       error = AuthMessages.resetCodeInvalid;
       codeRejected = true;
-    } on ResetCodeWrongException {
+    } on ResetCodeWrongException catch (e) {
       // The reset is still alive, so unlike an expired code it keeps its
       // resend cooldown; only the typed code is wrong.
       error = AuthMessages.resetCodeWrong;
       codeRejected = true;
       wrongCode = true;
+      _recordWrongCode(e);
     } on AuthRateLimitedException catch (e) {
-      // The server's wait replaces our own count (V2.4 AC5).
       waiting = true;
-      final seconds = e.retryAfterSeconds;
-      final waits = ref.read(resetCodeWaitsProvider.notifier);
-      if (seconds != null && seconds > 0) {
-        waits.recordServerWait(_requestedEmail, Duration(seconds: seconds));
-      } else {
-        // A 429 must always show a wait, but is not a wrong code (B4.5), so
-        // the count stays; within the free attempts use the first step.
-        waits.recordServerWait(
-          _requestedEmail,
-          backoffAfter(
-            math.max(
-              1,
-              waits.failures(_requestedEmail) - resetCodeFreeAttempts,
-            ),
-          ),
-        );
-      }
+      _recordServerWait(e);
     } on AuthNetworkException {
       error = AuthMessages.network;
     } on AuthValidationException catch (e) {
@@ -420,9 +474,6 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
     // corrected code doesn't mean retyping them. Cleared before
     // _isSubmitting drops so the listener doesn't wipe the new error.
     if (codeRejected) _codeController.clear();
-    if (wrongCode) {
-      ref.read(resetCodeWaitsProvider.notifier).recordWrong(_requestedEmail);
-    }
     setState(() {
       _isSubmitting = false;
       if (codeRejected || waiting) _step = _ResetStep.code;

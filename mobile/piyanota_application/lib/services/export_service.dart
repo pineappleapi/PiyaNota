@@ -6,7 +6,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../models/export_selection.dart';
-import 'leaving_app.dart';
 
 /// One track in the export mix: a voice (or the click) and the gain the
 /// Voice Mixer plays it at.
@@ -273,12 +272,9 @@ class MethodChannelExportService implements ExportService {
 
   @override
   Future<String?> pickFolder({Set<String> keep = const {}}) async {
-    final tree = await withoutSplash(
-      () => _call(
-        () => _channel.invokeMethod<String>('pickFolder', {
-          'keep': keep.toList(),
-        }),
-      ),
+    final tree = await _call(
+      () =>
+          _channel.invokeMethod<String>('pickFolder', {'keep': keep.toList()}),
     );
     if (tree != null && !isLocalFolder(tree)) {
       debugPrint('Export: refused a folder that is not on this phone');
@@ -292,11 +288,9 @@ class MethodChannelExportService implements ExportService {
   @override
   Future<bool> openFolder(String treeUri) async {
     try {
-      // Opens the Files app: coming back from it is not a fresh visit.
-      return await withoutSplash<bool?>(
-            () =>
-                _channel.invokeMethod<bool>('openFolder', {'treeUri': treeUri}),
-          ) ??
+      return await _channel.invokeMethod<bool>('openFolder', {
+            'treeUri': treeUri,
+          }) ??
           false;
     } on PlatformException catch (e) {
       // Only hides the "Open folder" button; the file is already saved.

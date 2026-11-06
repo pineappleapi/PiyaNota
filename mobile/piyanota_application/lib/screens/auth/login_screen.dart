@@ -39,6 +39,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   bool _isSubmitting = false;
   String? _errorMessage;
   String? _noticeMessage;
+  String? _hintMessage;
 
   /// PIYA-202-V2.1: when the typed email may try again. Each tick recomputes
   /// from this deadline, so a countdown frozen while the app was in the
@@ -97,6 +98,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     // The user kept typing while we read; the newer call owns the state.
     if (!mounted || email != _waitEmail) return;
     if (left == Duration.zero && _waitUntil == null) return;
+    // A wait that starts from a saved deadline replaces any old message.
+    if (left > Duration.zero) {
+      setState(() {
+        _errorMessage = null;
+        _hintMessage = null;
+      });
+    }
     _startWait(left);
   }
 
@@ -177,9 +185,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _isSubmitting = true;
       _errorMessage = null;
       _noticeMessage = null;
+      _hintMessage = null;
     });
 
     String? error;
+    String? hint;
     final email = _emailController.text.trim();
     final throttle = ref.read(loginThrottleProvider);
     Duration? newWait;
@@ -192,19 +202,25 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           );
       await throttle.reset(email);
       await startSession(ref, session);
-    } on InvalidCredentialsException {
+    } on InvalidCredentialsException catch (e) {
       error = AuthMessages.incorrectCredentials;
-      await throttle.recordFailure(email);
-      newWait = await throttle.remaining(email);
-    } on AuthRateLimitedException catch (e) {
-      // The server's wait replaces our own count (AC5).
       final seconds = e.retryAfterSeconds;
       if (seconds != null && seconds > 0) {
         await throttle.recordServerWait(email, Duration(seconds: seconds));
-      } else {
-        await throttle.recordFailure(email);
+        newWait = await throttle.remaining(email);
+      } else if (e.attemptsRemaining == 1) {
+        hint = AuthMessages.oneTryLeft;
       }
-      newWait = await throttle.remaining(email);
+    } on AuthRateLimitedException catch (e) {
+      // The server owns the ladder (J2); we only show its wait. A 429 with
+      // no seconds starts no wait here and counts nothing.
+      final seconds = e.retryAfterSeconds;
+      if (seconds != null && seconds > 0) {
+        await throttle.recordServerWait(email, Duration(seconds: seconds));
+        newWait = await throttle.remaining(email);
+      } else {
+        error = AuthMessages.tooManyAttempts;
+      }
     } on AuthNetworkException {
       error = AuthMessages.network;
     } on AuthValidationException catch (e) {
@@ -231,6 +247,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       setState(() {
         _isSubmitting = false;
         _errorMessage = error;
+        _hintMessage = hint;
       });
       return;
     }
@@ -299,6 +316,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           ),
         ),
         const SizedBox(height: _sectionGap),
+        if (_hintMessage != null) ...[
+          Text(
+            _hintMessage!,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: AppTheme.primaryBlue),
+          ),
+          const SizedBox(height: _fieldGap),
+        ],
         if (_wait > Duration.zero) ...[
           Text(
             AuthMessages.tryAgainIn(_wait),

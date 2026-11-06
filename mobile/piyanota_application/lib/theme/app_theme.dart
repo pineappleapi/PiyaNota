@@ -151,10 +151,6 @@ class AppTheme {
   static const Color libraryCaptureShadow = Color(0x33000000);
   // Round-2 polish (PIYA-205, 2026-10-08). Not in the mockups, so these are
   // derived from the sampled colours above rather than dropper-sampled:
-  // - Header logo: the full-colour PNG at reduced opacity (user asked for it
-  //   faded, not flat white like the auth watermark), top-right.
-  //   Settings (PIYA-212) still draws this corner mark.
-  static const double settingsHeaderLogoOpacity = 0.4;
   // - Library header logo (PIYA-205-V2.1 AC3 [Call]): 10% visible, read from
   //   the reference's faint mark (peak lift over the gradient is only ~+23
   //   of 255 red).

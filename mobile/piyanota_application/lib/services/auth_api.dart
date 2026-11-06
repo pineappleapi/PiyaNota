@@ -13,8 +13,18 @@ sealed class AuthException implements Exception {
 
 /// 401 from Login — deliberately covers both unknown email and wrong
 /// password (PIYA-302 AC3).
+///
+/// The server owns the wrong-password ladder (J2): [retryAfterSeconds] is
+/// set from the 5th wrong password on, [attemptsRemaining] only on wrongs
+/// 1 to 4. The app never infers either.
 class InvalidCredentialsException extends AuthException {
-  const InvalidCredentialsException();
+  const InvalidCredentialsException({
+    this.retryAfterSeconds,
+    this.attemptsRemaining,
+  });
+
+  final int? retryAfterSeconds;
+  final int? attemptsRemaining;
 }
 
 /// Any 401 from an endpoint that needs a session (PIYA-322 AC1). Kept apart
@@ -65,8 +75,13 @@ class ResetCodeInvalidException extends AuthException {
 /// PIYA-204-V2.4): the code is wrong, but the reset is still alive. Kept
 /// apart from [ResetCodeInvalidException] (410, expired or used) because
 /// the user retypes a wrong code but must request a new expired one.
+///
+/// From the 5th wrong code on the server also sends [retryAfterSeconds]
+/// (D0.2); the app starts its countdown from it.
 class ResetCodeWrongException extends AuthException {
-  const ResetCodeWrongException();
+  const ResetCodeWrongException({this.retryAfterSeconds});
+
+  final int? retryAfterSeconds;
 }
 
 /// Backend note B4's `error.code` for a wrong reset code.
@@ -126,6 +141,16 @@ abstract interface class AuthApi {
     required String newPasswordConfirmation,
   });
 
+  /// Checks [code] for [email] without spending it (contract J1, B1), so a
+  /// wrong code is caught on the Enter Code step. Shares the wrong-code
+  /// ladder with [confirmPasswordReset]. Throws [ResetCodeWrongException]
+  /// (400), [ResetCodeInvalidException] (410) or [AuthRateLimitedException]
+  /// (429); returning normally is the only way to the new-password step.
+  Future<void> verifyPasswordReset({
+    required String email,
+    required String code,
+  });
+
   /// PIYA-322. [token] is the current session's and stays valid on success
   /// (other sessions are revoked). A wrong [currentPassword] is
   /// [CurrentPasswordIncorrectException], any 401
@@ -137,6 +162,14 @@ abstract interface class AuthApi {
     required String currentPassword,
     required String newPassword,
   });
+
+  /// Contract J3. Purges the account and its data on the server and revokes
+  /// every session, so a normal return means the app must now wipe locally.
+  /// A wrong [password] is [CurrentPasswordIncorrectException] (403, not a
+  /// dead session), a 401 [AuthSessionExpiredException], too many wrong
+  /// attempts [AuthRateLimitedException]. A wrong password here is not a
+  /// login failure and must never reach the login throttle.
+  Future<void> deleteAccount({required String token, required String password});
 }
 
 /// Talks to the Module 3 Flask API. Request/response shapes follow the
@@ -184,6 +217,17 @@ class HttpAuthApi implements AuthApi {
   }
 
   @override
+  Future<void> verifyPasswordReset({
+    required String email,
+    required String code,
+  }) async {
+    await _post(ApiConfig.passwordResetVerifyPath, {
+      'email': email,
+      'code': code,
+    });
+  }
+
+  @override
   Future<void> confirmPasswordReset({
     required String email,
     required String resetToken,
@@ -210,6 +254,24 @@ class HttpAuthApi implements AuthApi {
       headers: {'Authorization': 'Bearer $token'},
       mapStatus: _mapChangePasswordStatus,
     );
+  }
+
+  @override
+  Future<void> deleteAccount({
+    required String token,
+    required String password,
+  }) async {
+    try {
+      await _dio.delete<Map<String, dynamic>>(
+        ApiConfig.deleteAccountPath,
+        data: {'password': password},
+        options: Options(headers: {'Authorization': 'Bearer $token'}),
+      );
+    } on DioException catch (e) {
+      // Same status meanings as Change Password: 401 dead session, 403
+      // wrong password, 429 wait.
+      throw _mapDioError(e, _mapChangePasswordStatus);
+    }
   }
 
   Future<AuthSession> _postForSession(
@@ -274,7 +336,10 @@ class HttpAuthApi implements AuthApi {
     // invalid` error code, because the error-envelope field holding that
     // code isn't pinned down by PIYA-304 (reconcile in PIYA-214).
     return switch (response?.statusCode) {
-      _unauthorized => const InvalidCredentialsException(),
+      _unauthorized => InvalidCredentialsException(
+        retryAfterSeconds: retryAfterSecondsOf(response),
+        attemptsRemaining: _attemptsRemaining(response?.data),
+      ),
       // Matched on the code too: a bare proxy 404 is not "unregistered".
       _notFound when _errorCode(response?.data) == emailNotRegisteredCode =>
         const EmailNotRegisteredException(),
@@ -285,10 +350,20 @@ class HttpAuthApi implements AuthApi {
         retryAfterSeconds: retryAfterSecondsOf(response),
       ),
       _badRequest when _errorCode(response?.data) == resetCodeWrongCode =>
-        const ResetCodeWrongException(),
+        ResetCodeWrongException(
+          retryAfterSeconds: retryAfterSecondsOf(response),
+        ),
       _badRequest => _validationFailure(response),
       _ => const AuthServerException(),
     };
+  }
+
+  static int? _attemptsRemaining(Object? body) {
+    final error = body is Map<String, dynamic> ? body['error'] : null;
+    final value = error is Map<String, dynamic>
+        ? error['attemptsRemaining']
+        : null;
+    return value is int && value >= 0 ? value : null;
   }
 
   /// PIYA-322. Mapped on status, not body, wherever the contract allows:

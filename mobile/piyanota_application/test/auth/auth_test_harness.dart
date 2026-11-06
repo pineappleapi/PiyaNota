@@ -18,6 +18,7 @@ class ScriptedAuthApi implements AuthApi {
     this.onLogin,
     this.onSignUp,
     this.onRequestReset,
+    this.onVerifyReset,
     this.onConfirmReset,
     this.onChangePassword,
   });
@@ -25,7 +26,13 @@ class ScriptedAuthApi implements AuthApi {
   Future<AuthSession> Function()? onLogin;
   Future<AuthSession> Function()? onSignUp;
   Future<void> Function()? onRequestReset;
+
+  /// Null means the code is accepted, so tests that only script confirm
+  /// still pass the Enter Code step.
+  Future<void> Function()? onVerifyReset;
   Future<void> Function()? onConfirmReset;
+  int verifyResetCalls = 0;
+  String? lastVerifyCode;
   Future<void> Function()? onChangePassword;
   int changePasswordCalls = 0;
   String? lastToken;
@@ -44,6 +51,16 @@ class ScriptedAuthApi implements AuthApi {
     requestResetCalls++;
     lastEmail = email;
     return onRequestReset!();
+  }
+
+  @override
+  Future<void> verifyPasswordReset({
+    required String email,
+    required String code,
+  }) async {
+    verifyResetCalls++;
+    lastVerifyCode = code;
+    await onVerifyReset?.call();
   }
 
   @override
@@ -71,6 +88,21 @@ class ScriptedAuthApi implements AuthApi {
     lastCurrentPassword = currentPassword;
     lastNewPassword = newPassword;
     return onChangePassword!();
+  }
+
+  Future<void> Function()? onDeleteAccount;
+  int deleteAccountCalls = 0;
+  String? lastDeletePassword;
+
+  @override
+  Future<void> deleteAccount({
+    required String token,
+    required String password,
+  }) {
+    deleteAccountCalls++;
+    lastToken = token;
+    lastDeletePassword = password;
+    return onDeleteAccount!();
   }
 
   @override

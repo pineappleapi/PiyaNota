@@ -45,6 +45,37 @@ class ProcessingTiming {
       (stallAfter.inMilliseconds / pollInterval.inMilliseconds).ceil();
 }
 
+/// The percentage the app shows for a followed job (J5). Pure, so the rules
+/// can be tested without a clock or a tracker.
+class ProcessingProgress {
+  ProcessingProgress._();
+
+  /// 100 means "finished" and the Playback hand-off keys off it, so a
+  /// running job never shows it, even if the server reports 100.
+  static const int maxBeforeComplete = 99;
+
+  /// Start of each stage's band in the backend's J5 progress bands. Only
+  /// used when the server sends no `percentComplete` (older jobs).
+  static int _stageFloor(ProcessingStage stage) => switch (stage) {
+    ProcessingStage.preprocessing => 5,
+    ProcessingStage.detectingStaff => 25,
+    ProcessingStage.transcribing => 40,
+    ProcessingStage.reconstructing => 85,
+    ProcessingStage.synthesizing => 92,
+    _ => 0,
+  };
+
+  /// [previous] is the percentage already shown; the result never drops
+  /// below it, so a reclaimed or re-reported lower value can't move the bar
+  /// backwards.
+  static int next({required int previous, required ProcessingStatus status}) {
+    if (status.stage == ProcessingStage.complete) return 100;
+    final reported = status.percentComplete ?? _stageFloor(status.stage);
+    final capped = reported > maxBeforeComplete ? maxBeforeComplete : reported;
+    return capped > previous ? capped : previous;
+  }
+}
+
 /// PIYA-218 AC6: how much finished-scan history the bell keeps — "the
 /// latest 20 items or 7 days, whichever is fewer". Scans still running
 /// are never dropped.
@@ -607,10 +638,10 @@ class ProcessingJobsController extends Notifier<Map<String, TrackedJob>> {
   }
 
   static TrackedJob _withStatus(TrackedJob job, ProcessingStatus status) {
-    final reported = status.stage == ProcessingStage.complete
-        ? 100
-        : status.percentComplete ?? job.percent;
-    final percent = reported > job.percent ? reported : job.percent;
+    final percent = ProcessingProgress.next(
+      previous: job.percent,
+      status: status,
+    );
     return job.copyWith(
       status: status,
       percent: percent,

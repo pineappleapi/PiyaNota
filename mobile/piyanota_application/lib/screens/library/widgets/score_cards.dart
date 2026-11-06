@@ -218,22 +218,59 @@ class ScoreCard extends StatelessWidget {
   static const double titleToDetailsGap = 5;
   static const double _chevronSize = 18;
   static const double _chevronInset = 8;
-  static const double _trashSize = 16;
+  // Glyph 20 dp (was 16): the reference's trash ink is 11 x 13 dp
+  // (PIYA205_HomePage_Version2.png, measured), which is a 20 dp Material
+  // glyph's ink (14/24 wide).
+  static const double _trashSize = 20;
   static const double _spinnerSize = 14;
   static const double _spinnerStroke = 2;
-  // A 48x48 dp hit area (Android's minimum tap target) in the card's
-  // lower-right corner, around a 16 dp glyph placed where the mockup draws
-  // it: 10 dp from the right, 7 from the bottom. On the 82 dp card it ends
-  // well below the chevron.
-  static const double _trashHitSize = 48;
-  // The pencil is the trash's twin: same 16 dp glyph, colour, inset and
-  // 48 dp hit area, directly to its left. The text column reserves both hit
-  // areas so a tap on the details line can't land on either.
-  static const double _editRightReserve = 2 * _trashHitSize;
-  static const EdgeInsets _trashGlyphInset = EdgeInsets.only(
-    right: 10,
-    bottom: 7,
-  );
+  // Two separate 48 dp targets (Android minimum). Padding, not margin, places
+  // the glyph inside each target, so the two ink areas sit 16 dp apart
+  // (6 + 4 gap + 6; was 32) while the targets themselves never overlap.
+  static const double _hitSize = 48;
+  static const double _hitGap = 4;
+  static const double _compactShrink = 8;
+  static const double _glyphNear = 6;
+  static const double _glyphFar = _hitSize - _trashSize - _glyphNear;
+  // Glyph sits 7 dp above the card's bottom edge, as in the mockup.
+  static const double _glyphBottom = 7;
+  static const double _glyphTop = _hitSize - _trashSize - _glyphBottom;
+  // The text column reserves both targets so a tap on the details line can't
+  // land on either.
+  static const double _editRightReserve = 2 * _hitSize + _hitGap;
+
+  Widget _actionButton({
+    required EdgeInsets padding,
+    required String label,
+    required VoidCallback? onPressed,
+    required Widget icon,
+    Key? key,
+  }) {
+    return Semantics(
+      button: true,
+      enabled: onPressed != null,
+      label: label,
+      onTap: onPressed,
+      excludeSemantics: true,
+      child: IconButton(
+        key: key,
+        onPressed: onPressed,
+        visualDensity: VisualDensity.compact,
+        padding: padding,
+        // Compact density shrinks tight constraints by 8 dp per axis, so ask
+        // for 8 more to land on exactly 48.
+        constraints: const BoxConstraints.tightFor(
+          width: _hitSize + _compactShrink,
+          height: _hitSize + _compactShrink,
+        ),
+        splashRadius: _hitSize / 2,
+        highlightColor: AppTheme.darken(AppTheme.libraryScoreCardFill),
+        splashColor: Colors.transparent,
+        hoverColor: Colors.transparent,
+        icon: icon,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -261,72 +298,59 @@ class ScoreCard extends StatelessWidget {
         ),
         if (onEdit case final onEdit?)
           Positioned(
-            right: _trashHitSize,
+            right: _hitSize + _hitGap,
             bottom: 0,
-            width: _trashHitSize,
-            height: _trashHitSize,
-            child: Semantics(
-              button: true,
-              enabled: !isDeleting,
+            child: _actionButton(
+              key: const ValueKey('score-card-edit'),
+              padding: const EdgeInsets.fromLTRB(
+                _glyphFar,
+                _glyphTop,
+                _glyphNear,
+                _glyphBottom,
+              ),
               label: LibraryMessages.editSemantics(entry.displayTitle),
-              onTap: isDeleting ? null : onEdit,
-              excludeSemantics: true,
-              child: InkWell(
-                onTap: isDeleting ? null : onEdit,
-                splashFactory: NoSplash.splashFactory,
-                highlightColor: AppTheme.darken(AppTheme.libraryScoreCardFill),
-                child: const Padding(
-                  padding: _trashGlyphInset,
-                  child: Align(
-                    alignment: Alignment.bottomRight,
-                    child: Icon(
-                      Icons.edit_rounded,
-                      size: _trashSize,
-                      color: AppTheme.libraryTrash,
-                    ),
-                  ),
-                ),
+              onPressed: isDeleting ? null : onEdit,
+              icon: const Icon(
+                Icons.edit_rounded,
+                size: _trashSize,
+                color: AppTheme.libraryTrash,
               ),
             ),
           ),
         Positioned(
           right: 0,
           bottom: 0,
-          width: _trashHitSize,
-          height: _trashHitSize,
-          child: Semantics(
-            button: true,
-            enabled: !isDeleting,
+          child: _actionButton(
+            key: const ValueKey('score-card-delete'),
+            padding: const EdgeInsets.fromLTRB(
+              _glyphNear,
+              _glyphTop,
+              _glyphFar,
+              _glyphBottom,
+            ),
             label: isDeleting
                 ? LibraryMessages.deleting
                 : LibraryMessages.deleteSemantics(entry.displayTitle),
-            onTap: isDeleting ? null : onDelete,
-            excludeSemantics: true,
-            child: InkWell(
-              onTap: isDeleting ? null : onDelete,
-              splashFactory: NoSplash.splashFactory,
-              highlightColor: AppTheme.darken(AppTheme.libraryScoreCardFill),
-              child: Padding(
-                padding: _trashGlyphInset,
-                child: Align(
-                  alignment: Alignment.bottomRight,
-                  child: isDeleting
-                      ? const SizedBox.square(
-                          dimension: _spinnerSize,
-                          child: CircularProgressIndicator(
-                            strokeWidth: _spinnerStroke,
-                            color: AppTheme.libraryTrash,
-                            semanticsLabel: LibraryMessages.deleting,
-                          ),
-                        )
-                      : const Icon(
-                          Icons.delete_rounded,
-                          size: _trashSize,
+            onPressed: isDeleting ? null : onDelete,
+            icon: isDeleting
+                ? const SizedBox.square(
+                    dimension: _trashSize,
+                    child: Center(
+                      child: SizedBox.square(
+                        dimension: _spinnerSize,
+                        child: CircularProgressIndicator(
+                          strokeWidth: _spinnerStroke,
                           color: AppTheme.libraryTrash,
+                          semanticsLabel: LibraryMessages.deleting,
                         ),
-                ),
-              ),
-            ),
+                      ),
+                    ),
+                  )
+                : const Icon(
+                    Icons.delete_rounded,
+                    size: _trashSize,
+                    color: AppTheme.libraryTrash,
+                  ),
           ),
         ),
       ],

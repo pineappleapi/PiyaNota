@@ -21,6 +21,7 @@ import 'package:piyanota_application/services/capture/device_channel.dart';
 import 'package:piyanota_application/services/capture/page_image_processor.dart';
 import 'package:piyanota_application/services/capture/page_image_source.dart';
 import 'package:piyanota_application/services/capture/page_picker.dart';
+import 'package:piyanota_application/services/capture/pdf_page_renderer.dart';
 import 'package:piyanota_application/services/score_upload_api.dart';
 import 'package:piyanota_application/services/session_storage.dart';
 import 'package:piyanota_application/services/settings_prefs_service.dart';
@@ -119,7 +120,13 @@ class FakePagePicker implements PagePicker {
   bool notAPdf = false;
 
   @override
-  Future<List<String>> pickGalleryImages() async => gallery;
+  Future<List<String>> pickGalleryImages({bool single = false}) async {
+    singlePicks += single ? 1 : 0;
+    return gallery;
+  }
+
+  /// How many times the one-photo picker (retake) was used.
+  int singlePicks = 0;
 
   /// How many times the PDF picker was opened.
   int pdfPicks = 0;
@@ -190,6 +197,37 @@ class FakeDeviceChannel implements DeviceChannel {
   Future<int> pdfPageCount(String path) async {
     if (problem case final p?) throw PdfUnreadableException(p);
     return pages;
+  }
+}
+
+class FakePdfDocument implements PdfPreviewDocument {
+  FakePdfDocument(this.pageCount);
+
+  @override
+  final int pageCount;
+  final List<int> rendered = [];
+  bool closed = false;
+
+  @override
+  Future<Uint8List> renderPage(int index, {required double width}) async {
+    rendered.add(index);
+    return kTinyPng;
+  }
+
+  @override
+  Future<void> close() async => closed = true;
+}
+
+class FakePdfPageRenderer implements PdfPageRenderer {
+  FakePdfPageRenderer({int pages = 30}) : document = FakePdfDocument(pages);
+
+  final FakePdfDocument document;
+  PdfProblem? problem;
+
+  @override
+  Future<PdfPreviewDocument> open(String path) async {
+    if (problem case final p?) throw PdfUnreadableException(p);
+    return document;
   }
 }
 
@@ -297,6 +335,7 @@ class CaptureHarness {
   final FakeCapturePermissions permissions;
   final FakeDeviceChannel device;
   final picker = FakePagePicker();
+  final pdfRenderer = FakePdfPageRenderer();
   final processor = FakePageImageProcessor();
   final upload = ScriptedScoreUploadApi();
 
@@ -313,6 +352,7 @@ class CaptureHarness {
     capturePermissionsProvider.overrideWithValue(permissions),
     deviceChannelProvider.overrideWithValue(device),
     pagePickerProvider.overrideWithValue(picker),
+    pdfPageRendererProvider.overrideWithValue(pdfRenderer),
     pageImageProcessorProvider.overrideWithValue(processor),
     pageImageSourceProvider.overrideWithValue(const FakePageImageSource()),
     captureCameraFactoryProvider.overrideWithValue(() {

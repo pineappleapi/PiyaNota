@@ -1,5 +1,8 @@
 import 'dart:async';
 
+import 'dart:math';
+
+import 'package:audio_session/audio_session.dart';
 import 'package:clock/clock.dart';
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -151,6 +154,9 @@ class FakeAudioPlayer implements AudioPlayer {
     _states.add(ProcessingState.completed);
   }
 
+  /// Only the completed event, as a late one from before a seek arrives.
+  void emitCompleted() => _states.add(ProcessingState.completed);
+
   /// A decoder/source error, as just_audio 0.10 reports it.
   void raise() {
     _errors.add(PlayerException(1, 'decoder failed', null));
@@ -185,6 +191,7 @@ rig({
   Map<VoicePart, FakeAudioPlayer> overrides = const {},
   FakeAudioPlayer? click,
   List<FakeAudioPlayer> laterClicks = const [],
+  AudioSession? session,
 }) {
   final players = {
     for (final voice in VoicePart.values)
@@ -198,7 +205,10 @@ rig({
     // Re-attached clicks after a detachClick, in order.
     ...laterClicks,
   ];
-  final engine = JustAudioPlaybackEngine(playerFactory: queue.removeAt0);
+  final engine = JustAudioPlaybackEngine(
+    playerFactory: queue.removeAt0,
+    audioSession: session == null ? null : Future.value(session),
+  );
   final playing = <bool>[];
   final failures = <PlaybackFailure>[];
   final clickFailures = <Object>[];
@@ -216,6 +226,63 @@ rig({
 }
 
 final Uri _clickUri = Uri.file('/tmp/click.wav');
+
+/// Focus and headphone events raised by hand; remembers its configuration.
+class FakeAudioSession implements AudioSession {
+  final StreamController<AudioInterruptionEvent> interruptions =
+      StreamController.broadcast();
+  final StreamController<void> noisy = StreamController.broadcast();
+  AudioSessionConfiguration? configured;
+
+  /// Every setActive call, in order; [grant] is what it answers.
+  final List<bool> activeCalls = [];
+  bool grant = true;
+
+  @override
+  Future<bool> setActive(
+    bool active, {
+    AVAudioSessionSetActiveOptions? avAudioSessionSetActiveOptions,
+    AndroidAudioFocusGainType? androidAudioFocusGainType,
+    AndroidAudioAttributes? androidAudioAttributes,
+    bool? androidWillPauseWhenDucked,
+    AudioSessionConfiguration fallbackConfiguration =
+        const AudioSessionConfiguration.music(),
+  }) async {
+    activeCalls.add(active);
+    return grant;
+  }
+
+  @override
+  Stream<AudioInterruptionEvent> get interruptionEventStream =>
+      interruptions.stream;
+
+  @override
+  Stream<void> get becomingNoisyEventStream => noisy.stream;
+
+  @override
+  Future<void> configure(AudioSessionConfiguration configuration) async =>
+      configured = configuration;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+/// Every transported player's offset from the master, and whether each
+/// one's playing state matches the engine's.
+void expectInStep(
+  JustAudioPlaybackEngine engine,
+  List<FakeAudioPlayer> players, {
+  Duration tolerance = JustAudioPlaybackEngine.resyncTrigger,
+}) {
+  for (final (i, player) in players.indexed) {
+    expect(player.playing, engine.playing, reason: 'player $i playing');
+    expect(
+      (player.position - engine.position).abs(),
+      lessThanOrEqualTo(tolerance),
+      reason: 'player $i offset',
+    );
+  }
+}
 
 extension on List<FakeAudioPlayer> {
   FakeAudioPlayer removeAt0() => removeAt(0);
@@ -652,8 +719,8 @@ void main() {
         unawaited(r.engine.play());
         async.flushMicrotasks();
 
-        // Put the alto 70 ms ahead, then keep it there.
-        alto.setRate(1.7);
+        // Put the alto 20 ms ahead, then keep it there.
+        alto.setRate(1.2);
         async.elapse(const Duration(milliseconds: 100));
         alto.setRate(1);
         final offset = alto.position - r.engine.position;
@@ -933,6 +1000,14 @@ void main() {
         expect(r.engine.clickAttached, isTrue);
         expect(r.click.seeks, hasLength(2));
         expect(r.click.playCalls, 1);
+        // Aimed ahead by the seek latency known so far (half the real 100
+        // ms after one sample), so closer than an unaimed seek would land.
+        expect(
+          (r.click.position - r.engine.position).abs(),
+          lessThan(r.click.seekDelay),
+        );
+        // The drift check (F8a's 25 ms trigger) finishes the job.
+        async.elapse(const Duration(seconds: 2));
         expect(
           (r.click.position - r.engine.position).abs(),
           lessThanOrEqualTo(JustAudioPlaybackEngine.resyncTrigger),
@@ -1219,6 +1294,272 @@ void main() {
         unawaited(r.engine.attachClick(_clickUri).then(results.add));
         async.flushMicrotasks();
         expect(results, [true, false]);
+      });
+    });
+  });
+
+  group('one transport path (F8a)', () {
+    /// Four voices and an attached click, all loaded, 60 s long so nothing
+    /// ends mid-test; [delays] are each player's seek latency (S/A/T/B,
+    /// click).
+    ({
+      JustAudioPlaybackEngine engine,
+      List<FakeAudioPlayer> all,
+      Map<VoicePart, FakeAudioPlayer> players,
+      FakeAudioPlayer click,
+    })
+    loaded(FakeAsync async, {List<int> delays = const [0, 0, 0, 0, 0]}) {
+      FakeAudioPlayer make(int ms) =>
+          FakeAudioPlayer(length: const Duration(seconds: 60))
+            ..seekDelay = Duration(milliseconds: ms);
+      final r = rig(
+        overrides: {
+          for (final (i, voice) in VoicePart.values.indexed)
+            voice: make(delays[i]),
+        },
+        click: make(delays[4]),
+      );
+      unawaited(r.engine.load(tracks()));
+      async.flushMicrotasks();
+      unawaited(r.engine.attachClick(_clickUri));
+      async.elapse(const Duration(seconds: 1));
+      expect(r.engine.clickAttached, isTrue);
+      return (
+        engine: r.engine,
+        all: [...r.players.values, r.click],
+        players: r.players,
+        click: r.click,
+      );
+    }
+
+    for (final seed in [1, 8, 21]) {
+      test('50 rapid play/pause/seek/skip/speed actions leave all four voices '
+          'and the click aligned (seed $seed)', () {
+        fakeAsync((async) {
+          final random = Random(seed);
+          final r = loaded(
+            async,
+            delays: [for (var i = 0; i < 5; i++) random.nextInt(120)],
+          );
+          const speeds = [0.5, 0.75, 1.0, 1.25, 1.5];
+          for (var i = 0; i < 50; i++) {
+            final position = r.engine.position;
+            unawaited(switch (random.nextInt(6)) {
+              0 => r.engine.play(),
+              1 => r.engine.pause(),
+              2 => r.engine.seek(Duration(milliseconds: random.nextInt(20000))),
+              3 => r.engine.seek(
+                position > const Duration(seconds: 5)
+                    ? position - const Duration(seconds: 5)
+                    : Duration.zero,
+              ),
+              4 => r.engine.seek(position + const Duration(seconds: 5)),
+              _ => r.engine.setSpeed(speeds[random.nextInt(speeds.length)]),
+            });
+            // Some actions land on top of the last one's seeks, some after.
+            async.elapse(Duration(milliseconds: random.nextInt(150)));
+            if (i % 10 == 9) {
+              // Each batch, once settled, is aligned too, playing or not.
+              async.elapse(const Duration(seconds: 1));
+              expectInStep(r.engine, r.all);
+            }
+          }
+          unawaited(r.engine.play());
+          async.elapse(const Duration(seconds: 1));
+          expect(r.engine.playing, isTrue);
+          expectInStep(r.engine, r.all);
+          final speed = r.all.first.speedSet;
+          expect(r.all.every((p) => p.speedSet == speed), isTrue);
+          expect(r.engine.resyncCount, 0, reason: 'aligned by transport alone');
+        });
+      });
+    }
+
+    test('back 5 s while playing: one set plays, from the new position', () {
+      fakeAsync((async) {
+        final r = loaded(async, delays: [0, 80, 0, 40, 60]);
+        unawaited(r.engine.play());
+        async.elapse(const Duration(seconds: 8));
+        final plays = [for (final p in r.all) p.playCalls];
+        final target = r.engine.position - const Duration(seconds: 5);
+
+        unawaited(r.engine.seek(target));
+        async.flushMicrotasks();
+        // Old audio stopped before any seek, nothing restarted yet.
+        expect(r.all.any((p) => p.playing), isFalse);
+        expect(r.engine.playing, isTrue);
+        expect(r.engine.position, target);
+        async.elapse(const Duration(milliseconds: 79));
+        expect(r.all.any((p) => p.playing), isFalse);
+        async.elapse(const Duration(milliseconds: 1));
+        // Every player started exactly once more, all at the target.
+        expect(
+          [for (final p in r.all) p.playCalls],
+          [for (final n in plays) n + 1],
+        );
+        expectInStep(r.engine, r.all, tolerance: Duration.zero);
+        expect(r.engine.position, target);
+      });
+    });
+
+    test('rapid skips add up from the last target, not the stale audio', () {
+      fakeAsync((async) {
+        final r = loaded(async, delays: [100, 100, 100, 100, 100]);
+        unawaited(r.engine.seek(const Duration(seconds: 20)));
+        async.elapse(const Duration(seconds: 1));
+        for (var i = 0; i < 3; i++) {
+          unawaited(
+            r.engine.seek(r.engine.position - const Duration(seconds: 5)),
+          );
+          async.elapse(const Duration(milliseconds: 10));
+        }
+        async.elapse(const Duration(seconds: 1));
+        expect(r.engine.position, const Duration(seconds: 5));
+        expectInStep(r.engine, r.all, tolerance: Duration.zero);
+      });
+    });
+
+    test('a speed change while playing pauses, sets every player, restarts '
+        'them together', () {
+      fakeAsync((async) {
+        final r = loaded(async, delays: [0, 50, 0, 0, 30]);
+        unawaited(r.engine.play());
+        async.elapse(const Duration(seconds: 2));
+        unawaited(r.engine.setSpeed(1.5));
+        async.flushMicrotasks();
+        expect(r.all.any((p) => p.playing), isFalse);
+        expect(r.all.every((p) => p.speedSet == 1.5), isTrue);
+        async.elapse(const Duration(milliseconds: 50));
+        expectInStep(r.engine, r.all, tolerance: Duration.zero);
+        expect(r.engine.playing, isTrue);
+        // The same speed again is no step at all.
+        final pauses = [for (final p in r.all) p.pauseCalls];
+        unawaited(r.engine.setSpeed(1.5));
+        async.flushMicrotasks();
+        expect([for (final p in r.all) p.pauseCalls], pauses);
+      });
+    });
+
+    test('a pause during a seek wins; a completion during a step is stale', () {
+      fakeAsync((async) {
+        final r = loaded(async, delays: [100, 0, 0, 0, 0]);
+        unawaited(r.engine.play());
+        async.elapse(const Duration(seconds: 2));
+        unawaited(r.engine.seek(const Duration(seconds: 30)));
+        async.elapse(const Duration(milliseconds: 20));
+        // The master reports its end while its seek is still landing: the
+        // seek moves it on, so the completion is stale.
+        r.players[VoicePart.soprano]!.complete();
+        async.elapse(const Duration(milliseconds: 200));
+        expect(r.engine.playing, isTrue);
+        expectInStep(r.engine, r.all, tolerance: Duration.zero);
+
+        unawaited(r.engine.seek(const Duration(seconds: 10)));
+        async.elapse(const Duration(milliseconds: 20));
+        unawaited(r.engine.pause());
+        async.elapse(const Duration(milliseconds: 200));
+        expect(r.all.any((p) => p.playing), isFalse);
+        expect(r.engine.position, const Duration(seconds: 10));
+      });
+    });
+
+    test('focus loss and unplugged headphones pause every player; ducking '
+        'does not; the session is set to music', () {
+      fakeAsync((async) {
+        final session = FakeAudioSession();
+        final r = rig(session: session);
+        unawaited(r.engine.load(tracks()));
+        async.flushMicrotasks();
+        expect(
+          session.configured?.androidAudioAttributes?.usage,
+          AndroidAudioUsage.media,
+        );
+        expect(
+          session.configured?.avAudioSessionCategory,
+          AVAudioSessionCategory.playback,
+        );
+
+        unawaited(r.engine.play());
+        async.flushMicrotasks();
+        session.interruptions.add(
+          AudioInterruptionEvent(true, AudioInterruptionType.duck),
+        );
+        async.flushMicrotasks();
+        expect(r.engine.playing, isTrue);
+        session.interruptions.add(
+          AudioInterruptionEvent(true, AudioInterruptionType.pause),
+        );
+        async.flushMicrotasks();
+        expect(r.engine.playing, isFalse);
+        expect(r.players.values.any((p) => p.playing), isFalse);
+        // The interruption ending doesn't resume on its own.
+        session.interruptions.add(
+          AudioInterruptionEvent(false, AudioInterruptionType.pause),
+        );
+        async.flushMicrotasks();
+        expect(r.engine.playing, isFalse);
+
+        unawaited(r.engine.play());
+        async.flushMicrotasks();
+        session.noisy.add(null);
+        async.flushMicrotasks();
+        expect(r.engine.playing, isFalse);
+        expect(r.players.values.any((p) => p.playing), isFalse);
+        expect(r.playing, [true, false, true, false]);
+      });
+    });
+
+    test('play holds audio focus, pause and dispose release it, and denied '
+        'focus does not start', () {
+      fakeAsync((async) {
+        final session = FakeAudioSession()..grant = false;
+        final r = rig(session: session);
+        unawaited(r.engine.load(tracks()));
+        async.flushMicrotasks();
+
+        unawaited(r.engine.play());
+        async.flushMicrotasks();
+        expect(session.activeCalls, [true]);
+        expect(r.engine.playing, isFalse);
+        expect(r.players.values.any((p) => p.playCalls > 0), isFalse);
+
+        session.grant = true;
+        unawaited(r.engine.play());
+        async.flushMicrotasks();
+        expect(r.engine.playing, isTrue);
+        expect(r.players.values.every((p) => p.playing), isTrue);
+        unawaited(r.engine.pause());
+        async.flushMicrotasks();
+        expect(session.activeCalls, [true, true, false]);
+
+        unawaited(r.engine.play());
+        async.flushMicrotasks();
+        unawaited(r.engine.dispose());
+        async.flushMicrotasks();
+        expect(session.activeCalls, [true, true, false, true, false]);
+      });
+    });
+
+    test('a completion while paused, or a late one after a seek back, is '
+        'ignored', () {
+      fakeAsync((async) {
+        final r = loaded(async);
+        final master = r.players[VoicePart.soprano]!;
+        unawaited(r.engine.seek(const Duration(seconds: 20)));
+        async.elapse(const Duration(seconds: 1));
+        final pauses = [for (final p in r.all) p.pauseCalls];
+        master.complete();
+        async.flushMicrotasks();
+        expect([for (final p in r.all) p.pauseCalls], pauses);
+
+        unawaited(r.engine.play());
+        async.elapse(const Duration(seconds: 1));
+        // The end event arrives after the master is already playing from
+        // well before its end again.
+        master.emitCompleted();
+        async.flushMicrotasks();
+        expect(r.engine.playing, isTrue);
+        expect(r.all.every((p) => p.playing), isTrue);
       });
     });
   });

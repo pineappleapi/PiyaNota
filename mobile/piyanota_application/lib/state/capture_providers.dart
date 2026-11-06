@@ -11,6 +11,7 @@ import '../services/capture/device_channel.dart';
 import '../services/capture/page_image_processor.dart';
 import '../services/capture/page_image_source.dart';
 import '../services/capture/page_picker.dart';
+import '../services/capture/pdf_page_renderer.dart';
 import '../services/fake_score_library_api.dart';
 import '../services/fake_score_upload_api.dart';
 import '../services/score_upload_api.dart';
@@ -45,6 +46,10 @@ final pageImageProcessorProvider = Provider<PageImageProcessor>(
 
 final captureFileStoreProvider = Provider<CaptureFileStore>(
   (ref) => DiskCaptureFileStore(captureWorkingDirectory),
+);
+
+final pdfPageRendererProvider = Provider<PdfPageRenderer>(
+  (ref) => const PdfxPageRenderer(),
 );
 
 final pageImageSourceProvider = Provider<PageImageSource>(

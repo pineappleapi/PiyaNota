@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 
 import 'screens/onboarding/widgets/splash_overlay.dart';
-import 'services/leaving_app.dart';
 
-/// Plays the splash over whatever is on screen on cold start and on
-/// resume, unless the app itself sent the user out (PIYA-201-V2.2).
+/// Plays the splash once per cold start (V3 F1). A paused-then-resumed app
+/// (camera, gallery, PDF picker, Gmail, home button) shows no splash; process
+/// death in the background is a cold start and replays it, which is accepted.
 ///
 /// It wraps MaterialApp, so it sits above the Navigator as a [Stack] layer
-/// rather than a pushed route: the screen beneath keeps its state
-/// (typed text, scroll, open sheets, running exports) while covered (AC2).
+/// rather than a pushed route: the screen beneath keeps its state while
+/// covered (AC2).
 class SplashGate extends StatefulWidget {
   const SplashGate({super.key, required this.child});
 
@@ -22,17 +22,6 @@ class _SplashGateState extends State<SplashGate> with WidgetsBindingObserver {
   // AC1: a cold start mounts the gate, so it starts showing.
   bool _showing = true;
 
-  /// Bumped per play so a resume during a play restarts the animation.
-  int _plays = 0;
-
-  /// Only `resumed` after `paused` replays: permission dialogs and system
-  /// sheets usually raise only `inactive`, and must not replay it.
-  bool _paused = false;
-
-  /// Decided at `paused`, not at `resumed`: the picker's result can arrive
-  /// before or after `resumed`, but it is always still out when paused.
-  bool _pausedToLeave = false;
-
   @override
   void initState() {
     super.initState();
@@ -43,31 +32,6 @@ class _SplashGateState extends State<SplashGate> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    switch (state) {
-      case AppLifecycleState.paused:
-        appPaused();
-        _paused = true;
-        _pausedToLeave = isLeavingApp;
-      case AppLifecycleState.resumed:
-        appResumed();
-        final replay = _paused && !_pausedToLeave;
-        _paused = false;
-        _pausedToLeave = false;
-        if (replay) {
-          setState(() {
-            _showing = true;
-            _plays++;
-          });
-        }
-      case AppLifecycleState.detached ||
-          AppLifecycleState.inactive ||
-          AppLifecycleState.hidden:
-        break;
-    }
   }
 
   /// AC2: back while covered must not pop the screen the user returns to.
@@ -96,7 +60,6 @@ class _SplashGateState extends State<SplashGate> with WidgetsBindingObserver {
               child: Directionality(
                 textDirection: TextDirection.ltr,
                 child: SplashOverlay(
-                  key: ValueKey(_plays),
                   onFinished: () => setState(() => _showing = false),
                 ),
               ),

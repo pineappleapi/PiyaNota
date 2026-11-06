@@ -29,11 +29,15 @@ class ApiConfig {
   // PIYA-303/304 — same caveat: assumed paths, reconcile in PIYA-214.
   static const String passwordResetRequestPath =
       '/api/auth/password-reset/request';
+  static const String passwordResetVerifyPath =
+      '/api/auth/password-reset/verify';
   static const String passwordResetConfirmPath =
       '/api/auth/password-reset/confirm';
   // PIYA-322 pins this path (all Module 3 routes sit under `/api`), so
   // unlike the paths above it is not an assumption.
   static const String changePasswordPath = '/api/auth/change-password';
+  // Contract J3: DELETE with a JSON body `{password}`.
+  static const String deleteAccountPath = '/api/account';
 
   // PIYA-308/309 define methods and schemas but not paths or the search
   // parameter name — all three are assumed; reconcile in PIYA-215.

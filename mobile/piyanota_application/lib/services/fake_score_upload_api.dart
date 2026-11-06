@@ -115,6 +115,14 @@ class FakeScoreUploadApi implements ScoreUploadApi {
     if (replacesJobId != null) {
       return _submitRetake(account, details, pageCount, replacesJobId);
     }
+    // J8: same 409 as the real create. Retakes returned above are exempt.
+    if (_library.scoreCount(account) >= maxScoresPerUser) {
+      throw const UploadRejectedException(
+        statusCode: 409,
+        code: scoreLimitReachedCode,
+        limit: maxScoresPerUser,
+      );
+    }
     if (account.endsWith(FakeScoreLibraryApi.flakyDomain)) {
       final call = (_callsByAccount[account] ?? 0) + 1;
       _callsByAccount[account] = call;

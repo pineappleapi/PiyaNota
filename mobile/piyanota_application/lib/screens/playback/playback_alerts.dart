@@ -6,8 +6,7 @@ import '../../models/voice_part.dart';
 import 'playback_messages.dart';
 
 /// The system alerts Playback shows (user decisions 2026-10-09): a voice
-/// that can't play at all, measures that will be silent, and a Solo that
-/// can't be heard. AlertDialogs like the rest of the app's confirmations.
+/// that can't play at all, and measures that will be silent. AlertDialogs like the rest of the app's confirmations.
 
 /// "Wholly corrupted, the others will play" for [voices] (in SATB order);
 /// [remaining] is how many voices are left to play.
@@ -108,33 +107,6 @@ Future<bool> showMutedMeasuresAlert(
     ),
   );
   return hide;
-}
-
-/// Solo was ticked on [voice] while its chip is off. True for "Turn
-/// `<Voice>` on", false for Cancel or a dismiss.
-Future<bool> showSoloChipOffAlert(
-  BuildContext context, {
-  required VoicePart voice,
-}) async {
-  final turnOn = await showDialog<bool>(
-    context: context,
-    builder: (context) => AlertDialog(
-      key: const ValueKey('solo-chip-off-alert'),
-      title: Text(PlaybackMessages.soloChipOffTitle(voice)),
-      content: Text(PlaybackMessages.soloChipOffBody(voice)),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          child: const Text(PlaybackMessages.cancel),
-        ),
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(true),
-          child: Text(PlaybackMessages.turnOn(voice)),
-        ),
-      ],
-    ),
-  );
-  return turnOn ?? false;
 }
 
 /// "Don't show again for this score", per `jobId` on the device

@@ -27,10 +27,10 @@ final notificationPermissionProvider = Provider<NotificationPermission>(
 );
 
 /// The level a ticked voice or click gets when the Voice Mixer does not
-/// let it be heard (muted, soloed out, or its slider at 0): 80%, not full
+/// let it be heard (muted or its slider at 0): 80%, not full
 /// (user decision 2026-10-21, kept 2026-10-22 when unmute stopped
-/// resetting the level). Not the Mixer's reset level, which stays at
-/// [PlaybackController.fullVolume] (PIYA-209 AC5).
+/// resetting the level). Equals the Mixer's voice default,
+/// [PlaybackController.defaultVoiceVolume] (F8c).
 const double exportDefaultLevel = 0.8;
 
 // The Export sheet only reads Playback (user decision 2026-10-21): it
@@ -38,7 +38,7 @@ const double exportDefaultLevel = 0.8;
 // and nothing ticked here is ever written back to them.
 
 /// [voice] can be heard in Playback right now: it can play, its chip is
-/// on (PIYA-208), it is not muted, not soloed out, and its slider is
+/// on (PIYA-208), it is not muted, and its slider is
 /// above 0. Same rule as [PlaybackState.voiceGain], which the engine uses.
 bool voiceAudibleForExport(PlaybackState state, VoicePart voice) =>
     state.voiceGain(voice) > 0;
@@ -56,14 +56,11 @@ bool clickAudibleForExport(PlaybackState state) =>
     !_clickSilencedInMixer(state);
 
 bool _clickSilencedInMixer(PlaybackState state) =>
-    state.clickMuted ||
-    (state.anySoloed && !state.clickSoloed) ||
-    state.clickVolume <= 0;
+    state.clickMuted || state.clickVolume <= 0;
 
 bool _voiceSilencedInMixer(PlaybackState state, VoicePart voice) =>
     state.muted.contains(voice) ||
-    (state.anySoloed && !state.soloed.contains(voice)) ||
-    (state.volumes[voice] ?? PlaybackController.fullVolume) <= 0;
+    (state.volumes[voice] ?? PlaybackController.defaultVoiceVolume) <= 0;
 
 /// What the sheet starts with: the voices that can be heard, and the click
 /// if it can be heard. A voice whose chip is off starts unticked.
@@ -86,11 +83,10 @@ ExportSelection initialExportSelection(PlaybackState state) {
 double exportVoiceGain(PlaybackState state, VoicePart voice) =>
     _voiceSilencedInMixer(state, voice)
     ? exportDefaultLevel
-    : state.volumes[voice] ?? PlaybackController.fullVolume;
+    : state.volumes[voice] ?? PlaybackController.defaultVoiceVolume;
 
 /// The ticked click's level: the Metronome row's, or [exportDefaultLevel]
-/// when the Mixer silences it (muted, soloed out by a soloed voice, or
-/// slider at 0), exactly as for a voice (user decision 2026-10-21).
+/// when the Mixer silences it (muted or slider at 0), exactly as for a voice (user decision 2026-10-21).
 double exportClickGain(PlaybackState state) =>
     _clickSilencedInMixer(state) ? exportDefaultLevel : state.clickVolume;
 

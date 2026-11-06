@@ -284,8 +284,11 @@ void main() {
       await tester.enterText(_field(0), FakeAuthApi.demoEmail);
       await tester.enterText(_field(1), 'wrong-pass1');
       await tester.pump();
-      await tester.tap(buttonLabelled('Log In'));
-      await tester.pumpAndSettle();
+      // Four wrong passwords are free; the 5th starts the wait (J2).
+      for (var i = 0; i < 5; i++) {
+        await tester.tap(buttonLabelled('Log In'));
+        await tester.pumpAndSettle();
+      }
       expect(find.textContaining('Try again in'), findsOneWidget);
 
       await tester.tap(find.text('Forgot Password?'));
@@ -379,7 +382,7 @@ void main() {
       );
       await _requestCode(tester);
 
-      expect(find.text('Try again in 60:00'), findsOneWidget);
+      expect(find.text('Try again in 1:00:00'), findsOneWidget);
       expect(find.text(AuthMessages.serverError), findsNothing);
       expect(find.text('Enter Code'), findsNothing);
     });
@@ -446,7 +449,7 @@ void main() {
       );
     });
 
-    testWidgets('AC2: wrong codes 1-2 have no wait, the 3rd starts 0:30', (
+    testWidgets('AC2: wrong codes 1-4 have no wait, the 5th starts 0:30', (
       tester,
     ) async {
       final clock = _TestClock();
@@ -458,9 +461,10 @@ void main() {
       );
       await _requestCode(tester);
       await submitCode(tester, first: true);
-      expect(find.textContaining('Try again in'), findsNothing);
-      await submitCode(tester);
-      expect(find.textContaining('Try again in'), findsNothing);
+      for (var i = 0; i < 3; i++) {
+        expect(find.textContaining('Try again in'), findsNothing);
+        await submitCode(tester);
+      }
       await submitCode(tester);
 
       expect(find.text('Try again in 0:30'), findsOneWidget);
@@ -484,22 +488,20 @@ void main() {
       expect(find.text(AuthMessages.resetCodeWrong), findsOneWidget);
     });
 
-    test(
-      'the wait after the 3rd, 4th and 5th wrong codes is 30, 60, 120 s',
-      () {
-        final clock = _TestClock();
-        final container = ProviderContainer(overrides: [clock.override]);
-        addTearDown(container.dispose);
-        final waits = container.read(resetCodeWaitsProvider.notifier);
-        waits.recordWrong(_email);
+    test('wrong x4 is free, then the wait after the 5th, 6th, 7th is 30, 60, 120 s', () {
+      final clock = _TestClock();
+      final container = ProviderContainer(overrides: [clock.override]);
+      addTearDown(container.dispose);
+      final waits = container.read(resetCodeWaitsProvider.notifier);
+      for (var i = 0; i < 4; i++) {
         waits.recordWrong(_email);
         expect(waits.remaining(_email), Duration.zero);
-        for (final seconds in [30, 60, 120]) {
-          waits.recordWrong(_email);
-          expect(waits.remaining(_email), Duration(seconds: seconds));
-        }
-      },
-    );
+      }
+      for (final seconds in [30, 60, 120]) {
+        waits.recordWrong(_email);
+        expect(waits.remaining(_email), Duration(seconds: seconds));
+      }
+    });
 
     testWidgets('AC2: the wait is announced at start and end', (tester) async {
       final announcements = <String>[];
@@ -688,6 +690,167 @@ void main() {
         container.read(resetCodeWaitsProvider.notifier).failures(_email),
         0,
       );
+    });
+  });
+
+  group('PIYA-211 F3: the code is verified on Enter Code', () {
+    Finder resendLink() => find.widgetWithText(TextButton, 'Resend code');
+
+    testWidgets('a wrong code stays on Enter Code and keeps the passwords', (
+      tester,
+    ) async {
+      final api = FakeAuthApi(latency: Duration.zero);
+      await pumpAuthScreen(
+        tester,
+        screen: const PasswordResetScreen(),
+        api: api,
+      );
+      await _requestCode(tester, email: FakeAuthApi.demoEmail);
+      final good = _demoCode(tester);
+      await _enterCode(tester, code: good == '000000' ? '000001' : '000000');
+
+      expect(find.text('Enter Code'), findsOneWidget);
+      expect(find.text('New Password'), findsNothing);
+      expect(find.text(AuthMessages.resetCodeWrong), findsOneWidget);
+      expect(find.textContaining('Try again in'), findsNothing);
+
+      // The correct code advances, and only then are passwords asked for.
+      await _enterCode(tester, code: good);
+      expect(find.text('New Password'), findsOneWidget);
+      await tester.enterText(_field(0), _newPassword);
+      await tester.enterText(_field(1), _newPassword);
+      await tester.pump();
+      // Going back and forward again keeps what was typed.
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      await _enterCode(tester, code: good);
+      expect(
+        find.widgetWithText(TextFormField, _newPassword),
+        findsNWidgets(2),
+      );
+    });
+
+    testWidgets('an expired code shows Resend and stays', (tester) async {
+      final api = ScriptedAuthApi(
+        onRequestReset: () async {},
+        onVerifyReset: () async => throw const ResetCodeInvalidException(),
+      );
+      await pumpAuthScreen(
+        tester,
+        screen: const PasswordResetScreen(),
+        api: api,
+      );
+      await _requestCode(tester);
+      await _enterCode(tester);
+
+      expect(find.text('Enter Code'), findsOneWidget);
+      expect(find.text('Code expired. Request a new one.'), findsOneWidget);
+      expect(api.confirmResetCalls, 0);
+      await tester.ensureVisible(resendLink());
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextButton>(resendLink()).onPressed, isNotNull);
+      await tester.tap(resendLink());
+      await tester.pumpAndSettle();
+      expect(api.requestResetCalls, 2);
+    });
+
+    testWidgets('wrong x4 is free, the 5th starts the server wait, Resend '
+        'clears the count', (tester) async {
+      final clock = _TestClock();
+      var wrongs = 0;
+      final api = ScriptedAuthApi(
+        onRequestReset: () async {},
+        onVerifyReset: () async {
+          wrongs++;
+          throw ResetCodeWrongException(
+            retryAfterSeconds: wrongs >= 5 ? 45 : null,
+          );
+        },
+      );
+      await pumpAuthScreen(
+        tester,
+        screen: const PasswordResetScreen(),
+        api: api,
+        extraOverrides: [clock.override],
+      );
+      await _requestCode(tester);
+      for (var i = 0; i < 4; i++) {
+        await _enterCode(tester);
+        expect(find.textContaining('Try again in'), findsNothing);
+      }
+      await _enterCode(tester);
+
+      // The server's 45 s, not our mirrored 30 s.
+      expect(find.text('Try again in 0:45'), findsOneWidget);
+      expect(api.verifyResetCalls, 5);
+      await tester.enterText(_field(0), _code);
+      await tester.pump();
+      expect(isButtonEnabled(tester, _continue), isFalse);
+
+      await clock.advance(tester, const Duration(seconds: 45));
+      await tester.ensureVisible(resendLink());
+      await tester.pumpAndSettle();
+      await tester.tap(resendLink());
+      await tester.pumpAndSettle();
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(PasswordResetScreen)),
+      );
+      expect(
+        container.read(resetCodeWaitsProvider.notifier).failures(_email),
+        0,
+      );
+    });
+
+    testWidgets('a 429 on verify shows the Retry-After wait', (tester) async {
+      final api = ScriptedAuthApi(
+        onRequestReset: () async {},
+        onVerifyReset: () async =>
+            throw const AuthRateLimitedException(retryAfterSeconds: 90),
+      );
+      await pumpAuthScreen(
+        tester,
+        screen: const PasswordResetScreen(),
+        api: api,
+      );
+      await _requestCode(tester);
+      await _enterCode(tester);
+
+      expect(find.text('Enter Code'), findsOneWidget);
+      expect(find.text('Try again in 1:30'), findsOneWidget);
+    });
+
+    testWidgets('NFR-10: Enter Code errors fit 320 dp at 2x text', (
+      tester,
+    ) async {
+      final api = ScriptedAuthApi(
+        onRequestReset: () async {},
+        onVerifyReset: () async =>
+            throw const ResetCodeWrongException(retryAfterSeconds: 900),
+      );
+      await pumpAuthScreen(
+        tester,
+        screen: const PasswordResetScreen(),
+        api: api,
+        physicalSize: const Size(640, 1136),
+        textScale: 2.0,
+      );
+      tester.view.devicePixelRatio = 2.0;
+      await tester.pump();
+      await tester.enterText(_field(0), _email);
+      await tester.ensureVisible(buttonLabelled(_sendCode));
+      await tester.pumpAndSettle();
+      await tester.tap(buttonLabelled(_sendCode));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(_field(0), _code);
+      await tester.ensureVisible(buttonLabelled(_continue));
+      await tester.pumpAndSettle();
+      await tester.tap(buttonLabelled(_continue));
+      await tester.pumpAndSettle();
+
+      expect(find.text(AuthMessages.resetCodeWrong), findsOneWidget);
+      expect(find.text('Try again in 15:00'), findsOneWidget);
+      expect(tester.takeException(), isNull);
     });
   });
 

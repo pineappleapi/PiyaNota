@@ -170,6 +170,7 @@ class ScoreResult {
     this.declaredFailedVoices = const {},
     this.failedVoiceCauses = const {},
     this.mutedMeasures = const [],
+    this.rawJson,
   });
 
   final int scoreId;
@@ -229,6 +230,11 @@ class ScoreResult {
   /// PIYA-103 AC9, in the server's order; empty when nothing was muted.
   /// Entries for a failed voice are dropped (it has no audio to mute).
   final List<MutedMeasure> mutedMeasures;
+
+  /// The unparsed `data` this was read from, kept so the F10 local copy can
+  /// read the J4 file ids (`audioFiles`, `pageFiles`, ...) and save the
+  /// whole manifest for offline opens without a second model.
+  final Map<String, dynamic>? rawJson;
 
   /// Every voice that won't play from the server's side: listed in
   /// `failedVoices`, or missing from `audioTracks` (PIYA-216 AC5 treats a
@@ -323,6 +329,7 @@ class ScoreResult {
         declaredFailed,
       ),
       mutedMeasures: List.unmodifiable(muted),
+      rawJson: data,
     );
   }
 

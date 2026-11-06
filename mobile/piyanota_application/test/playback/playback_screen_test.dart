@@ -55,7 +55,7 @@ void main() {
       expect(find.byKey(const ValueKey('score-scroll')), findsOneWidget);
       for (final voice in VoicePart.values) {
         expect(chipSelected(tester, voice), isTrue, reason: voice.name);
-        expect(harness.engine.volumes[voice], 1);
+        expect(harness.engine.volumes[voice], 0.8);
       }
       expect(find.byKey(const ValueKey('time-duration')), findsOneWidget);
       expect(find.text('0:10'), findsOneWidget);
@@ -76,7 +76,7 @@ void main() {
         expect(chipSelected(tester, voice), isFalse);
         expect(harness.engine.volumes[voice], 0);
       }
-      expect(harness.engine.volumes[VoicePart.alto], 1);
+      expect(harness.engine.volumes[VoicePart.alto], 0.8);
     });
 
     testWidgets('onboarding voice missing from the score: all available', (
@@ -109,7 +109,7 @@ void main() {
       await tester.tap(chip(VoicePart.bass));
       await tester.pump();
       expect(chipSelected(tester, VoicePart.bass), isTrue);
-      expect(harness.engine.volumes[VoicePart.bass], 1);
+      expect(harness.engine.volumes[VoicePart.bass], 0.8);
 
       await tester.tap(chip(VoicePart.soprano));
       await tester.pump();
@@ -120,7 +120,7 @@ void main() {
       await tester.tap(chip(VoicePart.bass));
       await tester.pump();
       expect(chipSelected(tester, VoicePart.bass), isTrue);
-      expect(harness.engine.volumes[VoicePart.bass], 1);
+      expect(harness.engine.volumes[VoicePart.bass], 0.8);
       // findsWidgets: ScaffoldMessenger also mirrors it onto the library
       // Scaffold underneath.
       expect(find.text(PlaybackMessages.keepOneVoice), findsWidgets);
@@ -526,7 +526,9 @@ void main() {
       final harness = ready();
       await pumpPlayback(tester, harness);
       final container = appContainer(tester);
-      container.read(playbackControllerProvider(kScoreId).notifier).setBpm(180);
+      container.read(playbackControllerProvider(kScoreId).notifier)
+        ..setBpm(180)
+        ..commitBpm();
       expect(harness.engine.speed, 2);
 
       await tester.tap(find.byKey(const ValueKey('play-pause')));
@@ -797,7 +799,7 @@ void main() {
         VoicePart.tenor,
       ]) {
         expect(chipSelected(tester, voice), isTrue, reason: voice.name);
-        expect(harness.engine.volumes[voice], 1, reason: voice.name);
+        expect(harness.engine.volumes[voice], 0.8, reason: voice.name);
       }
 
       // Still at least one voice: the last one stays on.
@@ -921,18 +923,10 @@ void main() {
     });
   });
 
-  test('page images: file only in the demo build', () {
-    final file = Uri.parse('file:///data/p1.png');
-    expect(scoreImageFor(file, allowLocalFiles: false), isNull);
-    expect(scoreImageFor(file, allowLocalFiles: true), isA<FileImage>());
-    expect(
-      scoreImageFor(Uri.parse('https://cdn/p1.png'), allowLocalFiles: false),
-      isA<NetworkImage>(),
-    );
-    expect(
-      scoreImageFor(Uri.parse('content://x/p1'), allowLocalFiles: true),
-      isNull,
-    );
+  test('page images: local copies (file) and network pages both load', () {
+    expect(scoreImageFor(Uri.parse('file:///data/p1.png')), isA<FileImage>());
+    expect(scoreImageFor(Uri.parse('https://cdn/p1.png')), isA<NetworkImage>());
+    expect(scoreImageFor(Uri.parse('content://x/p1')), isNull);
   });
 
   group('timing pages', () {
@@ -1351,6 +1345,21 @@ void main() {
   });
 
   group('layout', () {
+    testWidgets('voice chips do not overflow at 320 dp and 2x text', (
+      tester,
+    ) async {
+      await pumpPlayback(
+        tester,
+        ready(),
+        size: const Size(320, 800),
+        textScale: 2,
+      );
+      expect(tester.takeException(), isNull);
+      for (final v in VoicePart.values) {
+        expect(chip(v), findsOneWidget);
+      }
+    });
+
     for (final (name, size, scale) in [
       ('360 dp', const Size(360, 640), 1.0),
       ('360 dp at 1.3x text', const Size(360, 740), 1.3),
@@ -1460,6 +1469,30 @@ void main() {
         expect(tester.getSize(chip(v)).height, greaterThanOrEqualTo(48));
       }
       expect(tester.takeException(), isNull);
+    }, skip: fontsSkip != null);
+
+    testWidgets('F7: one line at 320 dp; chips are longer on a wider row', (
+      tester,
+    ) async {
+      await pumpPlayback(tester, ready(), size: const Size(320, 568));
+      final narrow = [
+        for (final v in VoicePart.values) tester.getRect(chip(v)),
+      ];
+      for (final r in narrow) {
+        expect(r.top, narrow.first.top, reason: 'one line');
+      }
+      expect(narrow.last.right, lessThanOrEqualTo(320 - 16));
+      expect(tester.takeException(), isNull);
+
+      tester.view.physicalSize = const Size(412, 917);
+      await tester.pump();
+      for (final v in VoicePart.values) {
+        expect(
+          tester.getSize(chip(v)).width,
+          greaterThan(narrow[v.index].width),
+          reason: v.name,
+        );
+      }
     }, skip: fontsSkip != null);
 
     testWidgets('AC1: large text wraps instead of overflowing', (tester) async {

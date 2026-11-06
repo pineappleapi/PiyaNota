@@ -14,27 +14,20 @@ class LibraryHeader extends StatelessWidget {
   const LibraryHeader({
     super.key,
     required this.subtitle,
-    required this.searchController,
-    required this.onSearchChanged,
+    this.title = LibraryMessages.title,
+    this.searchController,
+    this.onSearchChanged,
     required this.horizontalPadding,
   });
 
+  final String title;
   final String subtitle;
-  final TextEditingController searchController;
-  final ValueChanged<String> onSearchChanged;
+  // Settings passes neither: no search field, same header otherwise.
+  final TextEditingController? searchController;
+  final ValueChanged<String>? onSearchChanged;
   final double horizontalPadding;
 
   static const String _logoAsset = 'assets/branding/Piyanota_App_Logo.png';
-  // The PNG's mark spans x 528–1450, y 398–1631 of its 2000 px canvas
-  // (measured from the alpha channel), so the canvas is drawn larger than
-  // the box and overflows it, leaving the box the size of the mark itself.
-  // That lets the mark's top and right edges line up with the safe-area gap
-  // and the search field's right edge exactly.
-  static const double _logoMarkHeight = 72;
-  static const double logoMarkWidth = 54;
-  // 72 / 0.6165 (mark height fraction). The mark is centred on the canvas
-  // to within 1 dp, so OverflowBox's default centring needs no offset.
-  static const double _logoCanvasSize = 117;
 
   /// Breathing room between the status bar (safe area) and the header
   /// content, so neither the logo nor the title touches the top edge.
@@ -146,7 +139,7 @@ class LibraryHeader extends StatelessWidget {
                               child: Semantics(
                                 header: true,
                                 child: Text(
-                                  LibraryMessages.title,
+                                  title,
                                   style: textTheme.headlineLarge?.copyWith(
                                     fontSize: titleFontSize,
                                     fontWeight: FontWeight.w700,
@@ -167,11 +160,14 @@ class LibraryHeader extends StatelessWidget {
                           ],
                         ),
                       ),
-                      const SizedBox(height: _subtitleToSearchGap),
-                      LibrarySearchField(
-                        controller: searchController,
-                        onChanged: onSearchChanged,
-                      ),
+                      if (searchController != null &&
+                          onSearchChanged != null) ...[
+                        const SizedBox(height: _subtitleToSearchGap),
+                        LibrarySearchField(
+                          controller: searchController!,
+                          onChanged: onSearchChanged!,
+                        ),
+                      ],
                     ],
                   ),
                 ],
@@ -226,37 +222,6 @@ class _BackdropLogo extends StatelessWidget {
                 width: LibraryHeader._backdropLogoCanvas,
                 height: LibraryHeader._backdropLogoCanvas,
               ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// The faded corner mark. Public, with the title metrics above, so Settings
-/// (PIYA-212) draws the same header instead of a lookalike copy.
-class LibraryHeaderLogo extends StatelessWidget {
-  const LibraryHeaderLogo({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return ExcludeSemantics(
-      child: SizedBox(
-        key: const ValueKey('library-header-logo'),
-        width: LibraryHeader.logoMarkWidth,
-        height: LibraryHeader._logoMarkHeight,
-        child: Opacity(
-          opacity: AppTheme.settingsHeaderLogoOpacity,
-          child: OverflowBox(
-            minWidth: LibraryHeader._logoCanvasSize,
-            minHeight: LibraryHeader._logoCanvasSize,
-            maxWidth: LibraryHeader._logoCanvasSize,
-            maxHeight: LibraryHeader._logoCanvasSize,
-            child: Image.asset(
-              LibraryHeader._logoAsset,
-              width: LibraryHeader._logoCanvasSize,
-              height: LibraryHeader._logoCanvasSize,
             ),
           ),
         ),

@@ -7,6 +7,7 @@ import '../models/auth_session.dart';
 import 'auth_providers.dart';
 import 'export_jobs.dart';
 import 'export_providers.dart';
+import 'playback_providers.dart';
 import 'processing_providers.dart';
 import 'work_owner.dart';
 
@@ -38,19 +39,46 @@ void Function() _accountWorkForgetter(WidgetRef ref) {
 }
 
 /// Wipes the local session after the server rejected it, or on logout,
-/// before routing to Login. Everything kept for the account goes too.
-/// Never throws: the token is already dead server-side, and a failed
-/// local wipe must not trap the user on the screen.
-Future<void> endLocalSession(WidgetRef ref) async {
+/// before routing to Login. Never throws: the token is already dead
+/// server-side, and a failed local wipe must not trap the user on the
+/// screen.
+///
+/// The offline copy of results (F10) is wiped only when [wipeResults] is
+/// set: explicit Log out and Delete account. A session expiry keeps it, and
+/// keeps the owner id, so the same account logging back in still has its
+/// files and a different one is caught by [startSession].
+Future<void> endLocalSession(WidgetRef ref, {bool wipeResults = false}) async {
   ref.read(signedInProvider.notifier).set(false);
   _accountWorkForgetter(ref)();
+  final results = ref.read(localResultsStoreProvider);
   final owners = ref.read(workOwnerStoreProvider);
   final storage = ref.read(sessionStorageProvider);
-  await owners.clear();
+  if (wipeResults) {
+    // Results are keyed by score id only, so the next account must not see
+    // this one's scores offline. Not awaited and never throws: like the
+    // native stops above, logging out must not wait on file IO.
+    unawaited(results.deleteAll());
+    await owners.clear();
+  }
   try {
     await storage.clear();
   } catch (e) {
     debugPrint('Session clear failed: $e');
+  }
+}
+
+/// Delete account's local half, run only after the server returned 200.
+/// [endLocalSession] stops scan polling and the background service, forgets
+/// the stored scans and clears secure storage; this adds the login-wait
+/// keys and the results folder. Never throws: the account is already gone
+/// server-side, so a failed local step must not trap the user.
+Future<void> wipeAccountLocalData(WidgetRef ref) async {
+  final throttle = ref.read(loginThrottleProvider);
+  await endLocalSession(ref, wipeResults: true);
+  try {
+    await throttle.clearAll();
+  } catch (e, stack) {
+    debugPrint('Account wipe incomplete: $e\n$stack');
   }
 }
 
@@ -70,7 +98,11 @@ Future<void> startSession(WidgetRef ref, AuthSession session) async {
   // shortcut: trusts the server never to reuse a user id, so a DB reset or
   // a switch between fake and real builds can inherit another account's
   // work; upgrade by storing the email or API base URL with the owner id.
-  if (owner != session.userId) forgetAccountWork();
+  if (owner != session.userId) {
+    forgetAccountWork();
+    // Another account's offline results must not be readable by this one.
+    unawaited(ref.read(localResultsStoreProvider).deleteAll());
+  }
   await storage.save(session);
   await owners.save(session.userId);
   signedIn.set(true);

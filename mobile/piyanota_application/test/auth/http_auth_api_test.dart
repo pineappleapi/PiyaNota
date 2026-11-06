@@ -99,6 +99,44 @@ void main() {
     expect(_login(api), throwsA(isA<InvalidCredentialsException>()));
   });
 
+  test('401 carries attemptsRemaining from the error body', () {
+    final api = _apiWith(
+      _StubAdapter(
+        status: 401,
+        body: {
+          'error': {'code': 'invalid_credentials', 'attemptsRemaining': 1},
+        },
+      ),
+    );
+    expect(
+      _login(api),
+      throwsA(
+        isA<InvalidCredentialsException>()
+            .having((e) => e.attemptsRemaining, 'attemptsRemaining', 1)
+            .having((e) => e.retryAfterSeconds, 'retryAfterSeconds', null),
+      ),
+    );
+  });
+
+  test('401 carries retryAfterSeconds from the error body', () {
+    final api = _apiWith(
+      _StubAdapter(
+        status: 401,
+        body: {
+          'error': {'code': 'invalid_credentials', 'retryAfterSeconds': 3600},
+        },
+      ),
+    );
+    expect(
+      _login(api),
+      throwsA(
+        isA<InvalidCredentialsException>()
+            .having((e) => e.retryAfterSeconds, 'retryAfterSeconds', 3600)
+            .having((e) => e.attemptsRemaining, 'attemptsRemaining', null),
+      ),
+    );
+  });
+
   test('login 429 carries retryAfterSeconds', () {
     final api = _apiWith(
       _StubAdapter(
@@ -259,6 +297,59 @@ void main() {
         'newPassword': 'choir2026',
         'newPasswordConfirmation': 'choir2026',
       });
+    });
+
+    test('verify posts {email, code} to the verify path (B1)', () async {
+      final adapter = _StubAdapter(
+        body: {
+          'data': {'expiresInSeconds': 1500},
+          'success': true,
+          'status': 200,
+          'message': 'Reset code verified',
+        },
+      );
+      await _apiWith(adapter)
+          .verifyPasswordReset(email: 'maria@example.com', code: '482913');
+
+      expect(adapter.lastRequest?.path, ApiConfig.passwordResetVerifyPath);
+      expect(adapter.lastRequest?.data, {
+        'email': 'maria@example.com',
+        'code': '482913',
+      });
+    });
+
+    test('verify 400 reset_code_invalid carries retryAfterSeconds', () {
+      final api = _apiWith(
+        _StubAdapter(
+          status: 400,
+          body: {
+            'error': {'code': 'reset_code_invalid', 'retryAfterSeconds': 30},
+          },
+        ),
+      );
+      expect(
+        api.verifyPasswordReset(email: 'maria@example.com', code: '000000'),
+        throwsA(
+          isA<ResetCodeWrongException>().having(
+            (e) => e.retryAfterSeconds,
+            'retryAfterSeconds',
+            30,
+          ),
+        ),
+      );
+    });
+
+    test('verify 410 maps to ResetCodeInvalidException', () {
+      final api = _apiWith(
+        _StubAdapter(
+          status: 410,
+          body: {'error': 'reset_token_expired_or_invalid'},
+        ),
+      );
+      expect(
+        api.verifyPasswordReset(email: 'maria@example.com', code: '000000'),
+        throwsA(isA<ResetCodeInvalidException>()),
+      );
     });
 
     test('confirm 410 maps to ResetCodeInvalidException', () {

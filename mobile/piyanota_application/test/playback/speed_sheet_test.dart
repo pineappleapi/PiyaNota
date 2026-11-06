@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:piyanota_application/screens/playback/playback_messages.dart';
@@ -82,7 +84,9 @@ void main() {
       expect(sliderValue(tester), 120);
       expect(harness.engine.speed, 1);
 
-      controller(tester).setBpm(60);
+      controller(tester)
+        ..setBpm(60)
+        ..commitBpm();
       await tester.pump();
       expect(harness.engine.speed, 0.5);
     });
@@ -120,12 +124,60 @@ void main() {
       final harness = ready();
       await pumpPlayback(tester, harness);
       final c = controller(tester);
-      c.setBpm(10);
+      c
+        ..setBpm(10)
+        ..commitBpm();
       expect(c.state.chosenBpm, 30);
       expect(harness.engine.speed, 30 / 90);
-      c.setBpm(999);
+      c
+        ..setBpm(999)
+        ..commitBpm();
       expect(c.state.chosenBpm, 240);
       expect(harness.engine.speed, 240 / 90);
+    });
+  });
+
+  group('speed applied without a drag (F8a)', () {
+    testWidgets('a TalkBack increase/decrease reaches the engine', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      final harness = ready();
+      await pumpPlayback(tester, harness);
+      await openSpeed(tester);
+      final node = tester.getSemantics(slider);
+      node.owner!.performAction(node.id, SemanticsAction.increase);
+      await tester.pump();
+      final up = sliderValue(tester);
+      expect(up, greaterThan(90));
+      expect(harness.engine.speed, up / 90);
+      for (var i = 0; i < 2; i++) {
+        node.owner!.performAction(node.id, SemanticsAction.decrease);
+        await tester.pump();
+      }
+      final down = sliderValue(tester);
+      expect(down, lessThan(90));
+      expect(harness.engine.speed, down / 90);
+      handle.dispose();
+    });
+
+    testWidgets('a keyboard arrow reaches the engine', (tester) async {
+      final harness = ready();
+      await pumpPlayback(tester, harness);
+      await openSpeed(tester);
+      // The slider's own focus node, as a Tab to it would give.
+      tester
+          .widgetList<Focus>(
+            find.descendant(of: slider, matching: find.byType(Focus)),
+          )
+          .firstWhere((focus) => focus.focusNode != null)
+          .focusNode!
+          .requestFocus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pump();
+      expect(sliderValue(tester), greaterThan(90));
+      expect(harness.engine.speed, sliderValue(tester) / 90);
     });
   });
 
@@ -142,7 +194,7 @@ void main() {
       await tester.tap(toggle);
       await tester.pump();
       expect(tester.widget<SheetCheckbox>(toggle).value, isTrue);
-      expect(harness.engine.clickVolume, 1);
+      expect(harness.engine.clickVolume, 0.5);
 
       await tester.tap(toggle);
       await tester.pump();
@@ -162,7 +214,7 @@ void main() {
       expect(harness.engine.clickVolume, 0);
       // ...and unmuting there doesn't need the toggle again.
       c.setClickMuted(muted: false);
-      expect(harness.engine.clickVolume, 1);
+      expect(harness.engine.clickVolume, 0.5);
       // Turning it off here leaves the mixer's level alone.
       c.setClickVolume(0.4);
       await tester.tap(toggle);
@@ -184,7 +236,9 @@ void main() {
         Duration(seconds: 1),
       ]);
       expect(plan.length, harness.engine.duration);
-      controller(tester).setBpm(150);
+      controller(tester)
+        ..setBpm(150)
+        ..commitBpm();
       // One engine speed for voices and click: the click is heard at 150.
       expect(harness.engine.speed, 1.25);
     });
@@ -204,7 +258,9 @@ void main() {
       expect(find.text(PlaybackMessages.metronomeUnavailable), findsNothing);
       expect(sliderValue(tester), 90);
       expect(tester.widget<Slider>(slider).onChanged, isNotNull);
-      controller(tester).setBpm(135);
+      controller(tester)
+        ..setBpm(135)
+        ..commitBpm();
       expect(harness.engine.speed, 1.5);
     });
 
@@ -218,7 +274,9 @@ void main() {
       expect(tester.widget<SheetCheckbox>(toggle).onChanged, isNull);
       expect(find.text(PlaybackMessages.metronomeUnavailable), findsOneWidget);
       // Speed still works.
-      controller(tester).setBpm(45);
+      controller(tester)
+        ..setBpm(45)
+        ..commitBpm();
       expect(harness.engine.speed, 0.5);
       expect(tester.widget<Slider>(slider).onChanged, isNotNull);
       handle.dispose();

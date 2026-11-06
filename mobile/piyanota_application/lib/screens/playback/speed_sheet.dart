@@ -132,9 +132,10 @@ class PlaybackSpeedSheet extends ConsumerWidget {
                 divisions: ScoreDetails.maxTempo - ScoreDetails.minTempo,
                 semanticFormatterCallback: (v) =>
                     PlaybackMessages.bpmSpoken(v.round()),
-                // On every change, so a drag is heard as it moves (210 AC4).
+                // Moves the value; the speed is applied on release (F8a).
                 onChanged: (v) => controller.setBpm(v.round()),
-                // Re-plans the click only if the subdivision changed.
+                // Applies the speed; re-plans the click only if the
+                // subdivision changed.
                 onChangeEnd: (_) => controller.commitBpm(),
               ),
             ),

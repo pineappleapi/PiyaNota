@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,6 +9,7 @@ import '../../models/library_entry.dart';
 import '../../models/score_summary.dart';
 import '../../routes/app_routes.dart';
 import '../../services/score_library_api.dart';
+import '../../state/playback_providers.dart';
 import '../../state/processing_providers.dart';
 import '../../state/score_library_providers.dart';
 import '../../state/session_actions.dart';
@@ -231,7 +234,11 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
     }
     // PIYA-218: a deleted score's scans leave the bell and the stored
     // history with it.
-    if (gone) ref.read(processingJobsProvider.notifier).forgetScore(scoreId);
+    if (gone) {
+      ref.read(processingJobsProvider.notifier).forgetScore(scoreId);
+      // F10: the downloaded copy goes with the score; never throws.
+      unawaited(ref.read(localResultsStoreProvider).deleteScore(scoreId));
+    }
     if (!mounted) return gone;
     // A gone row keeps its disabled state until it has left the list.
     if (!gone) setState(() => _deletingIds.remove(scoreId));

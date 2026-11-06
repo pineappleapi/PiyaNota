@@ -4,8 +4,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 
-import '../leaving_app.dart';
-
 /// A PDF the user chose, copied into app storage so it stays readable.
 @immutable
 class PickedPdf {
@@ -22,8 +20,9 @@ class NotAPdfException implements Exception {
 /// Gallery and document pickers for Capture.
 abstract interface class PagePicker {
   /// Photos chosen in the gallery, in the order the picker returns them.
-  /// Empty when the user backs out.
-  Future<List<String>> pickGalleryImages();
+  /// Empty when the user backs out. [single] opens the one-photo picker
+  /// (a retake replaces exactly one page).
+  Future<List<String>> pickGalleryImages({bool single = false});
 
   /// Null when the user backs out. Throws [NotAPdfException].
   Future<PickedPdf?> pickPdf();
@@ -55,6 +54,9 @@ bool looksLikePdf(List<int> bytes) {
   return false;
 }
 
+const double _pickMaxSide = 4032; // = maxLongSide in page_image_processor
+const int _pickQuality = 90;
+
 class PluginPagePicker implements PagePicker {
   PluginPagePicker(this._outputDir, {ImagePicker? imagePicker})
     : _imagePicker = imagePicker ?? ImagePicker();
@@ -63,22 +65,35 @@ class PluginPagePicker implements PagePicker {
   final ImagePicker _imagePicker;
 
   @override
-  Future<List<String>> pickGalleryImages() async {
+  Future<List<String>> pickGalleryImages({bool single = false}) async {
+    if (single) {
+      final file = await _imagePicker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: _pickMaxSide,
+        maxHeight: _pickMaxSide,
+        imageQuality: _pickQuality,
+        requestFullMetadata: false,
+      );
+      return [if (file != null) file.path];
+    }
     // Full metadata off: on Android 13+ this keeps the permission-less
     // system photo picker (AC3); orientation is still read from the file.
-    final files = await withoutSplash(
-      () => _imagePicker.pickMultiImage(requestFullMetadata: false),
+    // Native downscale of oversize photos (cheap); the plugin keeps EXIF
+    // tags incl. GPS on resize, so the app still strips them in prepare.
+    final files = await _imagePicker.pickMultiImage(
+      maxWidth: _pickMaxSide,
+      maxHeight: _pickMaxSide,
+      imageQuality: _pickQuality,
+      requestFullMetadata: false,
     );
     return [for (final file in files) file.path];
   }
 
   @override
   Future<PickedPdf?> pickPdf() async {
-    final file = await withoutSplash(
-      () => FilePicker.pickFile(
-        type: FileType.custom,
-        allowedExtensions: const ['pdf'],
-      ),
+    final file = await FilePicker.pickFile(
+      type: FileType.custom,
+      allowedExtensions: const ['pdf'],
     );
     if (file == null) return null;
     final bytes = await file.readAsBytes();

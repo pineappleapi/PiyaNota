@@ -85,10 +85,15 @@ class FakeAuthApi implements AuthApi {
   /// the PIYA-322 AC5 sliding window.
   final Map<String, List<DateTime>> _changePasswordFailures = {};
 
-  /// PIYA-202-V2.1 AC7: wrong logins per account and when the current wait
-  /// ends, on the same schedule as the app's own throttle.
+  /// J2 / D0.1: wrong logins per account, when the current wait ends, and
+  /// which accounts sit in the long lock (the count steps back once it ends).
+  static const int loginFreeFailures = 4;
+  static const int loginLockAt = 10;
+  static const Duration loginStep = Duration(seconds: 30);
+  static const Duration loginLock = Duration(hours: 1);
   final Map<String, int> _loginFailures = {};
   final Map<String, DateTime> _loginBlockedUntil = {};
+  final Set<String> _loginLocked = {};
 
   /// B1.4: when each account's last wrong login happened.
   final Map<String, DateTime> _lastWrongLogin = {};
@@ -128,17 +133,30 @@ class FakeAuthApi implements AuthApi {
             .ceil(),
       );
     }
+    // The idle reset comes first, then the step-down after a lock that has
+    // ended (the deadline check above already passed).
+    final stale = _isStale(_lastWrongLogin[normalized], now);
+    if (stale) _loginLocked.remove(normalized);
+    if (_loginLocked.remove(normalized)) {
+      _loginFailures[normalized] = loginFreeFailures;
+    }
     if (_passwordsByEmail[normalized] != password) {
-      final stale = _isStale(_lastWrongLogin[normalized], now);
       final failures = (stale ? 0 : _loginFailures[normalized] ?? 0) + 1;
       _loginFailures[normalized] = failures;
       _lastWrongLogin[normalized] = now;
-      _loginBlockedUntil[normalized] = now.add(backoffAfter(failures));
-      throw const InvalidCredentialsException();
+      if (failures <= loginFreeFailures) {
+        throw InvalidCredentialsException(
+          attemptsRemaining: loginFreeFailures + 1 - failures,
+        );
+      }
+      final wait = failures >= loginLockAt
+          ? loginLock
+          : loginStep * (failures - loginFreeFailures);
+      if (failures >= loginLockAt) _loginLocked.add(normalized);
+      _loginBlockedUntil[normalized] = now.add(wait);
+      throw InvalidCredentialsException(retryAfterSeconds: wait.inSeconds);
     }
-    _loginFailures.remove(normalized);
-    _loginBlockedUntil.remove(normalized);
-    _lastWrongLogin.remove(normalized);
+    _clearLogin(normalized);
     return _issueSession(normalized);
   }
 
@@ -190,6 +208,15 @@ class FakeAuthApi implements AuthApi {
   }
 
   @override
+  Future<void> verifyPasswordReset({
+    required String email,
+    required String code,
+  }) async {
+    await Future<void>.delayed(latency);
+    _checkResetCode(_normalize(email), code);
+  }
+
+  @override
   Future<void> confirmPasswordReset({
     required String email,
     required String resetToken,
@@ -198,6 +225,23 @@ class FakeAuthApi implements AuthApi {
   }) async {
     await Future<void>.delayed(latency);
     final normalized = _normalize(email);
+    _checkResetCode(normalized, resetToken);
+    _checkNewPassword(newPassword, newPasswordConfirmation);
+    // PIYA-304 AC4: single use — consumed only once the reset succeeds, so
+    // a weak-password 400 doesn't burn the user's code.
+    _grantsByEmail.remove(normalized);
+    _wrongCodes.remove(normalized);
+    _wrongCodeBlockedUntil.remove(normalized);
+    _lastWrongCode.remove(normalized);
+    _passwordsByEmail[normalized] = newPassword;
+    // PIYA-202-V2.1: a reset proves control of the mailbox, so it lifts any
+    // login wait the forgotten password caused.
+    _clearLogin(normalized);
+  }
+
+  /// One code check for verify and confirm, as on the server (D0.2), so the
+  /// two can never disagree and a wrong code cannot reach the password step.
+  void _checkResetCode(String normalized, String code) {
     final now = _now();
     final blockedUntil = _wrongCodeBlockedUntil[normalized];
     // B4.5: even the right code waits, so the limit can't be guessed
@@ -214,33 +258,27 @@ class FakeAuthApi implements AuthApi {
     if (grant == null || !now.isBefore(grant.expiresAt)) {
       throw const ResetCodeInvalidException();
     }
-    if (grant.code != resetToken.trim()) {
-      // B4.4: every wrong code is a 400; from the 3rd on it also starts a
+    if (grant.code != code.trim()) {
+      // B4.4: every wrong code is a 400; from the 5th on it also starts a
       // wait, which the next request meets as a 429.
       final stale = _isStale(_lastWrongCode[normalized], now);
       final count = (stale ? 0 : _wrongCodes[normalized] ?? 0) + 1;
       _wrongCodes[normalized] = count;
       _lastWrongCode[normalized] = now;
       if (count > resetCodeFreeAttempts) {
-        _wrongCodeBlockedUntil[normalized] = now.add(
-          backoffAfter(count - resetCodeFreeAttempts),
-        );
+        final wait = backoffAfter(count - resetCodeFreeAttempts);
+        _wrongCodeBlockedUntil[normalized] = now.add(wait);
+        throw ResetCodeWrongException(retryAfterSeconds: wait.inSeconds);
       }
       throw const ResetCodeWrongException();
     }
-    _checkNewPassword(newPassword, newPasswordConfirmation);
-    // PIYA-304 AC4: single use — consumed only once the reset succeeds, so
-    // a weak-password 400 doesn't burn the user's code.
-    _grantsByEmail.remove(normalized);
-    _wrongCodes.remove(normalized);
-    _wrongCodeBlockedUntil.remove(normalized);
-    _lastWrongCode.remove(normalized);
-    _passwordsByEmail[normalized] = newPassword;
-    // PIYA-202-V2.1: a reset proves control of the mailbox, so it lifts any
-    // login wait the forgotten password caused.
+  }
+
+  void _clearLogin(String normalized) {
     _loginFailures.remove(normalized);
     _loginBlockedUntil.remove(normalized);
     _lastWrongLogin.remove(normalized);
+    _loginLocked.remove(normalized);
   }
 
   /// PIYA-322 stand-in, in the contract's order: session (AC1), rate limit
@@ -286,6 +324,40 @@ class FakeAuthApi implements AuthApi {
     _emailsByToken.removeWhere(
       (other, owner) => owner == email && other != token,
     );
+  }
+
+  /// J3 stand-in: shares Change Password's wrong-password window, never the
+  /// login ladder. Success forgets the account entirely, so the same email
+  /// can sign up again at once and a login returns the unknown-account 401.
+  @override
+  Future<void> deleteAccount({
+    required String token,
+    required String password,
+  }) async {
+    await Future<void>.delayed(latency);
+    final email = accountForToken(token);
+    if (email == null) throw const AuthSessionExpiredException();
+    if (email.endsWith(offlineDomain)) throw const AuthNetworkException();
+
+    final now = _now();
+    final failures = _changePasswordFailures.putIfAbsent(email, () => [])
+      ..removeWhere((at) => !now.isBefore(at.add(changePasswordFailureWindow)));
+    if (failures.length >= changePasswordMaxFailures) {
+      final freesAt = failures.first.add(changePasswordFailureWindow);
+      throw AuthRateLimitedException(
+        retryAfterSeconds: freesAt.difference(now).inSeconds,
+      );
+    }
+    if (_passwordsByEmail[email] != password) {
+      failures.add(now);
+      throw const CurrentPasswordIncorrectException();
+    }
+    _passwordsByEmail.remove(email);
+    _userIdsByEmail.remove(email);
+    _emailsByToken.removeWhere((_, owner) => owner == email);
+    _grantsByEmail.remove(email);
+    _changePasswordFailures.remove(email);
+    _clearLogin(email);
   }
 
   /// The code most recently "emailed" to [email], or null if nothing was

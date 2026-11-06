@@ -632,9 +632,7 @@ void main() {
     });
 
     testWidgets('gains: a voice the Mixer lets be heard keeps its level; '
-        'a muted, soloed-out or zeroed one gets the default level', (
-      tester,
-    ) async {
+        'a muted or zeroed one gets the default level', (tester) async {
       final service = FakeExportService();
       await pumpPlayback(tester, harness(service));
       controller(tester)
@@ -647,19 +645,15 @@ void main() {
       expect(gains(buildExportJob(playback(tester), all, kTitle)), {
         'soprano.mp3': 0.5,
         'alto.mp3': exportDefaultLevel,
-        'tenor.mp3': 1.0,
+        'tenor.mp3': 0.8,
         'bass.mp3': exportDefaultLevel,
       });
 
-      controller(tester)
-        ..setVoiceVolume(VoicePart.tenor, 0.7)
-        ..setVoiceSoloed(VoicePart.tenor, soloed: true);
-      expect(gains(buildExportJob(playback(tester), all, kTitle)), {
-        'soprano.mp3': exportDefaultLevel,
-        'alto.mp3': exportDefaultLevel,
-        'tenor.mp3': 0.7,
-        'bass.mp3': exportDefaultLevel,
-      });
+      controller(tester).setVoiceVolume(VoicePart.tenor, 0.7);
+      expect(
+        gains(buildExportJob(playback(tester), all, kTitle))['tenor.mp3'],
+        0.7,
+      );
       // User decision 2026-10-21: 80%, kept apart from the Mixer's reset.
       expect(exportDefaultLevel, 0.8);
       expect(exportDefaultLevel, isNot(PlaybackController.fullVolume));
@@ -682,7 +676,7 @@ void main() {
     });
 
     testWidgets('click gain: its Mixer level, or the default click level '
-        'when muted or soloed out by a voice', (tester) async {
+        'when muted', (tester) async {
       final service = FakeExportService();
       await pumpPlayback(tester, harness(service));
       final click = Uri.parse('test://export-click.wav');
@@ -704,12 +698,7 @@ void main() {
       controller(tester).setClickMuted(muted: true);
       expect(await clickGain(), exportDefaultLevel);
 
-      controller(tester)
-        ..setClickMuted(muted: false)
-        ..setVoiceSoloed(VoicePart.soprano, soloed: true);
-      expect(await clickGain(), exportDefaultLevel);
-
-      controller(tester).setClickSoloed(soloed: true);
+      controller(tester).setClickMuted(muted: false);
       expect(await clickGain(), 0.25);
     });
 
@@ -809,23 +798,20 @@ void main() {
       await tester.tap(download);
       await settle(tester);
       expect(gains(service.exports.single.$1), {
-        'soprano.mp3': 1.0,
+        'soprano.mp3': 0.8,
         'alto.mp3': exportDefaultLevel,
-        'tenor.mp3': 1.0,
+        'tenor.mp3': 0.8,
         'bass.mp3': exportDefaultLevel,
       });
     });
 
-    testWidgets('a solo ticks only the soloed voices; the click is soloed '
-        'out too', (tester) async {
+    testWidgets('a voice whose chip is off starts unticked', (tester) async {
       final service = FakeExportService();
       await pumpPlayback(tester, harness(service));
-      controller(tester)
-        ..setMetronomeOn(on: true)
-        ..setVoiceSoloed(VoicePart.alto, soloed: true);
+      controller(tester).toggleVoice(VoicePart.alto);
       await openExport(tester, clear: false);
-      expect(tickedVoices(tester), {VoicePart.alto});
-      expect(isChecked(tester, ExportMessages.clickBox), isFalse);
+      expect(tickedVoices(tester), isNot(contains(VoicePart.alto)));
+      expect(tickedVoices(tester), contains(VoicePart.soprano));
     });
 
     testWidgets('metronome on: the click starts ticked', (tester) async {
@@ -847,29 +833,6 @@ void main() {
       expect(isChecked(tester, ExportMessages.clickBox), isFalse);
     });
 
-    testWidgets('a soloed click leaves the voices unticked, so Download '
-        'waits for a voice; one ticked exports at the default level', (
-      tester,
-    ) async {
-      final service = FakeExportService();
-      await pumpPlayback(tester, harness(service));
-      controller(tester)
-        ..setMetronomeOn(on: true)
-        ..setVoiceVolume(VoicePart.soprano, 0.6)
-        ..setClickSoloed(soloed: true);
-      await openExport(tester, clear: false);
-      expect(tickedVoices(tester), isEmpty);
-      expect(isChecked(tester, ExportMessages.clickBox), isTrue);
-      expect(downloadEnabled(tester), isFalse);
-
-      await tick(tester, ExportMessages.voiceBox(VoicePart.soprano));
-      await tester.tap(download);
-      await settle(tester);
-      final (job, _) = service.exports.single;
-      expect(job.inputs.single.gain, exportDefaultLevel);
-      expect(job.prepare, isNotNull);
-    });
-
     testWidgets('ticks in the sheet never change the Mixer, the Speed '
         'toggle or the chips', (tester) async {
       final service = FakeExportService();
@@ -887,11 +850,9 @@ void main() {
       final after = playback(tester);
       expect(after.selected, before.selected);
       expect(after.muted, before.muted);
-      expect(after.soloed, before.soloed);
       expect(after.volumes, before.volumes);
       expect(after.metronomeOn, before.metronomeOn);
       expect(after.clickMuted, before.clickMuted);
-      expect(after.clickSoloed, before.clickSoloed);
     });
 
     testWidgets('the Speed toggle and the Mixer metronome row are one '

@@ -7,7 +7,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../config/api_config.dart';
 import '../../models/score_result.dart';
 import '../../models/score_timeline.dart';
 import '../../models/voice_part.dart';
@@ -719,6 +718,13 @@ class _VoiceChips extends StatelessWidget {
 
   static const double _chipGap = 2;
 
+  /// Row width at which four chips just fit on one line (Roboto, scale 1.0,
+  /// 320 dp minus gutters); wider rows spend the spare width on longer chips.
+  static const double _tightRowWidth = 288;
+
+  /// Spare row width per extra dp of label padding on each side.
+  static const double _spareDivisor = 40;
+
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
@@ -726,34 +732,45 @@ class _VoiceChips extends StatelessWidget {
       maxScaleFactor: 1.3,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              PlaybackMessages.selectVoices,
-              style: textTheme.bodyMedium?.copyWith(
-                color: AppTheme.playbackSubtle,
-              ),
-            ),
-            // A Wrap, not a Row: one line is guaranteed only at text scale 1.0;
-            // above that it wraps rather than clips (NFR-10).
-            Wrap(
-              spacing: _chipGap,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final extra =
+                ((constraints.maxWidth - _tightRowWidth) / _spareDivisor).clamp(
+                  0.0,
+                  double.infinity,
+                );
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                for (final voice in VoicePart.values)
-                  _VoiceChip(
-                    voice: voice,
-                    available: available.contains(voice),
-                    selected: selected.contains(voice),
-                    onToggle: onToggle,
-                    onUnavailableTap:
-                        !available.contains(voice) && unreadable.contains(voice)
-                        ? () => onUnreadable(voice)
-                        : null,
+                Text(
+                  PlaybackMessages.selectVoices,
+                  style: textTheme.bodyMedium?.copyWith(
+                    color: AppTheme.playbackSubtle,
                   ),
+                ),
+                // A Wrap, not a Row: one line is guaranteed only at text scale 1.0;
+                // above that it wraps rather than clips (NFR-10).
+                Wrap(
+                  spacing: _chipGap,
+                  children: [
+                    for (final voice in VoicePart.values)
+                      _VoiceChip(
+                        voice: voice,
+                        available: available.contains(voice),
+                        selected: selected.contains(voice),
+                        onToggle: onToggle,
+                        onUnavailableTap:
+                            !available.contains(voice) &&
+                                unreadable.contains(voice)
+                            ? () => onUnreadable(voice)
+                            : null,
+                        extraPadding: extra,
+                      ),
+                  ],
+                ),
               ],
-            ),
-          ],
+            );
+          },
         ),
       ),
     );
@@ -766,6 +783,7 @@ class _VoiceChip extends StatelessWidget {
     required this.available,
     required this.selected,
     required this.onToggle,
+    required this.extraPadding,
     this.onUnavailableTap,
   });
 
@@ -773,6 +791,9 @@ class _VoiceChip extends StatelessWidget {
   final bool available;
   final bool selected;
   final ValueChanged<VoicePart> onToggle;
+
+  /// Added to the label's horizontal padding: longer chips on wider rows.
+  final double extraPadding;
 
   /// A disabled chip that still answers a tap (PIYA-208: an `unreadable`
   /// voice offers the retake); null for one that doesn't.
@@ -807,7 +828,9 @@ class _VoiceChip extends StatelessWidget {
       checkmarkColor: Colors.white,
       selectedColor: _voiceFill[voice],
       padding: const EdgeInsets.all(_chipPadding),
-      labelPadding: const EdgeInsets.symmetric(horizontal: _labelPadding),
+      labelPadding: EdgeInsets.symmetric(
+        horizontal: _labelPadding + extraPadding,
+      ),
       backgroundColor: AppTheme.playbackChipFill,
       disabledColor: AppTheme.playbackChipFill.withValues(
         alpha: _unavailableAlpha,
@@ -1822,15 +1845,12 @@ class _MetronomePainter extends CustomPainter {
   bool shouldRepaint(_MetronomePainter oldDelegate) => false;
 }
 
-/// A score page's image. `file:` only in the debug-only fake build (the
-/// demo page is generated into the cache dir); ScoreResult already drops
-/// such URLs otherwise, and this keeps the screen safe on its own.
+/// A score page's image. A `file:` URI reaches here only from the local
+/// results store (F10, which checks it lies in the results folder) or the
+/// debug fake build: ScoreResult drops server-sent `file:` URLs.
 @visibleForTesting
-ImageProvider? scoreImageFor(
-  Uri uri, {
-  bool allowLocalFiles = ApiConfig.useFakeAuth,
-}) => switch (uri.scheme) {
-  'file' when allowLocalFiles => FileImage(File(uri.toFilePath())),
+ImageProvider? scoreImageFor(Uri uri) => switch (uri.scheme) {
+  'file' => FileImage(File(uri.toFilePath())),
   'http' || 'https' => NetworkImage(uri.toString()),
   _ => null,
 };

@@ -180,6 +180,9 @@ class FakeScoreLibraryApi implements ScoreLibraryApi {
     return scoreId;
   }
 
+  /// Scores [account] holds, processing ones included (J8 counts them).
+  int scoreCount(String account) => _scoresFor(account).length;
+
   /// Stands in for the placeholder score a cancelled scan leaves behind
   /// being removed (scan-status spec §3). Silent if it's already gone.
   void removeSubmittedScore({required String account, required int scoreId}) {
