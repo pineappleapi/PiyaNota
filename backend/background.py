@@ -106,16 +106,20 @@ UNION SELECT t.metadata_key FROM timing_metadata t JOIN scores s ON s.id = t.sco
 """
 
 
-def purge_user(conn: Conn, user_id: int) -> None:
+def purge_user(conn: Conn, user_id: int) -> int:
     """Queue every blob the user owns, then hard-delete the user (rows cascade) and log it.
 
     Shared by the background loop and ``DELETE /api/account`` so both purge the same set. The
     caller owns the transaction, so a failure here rolls back with it.
+
+    Returns:
+        Number of storage keys queued for deletion.
     """
     keys = [r["k"] for r in conn.execute(_USER_KEYS_SQL, {"u": user_id}).fetchall()]
     queue_deletion(conn, keys)
     conn.execute("DELETE FROM users WHERE id = %s", (user_id,))
     conn.execute("INSERT INTO purge_log (user_ref, completed_at) VALUES (%s, now())", (user_id,))
+    return len(keys)
 
 
 def run_purges(storage: Storage) -> int:

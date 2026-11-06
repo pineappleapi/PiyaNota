@@ -31,6 +31,22 @@ _INTERNAL_MESSAGE = "Internal server error"
 _DEBUG_HEADER_NAMES = ("X-Forwarded-For", "True-Client-IP", "CF-Connecting-IP")
 _MS_PER_S = 1000
 _UNROUTED = "-"
+_JOB_REF_PREFIX = "job_"
+
+
+def _id_fields() -> str:
+    """Integer ids for the request log: user_id (authenticated), score_id, job_id (from ``job_<n>``)."""
+    view_args = request.view_args or {}
+    fields: dict[str, int] = {}
+    user = g.get("user")
+    if user is not None:
+        fields["user_id"] = int(user.id)
+    if isinstance(view_args.get("score_id"), int):
+        fields["score_id"] = view_args["score_id"]
+    ref = view_args.get("ref")
+    if isinstance(ref, str) and ref.startswith(_JOB_REF_PREFIX) and ref[len(_JOB_REF_PREFIX):].isdecimal():
+        fields["job_id"] = int(ref[len(_JOB_REF_PREFIX):])
+    return "".join(f" {k}={v}" for k, v in fields.items())
 
 
 def create_app(settings: Settings | None = None) -> Flask:
@@ -108,10 +124,10 @@ def create_app(settings: Settings | None = None) -> Flask:
         started = g.get("request_started")
         if started is not None and request.path != "/healthz":
             LOG.info(
-                "req %s %s status=%s ms=%.0f in_bytes=%s out_bytes=%s",
+                "req %s %s status=%s ms=%.0f in_bytes=%s out_bytes=%s%s",
                 request.method, request.url_rule.rule if request.url_rule else _UNROUTED,
                 response.status_code, (time.perf_counter() - started) * _MS_PER_S,
-                request.content_length or 0, response.content_length,
+                request.content_length or 0, response.content_length, _id_fields(),
             )
         return response
 

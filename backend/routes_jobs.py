@@ -21,6 +21,7 @@ from werkzeug.exceptions import RequestEntityTooLarge
 from backend import access, background, db, security, standardize, throttle
 from backend.config import SETTINGS_KEY, Settings
 from backend.envelope import ApiError, iso_z, ok
+from backend.logutil import log_event
 from backend.standardize import MAX_PDF_PAGES, StandardPage
 from backend.storage import get_storage, new_key
 from backend.validation import (
@@ -385,7 +386,10 @@ def _submit(source: Source) -> tuple[Response, int]:
         raise ApiError(429, "queue_full", "The processing queue is full",
                        retry_after=QUEUE_FULL_RETRY_AFTER_S)
 
-    return _accepted(create_job(user_id, meta, pages, source, client_id))
+    job_row = create_job(user_id, meta, pages, source, client_id)
+    log_event(LOG, "score create", user_id=user_id, job_id=job_row["id"], pages=len(pages),
+              in_bytes=request.content_length or 0)
+    return _accepted(job_row)
 
 
 @jobs_bp.post("")
@@ -473,4 +477,5 @@ def cancel_job(ref: str) -> tuple[Response, int]:
         background.queue_deletion(conn, keys)
     LOG.info("job cancelled job_id=%s user_id=%s stage=%s at=%s",
              job_id, g.user.id, job["status"], iso_z(datetime.now(timezone.utc)))
+    log_event(LOG, "job cancel", user_id=g.user.id, job_id=job_id)
     return ok({"jobId": ref, "status": "cancelled"}, 200, "Processing cancelled")

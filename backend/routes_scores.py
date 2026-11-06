@@ -12,6 +12,7 @@ from flask import Blueprint, Response, current_app, g, request
 from backend import access, db, security
 from backend.config import SETTINGS_KEY, Settings
 from backend.envelope import ApiError, iso_z, ok
+from backend.logutil import log_event
 from backend.routes_jobs import job_ref
 from backend.storage import get_storage
 from backend.validation import clean_arranger, clean_title, json_body
@@ -184,6 +185,7 @@ def edit(score_id: int) -> tuple[Response, int]:
         )
     if row is None:
         raise RuntimeError("score update returned no row")
+    log_event(LOG, "score edit", user_id=g.user.id, score_id=score_id)
     return ok(score_entry(row), 200, "Score updated")
 
 
@@ -202,4 +204,5 @@ def delete(score_id: int) -> tuple[Response, int]:
         conn.execute(
             "UPDATE scores SET deleted_at = now() WHERE id = %s AND user_id = %s", (score_id, g.user.id)
         )
+    log_event(LOG, "score delete", user_id=g.user.id, score_id=score_id)
     return ok({"scoreId": score_id}, 200, "Score deleted")

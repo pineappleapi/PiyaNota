@@ -12,6 +12,7 @@ import signal
 import tempfile
 import threading
 from collections.abc import Callable, Sequence
+from datetime import datetime, timezone
 from pathlib import Path
 from time import monotonic
 from typing import Any
@@ -222,7 +223,8 @@ def process_one(*, storage: Storage, runner: Runner, settings: Settings,
     if job is None:
         return False
     job_id: int = job["id"]
-    LOG.info("job claimed job_id=%s attempt=%s", job_id, job["attempts"])
+    LOG.info("job claimed job_id=%s attempt=%s queue_wait_s=%.1f", job_id, job["attempts"],
+             _age_s(job["created_at"]))
 
     work_dir = Path(tempfile.mkdtemp(prefix=f"piya-job-{job_id}-"))  # before the thread so finally always pairs
     stop = threading.Event()
@@ -269,15 +271,22 @@ def process_one(*, storage: Storage, runner: Runner, settings: Settings,
         stop.set()
         beat.join(HEARTBEAT_JOIN_TIMEOUT_S)
         shutil.rmtree(work_dir, ignore_errors=True)
-        _log_timing(job_id, len(pages), started, marks)
+        _log_timing(job_id, len(pages), started, marks, job["created_at"])
     return True
 
 
-def _log_timing(job_id: int, page_count: int, started: float, marks: list[tuple[str, float]]) -> None:
-    """Log total and per-stage seconds so slow stages can be found from the worker log alone."""
+def _age_s(created_at: datetime) -> float:
+    """Seconds since the job row was created (database clock vs. this host's clock: expect small skew)."""
+    return (datetime.now(timezone.utc) - created_at).total_seconds()
+
+
+def _log_timing(job_id: int, page_count: int, started: float, marks: list[tuple[str, float]],
+                created_at: datetime) -> None:
+    """Log total, per-stage and created-to-finished seconds so slow stages can be found from the worker log alone."""
     end = monotonic()
     stages = {name: round(nxt - t, 1) for (name, t), (_, nxt) in zip(marks, [*marks[1:], ("end", end)])}
-    LOG.info("job timing job_id=%s pages=%s total_s=%.1f stages=%s", job_id, page_count, end - started, stages)
+    LOG.info("job timing job_id=%s pages=%s total_s=%.1f end_to_end_s=%.1f stages=%s", job_id, page_count,
+             end - started, _age_s(created_at), stages)
 
 
 def run_loop(*, storage: Storage, runner: Runner, settings: Settings, stop: threading.Event) -> None:

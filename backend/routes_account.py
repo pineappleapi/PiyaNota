@@ -6,13 +6,18 @@ from __future__ import annotations
 from typing import cast
 
 import psycopg.errors
+import logging
+
 from flask import Blueprint, Response, current_app, g
 
 from backend import background, db, security, throttle
 from backend.config import SETTINGS_KEY, Settings
 
 from backend.envelope import ApiError, iso_z, ok
+from backend.logutil import log_event
 from backend.validation import MAX_PASSWORD_LENGTH, json_body, require_str
+
+LOG = logging.getLogger(__name__)
 
 account_bp = Blueprint("account", __name__, url_prefix="/api/account")
 
@@ -79,6 +84,7 @@ def account_info() -> tuple[Response, int]:
 def delete_account() -> tuple[Response, int]:
     password = require_str(json_body(), "password")
     failure: ApiError | None = None
+    purged_keys = 0
     # A purge can deadlock against the worker finishing a job for the same user (opposite row
     # order); the whole transaction rolled back, so one retry is safe and turns a rare 500 into 200.
     for attempt in range(_DELETE_ATTEMPTS):
@@ -88,11 +94,12 @@ def delete_account() -> tuple[Response, int]:
                 if failure is None:
                     # Inline so users.email UNIQUE frees at once; the background loop stays as a safety
                     # net. Sessions cascade with the user row. Any failure rolls the whole delete back.
-                    background.purge_user(conn, g.user.id)
+                    purged_keys = background.purge_user(conn, g.user.id)
             break
         except psycopg.errors.DeadlockDetected:
             if attempt == _DELETE_ATTEMPTS - 1:
                 raise
     if failure is not None:
         raise failure
+    log_event(LOG, "account delete ok", user_id=g.user.id, purged_keys=purged_keys)
     return ok(None, 200, "Account deleted")

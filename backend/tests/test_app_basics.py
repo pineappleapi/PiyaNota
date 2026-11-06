@@ -292,3 +292,34 @@ def test_request_log_has_timing_and_no_raw_path(client, caplog):
     lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("req ")]
     assert len(lines) == 1  # healthz skipped
     assert "ms=" in lines[0] and "12345" not in lines[0] and "secret" not in lines[0]
+
+
+def test_event_and_request_logs_carry_ids_and_durations_but_no_secrets(client, caplog):
+    """PIYA-106 item J: ids and ms on req/event lines; emails, passwords and tokens never logged."""
+    import logging
+
+    email, password = "log.check@example.com", "Sup3r-secret-pw!"
+    with caplog.at_level(logging.INFO):
+        signup = client.post("/api/auth/signup", json={
+            "email": email, "password": password, "passwordConfirmation": password})
+        token = signup.get_json()["data"]["sessionToken"]
+        client.post("/api/auth/login", json={"email": email, "password": "Wrong-pw-123!"})
+        client.post("/api/auth/login", json={"email": email, "password": password})
+        auth = {"Authorization": f"Bearer {token}"}
+        client.patch("/api/scores/4242", json={"title": "X"}, headers=auth)
+        client.post("/api/jobs/job_77/cancel", headers=auth)
+        client.delete("/api/account", json={"password": password}, headers=auth)
+    lines = [r.getMessage() for r in caplog.records]
+
+    def has(prefix: str, *fields: str) -> bool:
+        return any(m.startswith(prefix) and all(f in m for f in fields) and " ms=" in m for m in lines)
+
+    assert has("auth signup ok", "user_id=") and has("auth login ok", "user_id=")
+    assert has("auth login fail", "reason=invalid_credentials")
+    assert has("account delete ok", "user_id=", "purged_keys=")
+    assert any(m.startswith("req PATCH /api/scores/<int:score_id>") and "score_id=4242" in m and "user_id=" in m
+               for m in lines)
+    assert any(m.startswith("req POST /api/jobs/<ref>/cancel") and "job_id=77" in m for m in lines)
+    blob = "\n".join(lines)
+    for secret in (email, password, token):
+        assert secret not in blob

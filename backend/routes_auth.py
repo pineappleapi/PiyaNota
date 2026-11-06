@@ -17,6 +17,7 @@ from backend import db, security, throttle
 from backend.mailer import MailError, get_mailer
 from backend.config import SETTINGS_KEY, Settings
 from backend.envelope import ApiError, iso_z, ok
+from backend.logutil import log_event
 from backend.routes_account import check_current_password
 from backend.validation import (
     MAX_PASSWORD_LENGTH,
@@ -106,6 +107,7 @@ def signup() -> tuple[Response, int]:
         raise ApiError(
             409, "email_already_registered", "Email is already registered", field="email"
         ) from None
+    log_event(LOG, "auth signup ok", user_id=user["id"])
     return ok(session_payload(user, token, expires_at), 201, "Account created")
 
 
@@ -176,9 +178,11 @@ def login() -> tuple[Response, int]:
                     ),
                 )
     if failure is not None:
+        log_event(LOG, "auth login fail", reason=failure.code)
         raise failure
     if result is None:
         raise RuntimeError("login finished without a result or an error")
+    log_event(LOG, "auth login ok", user_id=result[0]["id"])
     return ok(session_payload(*result), 200, "Login successful")
 
 
@@ -266,6 +270,7 @@ def password_reset_request() -> tuple[Response, int]:
                     failure = ApiError(500, "internal_error", "Internal server error")
     if failure is not None:
         raise failure
+    log_event(LOG, "auth reset requested")
     return ok(None, 200, _RESET_REQUEST_MESSAGE)
 
 
@@ -358,6 +363,7 @@ def password_reset_verify() -> tuple[Response, int]:
         raise failure
     if row is None:
         raise RuntimeError("verify finished without a result or an error")
+    log_event(LOG, "auth reset verified", user_id=row["user_id"])
     return ok({"expiresInSeconds": int(row["expires_in"])}, 200, "Reset code verified")
 
 
@@ -396,6 +402,8 @@ def password_reset_confirm() -> tuple[Response, int]:
             throttle.clear_failures(conn, _LOGIN_EMAIL_SCOPE, email_key)
     if failure is not None:
         raise failure
+    if row is not None:
+        log_event(LOG, "auth reset confirmed", user_id=row["user_id"])
     return ok(None, 200, "Password reset successful")
 
 
