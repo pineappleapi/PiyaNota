@@ -62,6 +62,7 @@ def _args(tag: str = "") -> dict[str, Any]:
         failed_voices=[], failed_voice_causes={}, review=REVIEW, muted_measures=[],
         thumbnail_key=f"thumbs/{tag}t.jpg",
         midi_keys={v: f"midi/{tag}{v}.mid" for v in VOICES},
+        midi_combined_key=f"midi/{tag}combined.mid",
     )
 
 
@@ -123,6 +124,8 @@ def test_retake_completion_updates_same_score(app: Flask) -> None:
     assert {f"midi/old-{v}.mid" for v in VOICES} <= queued  # no MIDI blob left behind by the replace
     assert not {f"midi/new-{v}.mid" for v in VOICES} & queued
     assert {r["midi_key"] for r in midi_rows} == {f"midi/new-{v}.mid" for v in VOICES}
+    assert score["midi_combined_key"] == "midi/new-combined.mid"
+    assert "midi/old-combined.mid" in queued and "midi/new-combined.mid" not in queued  # FR-12 on retake
     assert (old["superseded_by_job_id"], old["score_id"]) == (retake, None)
     assert (new["status"], new["score_id"]) == ("complete", score_id)
 

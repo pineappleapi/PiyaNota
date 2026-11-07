@@ -48,6 +48,7 @@ def complete_job(
     muted_measures: Sequence[Mapping[str, object]],
     thumbnail_key: str | None,
     midi_keys: Mapping[str, str] | None = None,
+    midi_combined_key: str | None = None,
 ) -> int | None:
     """Turn a job into a finished score in the caller's transaction (PIYA-321 AC4/AC5).
 
@@ -88,14 +89,14 @@ def complete_job(
         job["title"], job["arranger"], job["page_count"], job["tempo_bpm"], job["tempo_source"],
         job["key_signature"], job["time_signature"], thumbnail_key,
         Jsonb(dict(review)), Jsonb(list(muted_measures)), Jsonb(list(failed_voices)),
-        Jsonb(dict(failed_voice_causes)),
+        Jsonb(dict(failed_voice_causes)), midi_combined_key,
     )
     if retake_of_score and old_score is not None and old_job is not None:
         score_id: int = old_score["id"]
         conn.execute(
             f"UPDATE scores SET ({_SCORE_COPY_COLS}, thumbnail_key, review, muted_measures, "
-            "failed_voices, failed_voice_causes) = "
-            "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) WHERE id = %s",
+            "failed_voices, failed_voice_causes, midi_combined_key) = "
+            "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) WHERE id = %s",
             (*fields, score_id),
         )
         old_keys = [
@@ -110,6 +111,8 @@ def complete_job(
         ]
         if old_score["thumbnail_key"] is not None:
             old_keys.append(old_score["thumbnail_key"])
+        if old_score["midi_combined_key"] is not None:
+            old_keys.append(old_score["midi_combined_key"])
         background.queue_deletion(conn, old_keys)
         conn.execute("DELETE FROM audio_tracks WHERE score_id = %s", (score_id,))
         conn.execute("DELETE FROM timing_metadata WHERE score_id = %s", (score_id,))
@@ -121,7 +124,8 @@ def complete_job(
     else:
         row = conn.execute(
             f"INSERT INTO scores (user_id, {_SCORE_COPY_COLS}, thumbnail_key, review, muted_measures, "
-            "failed_voices, failed_voice_causes) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+            "failed_voices, failed_voice_causes, midi_combined_key) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
             "RETURNING id",
             (job["user_id"], *fields),
         ).fetchone()
@@ -140,7 +144,8 @@ def complete_job(
         "failed_voices = %s, failed_voice_causes = %s WHERE id = %s",
         (score_id, Jsonb(list(failed_voices)), Jsonb(dict(failed_voice_causes)), job_id),
     )
-    new_keys = [*audio_keys.values(), *(midi_keys or {}).values(), timing_key] + ([thumbnail_key] if thumbnail_key else [])
+    new_keys = [*audio_keys.values(), *(midi_keys or {}).values(), timing_key] + ([thumbnail_key] if thumbnail_key else []) \
+        + ([midi_combined_key] if midi_combined_key else [])
     background.release_keys(conn, new_keys)
     return score_id
 

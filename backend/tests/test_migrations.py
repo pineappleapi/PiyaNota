@@ -93,7 +93,7 @@ def _job(conn: psycopg.Connection[tuple[Any, ...]], user_id: int, **overrides: A
 
 
 def test_up_fresh_db_creates_all_tables(conn: psycopg.Connection[tuple[Any, ...]]) -> None:
-    assert migrate.up(conn) == ["0001", "0002", "0003", "0004", "0005"]
+    assert migrate.up(conn) == ["0001", "0002", "0003", "0004", "0005", "0006"]
     assert _tables(conn) == ERD_TABLES
 
 
@@ -103,17 +103,17 @@ def test_up_is_idempotent(conn: psycopg.Connection[tuple[Any, ...]]) -> None:
 
 
 def test_status_reports_pending_and_applied(conn: psycopg.Connection[tuple[Any, ...]]) -> None:
-    assert migrate.status(conn) == [("0001", False), ("0002", False), ("0003", False), ("0004", False), ("0005", False)]
+    assert migrate.status(conn) == [("0001", False), ("0002", False), ("0003", False), ("0004", False), ("0005", False), ("0006", False)]
     migrate.up(conn)
-    assert migrate.status(conn) == [("0001", True), ("0002", True), ("0003", True), ("0004", True), ("0005", True)]
+    assert migrate.status(conn) == [("0001", True), ("0002", True), ("0003", True), ("0004", True), ("0005", True), ("0006", True)]
 
 
 def test_down_then_up_roundtrip(conn: psycopg.Connection[tuple[Any, ...]]) -> None:
     migrate.up(conn)
-    assert migrate.down(conn, to="0000") == ["0005", "0004", "0003", "0002", "0001"]
+    assert migrate.down(conn, to="0000") == ["0006", "0005", "0004", "0003", "0002", "0001"]
     assert _tables(conn) <= {"schema_migrations"}
-    assert migrate.status(conn) == [("0001", False), ("0002", False), ("0003", False), ("0004", False), ("0005", False)]
-    assert migrate.up(conn) == ["0001", "0002", "0003", "0004", "0005"]
+    assert migrate.status(conn) == [("0001", False), ("0002", False), ("0003", False), ("0004", False), ("0005", False), ("0006", False)]
+    assert migrate.up(conn) == ["0001", "0002", "0003", "0004", "0005", "0006"]
     assert _tables(conn) == ERD_TABLES
 
 
@@ -218,5 +218,18 @@ def test_0005_soft_delete_column_and_indexes(conn: psycopg.Connection[tuple[Any,
 
     migrate.up(conn)
     assert state() == (True, {"scores_user_live_idx", "scores_deleted_at_idx"})
-    assert migrate.down(conn, to="0004") == ["0005"]
+    assert migrate.down(conn, to="0004") == ["0006", "0005"]
     assert state() == (False, set())
+
+
+def test_0006_midi_combined_key_column(conn: psycopg.Connection[tuple[Any, ...]]) -> None:
+    def has_col() -> bool:
+        return conn.execute(
+            "SELECT 1 FROM information_schema.columns WHERE table_schema = %s "
+            "AND table_name = 'scores' AND column_name = 'midi_combined_key'", (SCRATCH_SCHEMA,)
+        ).fetchone() is not None
+
+    migrate.up(conn)
+    assert has_col()
+    assert migrate.down(conn, to="0005") == ["0006"]
+    assert not has_col()

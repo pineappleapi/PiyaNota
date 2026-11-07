@@ -106,6 +106,7 @@ def result(score_id: int) -> tuple[Response, int]:
             size = None
         return {"url": storage.signed_url(key, ttl_seconds=ttl), "fileId": key, "sizeBytes": size}
 
+    midi_combined = file(score["midi_combined_key"]) if score["midi_combined_key"] else None
     midi = {t["voice"]: file(t["midi_key"]) for t in tracks if t["midi_key"]}
     data: dict[str, Any] = {
         "jobId": job_ref(job_id) if job_id is not None else None,
@@ -124,6 +125,7 @@ def result(score_id: int) -> tuple[Response, int]:
         "pageFiles": [file(p["object_key"]) for p in pages],
         "timingFile": file(timing["metadata_key"]) if timing else None,
         "midiTracks": midi or None,  # null for scores converted before MIDI existed
+        "midiCombined": midi_combined,  # null for older scores or when bars were unusable
         "review": _client_review(score["review"]),
         "mutedMeasures": score["muted_measures"],
         "failedVoices": score["failed_voices"],

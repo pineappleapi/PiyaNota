@@ -210,6 +210,29 @@ def test_result_old_score_without_midi_has_null_midi_tracks(
     assert data["midiTracks"] is None and set(data["audioFiles"]) == set(VOICES)
 
 
+def test_result_midi_combined_entry_and_null_for_old_score(client: FlaskClient, headers: dict[str, str]) -> None:
+    old, _ = _score(_uid(), tag="o")
+    data = client.get(f"/api/scores/{old}/result", headers=headers).get_json()["data"]
+    assert data["midiCombined"] is None
+    sid, _ = _score(_uid(), tag="c", midi=True)
+    with db.transaction() as conn:
+        conn.execute("UPDATE scores SET midi_combined_key = 'midi/comb.mid' WHERE id = %s", (sid,))
+    _storage(client.application).put("midi/comb.mid", b"abc", "audio/midi")
+    data = client.get(f"/api/scores/{sid}/result", headers=headers).get_json()["data"]
+    assert data["midiCombined"] == {"url": "https://storage.test/midi/comb.mid?sig=fake", "fileId": "midi/comb.mid",
+                                    "sizeBytes": 3}
+
+
+def test_purge_deleted_score_queues_combined_midi(client: FlaskClient, headers: dict[str, str]) -> None:
+    sid, _ = _score(_uid(), tag="d", midi=True)
+    with db.transaction() as conn:
+        conn.execute("UPDATE scores SET midi_combined_key = 'midi/dcomb.mid', deleted_at = now() - interval '8 days' "
+                     "WHERE id = %s", (sid,))
+        assert background.purge_deleted_scores(conn) == 1
+        queued = {r["object_key"] for r in conn.execute("SELECT object_key FROM storage_deletions")}
+    assert "midi/dcomb.mid" in queued  # FR-12: the blob is not orphaned
+
+
 def test_result_failed_voice_has_no_track(client: FlaskClient, headers: dict[str, str]) -> None:
     sid, _ = _score(_uid(), failed=("tenor",))
     data = client.get(f"/api/scores/{sid}/result", headers=headers).get_json()["data"]

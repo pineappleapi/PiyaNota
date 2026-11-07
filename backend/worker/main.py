@@ -20,6 +20,7 @@ from typing import Any
 import psycopg
 
 from backend import background, completion, db, migrate
+from backend.midi_combined import build_combined_midi
 from backend.config import Settings, load_settings
 from backend.logutil import describe_exception
 from backend.storage import Storage, build_storage, new_key
@@ -156,6 +157,19 @@ def _timing_bytes(result: PipelineResult, settings: Settings) -> bytes:
     return json.dumps(timing).encode("utf-8")
 
 
+def _combined_midi(result: PipelineResult, timing: bytes) -> bytes | None:
+    """Combined playback MIDI, or None when there are no usable bars; it must never fail a converted job."""
+    try:
+        bars = json.loads(timing).get("bars")
+        events = result.timing_inputs.get("events")
+        if not bars or not events:
+            return None
+        return build_combined_midi(events, bars, result.timing_inputs.get("bpm"))
+    except Exception as exc:  # noqa: BLE001 - optional artifact, per-voice MP3/MIDI still ship
+        LOG.error("combined midi failed, skipping: %s", describe_exception(exc))
+        return None
+
+
 def _publish(job_id: int, result: PipelineResult, storage: Storage, settings: Settings,
              uploaded: list[str]) -> None:
     """Upload results and complete the job in one transaction.
@@ -172,11 +186,17 @@ def _publish(job_id: int, result: PipelineResult, storage: Storage, settings: Se
     page_keys = [new_key("pages", "jpg") for _ in result.pages]
     thumb = completion.make_thumbnail(result.pages[0].served_jpeg)
     timing = _timing_bytes(result, settings)
+    combined = _combined_midi(result, timing)
+    combined_key = new_key("midi", "mid") if combined is not None else None
     all_keys = [*audio.values(), *midi.values(), timing_key, thumb_key, *page_keys]
+    if combined_key is not None:
+        all_keys.append(combined_key)
     uploaded.extend(all_keys)  # tracked before the puts: a failed put may still have written the object
     background.reserve_keys(all_keys)  # committed first so a crash mid-upload leaves a reaper row
     uploads = [(audio[v], result.mp3[v], "audio/mpeg") for v in audio]
     uploads += [(midi[v], result.midi[v], "audio/midi") for v in midi]
+    if combined_key is not None and combined is not None:
+        uploads.append((combined_key, combined, "audio/midi"))
     uploads += [(timing_key, timing, "application/json"), (thumb_key, thumb, "image/jpeg")]
     uploads += [(k, p.served_jpeg, "image/jpeg") for k, p in zip(page_keys, result.pages)]
     for key, data, content_type in uploads:
@@ -193,7 +213,8 @@ def _publish(job_id: int, result: PipelineResult, storage: Storage, settings: Se
         score_id = completion.complete_job(
             conn, job_id, audio_keys=audio, timing_key=timing_key, failed_voices=result.failed_voices,
             failed_voice_causes=result.failed_voice_causes, review=result.review,
-            muted_measures=result.muted_measures, thumbnail_key=thumb_key, midi_keys=midi)
+            muted_measures=result.muted_measures, thumbnail_key=thumb_key, midi_keys=midi,
+            midi_combined_key=combined_key)
         if score_id is None:
             raise _Cancelled  # rolls back the page swap too
         background.release_keys(conn, page_keys)

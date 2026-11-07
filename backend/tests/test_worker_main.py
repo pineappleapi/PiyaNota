@@ -237,6 +237,26 @@ def test_timing_enabled_builds_timing_from_inputs(
     assert got == {"bpm": 100} and b'"x": 1' in storage.get(key)
 
 
+@pytest.mark.parametrize("with_bars", [True, False])
+def test_combined_midi_uploaded_when_bars_exist_else_none(
+        app: Flask, settings: Settings, monkeypatch: pytest.MonkeyPatch, with_bars: bool) -> None:
+    import timing_export
+
+    bars = [dict(bar=1, startTick=0, durTicks=1920, numerator=4, denominator=4, pickup=False)]
+    ev = {"Soprano": [dict(type="note", pitch=72, tick_onset=0, duration_ticks=480)]}
+    storage = MemoryStorage()
+    _seed_job(storage)
+    monkeypatch.setattr(timing_export, "build_timing", lambda **kw: {"events": [{"x": 1}], "bars": bars if with_bars else []})
+    result = replace(_result(), timing_inputs={"bpm": 100, "events": ev})
+    process_one(storage=storage, runner=_runner(result), settings=settings)
+    with db.transaction() as conn:
+        key = conn.execute("SELECT midi_combined_key FROM scores").fetchone()["midi_combined_key"]
+    if with_bars:
+        assert storage.get(key)[:4] == b"MThd"
+    else:
+        assert key is None
+
+
 def test_timing_disabled_uploads_empty_timing(app: Flask, settings: Settings) -> None:
     storage = MemoryStorage()
     _seed_job(storage)

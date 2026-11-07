@@ -100,6 +100,7 @@ def run_deletions(storage: Storage, limit: int = 100) -> int:
 _USER_KEYS_SQL = """
 SELECT jp.object_key AS k FROM job_pages jp JOIN jobs j ON j.id = jp.job_id WHERE j.user_id = %(u)s
 UNION SELECT thumbnail_key FROM scores WHERE user_id = %(u)s AND thumbnail_key IS NOT NULL
+UNION SELECT midi_combined_key FROM scores WHERE user_id = %(u)s AND midi_combined_key IS NOT NULL
 UNION SELECT a.file_key FROM audio_tracks a JOIN scores s ON s.id = a.score_id WHERE s.user_id = %(u)s
 UNION SELECT a.midi_key FROM audio_tracks a JOIN scores s ON s.id = a.score_id WHERE s.user_id = %(u)s AND a.midi_key IS NOT NULL
 UNION SELECT t.metadata_key FROM timing_metadata t JOIN scores s ON s.id = t.score_id WHERE s.user_id = %(u)s
@@ -227,7 +228,7 @@ def purge_deleted_scores(
         Number of scores removed.
     """
     scores = conn.execute(
-        "SELECT id, thumbnail_key FROM scores WHERE deleted_at < now() - make_interval(secs => %s) "
+        "SELECT id, thumbnail_key, midi_combined_key FROM scores WHERE deleted_at < now() - make_interval(secs => %s) "
         "ORDER BY id LIMIT %s FOR UPDATE SKIP LOCKED",
         (retention_s, limit),
     ).fetchall()
@@ -263,6 +264,8 @@ def _purge_score(conn: Conn, score: dict[str, Any]) -> None:
     ]
     if score["thumbnail_key"] is not None:
         keys.append(score["thumbnail_key"])
+    if score["midi_combined_key"] is not None:
+        keys.append(score["midi_combined_key"])
     queue_deletion(conn, keys)
     conn.execute("DELETE FROM jobs WHERE id = ANY(%s)", (job_ids,))
     conn.execute("DELETE FROM scores WHERE id = %s", (score["id"],))
