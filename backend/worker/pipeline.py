@@ -33,6 +33,7 @@ STAGE_PERCENT = (("preprocessing", 5), ("detecting_staff", 25), ("transcribing",
 # 52.7 s of 212.8 s in the 2026-11-05 run and 104 s in the 2026-11-04 run. hi stays below the next stage's
 # start (25 / 85) so a stage never reports the next band before it ends; 100 is written only by complete_job.
 PREPROCESS_BAND = (5, 24)
+DETECT_BAND = (25, 39)  # Stage 2, reported per page so a cancel is noticed between pages
 TRANSCRIBE_BAND = (40, 80)  # Stage 3 Pass 1 (CRNN forward) only; Pass 2 and the system checks are fast
 
 ProgressFn = Callable[[int, int], None]
@@ -99,7 +100,7 @@ class Stages:
 
     preprocess: Callable[[str, str, bool, ProgressFn | None], list[Any]]
     clean_page: Callable[[Any], CleanPage]
-    detect: Callable[[list[Any], str, str, str, list[Any] | None], dict[str, Any]]
+    detect: Callable[[list[Any], str, str, str, list[Any] | None, ProgressFn | None], dict[str, Any]]
     clef_key: Callable[[list[Any], str, str], Any]
     transcribe: Callable[[dict[str, Any], str, Any, str, dict[Any, list[float]] | None, ProgressFn | None],
                          dict[str, list[dict[str, Any]]]]
@@ -153,9 +154,10 @@ def real_stages() -> Stages:
             raise PipelineError("could not encode the cleaned page", page[1] - 1)
         return CleanPage(buf.tobytes(), int(image.shape[1]), int(image.shape[0]))
 
-    def detect(pages: list[Any], yolo: str, strips_dir: str, manifest: str, geometry_out: list[Any] | None) -> Any:
+    def detect(pages: list[Any], yolo: str, strips_dir: str, manifest: str, geometry_out: list[Any] | None,
+               progress: ProgressFn | None) -> Any:
         return detect_staff_regions(pages, model_weights=yolo, output_dir=strips_dir, manifest_path=manifest,
-                                    geometry_out=geometry_out)
+                                    geometry_out=geometry_out, progress=progress)
 
     def clef_key(pages: list[Any], manifest_path: str, weights: str) -> Any:
         model = stage3_clefkey.load_clef_key_model(stage3_clefkey.check_clef_key_weights(weights))
@@ -276,7 +278,8 @@ def run_pipeline(
 
     t = begin("detecting_staff")
     voices = _guard("detecting_staff",
-                    lambda: st.detect(pages, str(config.yolo_weights), str(strips), manifest, geometry))
+                    lambda: st.detect(pages, str(config.yolo_weights), str(strips), manifest, geometry,
+                                      band(DETECT_BAND)))
     seconds["detecting_staff"] = monotonic() - t
 
     t = begin("transcribing")

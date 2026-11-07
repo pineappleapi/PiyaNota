@@ -5,6 +5,7 @@ Detects and extracts individual staff strips from preprocessed score pages.
 
 import json
 import logging
+from collections.abc import Callable
 
 import cv2
 import numpy as np
@@ -49,6 +50,7 @@ def detect_staff_regions(
     viz_dir: str = "data/detection_viz",
     manifest_path: str | None = None,
     geometry_out: list[StripGeometry] | None = None,
+    progress: Callable[[int, int], None] | None = None,
 ) -> dict:
     """Detects staves per page and crops one fixed-height strip per staff.
 
@@ -79,7 +81,9 @@ def detect_staff_regions(
 
     voice_sequences = {"Soprano": [], "Alto": [], "Tenor": [], "Bass": []}
 
-    for page in preprocessed_images:
+    for done, page in enumerate(preprocessed_images):
+        if progress is not None:
+            progress(done, len(preprocessed_images))  # lets the worker notice a cancel between pages
         image, page_index = page[0], page[1]
         strip_source = page[2] if len(page) > 2 else None
         strip_origin = "native" if strip_source is not None else "fallback"

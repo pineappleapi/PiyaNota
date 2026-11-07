@@ -91,6 +91,17 @@ void main() {
       expect(harness.engine.speed, 0.5);
     });
 
+    testWidgets(
+      'a score rendered at 200 BPM keeps the thumb on 200 (BUG-055)',
+      (tester) async {
+        final harness = ready(tempoBpm: 200);
+        await pumpPlayback(tester, harness);
+        await openSpeed(tester);
+        expect(sliderValue(tester), 200);
+        expect(tester.widget<Slider>(slider).max, 200);
+      },
+    );
+
     testWidgets('dragging while playing changes speed at once, no restart', (
       tester,
     ) async {

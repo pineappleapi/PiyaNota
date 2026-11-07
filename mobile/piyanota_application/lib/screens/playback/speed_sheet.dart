@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -29,6 +31,7 @@ class PlaybackSpeedSheet extends ConsumerWidget {
         ? PlaybackMessages.metronomeNeedsTempo
         : PlaybackMessages.metronomeUnavailable;
     final bpm = state.chosenBpm;
+    final sliderMax = math.max(ScoreDetails.maxTempo, bpm);
 
     final metronome = Row(
       key: const ValueKey('speed-metronome-row'),
@@ -126,13 +129,11 @@ class PlaybackSpeedSheet extends ConsumerWidget {
             child: SheetSliderTheme(
               child: Slider(
                 key: const ValueKey('speed-slider'),
-                // Clamped: scores rendered above the 180 cap open at their own tempo.
-                value: bpm
-                    .clamp(ScoreDetails.minTempo, ScoreDetails.maxTempo)
-                    .toDouble(),
+                // Range widens to the score's own tempo (181-240 BPM) so the thumb matches the label.
+                value: bpm.clamp(ScoreDetails.minTempo, sliderMax).toDouble(),
                 min: ScoreDetails.minTempo.toDouble(),
-                max: ScoreDetails.maxTempo.toDouble(),
-                divisions: ScoreDetails.maxTempo - ScoreDetails.minTempo,
+                max: sliderMax.toDouble(),
+                divisions: sliderMax - ScoreDetails.minTempo,
                 semanticFormatterCallback: (v) =>
                     PlaybackMessages.bpmSpoken(v.round()),
                 // Moves the value; the speed is applied on release (F8a).

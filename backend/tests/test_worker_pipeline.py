@@ -48,7 +48,7 @@ def _fake_stages(missing: tuple[str, ...] = (), midi_only: bool = False) -> Stag
     return Stages(
         preprocess=lambda i, p, k, pr: [("img", 1, None)],
         clean_page=lambda page: CleanPage(b"jpg", 10, 20),
-        detect=lambda pages, y, s, m, g: {},
+        detect=lambda pages, y, s, m, g, p: {},
         clef_key=lambda pages, m, w: None,
         transcribe=lambda v, w, d, e, b, pr: {"Soprano": [{"type": "note"}]},
         reconstruct=lambda ev: (satb, {"flags": flags, "failed_voices": list(missing)}),
@@ -93,6 +93,19 @@ def test_in_stage_progress_rises_between_bands_and_stays_below_100(tmp_path: Pat
     assert values == sorted(values) and max(values) < 100
     assert seen[:4] == [("preprocessing", 5), ("p", 14), ("p", 24), ("detecting_staff", 25)]
     assert ("p", 40) in seen and ("p", 80) in seen and ("p", 85) not in seen
+
+
+def test_detect_reports_progress_per_page(tmp_path: Path) -> None:
+    """BUG-054: Stage 2 reports between pages so a cancel is noticed inside detecting_staff."""
+    seen: list[int] = []
+
+    def det(pages: Any, y: str, s: str, m: str, g: Any, pr: Any) -> dict[str, Any]:
+        pr(0, 2)
+        pr(1, 2)
+        return {}
+
+    _run(tmp_path, replace(_fake_stages(), detect=det), on_progress=seen.append)
+    assert 25 in seen and 32 in seen and max(seen) < 40
 
 
 def test_progress_hooks_default_to_none() -> None:
