@@ -28,6 +28,10 @@ from stage4_reconstruction import TICKS_PER_QUARTER
 # FluidSynth output sample rate (midi2audio's former default).
 RENDER_SAMPLE_RATE = 44100
 
+# FluidSynth turns reverb and chorus on by default, which smeared the voices and sounded wrong on phone
+# playback (user phone test 2026-11-07, item E). Off gives a dry piano; the app can add room sound later.
+FLUIDSYNTH_DRY_SETTINGS = ["-o", "synth.reverb.active=0", "-o", "synth.chorus.active=0"]
+
 # Loudness baked into every stem (the app player volume is capped at 1.0). Values and sources:
 # docs/decisions/audio-loudness-2026-11.md.
 STEM_TARGET_LUFS = -20.0
@@ -292,7 +296,7 @@ def _render_to_mp3(
         # FluidSynth 2.x ignores options placed after them (midi2audio's order), which left no WAV.
         subprocess.run(
             [fluidsynth, "-ni", "-F", str(wav_path), "-r", str(RENDER_SAMPLE_RATE),
-             str(sf_path), str(midi_path)],
+             *FLUIDSYNTH_DRY_SETTINGS, str(sf_path), str(midi_path)],
             check=True, capture_output=True, text=True,
         )
         if not wav_path.exists():
