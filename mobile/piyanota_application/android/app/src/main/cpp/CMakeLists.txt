@@ -46,3 +46,17 @@ target_link_libraries(mp3lame m)
 add_library(piyanota_lame SHARED lame_jni.c)
 target_include_directories(piyanota_lame PRIVATE ${LAME_DIR}/include)
 target_link_libraries(piyanota_lame mp3lame)
+
+# MIDI -> WAV render through prebuilt FluidSynth 2.6.2 (arm64 only; the .so
+# files ship from src/main/jniLibs/arm64-v8a). On other ABIs the Dart side
+# sees loadLibrary fail and reports MidiSynthUnavailable.
+if(ANDROID_ABI STREQUAL "arm64-v8a")
+    set(FS_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/arm64-v8a)
+    add_library(fluidsynth SHARED IMPORTED)
+    set_target_properties(fluidsynth PROPERTIES
+        IMPORTED_LOCATION ${FS_LIB_DIR}/libfluidsynth.so)
+    add_library(piyanota_synth SHARED piyanota_synth.c)
+    target_include_directories(piyanota_synth PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/fluidsynth/include)
+    target_link_libraries(piyanota_synth fluidsynth)
+endif()

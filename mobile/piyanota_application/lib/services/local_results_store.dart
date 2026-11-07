@@ -63,7 +63,7 @@ class LocalResultsStore {
   static final RegExp _unsafeNameChars = RegExp(r'[^A-Za-z0-9._-]');
 
   /// Download slots of a `/result` body: the J4 `audioFiles`, `midiTracks`
-  /// (null on old scores), `pageFiles` and `timingFile`.
+  /// (null on old scores), `pageFiles`, `timingFile` and `midiCombined`.
   static Map<String, _Remote> _entries(Map<String, dynamic> data) {
     final out = <String, _Remote>{};
     void add(String slot, Object? value) {
@@ -97,6 +97,7 @@ class LocalResultsStore {
       }
     }
     add('timing', data['timingFile']);
+    add('midi_combined', data['midiCombined']);
     return out;
   }
 
@@ -149,6 +150,10 @@ class LocalResultsStore {
       ];
     }
     out['timingMetadataUrl'] = local['timing'] ?? data['timingMetadataUrl'];
+    final combined = data['midiCombined'];
+    if (combined is Map && local['midi_combined'] != null) {
+      out['midiCombined'] = {...combined, 'url': local['midi_combined']};
+    }
 
     final result = ScoreResult.fromJson(out, allowLocalFiles: true);
     // allowLocalFiles must not let a server-sent file: URL through.
@@ -158,7 +163,8 @@ class LocalResultsStore {
     final safe =
         result.audioTracks.values.every(ours) &&
         result.scoreImages.every(ours) &&
-        ours(result.timingMetadataUrl);
+        ours(result.timingMetadataUrl) &&
+        ours(result.midiCombined?.url);
     return safe ? result : null;
   }
 
@@ -172,8 +178,12 @@ class LocalResultsStore {
       final data = jsonDecode(await manifest.readAsString());
       if (data is! Map<String, dynamic>) return null;
       for (final MapEntry(:key, :value) in _entries(data).entries) {
-        // MIDI has no reader yet, so a missing .mid must not block opening.
-        if (key.startsWith('midi_')) continue;
+        // Per-voice MIDI has no reader, so a missing one must not block
+        // opening. midi_combined is required only when this manifest lists
+        // it (an older download has no such entry, so it still loads and
+        // playback falls back to the MP3s); sync writes the manifest only
+        // after every listed file is downloaded.
+        if (key.startsWith('midi_') && key != 'midi_combined') continue;
         if (!await File(_path(dir, _fileName(key, value))).exists()) {
           return null;
         }

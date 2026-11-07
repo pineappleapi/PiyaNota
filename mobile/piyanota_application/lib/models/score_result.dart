@@ -153,6 +153,20 @@ class MutedMeasure {
       value is int && value >= 0 ? value : null;
 }
 
+/// The `midiCombined` file of a result: one MIDI holding all four voices.
+@immutable
+class MidiCombinedFile {
+  const MidiCombinedFile({
+    required this.url,
+    required this.fileId,
+    this.sizeBytes,
+  });
+
+  final Uri url;
+  final String fileId;
+  final int? sizeBytes;
+}
+
 /// The `data` of a PIYA-103 result: everything Playback needs to load.
 @immutable
 class ScoreResult {
@@ -170,6 +184,7 @@ class ScoreResult {
     this.declaredFailedVoices = const {},
     this.failedVoiceCauses = const {},
     this.mutedMeasures = const [],
+    this.midiCombined,
     this.rawJson,
   });
 
@@ -230,6 +245,10 @@ class ScoreResult {
   /// PIYA-103 AC9, in the server's order; empty when nothing was muted.
   /// Entries for a failed voice are dropped (it has no audio to mute).
   final List<MutedMeasure> mutedMeasures;
+
+  /// The all-voices MIDI; null on old scores or when the server sent none
+  /// or something unusable (playback then falls back to the MP3s).
+  final MidiCombinedFile? midiCombined;
 
   /// The unparsed `data` this was read from, kept so the F10 local copy can
   /// read the J4 file ids (`audioFiles`, `pageFiles`, ...) and save the
@@ -292,6 +311,20 @@ class ScoreResult {
           if (MutedMeasure.tryParse(entry) case final measure?)
             if (tracks.containsKey(measure.voice)) measure,
     ];
+    MidiCombinedFile? midiCombined;
+    final rawMidi = data['midiCombined'];
+    if (rawMidi is Map) {
+      final midiUrl = uri(rawMidi['url']);
+      final midiId = rawMidi['fileId'];
+      final midiSize = rawMidi['sizeBytes'];
+      if (midiUrl != null && midiId is String && midiId.isNotEmpty) {
+        midiCombined = MidiCombinedFile(
+          url: midiUrl,
+          fileId: midiId,
+          sizeBytes: midiSize is int ? midiSize : null,
+        );
+      }
+    }
     final rawImages = data['scoreImages'];
     // Rejected entries stay as null: dropping them would shift every later
     // page onto the wrong timing events.
@@ -329,6 +362,7 @@ class ScoreResult {
         declaredFailed,
       ),
       mutedMeasures: List.unmodifiable(muted),
+      midiCombined: midiCombined,
       rawJson: data,
     );
   }

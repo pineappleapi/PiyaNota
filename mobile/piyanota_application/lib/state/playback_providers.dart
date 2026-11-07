@@ -16,6 +16,8 @@ import '../services/fake_score_library_api.dart';
 import '../services/fake_score_result_api.dart';
 import '../services/local_results_store.dart';
 import '../services/metronome_click.dart';
+import '../services/midi_render_cache.dart';
+import '../services/midi_synth.dart' show ensureSoundfont;
 import '../services/playback_engine.dart';
 import '../services/score_result_api.dart';
 import 'auth_providers.dart';
@@ -73,6 +75,44 @@ final clickTrackWriterProvider = Provider<ClickTrackWriter>(
 
 enum PlaybackPhase { loading, ready, failed }
 
+/// What the voice tracks were made from: WAVs rendered on the phone from the
+/// combined MIDI, or the server's MP3s (also the fallback for any render
+/// problem).
+enum PlaybackSource { midi, mp3 }
+
+/// Renders the four voices from the result's combined MIDI; null means play
+/// the MP3s. Tests override it.
+typedef MidiVoiceRenderer =
+    Future<Map<VoicePart, Uri>?> Function(
+      ScoreResult result,
+      List<BarInfo> bars,
+    );
+
+final midiVoiceRendererProvider = Provider<MidiVoiceRenderer>((ref) {
+  final cache = MidiRenderCache(
+    rootDir: () async {
+      final support = await getApplicationSupportDirectory();
+      return Directory('${support.path}/render_cache')
+        ..createSync(recursive: true);
+    },
+    tempDir: getTemporaryDirectory,
+    soundfont: ensureSoundfont,
+  );
+  final downloader = DioFileDownloader(ref.watch(dioProvider));
+  return (result, bars) => cache.renderVoices(
+    result,
+    bars: bars,
+    midiPath: () async {
+      final url = result.midiCombined!.url;
+      if (url.scheme == 'file') return url.toFilePath();
+      final temp = await getTemporaryDirectory();
+      final path = '${temp.path}/combined_${result.scoreId}.mid';
+      await downloader.download(url, path);
+      return path;
+    },
+  );
+});
+
 /// The app-made metronome click track (PIYA-209/210).
 enum ClickStatus {
   /// Being generated and loaded after the voices. The controls already
@@ -128,9 +168,13 @@ class PlaybackState {
     this.reviewDismissed = false,
     this.timingUnavailable = false,
     this.failedVoices = const {},
+    this.source = PlaybackSource.mp3,
   });
 
   final PlaybackPhase phase;
+
+  /// Where the loaded voice audio came from.
+  final PlaybackSource source;
   final PlaybackError? error;
   final ScoreResult? result;
   final ScoreTimeline? timeline;
@@ -262,6 +306,7 @@ class PlaybackState {
     reviewDismissed: reviewDismissed ?? this.reviewDismissed,
     timingUnavailable: timingUnavailable,
     failedVoices: failedVoices ?? this.failedVoices,
+    source: source,
   );
 }
 
@@ -367,11 +412,39 @@ class PlaybackController extends Notifier<PlaybackState> {
     if (!current()) return;
 
     PlaybackEngine? engine;
+    var source = PlaybackSource.mp3;
     try {
-      engine = ref.read(playbackEngineFactoryProvider)();
-      // Throws only if no voice at all loads; a voice that didn't is in
-      // unavailableVoices and the rest still play.
-      await engine.load(result.audioTracks);
+      Map<VoicePart, Uri>? rendered;
+      if (result.midiCombined != null) {
+        try {
+          rendered = await ref.read(midiVoiceRendererProvider)(result, bars);
+        } on Object catch (e) {
+          debugPrint('Playback: MIDI render failed, using MP3: $e');
+        }
+        if (!current()) return;
+      }
+      if (rendered != null) {
+        // Only the voices the result has audio for, so the mixer keys match.
+        final wavs = {
+          for (final v in result.audioTracks.keys)
+            if (rendered[v] != null) v: rendered[v]!,
+        };
+        try {
+          engine = ref.read(playbackEngineFactoryProvider)();
+          await engine.load(wavs);
+          source = PlaybackSource.midi;
+        } on Object catch (e) {
+          debugPrint('Playback: rendered WAVs failed, using MP3: $e');
+          await _disposeQuietly(engine);
+          engine = null;
+        }
+      }
+      if (engine == null) {
+        engine = ref.read(playbackEngineFactoryProvider)();
+        // Throws only if no voice at all loads; a voice that didn't is in
+        // unavailableVoices and the rest still play.
+        await engine.load(result.audioTracks);
+      }
     } on Object catch (e, stack) {
       debugPrint('Playback: audio failed to load: $e\n$stack');
       await _disposeQuietly(engine);
@@ -418,6 +491,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       duration: engine.duration,
       timingUnavailable: timingFailed,
       failedVoices: failedVoices,
+      source: source,
       bpm: result.tempoBpm,
       // No tempo, no grid to lay the click on (coordinator decision
       // 2026-10-09); the slider still runs relative to the assumed 90.

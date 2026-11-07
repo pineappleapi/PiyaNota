@@ -342,6 +342,43 @@ void main() {
     });
   });
 
+  group('midiCombined parse', () {
+    final base = <String, dynamic>{
+      'scoreId': 7,
+      'audioTracks': {'soprano': 'https://cdn.test/s.mp3'},
+    };
+    test('present', () {
+      final m = ScoreResult.fromJson({
+        ...base,
+        'midiCombined': {
+          'url': 'https://cdn.test/all.mid',
+          'fileId': 'midi/all.mid',
+          'sizeBytes': 99,
+        },
+      }).midiCombined!;
+      expect(m.url, Uri.parse('https://cdn.test/all.mid'));
+      expect(m.fileId, 'midi/all.mid');
+      expect(m.sizeBytes, 99);
+    });
+
+    test('null, absent and malformed are null, never a throw', () {
+      for (final bad in <Object?>[
+        null,
+        'x',
+        {'url': 'https://cdn.test/a.mid'},
+        {'url': 42, 'fileId': 'f'},
+        {'url': 'https://cdn.test/a.mid', 'fileId': ''},
+      ]) {
+        expect(
+          ScoreResult.fromJson({...base, 'midiCombined': bad}).midiCombined,
+          isNull,
+          reason: '$bad',
+        );
+      }
+      expect(ScoreResult.fromJson(base).midiCombined, isNull);
+    });
+  });
+
   group('J5 percentComplete', () {
     test('real parser: int 0-100, 100 only on complete', () {
       for (final p in [0, 5, 24, 40, 85, 92, 99]) {

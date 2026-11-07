@@ -57,6 +57,7 @@ Map<String, dynamic> _result({
   String host = 'good',
   bool midi = true,
   bool withFiles = true,
+  bool combined = false,
 }) => {
   'scoreId': _scoreId,
   'audioTracks': {'soprano': 'https://$host.example/audio/s$tag.mp3'},
@@ -66,6 +67,7 @@ Map<String, dynamic> _result({
     'audioFiles': {'soprano': _file('audio/s$tag.mp3', host: host)},
     'pageFiles': [_file('pages/p$tag.png', host: host)],
     'timingFile': _file('timing/t$tag.json', host: host),
+    if (combined) 'midiCombined': _file('midi/all$tag.mid', host: host),
     'midiTracks': midi
         ? {'soprano': _file('midi/s$tag.mid', host: host)}
         : null,
@@ -190,6 +192,44 @@ void main() {
     }
     expect(await store.loadOffline(_scoreId), isNotNull);
   });
+
+  test(
+    'midiCombined is downloaded, localized, and pruned on new fileId',
+    () async {
+      inner.next = _result(combined: true);
+      await reopen();
+      final second = await reopen();
+      expect(second.midiCombined!.url.scheme, 'file');
+      expect(second.midiCombined!.fileId, 'midi/alla.mid');
+      inner.next = _result(tag: 'b', combined: true);
+      await reopen();
+      final names = scoreDir().listSync().map((e) => e.uri.pathSegments.last);
+      expect(
+        names.any((n) => n.startsWith('midi_combined_') && n.contains('allb')),
+        isTrue,
+      );
+      expect(names.any((n) => n.contains('alla')), isFalse);
+    },
+  );
+
+  test('offline: a manifest without midiCombined still loads', () async {
+    await reopen();
+    final loaded = await store.loadOffline(_scoreId);
+    expect(loaded, isNotNull);
+    expect(loaded!.midiCombined, isNull);
+  });
+
+  test(
+    'offline: a listed but missing midiCombined file blocks opening',
+    () async {
+      inner.next = _result(combined: true);
+      await reopen();
+      for (final e in scoreDir().listSync()) {
+        if (e.path.contains('midi_combined_')) e.deleteSync();
+      }
+      expect(await store.loadOffline(_scoreId), isNull);
+    },
+  );
 
   test('timing read from a local file', () async {
     final file = File('${root.path}${Platform.pathSeparator}t.json');

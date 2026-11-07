@@ -46,6 +46,7 @@ dependencies:
   # focus (music usage, pause on calls and unplugged headphones, F8a).
   audio_session: ^0.2.4
   path_provider: ^2.1.6
+  ffi: ^2.1.0
   shared_preferences: ^2.5.5
   google_fonts: ^8.2.1
   camera: ^0.12.1
@@ -88,6 +89,7 @@ flutter:
 
   assets:
     - assets/branding/
+    - assets/soundfont/piano.sf2
 
   # To add assets to your application, add an assets section, like this:
   # assets:
