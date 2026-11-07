@@ -249,7 +249,9 @@ def run_pipeline(
     so nothing here may swallow its exception.
     """
     _validate_inputs(page_jpegs, config)
+    t_libs = monotonic()
     st = stages or real_stages()
+    LOG.info("pipeline libraries ready load_s=%.1f pages=%s", monotonic() - t_libs, len(page_jpegs))
     in_dir, prep, strips, out = (work_dir / n for n in ("input", "prep", "strips", "audio"))
     in_dir.mkdir(parents=True, exist_ok=True)
     for index, data in enumerate(page_jpegs, start=1):
@@ -267,6 +269,7 @@ def run_pipeline(
         return lambda done, total: on_progress(lo + (hi - lo) * done // max(total, 1))
 
     def begin(status: str) -> float:
+        LOG.info("stage start status=%s percent=%s", status, percent[status])
         on_stage(status, percent[status])
         return monotonic()
 

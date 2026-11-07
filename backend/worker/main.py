@@ -249,7 +249,11 @@ def process_one(*, storage: Storage, runner: Runner, settings: Settings,
                     raise _Cancelled  # stops the pipeline at its next progress report
 
         try:
-            result = runner([storage.get(p["object_key"]) for p in pages], tempo_bpm=job["tempo_bpm"],
+            t_pages = monotonic()
+            page_blobs = [storage.get(p["object_key"]) for p in pages]
+            LOG.info("pages loaded job_id=%s pages=%s bytes=%s load_s=%.1f", job_id, len(page_blobs),
+                     sum(len(b) for b in page_blobs), monotonic() - t_pages)
+            result = runner(page_blobs, tempo_bpm=job["tempo_bpm"],
                             work_dir=work_dir, on_stage=on_stage, timing=settings.timing_enabled,
                             on_progress=make_progress_writer(write_progress))
             marks.append(("publish", monotonic()))
