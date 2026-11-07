@@ -84,6 +84,55 @@ D6. Export stays server-side MP3 for now. Moving export to the phone is a later 
 6. Phone test pass: chopping gone, click aligned, offline playback, mute/volume, delete removes render cache.
 7. senior-reviewer before any merge proposal. Merge only on user approval.
 
+## 4b. Added after review (2026-11-07)
+
+### Backend-lead answers (read-only review)
+
+- Old scores stay on MP3, no backfill. The server keeps no Stage 4 events or report per score, so Stage 5 cannot be re-run
+  from stored data; a backfill is a full GPU re-run per score (26-51 s per page) and could change notes the user trusts.
+  The user can retake a score to get MIDI. The app must always fall back to MP3 when `midiCombined`/`midiTracks` is null;
+  keep that branch tested permanently.
+- Keep server MP3 rendering for new scores until the MIDI path has shipped and passed phone testing. `audio_tracks.file_key`
+  is NOT NULL and the worker treats a missing MP3 as a failed voice (`worker/pipeline.py` ~310-318). MP3 render is about
+  16 s of a 104 s four-page job, CPU only. Dropping it later is one contract change: nullable `file_key`, nullable
+  `audioFiles`/`audioTracks`, a midi-only worker mode, a new failed-voice rule.
+- Add the `midiCombined` key to the old-key cleanup (`completion.py` ~103-108) and new keys (~134), and check the delete path
+  in `routes_scores.py`, or retakes and deletes orphan the blob (FR-12). Delete path not yet verified.
+
+### Soundfont facts
+
+- The current `soundfont/piano.sf2` (32 MB) is GeneralUser GS 2.0.3 BETA by S. Christian Collins. Its licence allows use for
+  music creation; in-app redistribution is not clearly granted and some sample origins are uncertain. Ask the author in
+  writing before shipping it in the app.
+- Candidates (licences unverified from files): FreePats piano (CC-BY 3.0), Salamander Lite repack (21 MB, CC-BY, repack
+  provenance unknown), a trimmed copy of GeneralUser GS (Polyphone). TimGM6mb is GPL, avoid. SFZ pianos need an SFZ player
+  (sfizz), not FluidSynth, and are very large; not for shipping.
+- Audition MP3s: `scratch/sf-audition` (not committed).
+
+### Item D (added to this session): playback images should keep lyrics
+
+Finding from a read-only trace (cheap agent, partly UNCERTAIN):
+- The served page JPEG is the native-resolution gray strip source (`worker/pipeline.py:149-155,276`; source built at
+  `stage1_preprocessing.py:668-669,751-753`), not the 1600 px detection binary. `blank_lyrics_regions` (`stage1:650`)
+  runs only on the detection binary, so it is NOT what removes lyrics from the served image.
+- Lyrics are likely removed by `non_staff_ink_mask` (`stage1:386-433,741`), which erases ink not connected to a staff,
+  and the gray source is filled with paper colour where it erased. So the findings-plan fix ("build the JPEG before
+  blanking") would not change anything; the lyrics must be kept in a different image.
+- Geometry risk: timing x and bar positions are in detection-page pixels (`timing_export.py:31-63,200-213`), while the
+  served JPEG has native dimensions; the app scales by the decoded image width (`playback_screen.dart:1185-1213`). The
+  phone test showed highlights working, so either something rescales or the mismatch is hidden; UNVERIFIED. Any new
+  display image must keep the same dimensions and deskew as the current one.
+
+Plan:
+- D1. Verify with one real job: compare page JPEG size with timing `pageW`; confirm what the highlight maps against.
+- D2. Prototype: a display-only gray image built from the same deskewed/dewarped source with the staff-ink erase
+  skipped (lyrics kept, same size and rotation), saved only for `result.pages`. Detection and strips keep today's
+  inputs, so Stage 2-3 output must be byte-identical; show this with a test on one fixture.
+- D3. Check that lyrics-kept pages do not look worse (stray marks, bleed-through) on 3-4 real pages. User signs off.
+- D4. Review: ml-cv-lead for the Stage 1 change, backend-lead for the page JPEG and storage size (bigger JPEGs, 20-score
+  limit), frontend-lead only if app scaling changes.
+- Open question for the user: should lyric text be kept as printed, or also should the page remain clean of marginal noise?
+
 ## 5. Risks
 
 - Soundfont size and licence may block shipping; spike A answers this first.
