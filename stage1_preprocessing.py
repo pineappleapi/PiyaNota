@@ -498,6 +498,7 @@ def preprocess_score_page(
     mask_non_staff_ink: bool = True,
     build_strip_source: bool = True,
     keep_unmasked: bool = False,
+    keep_display: bool = False,
 ) -> PreprocessedPage:
     """Runs Stage 1 on one photo.
 
@@ -510,6 +511,8 @@ def preprocess_score_page(
             mask to have been applied).
         keep_unmasked: Also return the native page before the mask and its staves, for auditing
             what the mask removed.
+        keep_display: Also build ``strip_display`` (lyrics-kept app page). Off by default because it
+            costs one native-size copy and warp per page that CLI and eval callers never read.
 
     Returns:
         A PreprocessedPage.
@@ -671,7 +674,7 @@ def preprocess_score_page(
     strip_display: np.ndarray | None = None
     if build_strip_source and remove is not None:
         strip_binary, unmasked, hi_staves, strip_gray, strip_source, strip_display = _build_strip_source(
-            hi, bg, map_y, _border_region(binary.shape, border_rows, side_border), staves)
+            hi, bg, map_y, _border_region(binary.shape, border_rows, side_border), staves, keep_display)
 
     # Step 4: Grid alignment using stafflines + barlines
     # After a dewarp the staves are horizontal by construction; a further global
@@ -706,8 +709,8 @@ def preprocess_score_page(
 
 
 def _build_strip_source(hi: np.ndarray, bg: np.ndarray, map_y: np.ndarray | None,
-                        border_lo: np.ndarray, staves: list[StaffBand]
-                        ) -> tuple[np.ndarray, np.ndarray, list[StaffBand], np.ndarray, np.ndarray, np.ndarray]:
+                        border_lo: np.ndarray, staves: list[StaffBand], build_display: bool = False
+                        ) -> tuple[np.ndarray, np.ndarray, list[StaffBand], np.ndarray, np.ndarray, np.ndarray | None]:
     """Builds the native-resolution, lyric-masked strip pages in the detection page's geometry.
 
     Same steps as the detection path (normalize, dewarp with the same tracked curves,
@@ -723,12 +726,14 @@ def _build_strip_source(hi: np.ndarray, bg: np.ndarray, map_y: np.ndarray | None
         map_y: Detection-resolution dewarp row map, or None if the page was not dewarped.
         border_lo: Detection-resolution region blanked by the border step.
         staves: Tracked staves in detection pixels.
+        build_display: Also build the lyrics-kept display gray (extra native copy per page).
 
     Returns:
         (masked binary page, binary page before the mask, staves in native pixels, normalized
         dewarped gray, masked gray strip source, display gray). The gray strip source is the gray page
         with the border and the erased ink, dilated by its blur halo, filled with the local paper grey.
-        The display gray is the same page with only the border filled (lyrics kept).
+        The display gray is the same page with only the border filled (lyrics kept); None unless
+        ``build_display``.
     """
     gray = cv2.cvtColor(hi, cv2.COLOR_BGR2GRAY)
     h, w = gray.shape
@@ -760,8 +765,10 @@ def _build_strip_source(hi: np.ndarray, bg: np.ndarray, map_y: np.ndarray | None
     paper = paper_fill(norm, ~near_ink & ~border, bg.shape)
     gray_source = norm.copy()
     gray_source[fill] = paper[fill]
-    display = norm.copy()
-    display[border] = paper[border]
+    display: np.ndarray | None = None
+    if build_display:
+        display = norm.copy()
+        display[border] = paper[border]
     return binary, unmasked, hi_staves, norm, gray_source, display
 
 
@@ -1740,7 +1747,8 @@ def preprocess_batch(image_dir: str, output_dir: str, save_debug: bool = False,
 
     results = []
     for i, img_file in enumerate(image_files, start=1):
-        page = preprocess_score_page(str(img_file), save_debug=save_debug, keep_unmasked=keep_unmasked)
+        page = preprocess_score_page(str(img_file), save_debug=save_debug, keep_unmasked=keep_unmasked,
+                                     keep_display=keep_display)
         out_file = output_path / f"page_{i:03d}_preprocessed.png"
         cv2.imwrite(str(out_file), page.detect)
         print(f"  Saved -> {out_file}")

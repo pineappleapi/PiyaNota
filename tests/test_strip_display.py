@@ -14,7 +14,7 @@ MIN_KEPT_INK_PX = 50_000
 
 @pytest.mark.skipif(not PHOTO.exists(), reason="Moonriver photo not available")
 def test_strip_display_keeps_lyrics_with_same_geometry() -> None:
-    page = s1.preprocess_score_page(str(PHOTO))
+    page = s1.preprocess_score_page(str(PHOTO), keep_display=True)
     assert page.strip_source is not None and page.strip_display is not None
     assert page.strip_display.shape == page.strip_source.shape  # highlights are scaled to this size
     assert page.strip_display.dtype == np.uint8

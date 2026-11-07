@@ -167,7 +167,7 @@ Current state (verified 2026-11-07):
 - The phone plays MP3 only. The app has no MIDI reader or synth. App v1.4.0+3 is installed on phone 622ad04c (version bump only, no app code change since 1.3.0).
 - Offline: `local_results_store.dart` downloads `midi_<voice>` files like the MP3s, but `loadOffline` skips them (line ~175). `midiCombined` must be added as a required offline file once the app reads it.
 
-Spike B desktop results (`tools/spike_midi/`, scratch outputs not committed):
+Spike B desktop results (`scratch/spike_midi/`, moved out of the repo, not tracked):
 - Combined format-1 file works on synthetic data: 0 ms click/note offset from ticks, mute by channel and tempo scaling behave. Create the file with `numTracks=5` (midiutil adds its own conductor track).
 - Real data: `moonriver_sample.py` builds the file from the saved run `data/eval_moonriver_diag/pipeline_out.json` (CRNN output, many underfull-bar flags). 40 bars end at tick 76800 = report total_ticks. Notes per channel 85/87/77/83, 160 clicks, 4/4 only, 106 s at 90 BPM. Renders in under 1 s on the desktop.
 - NOT done: pickup and non-4/4 pieces on real data, secondary accents (item 8), fallback for an unreadable bar table, audible click sync check, ties/slurs/multirests.

@@ -1,8 +1,8 @@
 """One format-1 MIDI for in-app playback: conductor, S/A/T/B on channels 0-3, click on channel 9.
 
 Pure standard library (midiutil is not a backend dependency). Built from the timing ``bars`` that
-already drive the app click, so notes and click share one tick grid. Logic follows
-``tools/spike_midi/build_combined.py``.
+already drive the app click, so notes and click share one tick grid. This file is the source of
+truth; the desktop prototype it grew from is scratch code outside the repo.
 """
 
 from __future__ import annotations
