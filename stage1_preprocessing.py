@@ -269,6 +269,9 @@ class PreprocessedPage:
             the analog reference thin-glyph fidelity is measured against.
         strip_binary: The masked native binary page the mask was decided on (ink = 0); kept-ink
             reference for mask audits. None when ``strip_source`` is None.
+        strip_display: ``strip_source`` with the lyrics and other non-staff ink kept (only the border is
+            painted paper). Display only for the app page view: same size and deskew as ``strip_source``
+            so timing highlights stay aligned; no stage reads it.
     """
     detect: np.ndarray
     strip_source: np.ndarray | None
@@ -279,6 +282,7 @@ class PreprocessedPage:
     strip_staves: list[StaffBand] | None = None
     strip_gray: np.ndarray | None = None
     strip_binary: np.ndarray | None = None
+    strip_display: np.ndarray | None = None
 
 
 def _band_row_mask(height: int, staves: list[StaffBand], tol_spacings: float) -> np.ndarray:
@@ -664,8 +668,9 @@ def preprocess_score_page(
     hi_staves: list[StaffBand] | None = None
     strip_gray: np.ndarray | None = None
     strip_binary: np.ndarray | None = None
+    strip_display: np.ndarray | None = None
     if build_strip_source and remove is not None:
-        strip_binary, unmasked, hi_staves, strip_gray, strip_source = _build_strip_source(
+        strip_binary, unmasked, hi_staves, strip_gray, strip_source, strip_display = _build_strip_source(
             hi, bg, map_y, _border_region(binary.shape, border_rows, side_border), staves)
 
     # Step 4: Grid alignment using stafflines + barlines
@@ -691,15 +696,18 @@ def preprocess_score_page(
             if strip_gray is not None:
                 strip_gray = cv2.warpAffine(strip_gray, rot_m, (sw, sh), flags=cv2.INTER_LINEAR,
                                             borderMode=cv2.BORDER_REPLICATE)
+            if strip_display is not None:
+                strip_display = cv2.warpAffine(strip_display, rot_m, (sw, sh), flags=cv2.INTER_LINEAR,
+                                               borderMode=cv2.BORDER_REPLICATE)
 
     return PreprocessedPage(corrected, strip_source, h_angle, remove is not None, removed_px,
                             unmasked if keep_unmasked else None, hi_staves if keep_unmasked else None,
-                            strip_gray if keep_unmasked else None, strip_binary)
+                            strip_gray if keep_unmasked else None, strip_binary, strip_display)
 
 
 def _build_strip_source(hi: np.ndarray, bg: np.ndarray, map_y: np.ndarray | None,
                         border_lo: np.ndarray, staves: list[StaffBand]
-                        ) -> tuple[np.ndarray, np.ndarray, list[StaffBand], np.ndarray, np.ndarray]:
+                        ) -> tuple[np.ndarray, np.ndarray, list[StaffBand], np.ndarray, np.ndarray, np.ndarray]:
     """Builds the native-resolution, lyric-masked strip pages in the detection page's geometry.
 
     Same steps as the detection path (normalize, dewarp with the same tracked curves,
@@ -718,8 +726,9 @@ def _build_strip_source(hi: np.ndarray, bg: np.ndarray, map_y: np.ndarray | None
 
     Returns:
         (masked binary page, binary page before the mask, staves in native pixels, normalized
-        dewarped gray, masked gray strip source). The gray strip source is the gray page with the
-        border and the erased ink, dilated by its blur halo, filled with the local paper grey.
+        dewarped gray, masked gray strip source, display gray). The gray strip source is the gray page
+        with the border and the erased ink, dilated by its blur halo, filled with the local paper grey.
+        The display gray is the same page with only the border filled (lyrics kept).
     """
     gray = cv2.cvtColor(hi, cv2.COLOR_BGR2GRAY)
     h, w = gray.shape
@@ -748,9 +757,12 @@ def _build_strip_source(hi: np.ndarray, bg: np.ndarray, map_y: np.ndarray | None
     # Paper = away from ANY ink by the same halo radius, and not border.
     near_ink = cv2.dilate((unmasked < 128).astype(np.uint8), disk) > 0
     fill = erased | border
+    paper = paper_fill(norm, ~near_ink & ~border, bg.shape)
     gray_source = norm.copy()
-    gray_source[fill] = paper_fill(norm, ~near_ink & ~border, bg.shape)[fill]
-    return binary, unmasked, hi_staves, norm, gray_source
+    gray_source[fill] = paper[fill]
+    display = norm.copy()
+    display[border] = paper[border]
+    return binary, unmasked, hi_staves, norm, gray_source, display
 
 
 def paper_fill(gray: np.ndarray, paper: np.ndarray, work_shape: tuple[int, ...]) -> np.ndarray:
@@ -1698,12 +1710,16 @@ def blank_lyrics_regions(binary: np.ndarray) -> np.ndarray:
 
 def preprocess_batch(image_dir: str, output_dir: str, save_debug: bool = False,
                      keep_unmasked: bool = False,
+                     keep_display: bool = False,
                      progress: Optional[Callable[[int, int], None]] = None) -> list:
     """Runs Stage 1 on every image in ``image_dir``.
 
     Args:
         keep_unmasked: Also keep each page's unmasked native image and tracked staves and append the
             PreprocessedPage as a 4th tuple element; ClefKeyNet crops from it (stage3_clefkey).
+        keep_display: Append the PreprocessedPage as a 4th tuple element so the caller can read
+            ``strip_display`` (the lyrics-kept app page view). ``strip_unmasked`` stays None unless
+            keep_unmasked is also set.
         progress: Called as progress(pages_done, pages_total) after each page. Must not raise; the
             stage does not catch callback exceptions.
 
@@ -1734,7 +1750,7 @@ def preprocess_batch(image_dir: str, output_dir: str, save_debug: bool = False,
             print(f"  Saved -> {src_file}")
         # (detection page, page index, native strip source or None); Stage 2 accepts 2-tuples too and
         # ignores the 4th element.
-        results.append((page.detect, i, page.strip_source, page) if keep_unmasked
+        results.append((page.detect, i, page.strip_source, page) if keep_unmasked or keep_display
                        else (page.detect, i, page.strip_source))
         if progress is not None:
             progress(i, len(image_files))

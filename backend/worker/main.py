@@ -170,7 +170,7 @@ def _publish(job_id: int, result: PipelineResult, storage: Storage, settings: Se
     timing_key = new_key("timing", "json")
     thumb_key = new_key("thumbs", "jpg")
     page_keys = [new_key("pages", "jpg") for _ in result.pages]
-    thumb = completion.make_thumbnail(result.pages[0].jpeg)
+    thumb = completion.make_thumbnail(result.pages[0].served_jpeg)
     timing = _timing_bytes(result, settings)
     all_keys = [*audio.values(), *midi.values(), timing_key, thumb_key, *page_keys]
     uploaded.extend(all_keys)  # tracked before the puts: a failed put may still have written the object
@@ -178,7 +178,7 @@ def _publish(job_id: int, result: PipelineResult, storage: Storage, settings: Se
     uploads = [(audio[v], result.mp3[v], "audio/mpeg") for v in audio]
     uploads += [(midi[v], result.midi[v], "audio/midi") for v in midi]
     uploads += [(timing_key, timing, "application/json"), (thumb_key, thumb, "image/jpeg")]
-    uploads += [(k, p.jpeg, "image/jpeg") for k, p in zip(page_keys, result.pages)]
+    uploads += [(k, p.served_jpeg, "image/jpeg") for k, p in zip(page_keys, result.pages)]
     for key, data, content_type in uploads:
         storage.put(key, data, content_type)
 

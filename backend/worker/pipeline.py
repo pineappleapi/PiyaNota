@@ -66,6 +66,13 @@ class CleanPage:
     jpeg: bytes
     width: int
     height: int
+    # Same size and deskew as ``jpeg`` but with the lyrics kept; None when Stage 1 had no native page.
+    display_jpeg: bytes | None = None
+
+    @property
+    def served_jpeg(self) -> bytes:
+        """The bytes stored and shown in the app: the lyrics-kept page when there is one."""
+        return self.display_jpeg if self.display_jpeg is not None else self.jpeg
 
 
 @dataclass(frozen=True)
@@ -144,7 +151,7 @@ def real_stages() -> Stages:
 
     def preprocess(in_dir: str, prep_dir: str, keep_unmasked: bool, progress: ProgressFn | None) -> list[Any]:
         return preprocess_batch(in_dir, prep_dir, save_debug=False, keep_unmasked=keep_unmasked,
-                                progress=progress)
+                                keep_display=True, progress=progress)
 
     def clean_page(page: Any) -> CleanPage:
         # The native strip source is the best cleaned view; the 1600 px binary is the fallback.
@@ -152,7 +159,13 @@ def real_stages() -> Stages:
         ok, buf = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, CLEAN_PAGE_JPEG_QUALITY])
         if not ok:
             raise PipelineError("could not encode the cleaned page", page[1] - 1)
-        return CleanPage(buf.tobytes(), int(image.shape[1]), int(image.shape[0]))
+        display_jpeg = None
+        if page[2] is not None and len(page) > 3 and page[3] is not None and page[3].strip_display is not None:
+            ok, dbuf = cv2.imencode(".jpg", page[3].strip_display, [cv2.IMWRITE_JPEG_QUALITY, CLEAN_PAGE_JPEG_QUALITY])
+            if not ok:
+                raise PipelineError("could not encode the display page", page[1] - 1)
+            display_jpeg = dbuf.tobytes()
+        return CleanPage(buf.tobytes(), int(image.shape[1]), int(image.shape[0]), display_jpeg)
 
     def detect(pages: list[Any], yolo: str, strips_dir: str, manifest: str, geometry_out: list[Any] | None,
                progress: ProgressFn | None) -> Any:
@@ -277,6 +290,12 @@ def run_pipeline(
     use_ck = config.clef_key_weights is not None
     pages = _guard("preprocessing", lambda: st.preprocess(str(in_dir), str(prep), use_ck, band(PREPROCESS_BAND)))
     clean = [st.clean_page(p) for p in pages]
+    # Free the native display planes (and the whole PreprocessedPage when ClefKeyNet is off) now that
+    # the JPEGs exist; the worker otherwise holds ~24 MB per 12 MP page until synthesis ends.
+    pages = [tuple(p) if use_ck else tuple(p[:3]) for p in pages]
+    for p in pages:
+        if len(p) > 3 and p[3] is not None:
+            p[3].strip_display = None
     seconds["preprocessing"] = monotonic() - t
 
     t = begin("detecting_staff")

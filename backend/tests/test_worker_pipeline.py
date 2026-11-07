@@ -274,3 +274,8 @@ def test_moonriver_page1_end_to_end(tmp_path: Path) -> None:
     print("STAGE_SECONDS", result.stage_seconds)
     assert len(result.mp3) == 4 and all(result.mp3.values())
     assert len(result.pages) == 1 and result.pages[0].width > 0 and result.pages[0].height > 0
+
+
+def test_served_jpeg_prefers_the_lyrics_kept_page() -> None:
+    assert CleanPage(b"masked", 10, 20, b"display").served_jpeg == b"display"
+    assert CleanPage(b"masked", 10, 20).served_jpeg == b"masked"  # no native page: fall back
