@@ -445,3 +445,46 @@ def test_check_schema_passes_when_applied_and_raises_when_behind(app: Flask, mon
     monkeypatch.setattr(migrate, "status", lambda conn: [("0001_x", True), ("0006_y", False)])
     with db.transaction() as conn, pytest.raises(RuntimeError, match="unapplied migrations: 0006_y"):
         check_schema(conn)
+
+
+def _bars_timing(monkeypatch: pytest.MonkeyPatch) -> PipelineResult:
+    import timing_export
+
+    bars = [dict(bar=1, startTick=0, durTicks=1920, numerator=4, denominator=4, pickup=False)]
+    ev = {"Soprano": [dict(type="note", pitch=72, tick_onset=0, duration_ticks=480)]}
+    monkeypatch.setattr(timing_export, "build_timing", lambda **kw: {"events": [{"x": 1}], "bars": bars})
+    return replace(_result(), timing_inputs={"bpm": 100, "events": ev})
+
+
+def test_combined_midi_builder_error_still_completes_job(
+        app: Flask, settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    from backend.worker import main as worker_main
+
+    storage = MemoryStorage()
+    _seed_job(storage)
+    result = _bars_timing(monkeypatch)
+
+    def boom(*a: Any, **k: Any) -> bytes:
+        raise ValueError("bad ticks")
+
+    monkeypatch.setattr(worker_main, "build_combined_midi", boom)
+    process_one(storage=storage, runner=_runner(result), settings=settings)
+    with db.transaction() as conn:
+        row = conn.execute("SELECT midi_combined_key FROM scores").fetchone()
+    assert row is not None and row["midi_combined_key"] is None
+
+
+def test_cancel_during_publish_discards_combined_midi(
+        app: Flask, settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    storage = MemoryStorage()
+    job_id, old_keys = _seed_job(storage)
+    result = _bars_timing(monkeypatch)
+
+    def late_cancel(page_jpegs: list[bytes], *, tempo_bpm: int, work_dir: Path, on_stage: Any, timing: bool, on_progress: Any = None) -> PipelineResult:
+        on_stage("synthesizing", 92)
+        with db.transaction() as conn:
+            conn.execute("UPDATE jobs SET status = 'cancelled' WHERE id = %s", (job_id,))
+        return result
+
+    process_one(storage=storage, runner=late_cancel, settings=settings)
+    assert _count("scores") == 0 and set(storage.objects) == set(old_keys)

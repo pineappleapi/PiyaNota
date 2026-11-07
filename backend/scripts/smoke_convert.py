@@ -239,6 +239,8 @@ def run(photos: list[Path]) -> int:
         keys += [r["object_key"] for r in conn.execute("SELECT object_key FROM job_pages").fetchall()]
         keys += [r["thumbnail_key"] for r in conn.execute("SELECT thumbnail_key FROM scores").fetchall()
                  if r["thumbnail_key"]]
+        keys += [r["midi_combined_key"] for r in conn.execute("SELECT midi_combined_key FROM scores").fetchall()
+                 if r["midi_combined_key"]]
         stored = conn.execute("SELECT coalesce(sum(octet_length(data)), 0) AS n FROM blobs "
                               "WHERE key = ANY(%s)", (keys,)).fetchone()["n"]
         everything = conn.execute("SELECT coalesce(sum(octet_length(data)), 0) AS n FROM blobs").fetchone()["n"]

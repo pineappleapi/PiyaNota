@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import math
 import struct
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import Any
 
 LOG = logging.getLogger(__name__)
@@ -28,6 +28,8 @@ _BAR_FIELDS = ("startTick", "durTicks", "numerator", "denominator")
 
 
 def _vlq(n: int) -> bytes:
+    if n < 0:  # a negative value never terminates the shift loop below (-1 >> 7 == -1)
+        raise ValueError(f"negative variable-length quantity: {n}")
     out = [n & 0x7F]
     n >>= 7
     while n:
@@ -79,6 +81,7 @@ def build_combined_midi(
     events: Mapping[str, Sequence[Mapping[str, Any]]],
     bars: Sequence[Mapping[str, Any]] | None,
     bpm: int | None,
+    skip_voices: Collection[str] = (),
 ) -> bytes | None:
     """Build the combined file, or None when bars/tempo are missing or unusable.
 
@@ -86,6 +89,8 @@ def build_combined_midi(
         events: Voice-capitalised Stage 4 events (``Soprano`` ... ``Bass``); rests are skipped.
         bars: Timing ``bars`` (startTick, durTicks, numerator, denominator, optional pickup).
         bpm: Tempo of the render; stored as the base tempo.
+        skip_voices: Lower-case voices to leave silent (``failed_voices``), so the file never plays a
+            voice that /result reports as failed.
     """
     if not bars or not isinstance(bpm, int) or isinstance(bpm, bool) or bpm <= 0 or not _usable(bars):
         return None
@@ -101,10 +106,11 @@ def build_combined_midi(
     tracks = [_track(cond)]
     for ch, voice in enumerate(VOICES):
         items = [_name(voice), (0, 0, bytes([0xC0 | ch, 0]))]  # GM program 0, acoustic piano
-        for e in events.get(voice, ()):
+        for e in () if voice.lower() in skip_voices else events.get(voice, ()):
             pitch = e.get("pitch")
-            if e.get("type") == "note" and isinstance(pitch, int) and 0 <= pitch <= MIDI_MAX_DATA:
-                _note(items, ch, pitch, int(e["tick_onset"]), max(1, int(e["duration_ticks"])), NOTE_VELOCITY)
+            onset = int(e["tick_onset"]) if e.get("type") == "note" else -1
+            if isinstance(pitch, int) and 0 <= pitch <= MIDI_MAX_DATA and onset >= 0:  # <0: drop, not hang
+                _note(items, ch, pitch, onset, max(1, int(e["duration_ticks"])), NOTE_VELOCITY)
         tracks.append(_track(items))
     click = [_name("Click")]
     for b in ordered:

@@ -164,7 +164,7 @@ def _combined_midi(result: PipelineResult, timing: bytes) -> bytes | None:
         events = result.timing_inputs.get("events")
         if not bars or not events:
             return None
-        return build_combined_midi(events, bars, result.timing_inputs.get("bpm"))
+        return build_combined_midi(events, bars, result.timing_inputs.get("bpm"), result.failed_voices)
     except Exception as exc:  # noqa: BLE001 - optional artifact, per-voice MP3/MIDI still ship
         LOG.error("combined midi failed, skipping: %s", describe_exception(exc))
         return None

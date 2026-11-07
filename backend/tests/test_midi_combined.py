@@ -106,3 +106,21 @@ def test_missing_tempo_gives_none() -> None:
     bars = _bars([(1, 4 * PPQ, 4, False)])
     assert build_combined_midi(_events(bars), bars, None) is None
     assert VOICES == ("Soprano", "Alto", "Tenor", "Bass")
+
+
+def test_negative_onset_is_dropped_not_hung() -> None:
+    bars = _bars([(1, 4 * PPQ, 4, False)])
+    ev = _events(bars)
+    ev["Soprano"].append(dict(type="note", pitch=70, tick_onset=-5, duration_ticks=PPQ))
+    blob = build_combined_midi(ev, bars, 100)
+    assert blob is not None
+    _, tracks = _parse(blob)
+    assert all(p != 70 for _, p, _ in _ons(tracks[1], 0))
+
+
+def test_failed_voice_is_silent() -> None:
+    bars = _bars([(1, 4 * PPQ, 4, False)])
+    blob = build_combined_midi(_events(bars), bars, 100, ["tenor"])
+    assert blob is not None
+    _, tracks = _parse(blob)
+    assert _ons(tracks[3], 2) == [] and _ons(tracks[1], 0) != []
