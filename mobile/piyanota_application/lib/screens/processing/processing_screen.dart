@@ -409,7 +409,9 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message), duration: AppTheme.snackBarDuration));
+      ..showSnackBar(
+        SnackBar(content: Text(message), duration: AppTheme.snackBarDuration),
+      );
   }
 
   @override

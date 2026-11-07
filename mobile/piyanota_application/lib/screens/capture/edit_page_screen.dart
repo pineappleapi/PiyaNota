@@ -68,9 +68,7 @@ class _EditPageScreenState extends ConsumerState<EditPageScreen> {
       debugPrint('Edit Page could not save: $e');
       if (!mounted) return;
       setState(() => _saving = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text(CaptureMessages.editFailed),
           duration: AppTheme.snackBarDuration,
