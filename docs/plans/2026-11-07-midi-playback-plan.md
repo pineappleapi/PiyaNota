@@ -1,6 +1,6 @@
 # Plan: play the score from MIDI on the phone (Session B)
 
-Date: 2026-11-07. Status: plan only, no app code written, nothing committed or merged.
+Date: 2026-11-07. Status: plan plus desktop spike only. No app code. Decisions and results in section 8.
 Source: `2026-11-07-phone-test-findings-plan.md` sections 0 and 6, plus two checks below.
 Also follows `2026-11-07-handoff.md` "Session B" and "Working method" (cheap models for search/checks, strong model only
 for design decisions D1-D6, reviewers only where CLAUDE.md requires them). Branch: `feature/piya106-overnight-cancel-logging-ui`.
@@ -153,3 +153,27 @@ Plan:
 One subagent per task with an explicit cheap model for search and checks; strong model only for D-decisions.
 Briefs and reports as short files, reports capped near 40 lines. Grep with line ranges, no whole-file dumps.
 Run only touched tests. Do not re-read `docs/sow.md`, pipeline code or old ledgers.
+
+## 8. Decisions and results after the first session (2026-11-07)
+
+Decisions (user):
+- Synth: FluidSynth. Soundfont: keep the CURRENT `soundfont/piano.sf2` (GeneralUser GS 2.0.3 BETA). Not the upright fonts (rejected by ear).
+- Reverb and chorus off. Done in `stage5_synthesis.py` (`FLUIDSYNTH_DRY_SETTINGS`), commit 7d5836a, merged to main. Not yet confirmed on the phone: the measured effect is small, so the item E complaint may come from the soundfont, MP3 encoding or the five-player playback.
+- FluidSynth 2.x CLI: options (`-F`, `-r`, `-o`) must come BEFORE the sf2 and mid names, or no WAV is written.
+- Old scores stay on MP3, no backfill. Server keeps rendering MP3 until the MIDI path has passed phone testing (backend-lead).
+- Item D (lyrics kept in playback images) is part of this work.
+
+Current state (verified 2026-11-07):
+- The phone plays MP3 only. The app has no MIDI reader or synth. App v1.4.0+3 is installed on phone 622ad04c (version bump only, no app code change since 1.3.0).
+- Offline: `local_results_store.dart` downloads `midi_<voice>` files like the MP3s, but `loadOffline` skips them (line ~175). `midiCombined` must be added as a required offline file once the app reads it.
+
+Spike B desktop results (`tools/spike_midi/`, scratch outputs not committed):
+- Combined format-1 file works on synthetic data: 0 ms click/note offset from ticks, mute by channel and tempo scaling behave. Create the file with `numTracks=5` (midiutil adds its own conductor track).
+- Real data: `moonriver_sample.py` builds the file from the saved run `data/eval_moonriver_diag/pipeline_out.json` (CRNN output, many underfull-bar flags). 40 bars end at tick 76800 = report total_ticks. Notes per channel 85/87/77/83, 160 clicks, 4/4 only, 106 s at 90 BPM. Renders in under 1 s on the desktop.
+- NOT done: pickup and non-4/4 pieces on real data, secondary accents (item 8), fallback for an unreadable bar table, audible click sync check, ties/slurs/multirests.
+
+Item D1 (code-verified, no real job checked): the earlier "geometry mismatch" is wrong. `backend/worker/main.py:114-134` (`_scale_to_served_pages`) rescales timing x/y to the served JPEG size, and `scoreImageSizes` is the served JPEG size, so the app scale is right. A new display image must keep the SAME width and height. Unverified: app x-mapping `playback_screen.dart:1324-1333`; whether `backend/tests` covers `_scale_to_served_pages`; it skips pages with a missing size silently.
+
+Phone-side engine research (not tested): FluidSynth official Android prebuilt libs (many .so, NDK OpenMP, libc++_shared); LGPL 2.1 needs dynamic linking; `flutter_midi_pro` is real-time only; TinySoundFont (MIT) is the fallback. Spike A route: small native C wrapper (`new_fluid_settings`, `fluid_synth_sfload`, `fluid_player`, `fluid_synth_write_s16`) called through dart:ffi in an isolate.
+
+Open and next: see `2026-11-07-handoff.md` "Session C".
