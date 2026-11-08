@@ -1,0 +1,12 @@
+{
+ "pred_slots": 12474,
+ "pred_slots_wrong": 386,
+ "confident": 11386,
+ "confident_wrong": 179,
+ "confident_wrong_share": 0.015721060952046374,
+ "confident_share_of_slots": 0.9127785794452461,
+ "auc": 0.8485554337277924,
+ "header_mode": "own",
+ "pred_sha256": "122ccc4b7d5128c964af44529d1c6befef16cf549c8ae0ddee01e41cb0b56ba4",
+ "confidence_sha256": "01140751e0201b9ffbae9766eb582e93a878872d68b92dc0b09eb74bbffda88d"
+}

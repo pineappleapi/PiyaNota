@@ -1,0 +1,1970 @@
+{
+ "scorer_sha256": "5689f3329e92ac6b6aa37a6da1bc15ea9a9d5ac1ce1562466be6d48531265899",
+ "source": "pdf",
+ "header_mode": "own",
+ "input_sha256": {
+  "labels\\Ale\\labels.jsonl": "d8ba8a6b76270f7079cf37b1ec51c31ffc850a2a2a72bd095692d22ee51ae1cb",
+  "labels\\Ama_Namin\\labels.jsonl": "a8ea69ad0967781d0a3123a5d531880c5dddfb1c838f67700eb5c2bae8c001c7",
+  "labels\\Bahay_Kubo\\labels.jsonl": "d76c28508291147ecfdedf523b4fe9206f955bfa201b6f6eda723d66d2db1468",
+  "labels\\Gaano_Ko_Ikaw_Kamahal\\labels.jsonl": "16574fdb48c4403f285e7495a0436bb666354608956430630da28f0d8adf1516",
+  "labels\\Kay_Ganda_Ng_Ating_Musika\\labels.jsonl": "07c16ad6600c19971c10a921879572affab0d9b413547a0ca44c4328663ea09b",
+  "labels\\May_Hihigit_Pa_Ba\\labels.jsonl": "53a94cecd4f393ba85095ac2f0d66f64cb34a74d3d50466ab5bdea8359b95537",
+  "labels\\Pangarap_Ko_Ang_Ibigin_Ka\\labels.jsonl": "561141d3fba515ac098f6f77db504f89d91a6ffc13b2b34a948b7b86dc42233f",
+  "labels\\Pangarap_Lang\\labels.jsonl": "2b02d8525dcceb4cfe4a422ba694125889b6c136fd3a358cc317bbb798da55b5",
+  "labels\\Paru-parong_Bukid\\labels.jsonl": "9bd53e9371c3d898818a3cf49ecfd8f77160de9503a367d82e8625b53886366d",
+  "labels\\Tikong_Tiko\\labels.jsonl": "34c2ffdcb36d17dc151e641609d431b40900f16c4d96568bed2ebeb048468b45",
+  "labels_tuplet\\Ale\\labels.jsonl": "d8ba8a6b76270f7079cf37b1ec51c31ffc850a2a2a72bd095692d22ee51ae1cb",
+  "labels_tuplet\\Ama_Namin\\labels.jsonl": "63789cac1bab91d2fe4a1fb886001e799f339278a55a668571d43bdfe75c0106",
+  "labels_tuplet\\Bahay_Kubo\\labels.jsonl": "d76c28508291147ecfdedf523b4fe9206f955bfa201b6f6eda723d66d2db1468",
+  "labels_tuplet\\Gaano_Ko_Ikaw_Kamahal\\labels.jsonl": "c8a2d81a0840c54d984d30c8046c592721ad01f3fbfd7e41436aa43aa810b2e2",
+  "labels_tuplet\\Kay_Ganda_Ng_Ating_Musika\\labels.jsonl": "01b62a3cd31ddc5167ea1370742702aba805a931c1cd8ee165a50c42281a5a1d",
+  "labels_tuplet\\May_Hihigit_Pa_Ba\\labels.jsonl": "86e48cbbcfe14686b4c5dd53a9a09923f2634410be1dcf5288b9d0ab9ac0034c",
+  "labels_tuplet\\Pangarap_Ko_Ang_Ibigin_Ka\\labels.jsonl": "4af8b7e3072f8998cbef6afbc848f4a95ee751600f2764650f5a66622952d8ed",
+  "labels_tuplet\\Pangarap_Lang\\labels.jsonl": "2b02d8525dcceb4cfe4a422ba694125889b6c136fd3a358cc317bbb798da55b5",
+  "labels_tuplet\\Paru-parong_Bukid\\labels.jsonl": "9bd53e9371c3d898818a3cf49ecfd8f77160de9503a367d82e8625b53886366d",
+  "labels_tuplet\\Tikong_Tiko\\labels.jsonl": "34c2ffdcb36d17dc151e641609d431b40900f16c4d96568bed2ebeb048468b45",
+  "scoring_exclusions.json": "1c6cd41b8c3d64634a03e13bb7b1f1cd40e368acaf29862962f6d38b4637678a"
+ },
+ "runs": {
+  "s1": {
+   "pred_sha256": "5c3efa18b76cc15156e3726f74d8d07074780846f8036f81c9bd2e629013aa77",
+   "phantom_strips": [],
+   "arm1": {
+    "all": {
+     "strips": 816,
+     "pred_present": 1.0,
+     "underpowered_heads": false,
+     "pred_to_gt_slots": 0.9908077283173036,
+     "pitch": {
+      "acc": 0.9602020511250574,
+      "hit": 12546,
+      "n": 13066,
+      "wilson": [
+       0.9567126073355644,
+       0.9634209618425043
+      ],
+      "cluster_indicative": [
+       0.9377301927194861,
+       0.9826483132997286
+      ]
+     },
+     "ser": {
+      "rate": 0.048183930536871714,
+      "err": 1182,
+      "n": 24531,
+      "cluster_indicative": [
+       0.03168872843963097,
+       0.06901866758006509
+      ],
+      "rate_cost1": 0.048183930536871714
+     },
+     "clef_ok": 813,
+     "key_ok": 783,
+     "meter_ok": 816,
+     "gt_barlines_missed": 1,
+     "pred_barlines_spurious": 3
+    },
+    "per_piece": {
+     "Ale": {
+      "strips": 108,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.9966644429619747,
+      "pitch": {
+       "acc": 0.992989165073295,
+       "hit": 1558,
+       "n": 1569,
+       "wilson": [
+        0.9874893069766725,
+        0.9960808122266852
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.019411764705882354,
+       "err": 66,
+       "n": 3400,
+       "cluster_indicative": null,
+       "rate_cost1": 0.019411764705882354
+      },
+      "clef_ok": 108,
+      "key_ok": 104,
+      "meter_ok": 108,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 1
+     },
+     "Ama_Namin": {
+      "strips": 37,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.8856502242152466,
+      "pitch": {
+       "acc": 0.7867494824016563,
+       "hit": 380,
+       "n": 483,
+       "wilson": [
+        0.7480312316673247,
+        0.8209423318079412
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.16888433981576254,
+       "err": 165,
+       "n": 977,
+       "cluster_indicative": null,
+       "rate_cost1": 0.16888433981576254
+      },
+      "clef_ok": 37,
+      "key_ok": 37,
+      "meter_ok": 37,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 0
+     },
+     "Bahay_Kubo": {
+      "strips": 48,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.9970238095238095,
+      "pitch": {
+       "acc": 0.9945820433436533,
+       "hit": 1285,
+       "n": 1292,
+       "wilson": [
+        0.9888585221468504,
+        0.997373128388215
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.10467479674796748,
+       "err": 206,
+       "n": 1968,
+       "cluster_indicative": null,
+       "rate_cost1": 0.10467479674796748
+      },
+      "clef_ok": 48,
+      "key_ok": 48,
+      "meter_ok": 48,
+      "gt_barlines_missed": 1,
+      "pred_barlines_spurious": 0
+     },
+     "Gaano_Ko_Ikaw_Kamahal": {
+      "strips": 53,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.997093023255814,
+      "pitch": {
+       "acc": 0.9918367346938776,
+       "hit": 729,
+       "n": 735,
+       "wilson": [
+        0.9823053307090999,
+        0.9962535376599795
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.00916030534351145,
+       "err": 12,
+       "n": 1310,
+       "cluster_indicative": null,
+       "rate_cost1": 0.00916030534351145
+      },
+      "clef_ok": 53,
+      "key_ok": 51,
+      "meter_ok": 53,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 0
+     },
+     "Kay_Ganda_Ng_Ating_Musika": {
+      "strips": 132,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.9990291262135922,
+      "pitch": {
+       "acc": 0.9383886255924171,
+       "hit": 2178,
+       "n": 2321,
+       "wilson": [
+        0.9278632195537204,
+        0.9474652329309564
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.0350922131147541,
+       "err": 137,
+       "n": 3904,
+       "cluster_indicative": null,
+       "rate_cost1": 0.0350922131147541
+      },
+      "clef_ok": 129,
+      "key_ok": 113,
+      "meter_ok": 132,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 0
+     },
+     "May_Hihigit_Pa_Ba": {
+      "strips": 73,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 1.00139470013947,
+      "pitch": {
+       "acc": 0.9906040268456375,
+       "hit": 738,
+       "n": 745,
+       "wilson": [
+        0.9807330593344866,
+        0.9954413412330031
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.02960331557134399,
+       "err": 50,
+       "n": 1689,
+       "cluster_indicative": null,
+       "rate_cost1": 0.02960331557134399
+      },
+      "clef_ok": 73,
+      "key_ok": 73,
+      "meter_ok": 73,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 0
+     },
+     "Pangarap_Ko_Ang_Ibigin_Ka": {
+      "strips": 102,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.9829503335804299,
+      "pitch": {
+       "acc": 0.9375,
+       "hit": 1455,
+       "n": 1552,
+       "wilson": [
+        0.9243431819100935,
+        0.9484963153754915
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.05765890934352206,
+       "err": 166,
+       "n": 2879,
+       "cluster_indicative": null,
+       "rate_cost1": 0.05765890934352206
+      },
+      "clef_ok": 102,
+      "key_ok": 99,
+      "meter_ok": 102,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 1
+     },
+     "Pangarap_Lang": {
+      "strips": 116,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.9874411302982732,
+      "pitch": {
+       "acc": 0.9428571428571428,
+       "hit": 1980,
+       "n": 2100,
+       "wilson": [
+        0.9320969084706748,
+        0.952000069172509
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.062135922330097085,
+       "err": 256,
+       "n": 4120,
+       "cluster_indicative": null,
+       "rate_cost1": 0.062135922330097085
+      },
+      "clef_ok": 116,
+      "key_ok": 113,
+      "meter_ok": 116,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 0
+     },
+     "Paru-parong_Bukid": {
+      "strips": 55,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 1.0013175230566536,
+      "pitch": {
+       "acc": 0.9895833333333334,
+       "hit": 855,
+       "n": 864,
+       "wilson": [
+        0.9803219851119336,
+        0.9945102884273852
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.01555104800540906,
+       "err": 23,
+       "n": 1479,
+       "cluster_indicative": null,
+       "rate_cost1": 0.01555104800540906
+      },
+      "clef_ok": 55,
+      "key_ok": 54,
+      "meter_ok": 55,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 1
+     },
+     "Tikong_Tiko": {
+      "strips": 92,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 1.0,
+      "pitch": {
+       "acc": 0.9879003558718861,
+       "hit": 1388,
+       "n": 1405,
+       "wilson": [
+        0.9807078940771815,
+        0.9924320245623588
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.03600713012477719,
+       "err": 101,
+       "n": 2805,
+       "cluster_indicative": null,
+       "rate_cost1": 0.03600713012477719
+      },
+      "clef_ok": 92,
+      "key_ok": 91,
+      "meter_ok": 92,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 0
+     }
+    }
+   },
+   "arm2": {
+    "all": {
+     "strips": 912,
+     "pred_present": 1.0,
+     "underpowered_heads": false,
+     "pred_to_gt_slots": 0.9896444072184574,
+     "pitch": {
+      "acc": 0.9597689292345781,
+      "hit": 13956,
+      "n": 14541,
+      "wilson": [
+       0.9564516954444513,
+       0.962843293646389
+      ],
+      "cluster_indicative": [
+       0.9347884812793776,
+       0.9820908251012721
+      ]
+     },
+     "clef_ok": 909,
+     "key_ok": 878,
+     "meter_ok": 912
+    },
+    "per_piece": {
+     "Ale": {
+      "strips": 108,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.9966644429619747,
+      "pitch": {
+       "acc": 0.992989165073295,
+       "hit": 1558,
+       "n": 1569,
+       "wilson": [
+        0.9874893069766725,
+        0.9960808122266852
+       ],
+       "cluster_indicative": null
+      },
+      "clef_ok": 108,
+      "key_ok": 104,
+      "meter_ok": 108
+     },
+     "Ama_Namin": {
+      "strips": 48,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.884430176565008,
+      "pitch": {
+       "acc": 0.7852941176470588,
+       "hit": 534,
+       "n": 680,
+       "wilson": [
+        0.7528734222751667,
+        0.8145094336376645
+       ],
+       "cluster_indicative": null
+      },
+      "clef_ok": 48,
+      "key_ok": 48,
+      "meter_ok": 48
+     },
+     "Bahay_Kubo": {
+      "strips": 48,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.9970238095238095,
+      "pitch": {
+       "acc": 0.9945820433436533,
+       "hit": 1285,
+       "n": 1292,
+       "wilson": [
+        0.9888585221468504,
+        0.997373128388215
+       ],
+       "cluster_indicative": null
+      },
+      "clef_ok": 48,
+      "key_ok": 48,
+      "meter_ok": 48
+     },
+     "Gaano_Ko_Ikaw_Kamahal": {
+      "strips": 72,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.99375,
+      "pitch": {
+       "acc": 0.983495145631068,
+       "hit": 1013,
+       "n": 1030,
+       "wilson": [
+        0.9737270337086293,
+        0.9896700669690761
+       ],
+       "cluster_indicative": null
+      },
+      "clef_ok": 72,
+      "key_ok": 69,
+      "meter_ok": 72
+     },
+     "Kay_Ganda_Ng_Ating_Musika": {
+      "strips": 136,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.9990662931839402,
+      "pitch": {
+       "acc": 0.9404910528506034,
+       "hit": 2260,
+       "n": 2403,
+       "wilson": [
+        0.9303103627635599,
+        0.9492655927126957
+       ],
+       "cluster_indicative": null
+      },
+      "clef_ok": 133,
+      "key_ok": 117,
+      "meter_ok": 136
+     },
+     "May_Hihigit_Pa_Ba": {
+      "strips": 128,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.9986291980808774,
+      "pitch": {
+       "acc": 0.9902470741222367,
+       "hit": 1523,
+       "n": 1538,
+       "wilson": [
+        0.9839703877904518,
+        0.9940807946397019
+       ],
+       "cluster_indicative": null
+      },
+      "clef_ok": 128,
+      "key_ok": 128,
+      "meter_ok": 128
+     },
+     "Pangarap_Ko_Ang_Ibigin_Ka": {
+      "strips": 104,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.9835948644793152,
+      "pitch": {
+       "acc": 0.9389408099688473,
+       "hit": 1507,
+       "n": 1605,
+       "wilson": [
+        0.9261456333917536,
+        0.9496397764335517
+       ],
+       "cluster_indicative": null
+      },
+      "clef_ok": 104,
+      "key_ok": 101,
+      "meter_ok": 104
+     },
+     "Pangarap_Lang": {
+      "strips": 116,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.9874411302982732,
+      "pitch": {
+       "acc": 0.9428571428571428,
+       "hit": 1980,
+       "n": 2100,
+       "wilson": [
+        0.9320969084706748,
+        0.952000069172509
+       ],
+       "cluster_indicative": null
+      },
+      "clef_ok": 116,
+      "key_ok": 113,
+      "meter_ok": 116
+     },
+     "Paru-parong_Bukid": {
+      "strips": 60,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 1.0012239902080784,
+      "pitch": {
+       "acc": 0.9880304678998912,
+       "hit": 908,
+       "n": 919,
+       "wilson": [
+        0.9786942700241537,
+        0.9933035246136261
+       ],
+       "cluster_indicative": null
+      },
+      "clef_ok": 60,
+      "key_ok": 59,
+      "meter_ok": 60
+     },
+     "Tikong_Tiko": {
+      "strips": 92,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 1.0,
+      "pitch": {
+       "acc": 0.9879003558718861,
+       "hit": 1388,
+       "n": 1405,
+       "wilson": [
+        0.9807078940771815,
+        0.9924320245623588
+       ],
+       "cluster_indicative": null
+      },
+      "clef_ok": 92,
+      "key_ok": 91,
+      "meter_ok": 92
+     }
+    }
+   },
+   "arm3": {
+    "all": {
+     "strips": 912,
+     "pred_present": 1.0,
+     "underpowered_heads": false,
+     "pitch": {
+      "acc": 0.9586818214311245,
+      "hit": 13411,
+      "n": 13989,
+      "wilson": [
+       0.9552557928248425,
+       0.9618559966775841
+      ],
+      "cluster_indicative": [
+       0.933094593414272,
+       0.9811560607193599
+      ]
+     },
+     "ser": {
+      "rate": 0.05148152871657527,
+      "err": 1211,
+      "n": 23523,
+      "cluster_indicative": [
+       0.03314319024024649,
+       0.07749875270247797
+      ],
+      "rate_cost1": 0.05148152871657527
+     },
+     "bars_scored": 3318,
+     "bars_masked": 106,
+     "underpowered": false,
+     "ties_next_to_masked": 6,
+     "clef_ok": 909,
+     "key_ok": 878,
+     "meter_ok": 912,
+     "gt_barlines_missed": 2,
+     "pred_barlines_spurious": 5
+    },
+    "per_piece": {
+     "Ale": {
+      "strips": 108,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pitch": {
+       "acc": 0.992989165073295,
+       "hit": 1558,
+       "n": 1569,
+       "wilson": [
+        0.9874893069766725,
+        0.9960808122266852
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.019199479336153596,
+       "err": 59,
+       "n": 3073,
+       "cluster_indicative": null,
+       "rate_cost1": 0.019199479336153596
+      },
+      "bars_scored": 436,
+      "bars_masked": 0,
+      "underpowered": true,
+      "ties_next_to_masked": 0,
+      "clef_ok": 108,
+      "key_ok": 104,
+      "meter_ok": 108,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 1
+     },
+     "Ama_Namin": {
+      "strips": 48,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pitch": {
+       "acc": 0.77491961414791,
+       "hit": 482,
+       "n": 622,
+       "wilson": [
+        0.7404680075748693,
+        0.8059961456549576
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.20961887477313976,
+       "err": 231,
+       "n": 1102,
+       "cluster_indicative": null,
+       "rate_cost1": 0.20961887477313976
+      },
+      "bars_scored": 206,
+      "bars_masked": 10,
+      "underpowered": true,
+      "ties_next_to_masked": 1,
+      "clef_ok": 48,
+      "key_ok": 48,
+      "meter_ok": 48,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 0
+     },
+     "Bahay_Kubo": {
+      "strips": 48,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pitch": {
+       "acc": 0.9945820433436533,
+       "hit": 1285,
+       "n": 1292,
+       "wilson": [
+        0.9888585221468504,
+        0.997373128388215
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.10388918486947256,
+       "err": 195,
+       "n": 1877,
+       "cluster_indicative": null,
+       "rate_cost1": 0.10388918486947256
+      },
+      "bars_scored": 276,
+      "bars_masked": 0,
+      "underpowered": true,
+      "ties_next_to_masked": 0,
+      "clef_ok": 48,
+      "key_ok": 48,
+      "meter_ok": 48,
+      "gt_barlines_missed": 1,
+      "pred_barlines_spurious": 0
+     },
+     "Gaano_Ko_Ikaw_Kamahal": {
+      "strips": 72,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pitch": {
+       "acc": 0.9837310195227765,
+       "hit": 907,
+       "n": 922,
+       "wilson": [
+        0.9733312925570105,
+        0.9901164505558502
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.017543859649122806,
+       "err": 25,
+       "n": 1425,
+       "cluster_indicative": null,
+       "rate_cost1": 0.017543859649122806
+      },
+      "bars_scored": 285,
+      "bars_masked": 19,
+      "underpowered": true,
+      "ties_next_to_masked": 0,
+      "clef_ok": 72,
+      "key_ok": 69,
+      "meter_ok": 72,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 2
+     },
+     "Kay_Ganda_Ng_Ating_Musika": {
+      "strips": 136,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pitch": {
+       "acc": 0.9392265193370166,
+       "hit": 2210,
+       "n": 2353,
+       "wilson": [
+        0.9288383715143695,
+        0.9481828080167454
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.029238122012932247,
+       "err": 104,
+       "n": 3557,
+       "cluster_indicative": null,
+       "rate_cost1": 0.029238122012932247
+      },
+      "bars_scored": 296,
+      "bars_masked": 4,
+      "underpowered": true,
+      "ties_next_to_masked": 0,
+      "clef_ok": 133,
+      "key_ok": 117,
+      "meter_ok": 136,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 0
+     },
+     "May_Hihigit_Pa_Ba": {
+      "strips": 128,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pitch": {
+       "acc": 0.9876441515650741,
+       "hit": 1199,
+       "n": 1214,
+       "wilson": [
+        0.9797137039892253,
+        0.992498117318242
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.03489399293286219,
+       "err": 79,
+       "n": 2264,
+       "cluster_indicative": null,
+       "rate_cost1": 0.03489399293286219
+      },
+      "bars_scored": 484,
+      "bars_masked": 64,
+      "underpowered": true,
+      "ties_next_to_masked": 4,
+      "clef_ok": 128,
+      "key_ok": 128,
+      "meter_ok": 128,
+      "gt_barlines_missed": 1,
+      "pred_barlines_spurious": 0
+     },
+     "Pangarap_Ko_Ang_Ibigin_Ka": {
+      "strips": 104,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pitch": {
+       "acc": 0.9391086001255493,
+       "hit": 1496,
+       "n": 1593,
+       "wilson": [
+        0.9262757374722014,
+        0.949828692672905
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.05855685681904042,
+       "err": 155,
+       "n": 2647,
+       "cluster_indicative": null,
+       "rate_cost1": 0.05855685681904042
+      },
+      "bars_scored": 306,
+      "bars_masked": 2,
+      "underpowered": true,
+      "ties_next_to_masked": 0,
+      "clef_ok": 104,
+      "key_ok": 101,
+      "meter_ok": 104,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 1
+     },
+     "Pangarap_Lang": {
+      "strips": 116,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pitch": {
+       "acc": 0.9419047619047619,
+       "hit": 1978,
+       "n": 2100,
+       "wilson": [
+        0.9310693984203928,
+        0.9511262953999025
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.06447333510214912,
+       "err": 243,
+       "n": 3769,
+       "cluster_indicative": null,
+       "rate_cost1": 0.06447333510214912
+      },
+      "bars_scored": 428,
+      "bars_masked": 0,
+      "underpowered": true,
+      "ties_next_to_masked": 0,
+      "clef_ok": 116,
+      "key_ok": 113,
+      "meter_ok": 116,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 0
+     },
+     "Paru-parong_Bukid": {
+      "strips": 60,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pitch": {
+       "acc": 0.9880304678998912,
+       "hit": 908,
+       "n": 919,
+       "wilson": [
+        0.9786942700241537,
+        0.9933035246136261
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.017106200997861726,
+       "err": 24,
+       "n": 1403,
+       "cluster_indicative": null,
+       "rate_cost1": 0.017106200997861726
+      },
+      "bars_scored": 233,
+      "bars_masked": 7,
+      "underpowered": true,
+      "ties_next_to_masked": 1,
+      "clef_ok": 60,
+      "key_ok": 59,
+      "meter_ok": 60,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 1
+     },
+     "Tikong_Tiko": {
+      "strips": 92,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pitch": {
+       "acc": 0.9879003558718861,
+       "hit": 1388,
+       "n": 1405,
+       "wilson": [
+        0.9807078940771815,
+        0.9924320245623588
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.0399002493765586,
+       "err": 96,
+       "n": 2406,
+       "cluster_indicative": null,
+       "rate_cost1": 0.0399002493765586
+      },
+      "bars_scored": 368,
+      "bars_masked": 0,
+      "underpowered": true,
+      "ties_next_to_masked": 0,
+      "clef_ok": 92,
+      "key_ok": 91,
+      "meter_ok": 92,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 0
+     }
+    }
+   },
+   "arm3_extra_subset": {
+    "strips": 96,
+    "pred_present": 1.0,
+    "underpowered_heads": false,
+    "pitch": {
+     "acc": 0.9393282773564464,
+     "hit": 867,
+     "n": 923,
+     "wilson": [
+      0.9220305028268737,
+      0.9529841706621023
+     ],
+     "cluster_indicative": [
+      0.8216867469879519,
+      0.984313725490196
+     ]
+    },
+    "ser": {
+     "rate": 0.07484276729559748,
+     "err": 119,
+     "n": 1590,
+     "cluster_indicative": [
+      0.030461270670147953,
+      0.19756309834638816
+     ],
+     "rate_cost1": 0.07484276729559748
+    },
+    "bars_scored": 293,
+    "bars_masked": 106,
+    "underpowered": true,
+    "ties_next_to_masked": 6,
+    "clef_ok": 96,
+    "key_ok": 95,
+    "meter_ok": 96,
+    "gt_barlines_missed": 1,
+    "pred_barlines_spurious": 2
+   },
+   "arm3_without_unverified_pieces": {
+    "strips": 716,
+    "pred_present": 1.0,
+    "underpowered_heads": false,
+    "pitch": {
+     "acc": 0.9577836411609498,
+     "hit": 10527,
+     "n": 10991,
+     "wilson": [
+      0.9538616068896008,
+      0.9613857760285851
+     ],
+     "cluster_indicative": [
+      0.9241189931350114,
+      0.9874789308933302
+     ]
+    },
+    "ser": {
+     "rate": 0.05197617758527342,
+     "err": 960,
+     "n": 18470,
+     "cluster_indicative": [
+      0.02780456444873031,
+      0.08472407978135721
+     ],
+     "rate_cost1": 0.05197617758527342
+    },
+    "bars_scored": 2644,
+    "bars_masked": 104,
+    "underpowered": false,
+    "ties_next_to_masked": 6,
+    "clef_ok": 713,
+    "key_ok": 686,
+    "meter_ok": 716,
+    "gt_barlines_missed": 2,
+    "pred_barlines_spurious": 4
+   },
+   "dropped_fraction_arm1": 0.10526315789473684
+  },
+  "s2": {
+   "pred_sha256": "8169361704efbbec5478f145fc77b685405dcca393972642777a5e9112b55e3f",
+   "phantom_strips": [],
+   "arm1": {
+    "all": {
+     "strips": 816,
+     "pred_present": 1.0,
+     "underpowered_heads": false,
+     "pred_to_gt_slots": 0.9904672738105371,
+     "pitch": {
+      "acc": 0.9607377927445278,
+      "hit": 12553,
+      "n": 13066,
+      "wilson": [
+       0.9572698730547089,
+       0.9639348644227522
+      ],
+      "cluster_indicative": [
+       0.9388020833333334,
+       0.9828289536097145
+      ]
+     },
+     "ser": {
+      "rate": 0.047287106110635524,
+      "err": 1160,
+      "n": 24531,
+      "cluster_indicative": [
+       0.030954834277863646,
+       0.068025867601323
+      ],
+      "rate_cost1": 0.047287106110635524
+     },
+     "clef_ok": 813,
+     "key_ok": 783,
+     "meter_ok": 816,
+     "gt_barlines_missed": 2,
+     "pred_barlines_spurious": 7
+    },
+    "per_piece": {
+     "Ale": {
+      "strips": 108,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.9966644429619747,
+      "pitch": {
+       "acc": 0.992989165073295,
+       "hit": 1558,
+       "n": 1569,
+       "wilson": [
+        0.9874893069766725,
+        0.9960808122266852
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.018235294117647058,
+       "err": 62,
+       "n": 3400,
+       "cluster_indicative": null,
+       "rate_cost1": 0.018235294117647058
+      },
+      "clef_ok": 108,
+      "key_ok": 104,
+      "meter_ok": 108,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 0
+     },
+     "Ama_Namin": {
+      "strips": 37,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.8856502242152466,
+      "pitch": {
+       "acc": 0.7908902691511387,
+       "hit": 382,
+       "n": 483,
+       "wilson": [
+        0.7523970758914732,
+        0.8247927123271177
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.1647901740020471,
+       "err": 161,
+       "n": 977,
+       "cluster_indicative": null,
+       "rate_cost1": 0.1647901740020471
+      },
+      "clef_ok": 37,
+      "key_ok": 37,
+      "meter_ok": 37,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 0
+     },
+     "Bahay_Kubo": {
+      "strips": 48,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.9950396825396826,
+      "pitch": {
+       "acc": 0.9930340557275542,
+       "hit": 1283,
+       "n": 1292,
+       "wilson": [
+        0.9868139117908863,
+        0.9963309417159003
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.10619918699186992,
+       "err": 209,
+       "n": 1968,
+       "cluster_indicative": null,
+       "rate_cost1": 0.10619918699186992
+      },
+      "clef_ok": 48,
+      "key_ok": 48,
+      "meter_ok": 48,
+      "gt_barlines_missed": 1,
+      "pred_barlines_spurious": 0
+     },
+     "Gaano_Ko_Ikaw_Kamahal": {
+      "strips": 53,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.997093023255814,
+      "pitch": {
+       "acc": 0.9904761904761905,
+       "hit": 728,
+       "n": 735,
+       "wilson": [
+        0.9804727095055078,
+        0.9953792187021082
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.012213740458015267,
+       "err": 16,
+       "n": 1310,
+       "cluster_indicative": null,
+       "rate_cost1": 0.012213740458015267
+      },
+      "clef_ok": 53,
+      "key_ok": 51,
+      "meter_ok": 53,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 0
+     },
+     "Kay_Ganda_Ng_Ating_Musika": {
+      "strips": 132,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.9980582524271845,
+      "pitch": {
+       "acc": 0.9405428694528221,
+       "hit": 2183,
+       "n": 2321,
+       "wilson": [
+        0.9301745697479522,
+        0.9494552510536025
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.030737704918032786,
+       "err": 120,
+       "n": 3904,
+       "cluster_indicative": null,
+       "rate_cost1": 0.030737704918032786
+      },
+      "clef_ok": 129,
+      "key_ok": 113,
+      "meter_ok": 132,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 0
+     },
+     "May_Hihigit_Pa_Ba": {
+      "strips": 73,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 1.0,
+      "pitch": {
+       "acc": 0.9919463087248322,
+       "hit": 739,
+       "n": 745,
+       "wilson": [
+        0.9825412973306663,
+        0.9963038950304421
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.03078744819419775,
+       "err": 52,
+       "n": 1689,
+       "cluster_indicative": null,
+       "rate_cost1": 0.03078744819419775
+      },
+      "clef_ok": 73,
+      "key_ok": 73,
+      "meter_ok": 73,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 0
+     },
+     "Pangarap_Ko_Ang_Ibigin_Ka": {
+      "strips": 102,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.9829503335804299,
+      "pitch": {
+       "acc": 0.9413659793814433,
+       "hit": 1461,
+       "n": 1552,
+       "wilson": [
+        0.9285512168426898,
+        0.9520011478710446
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.05765890934352206,
+       "err": 166,
+       "n": 2879,
+       "cluster_indicative": null,
+       "rate_cost1": 0.05765890934352206
+      },
+      "clef_ok": 102,
+      "key_ok": 99,
+      "meter_ok": 102,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 6
+     },
+     "Pangarap_Lang": {
+      "strips": 116,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.989010989010989,
+      "pitch": {
+       "acc": 0.939047619047619,
+       "hit": 1972,
+       "n": 2100,
+       "wilson": [
+        0.9279912918045511,
+        0.9485005505470785
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.06116504854368932,
+       "err": 252,
+       "n": 4120,
+       "cluster_indicative": null,
+       "rate_cost1": 0.06116504854368932
+      },
+      "clef_ok": 116,
+      "key_ok": 113,
+      "meter_ok": 116,
+      "gt_barlines_missed": 1,
+      "pred_barlines_spurious": 1
+     },
+     "Paru-parong_Bukid": {
+      "strips": 55,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 1.0,
+      "pitch": {
+       "acc": 0.9918981481481481,
+       "hit": 857,
+       "n": 864,
+       "wilson": [
+        0.9833713371453836,
+        0.9960700724390381
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.014198782961460446,
+       "err": 21,
+       "n": 1479,
+       "cluster_indicative": null,
+       "rate_cost1": 0.014198782961460446
+      },
+      "clef_ok": 55,
+      "key_ok": 54,
+      "meter_ok": 55,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 0
+     },
+     "Tikong_Tiko": {
+      "strips": 92,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.9992378048780488,
+      "pitch": {
+       "acc": 0.9893238434163701,
+       "hit": 1390,
+       "n": 1405,
+       "wilson": [
+        0.9824595544076863,
+        0.993519576248308
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.03600713012477719,
+       "err": 101,
+       "n": 2805,
+       "cluster_indicative": null,
+       "rate_cost1": 0.03600713012477719
+      },
+      "clef_ok": 92,
+      "key_ok": 91,
+      "meter_ok": 92,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 0
+     }
+    }
+   },
+   "arm2": {
+    "all": {
+     "strips": 912,
+     "pred_present": 1.0,
+     "underpowered_heads": false,
+     "pred_to_gt_slots": 0.9893398309601766,
+     "pitch": {
+      "acc": 0.9605941819682278,
+      "hit": 13968,
+      "n": 14541,
+      "wilson": [
+       0.9573082637763217,
+       0.9636367948484487
+      ],
+      "cluster_indicative": [
+       0.9362090418913314,
+       0.9820497542082527
+      ]
+     },
+     "clef_ok": 909,
+     "key_ok": 878,
+     "meter_ok": 912
+    },
+    "per_piece": {
+     "Ale": {
+      "strips": 108,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.9966644429619747,
+      "pitch": {
+       "acc": 0.992989165073295,
+       "hit": 1558,
+       "n": 1569,
+       "wilson": [
+        0.9874893069766725,
+        0.9960808122266852
+       ],
+       "cluster_indicative": null
+      },
+      "clef_ok": 108,
+      "key_ok": 104,
+      "meter_ok": 108
+     },
+     "Ama_Namin": {
+      "strips": 48,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.884430176565008,
+      "pitch": {
+       "acc": 0.7911764705882353,
+       "hit": 538,
+       "n": 680,
+       "wilson": [
+        0.7590316070772103,
+        0.8200498644214524
+       ],
+       "cluster_indicative": null
+      },
+      "clef_ok": 48,
+      "key_ok": 48,
+      "meter_ok": 48
+     },
+     "Bahay_Kubo": {
+      "strips": 48,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.9950396825396826,
+      "pitch": {
+       "acc": 0.9930340557275542,
+       "hit": 1283,
+       "n": 1292,
+       "wilson": [
+        0.9868139117908863,
+        0.9963309417159003
+       ],
+       "cluster_indicative": null
+      },
+      "clef_ok": 48,
+      "key_ok": 48,
+      "meter_ok": 48
+     },
+     "Gaano_Ko_Ikaw_Kamahal": {
+      "strips": 72,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.99375,
+      "pitch": {
+       "acc": 0.9854368932038835,
+       "hit": 1015,
+       "n": 1030,
+       "wilson": [
+        0.9761111164431463,
+        0.9911550488959154
+       ],
+       "cluster_indicative": null
+      },
+      "clef_ok": 72,
+      "key_ok": 69,
+      "meter_ok": 72
+     },
+     "Kay_Ganda_Ng_Ating_Musika": {
+      "strips": 136,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.9981325863678805,
+      "pitch": {
+       "acc": 0.9425717852684145,
+       "hit": 2265,
+       "n": 2403,
+       "wilson": [
+        0.932543525842271,
+        0.9511872522862108
+       ],
+       "cluster_indicative": null
+      },
+      "clef_ok": 133,
+      "key_ok": 117,
+      "meter_ok": 136
+     },
+     "May_Hihigit_Pa_Ba": {
+      "strips": 128,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.997943797121316,
+      "pitch": {
+       "acc": 0.9902470741222367,
+       "hit": 1523,
+       "n": 1538,
+       "wilson": [
+        0.9839703877904518,
+        0.9940807946397019
+       ],
+       "cluster_indicative": null
+      },
+      "clef_ok": 128,
+      "key_ok": 128,
+      "meter_ok": 128
+     },
+     "Pangarap_Ko_Ang_Ibigin_Ka": {
+      "strips": 104,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.9835948644793152,
+      "pitch": {
+       "acc": 0.9433021806853582,
+       "hit": 1514,
+       "n": 1605,
+       "wilson": [
+        0.9308934254603345,
+        0.9535938975924756
+       ],
+       "cluster_indicative": null
+      },
+      "clef_ok": 104,
+      "key_ok": 101,
+      "meter_ok": 104
+     },
+     "Pangarap_Lang": {
+      "strips": 116,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.989010989010989,
+      "pitch": {
+       "acc": 0.939047619047619,
+       "hit": 1972,
+       "n": 2100,
+       "wilson": [
+        0.9279912918045511,
+        0.9485005505470785
+       ],
+       "cluster_indicative": null
+      },
+      "clef_ok": 116,
+      "key_ok": 113,
+      "meter_ok": 116
+     },
+     "Paru-parong_Bukid": {
+      "strips": 60,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 1.0,
+      "pitch": {
+       "acc": 0.9902067464635473,
+       "hit": 910,
+       "n": 919,
+       "wilson": [
+        0.9814928692349393,
+        0.9948393637289844
+       ],
+       "cluster_indicative": null
+      },
+      "clef_ok": 60,
+      "key_ok": 59,
+      "meter_ok": 60
+     },
+     "Tikong_Tiko": {
+      "strips": 92,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pred_to_gt_slots": 0.9992378048780488,
+      "pitch": {
+       "acc": 0.9893238434163701,
+       "hit": 1390,
+       "n": 1405,
+       "wilson": [
+        0.9824595544076863,
+        0.993519576248308
+       ],
+       "cluster_indicative": null
+      },
+      "clef_ok": 92,
+      "key_ok": 91,
+      "meter_ok": 92
+     }
+    }
+   },
+   "arm3": {
+    "all": {
+     "strips": 912,
+     "pred_present": 1.0,
+     "underpowered_heads": false,
+     "pitch": {
+      "acc": 0.9598970619772679,
+      "hit": 13428,
+      "n": 13989,
+      "wilson": [
+       0.9565174512373019,
+       0.9630241520922176
+      ],
+      "cluster_indicative": [
+       0.9354658583280153,
+       0.9817105970952125
+      ]
+     },
+     "ser": {
+      "rate": 0.05016366959996599,
+      "err": 1180,
+      "n": 23523,
+      "cluster_indicative": [
+       0.031395004442689306,
+       0.07602937075936425
+      ],
+      "rate_cost1": 0.05016366959996599
+     },
+     "bars_scored": 3318,
+     "bars_masked": 106,
+     "underpowered": false,
+     "ties_next_to_masked": 6,
+     "clef_ok": 909,
+     "key_ok": 878,
+     "meter_ok": 912,
+     "gt_barlines_missed": 3,
+     "pred_barlines_spurious": 8
+    },
+    "per_piece": {
+     "Ale": {
+      "strips": 108,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pitch": {
+       "acc": 0.992989165073295,
+       "hit": 1558,
+       "n": 1569,
+       "wilson": [
+        0.9874893069766725,
+        0.9960808122266852
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.017897819720143184,
+       "err": 55,
+       "n": 3073,
+       "cluster_indicative": null,
+       "rate_cost1": 0.017897819720143184
+      },
+      "bars_scored": 436,
+      "bars_masked": 0,
+      "underpowered": true,
+      "ties_next_to_masked": 0,
+      "clef_ok": 108,
+      "key_ok": 104,
+      "meter_ok": 108,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 0
+     },
+     "Ama_Namin": {
+      "strips": 48,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pitch": {
+       "acc": 0.7813504823151125,
+       "hit": 486,
+       "n": 622,
+       "wilson": [
+        0.7471941549418891,
+        0.812052785497992
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.20326678765880218,
+       "err": 224,
+       "n": 1102,
+       "cluster_indicative": null,
+       "rate_cost1": 0.20326678765880218
+      },
+      "bars_scored": 206,
+      "bars_masked": 10,
+      "underpowered": true,
+      "ties_next_to_masked": 1,
+      "clef_ok": 48,
+      "key_ok": 48,
+      "meter_ok": 48,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 0
+     },
+     "Bahay_Kubo": {
+      "strips": 48,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pitch": {
+       "acc": 0.9930340557275542,
+       "hit": 1283,
+       "n": 1292,
+       "wilson": [
+        0.9868139117908863,
+        0.9963309417159003
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.1054874800213106,
+       "err": 198,
+       "n": 1877,
+       "cluster_indicative": null,
+       "rate_cost1": 0.1054874800213106
+      },
+      "bars_scored": 276,
+      "bars_masked": 0,
+      "underpowered": true,
+      "ties_next_to_masked": 0,
+      "clef_ok": 48,
+      "key_ok": 48,
+      "meter_ok": 48,
+      "gt_barlines_missed": 1,
+      "pred_barlines_spurious": 0
+     },
+     "Gaano_Ko_Ikaw_Kamahal": {
+      "strips": 72,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pitch": {
+       "acc": 0.9859002169197397,
+       "hit": 909,
+       "n": 922,
+       "wilson": [
+        0.9760263160605905,
+        0.9917418205191441
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.018245614035087718,
+       "err": 26,
+       "n": 1425,
+       "cluster_indicative": null,
+       "rate_cost1": 0.018245614035087718
+      },
+      "bars_scored": 285,
+      "bars_masked": 19,
+      "underpowered": true,
+      "ties_next_to_masked": 0,
+      "clef_ok": 72,
+      "key_ok": 69,
+      "meter_ok": 72,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 1
+     },
+     "Kay_Ganda_Ng_Ating_Musika": {
+      "strips": 136,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pitch": {
+       "acc": 0.9413514662133446,
+       "hit": 2215,
+       "n": 2353,
+       "wilson": [
+        0.9311185672207051,
+        0.95014557882967
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.02417767781838628,
+       "err": 86,
+       "n": 3557,
+       "cluster_indicative": null,
+       "rate_cost1": 0.02417767781838628
+      },
+      "bars_scored": 296,
+      "bars_masked": 4,
+      "underpowered": true,
+      "ties_next_to_masked": 0,
+      "clef_ok": 133,
+      "key_ok": 117,
+      "meter_ok": 136,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 0
+     },
+     "May_Hihigit_Pa_Ba": {
+      "strips": 128,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pitch": {
+       "acc": 0.9884678747940692,
+       "hit": 1200,
+       "n": 1214,
+       "wilson": [
+        0.9807357515668952,
+        0.9931183194387266
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.0353356890459364,
+       "err": 80,
+       "n": 2264,
+       "cluster_indicative": null,
+       "rate_cost1": 0.0353356890459364
+      },
+      "bars_scored": 484,
+      "bars_masked": 64,
+      "underpowered": true,
+      "ties_next_to_masked": 4,
+      "clef_ok": 128,
+      "key_ok": 128,
+      "meter_ok": 128,
+      "gt_barlines_missed": 1,
+      "pred_barlines_spurious": 0
+     },
+     "Pangarap_Ko_Ang_Ibigin_Ka": {
+      "strips": 104,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pitch": {
+       "acc": 0.9453860640301318,
+       "hit": 1506,
+       "n": 1593,
+       "wilson": [
+        0.9331181525703381,
+        0.9555110013795589
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.058934642992066494,
+       "err": 156,
+       "n": 2647,
+       "cluster_indicative": null,
+       "rate_cost1": 0.058934642992066494
+      },
+      "bars_scored": 306,
+      "bars_masked": 2,
+      "underpowered": true,
+      "ties_next_to_masked": 0,
+      "clef_ok": 104,
+      "key_ok": 101,
+      "meter_ok": 104,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 6
+     },
+     "Pangarap_Lang": {
+      "strips": 116,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pitch": {
+       "acc": 0.9380952380952381,
+       "hit": 1970,
+       "n": 2100,
+       "wilson": [
+        0.9269666769614793,
+        0.9476238815672617
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.06341204563544707,
+       "err": 239,
+       "n": 3769,
+       "cluster_indicative": null,
+       "rate_cost1": 0.06341204563544707
+      },
+      "bars_scored": 428,
+      "bars_masked": 0,
+      "underpowered": true,
+      "ties_next_to_masked": 0,
+      "clef_ok": 116,
+      "key_ok": 113,
+      "meter_ok": 116,
+      "gt_barlines_missed": 1,
+      "pred_barlines_spurious": 1
+     },
+     "Paru-parong_Bukid": {
+      "strips": 60,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pitch": {
+       "acc": 0.9912948857453754,
+       "hit": 911,
+       "n": 919,
+       "wilson": [
+        0.9829168887852768,
+        0.9955825633417188
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.01639344262295082,
+       "err": 23,
+       "n": 1403,
+       "cluster_indicative": null,
+       "rate_cost1": 0.01639344262295082
+      },
+      "bars_scored": 233,
+      "bars_masked": 7,
+      "underpowered": true,
+      "ties_next_to_masked": 1,
+      "clef_ok": 60,
+      "key_ok": 59,
+      "meter_ok": 60,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 0
+     },
+     "Tikong_Tiko": {
+      "strips": 92,
+      "pred_present": 1.0,
+      "underpowered_heads": false,
+      "pitch": {
+       "acc": 0.9893238434163701,
+       "hit": 1390,
+       "n": 1405,
+       "wilson": [
+        0.9824595544076863,
+        0.993519576248308
+       ],
+       "cluster_indicative": null
+      },
+      "ser": {
+       "rate": 0.03865336658354115,
+       "err": 93,
+       "n": 2406,
+       "cluster_indicative": null,
+       "rate_cost1": 0.03865336658354115
+      },
+      "bars_scored": 368,
+      "bars_masked": 0,
+      "underpowered": true,
+      "ties_next_to_masked": 0,
+      "clef_ok": 92,
+      "key_ok": 91,
+      "meter_ok": 92,
+      "gt_barlines_missed": 0,
+      "pred_barlines_spurious": 0
+     }
+    }
+   },
+   "arm3_extra_subset": {
+    "strips": 96,
+    "pred_present": 1.0,
+    "underpowered_heads": false,
+    "pitch": {
+     "acc": 0.9447453954496208,
+     "hit": 872,
+     "n": 923,
+     "wilson": [
+      0.9280775445800824,
+      0.9577264590382274
+     ],
+     "cluster_indicative": [
+      0.8338323353293413,
+      0.984313725490196
+     ]
+    },
+    "ser": {
+     "rate": 0.07044025157232704,
+     "err": 112,
+     "n": 1590,
+     "cluster_indicative": [
+      0.027754415475189236,
+      0.185378590078329
+     ],
+     "rate_cost1": 0.07044025157232704
+    },
+    "bars_scored": 293,
+    "bars_masked": 106,
+    "underpowered": true,
+    "ties_next_to_masked": 6,
+    "clef_ok": 96,
+    "key_ok": 95,
+    "meter_ok": 96,
+    "gt_barlines_missed": 1,
+    "pred_barlines_spurious": 1
+   },
+   "arm3_without_unverified_pieces": {
+    "strips": 716,
+    "pred_present": 1.0,
+    "underpowered_heads": false,
+    "pitch": {
+     "acc": 0.9582385588208534,
+     "hit": 10532,
+     "n": 10991,
+     "wilson": [
+      0.9543357598302579,
+      0.9618211405110804
+     ],
+     "cluster_indicative": [
+      0.9243605024296323,
+      0.9892061281337048
+     ]
+    },
+    "ser": {
+     "rate": 0.05040606388738495,
+     "err": 931,
+     "n": 18470,
+     "cluster_indicative": [
+      0.02605139597112132,
+      0.0830416068866571
+     ],
+     "rate_cost1": 0.05040606388738495
+    },
+    "bars_scored": 2644,
+    "bars_masked": 104,
+    "underpowered": false,
+    "ties_next_to_masked": 6,
+    "clef_ok": 713,
+    "key_ok": 686,
+    "meter_ok": 716,
+    "gt_barlines_missed": 3,
+    "pred_barlines_spurious": 2
+   },
+   "dropped_fraction_arm1": 0.10526315789473684
+  }
+ },
+ "two_run_range_arm1_pitch": [
+  0.9602020511250574,
+  0.9607377927445278
+ ],
+ "two_run_paired_delta_pitch_arm3": {
+  "s1-s2": [
+   -0.0012152405461434146,
+   -0.003316405845165349,
+   0.0007430424209673436
+  ],
+  "ci_excludes_zero": false
+ }
+}
