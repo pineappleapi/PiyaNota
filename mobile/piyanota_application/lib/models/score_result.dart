@@ -262,8 +262,16 @@ class ScoreResult {
   Set<VoicePart> get failedVoices => {
     ...declaredFailedVoices,
     for (final voice in VoicePart.values)
-      if (!audioTracks.containsKey(voice)) voice,
+      if (!playableVoices.contains(voice)) voice,
   };
+
+  /// Voices the score has audio for: the MP3 tracks on old scores; on a
+  /// MIDI-only score (no MP3s, new backend) all four, minus the server's
+  /// failed ones, since the phone renders them from [midiCombined].
+  Set<VoicePart> get playableVoices =>
+      audioTracks.isEmpty && midiCombined != null
+      ? {...VoicePart.values}.difference(declaredFailedVoices)
+      : audioTracks.keys.toSet();
 
   /// Whether page [pageIndex] has an image to draw on.
   bool hasPage(int pageIndex) =>
@@ -301,16 +309,6 @@ class ScoreResult {
     // A voice the server calls failed has no audio to trust, even if a
     // track was sent anyway (AC10 says it has none).
     tracks.removeWhere((voice, _) => declaredFailed.contains(voice));
-    if (tracks.isEmpty) {
-      throw const FormatException('PIYA-103 result without audio tracks');
-    }
-    final rawMuted = data['mutedMeasures'];
-    final muted = <MutedMeasure>[
-      if (rawMuted is List)
-        for (final entry in rawMuted)
-          if (MutedMeasure.tryParse(entry) case final measure?)
-            if (tracks.containsKey(measure.voice)) measure,
-    ];
     MidiCombinedFile? midiCombined;
     final rawMidi = data['midiCombined'];
     if (rawMidi is Map) {
@@ -325,6 +323,19 @@ class ScoreResult {
         );
       }
     }
+    if (tracks.isEmpty && midiCombined == null) {
+      throw const FormatException('PIYA-103 result without audio tracks');
+    }
+    final rawMuted = data['mutedMeasures'];
+    final muted = <MutedMeasure>[
+      if (rawMuted is List)
+        for (final entry in rawMuted)
+          if (MutedMeasure.tryParse(entry) case final measure?)
+            if (tracks.isNotEmpty
+                ? tracks.containsKey(measure.voice)
+                : !declaredFailed.contains(measure.voice))
+              measure,
+    ];
     final rawImages = data['scoreImages'];
     // Rejected entries stay as null: dropping them would shift every later
     // page onto the wrong timing events.

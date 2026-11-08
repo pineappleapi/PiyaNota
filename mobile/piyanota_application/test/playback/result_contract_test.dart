@@ -24,6 +24,33 @@ void main() {
     'mutedMeasures': ?muted,
   };
 
+  group('MIDI-only score (new backend: audioTracks {})', () {
+    Map<String, dynamic> midiOnly({Object? failed}) => {
+      ...result(tracks: const {}, failed: failed),
+      'midiCombined': {'url': 'https://cdn.test/c.mid', 'fileId': 'f1'},
+    };
+
+    test('parses; all four voices playable, none failed', () {
+      final r = ScoreResult.fromJson(midiOnly());
+      expect(r.audioTracks, isEmpty);
+      expect(r.playableVoices, VoicePart.values.toSet());
+      expect(r.failedVoices, isEmpty);
+    });
+
+    test('a declared failed voice stays failed', () {
+      final r = ScoreResult.fromJson(midiOnly(failed: ['tenor']));
+      expect(r.playableVoices, isNot(contains(VoicePart.tenor)));
+      expect(r.failedVoices, {VoicePart.tenor});
+    });
+
+    test('no tracks and no midiCombined is still an error', () {
+      expect(
+        () => ScoreResult.fromJson(result(tracks: const {})),
+        throwsFormatException,
+      );
+    });
+  });
+
   group('failedVoices (PIYA-103 AC10, PIYA-216 AC5)', () {
     test('absent: nothing failed', () {
       expect(ScoreResult.fromJson(result()).failedVoices, isEmpty);

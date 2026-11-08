@@ -105,10 +105,11 @@ ExportSelection exportableSelection(
   ExportSelection selection, {
   Map<VoicePart, Uri>? tracks,
 }) {
-  tracks ??= state.result?.audioTracks ?? const <VoicePart, Uri>{};
+  // No explicit tracks: a MIDI-only score has no MP3s, so judge by what
+  // Playback can hear.
   return selection.withAvailable({
     for (final voice in state.available)
-      if (tracks[voice] != null) voice,
+      if (tracks == null || tracks[voice] != null) voice,
   });
 }
 

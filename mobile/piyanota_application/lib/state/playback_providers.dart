@@ -234,7 +234,7 @@ class PlaybackState {
 
   /// Voices that can be heard: in the result, and not failed.
   Set<VoicePart> get available =>
-      {...?result?.audioTracks.keys}.difference(failedVoices);
+      {...?result?.playableVoices}.difference(failedVoices);
 
   /// The score's own tempo (PIYA-103 AC8), 90 until loaded.
   int get tempoBpm => result?.tempoBpm ?? ScoreDetails.defaultTempo;
@@ -442,7 +442,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       if (rendered != null) {
         // Only the voices the result has audio for, so the mixer keys match.
         final wavs = {
-          for (final v in result.audioTracks.keys)
+          for (final v in result.playableVoices)
             if (rendered.voices[v] != null) v: rendered.voices[v]!,
         };
         try {
@@ -476,7 +476,7 @@ class PlaybackController extends Notifier<PlaybackState> {
     }
 
     final failedVoices = {...result.failedVoices, ...engine.unavailableVoices};
-    final playable = result.audioTracks.keys.toSet().difference(failedVoices);
+    final playable = result.playableVoices.difference(failedVoices);
     final selected = await _defaultSelection(playable);
     if (!current()) {
       await _disposeQuietly(engine);
@@ -493,7 +493,7 @@ class PlaybackController extends Notifier<PlaybackState> {
     // here again (209 AC6).
     _mixMuted = playable.difference(selected);
     final volumes = {
-      for (final voice in result.audioTracks.keys) voice: defaultVoiceVolume,
+      for (final voice in result.playableVoices) voice: defaultVoiceVolume,
     };
     state = PlaybackState(
       phase: PlaybackPhase.ready,
@@ -570,7 +570,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       final voices = rendered == null
           ? null
           : {
-              for (final v in result.audioTracks.keys)
+              for (final v in result.playableVoices)
                 if (rendered.voices[v] != null) v: rendered.voices[v]!,
             };
       final position = Duration(
