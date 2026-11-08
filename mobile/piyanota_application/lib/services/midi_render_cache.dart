@@ -71,6 +71,10 @@ List<(int, int)> silentRangesFor(
 /// no bar table to lay a click on).
 typedef MidiRender = ({Map<VoicePart, Uri> voices, Uri? click});
 
+/// One MIDI file (all voices + click, tempo already at the chosen bpm) for
+/// the live synth, with the soundfont it plays through.
+typedef LiveRender = ({Uri midi, String sf2, int bpm});
+
 typedef MidiSynthFn =
     Future<int> Function({
       required String sf2Path,
@@ -218,7 +222,22 @@ class MidiRenderCache {
     int bpm,
     List<BarInfo> bars,
   ) async {
-    if (bars.isEmpty) return;
+    final clicks = _clickList(bars, bpm);
+    if (clicks.isEmpty) return;
+    final mid = File('${temp.path}/render_click_$stamp.mid');
+    await mid.writeAsBytes(buildClickMidi(clicks, bpm), flush: true);
+    try {
+      final wav = '${out.path}/$_kClickFile';
+      final peak = await synth(sf2Path: sf2, midPath: mid.path, wavPath: wav);
+      if (peak > 0) await scale(wav, kRenderTargetPeak / peak);
+    } finally {
+      if (mid.existsSync()) mid.deleteSync();
+    }
+  }
+
+  /// (tick, isDownbeat) per click at [bpm]; empty without bars (no grid).
+  List<(int, bool)> _clickList(List<BarInfo> bars, int bpm) {
+    if (bars.isEmpty) return const [];
     // planClicks times are tick x usPerTick; at 125 bpm that is exactly
     // 1 ms per tick, so a click's millisecond is its tick.
     const msPerTickBpm = 125;
@@ -230,20 +249,60 @@ class MidiRenderCache {
       chosenBpm: bpm,
       length: Duration(milliseconds: last.startTick + last.durTicks),
     );
-    final clicks = [
+    return [
       for (var i = 0; i < plan.clicks.length; i++)
         (plan.clicks[i].inMilliseconds, plan.levels[i] == ClickLevel.downbeat),
     ];
-    if (clicks.isEmpty) return;
-    final mid = File('${temp.path}/render_click_$stamp.mid');
-    await mid.writeAsBytes(buildClickMidi(clicks, bpm), flush: true);
+  }
+
+  /// The live-synth file for [result] at [bpm]: no rendering, only a rewrite
+  /// of the MIDI (silent ranges, tempo, click track), so it is instant.
+  /// Null when the MIDI or the synth setup is unusable (caller falls back).
+  Future<LiveRender?> liveFile(
+    ScoreResult result, {
+    required Future<String> Function() midiPath,
+    List<BarInfo> bars = const [],
+    int? bpm,
+  }) async {
+    final chosen = bpm ?? result.tempoBpm;
+    final midi = result.midiCombined;
+    if (midi == null) return null;
     try {
-      final wav = '${out.path}/$_kClickFile';
-      final peak = await synth(sf2Path: sf2, midPath: mid.path, wavPath: wav);
-      if (peak > 0) await scale(wav, kRenderTargetPeak / peak);
-    } finally {
-      if (mid.existsSync()) mid.deleteSync();
+      final ranges = {
+        for (final v in VoicePart.values)
+          kVoiceChannel[v]!:
+              silentRangesFor(v, result.mutedMeasures, bars, result.tempoBpm),
+      };
+      final key = _hash(
+        '${midi.fileId}|$chosen|${ranges.toString()}|'
+        '${bars.map((b) => '${b.startTick}/${b.durTicks}').join(',')}',
+      );
+      final root = await rootDir();
+      final prefix = '${result.scoreId}_live_v${kRenderVersion}_';
+      final file = File('${root.path}/$prefix$key.mid');
+      if (!file.existsSync()) {
+        final smf = await File(await midiPath()).readAsBytes();
+        final live = buildLiveMidi(
+          smf,
+          ranges,
+          tempoScale: chosen / result.tempoBpm,
+          clicks: _clickList(bars, chosen),
+        );
+        await file.writeAsBytes(live, flush: true);
+        for (final e in root.listSync()) {
+          if (e is File && e.path != file.path) {
+            final name = e.uri.pathSegments.last;
+            if (name.startsWith(prefix) && name.endsWith('.mid')) e.deleteSync();
+          }
+        }
+      }
+      return (midi: file.uri, sf2: await soundfont(), bpm: chosen);
+    } on MidiFormatException catch (e) {
+      debugPrint('MIDI unusable: $e');
+    } on FileSystemException catch (e) {
+      debugPrint('MIDI live files: $e');
     }
+    return null;
   }
 
   MidiRender? _readCache(Directory dir, String key) {

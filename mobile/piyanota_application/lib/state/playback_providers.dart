@@ -17,6 +17,7 @@ import '../services/fake_score_result_api.dart';
 import '../services/local_results_store.dart';
 import '../services/metronome_click.dart';
 import '../services/midi_render_cache.dart';
+import '../services/live_synth_engine.dart';
 import '../services/midi_synth.dart' show ensureSoundfont;
 import '../services/playback_engine.dart';
 import '../services/score_result_api.dart';
@@ -71,6 +72,62 @@ final playbackEngineFactoryProvider = Provider<PlaybackEngine Function()>(
 /// failure).
 final clickTrackWriterProvider = Provider<ClickTrackWriter>(
   (ref) => writeClickTrack,
+);
+
+/// Builds the one-clock live-synth file for the combined MIDI at [bpm]; null
+/// means the live path is unusable and the caller renders WAVs instead.
+/// Tests override it (the default needs the Android native library).
+typedef LiveFileMaker = Future<LiveRender?> Function(
+  ScoreResult result,
+  List<BarInfo> bars,
+  int bpm,
+);
+
+final liveFileMakerProvider = Provider<LiveFileMaker>((ref) {
+  if (!Platform.isAndroid) return (_, _, _) async => null;
+  final cache = MidiRenderCache(
+    rootDir: () async {
+      final support = await getApplicationSupportDirectory();
+      return Directory('${support.path}/render_cache')
+        ..createSync(recursive: true);
+    },
+    tempDir: getTemporaryDirectory,
+    soundfont: ensureSoundfont,
+  );
+  final downloader = DioFileDownloader(ref.watch(dioProvider));
+  return (result, bars, bpm) async {
+    String? downloaded;
+    try {
+      return await cache.liveFile(
+        result,
+        bars: bars,
+        bpm: bpm,
+        midiPath: () async {
+          final url = result.midiCombined!.url;
+          if (url.scheme == 'file') return url.toFilePath();
+          final temp = await getTemporaryDirectory();
+          final path = '${temp.path}/combined_live_${result.scoreId}.mid';
+          downloaded = path;
+          await downloader.download(url, path);
+          return path;
+        },
+      );
+    } finally {
+      final d = downloaded;
+      if (d != null && File(d).existsSync()) File(d).deleteSync();
+    }
+  };
+});
+
+/// The engine that plays a [LiveRender] through one synth; tests override it.
+final liveEngineFactoryProvider = Provider<PlaybackEngine Function(LiveRender)>(
+  (ref) =>
+      (live) => LiveSynthPlaybackEngine(
+        sf2Path: live.sf2,
+        midPath: live.midi.toFilePath(),
+        bpm: live.bpm,
+        audioSession: AudioSession.instance,
+      ),
 );
 
 enum PlaybackPhase { loading, ready, failed }
@@ -428,6 +485,18 @@ class PlaybackController extends Notifier<PlaybackState> {
     try {
       MidiRender? rendered;
       if (result.midiCombined != null) {
+        // One synth, one clock: tried first; any failure renders WAVs.
+        engine = await _openLiveEngine(result, bars, result.tempoBpm);
+        if (!current()) {
+          await _disposeQuietly(engine);
+          return;
+        }
+        if (engine != null) {
+          source = PlaybackSource.midi;
+          clickAttached = bars.isNotEmpty;
+        }
+      }
+      if (engine == null && result.midiCombined != null) {
         try {
           rendered = await ref.read(midiVoiceRendererProvider)(
             result,
@@ -534,6 +603,31 @@ class PlaybackController extends Notifier<PlaybackState> {
     _clickFailureSub = engine.clickFailures.listen(_onClickFailure);
   }
 
+  /// The live-synth engine for [result] at [bpm], loaded and with its click
+  /// attached, or null when it cannot be used (not Android, native library
+  /// or audio output failing): the caller then renders WAVs.
+  Future<PlaybackEngine?> _openLiveEngine(
+    ScoreResult result,
+    List<BarInfo> bars,
+    int bpm,
+  ) async {
+    PlaybackEngine? engine;
+    try {
+      final live = await ref.read(liveFileMakerProvider)(result, bars, bpm);
+      if (live == null) return null;
+      engine = ref.read(liveEngineFactoryProvider)(live);
+      await engine.load({
+        for (final v in result.playableVoices) v: live.midi,
+      });
+      if (bars.isNotEmpty) await engine.attachClick(live.midi);
+      return engine;
+    } on Object catch (e) {
+      debugPrint('Playback: live synth unavailable, rendering WAVs: $e');
+      await _disposeQuietly(engine);
+      return null;
+    }
+  }
+
   /// The bpm the current MIDI-rendered audio was made at.
   int _renderedBpm = 0;
   bool _rerendering = false;
@@ -555,7 +649,33 @@ class PlaybackController extends Notifier<PlaybackState> {
     _rerendering = true;
     final generation = _generation;
     bool current() => ref.mounted && generation == _generation;
+    // Paused for the render (about a second or two): playing on while the
+    // new voices render left the old ones running, and the swap then
+    // started the new ones from a position read after that drift.
+    final wasPlaying = state.playing;
+    if (wasPlaying) await old.pause();
+    var swappedOk = false;
     try {
+      final liveFile = await _liveFileOrNull(result, bpm);
+      if (!current()) return;
+      if (liveFile != null &&
+          await _swapEngine(
+            {for (final v in result.playableVoices) v: liveFile.midi},
+            click: _bars.isEmpty ? null : liveFile.midi,
+            live: liveFile,
+            position: Duration(
+              microseconds: (old.position.inMicroseconds * _renderedBpm / bpm)
+                  .round(),
+            ),
+            speed: 1,
+            source: PlaybackSource.midi,
+            renderedBpm: bpm,
+            resume: wasPlaying,
+          )) {
+        swappedOk = true;
+        return;
+      }
+      if (!current()) return;
       MidiRender? rendered;
       try {
         rendered = await ref.read(midiVoiceRendererProvider)(
@@ -586,9 +706,13 @@ class PlaybackController extends Notifier<PlaybackState> {
             speed: 1,
             source: PlaybackSource.midi,
             renderedBpm: bpm,
+            resume: wasPlaying,
           );
       if (!current()) return;
-      if (swapped) return;
+      if (swapped) {
+        swappedOk = true;
+        return;
+      }
       // Fallback keeps the old engine's musical position: it is still at
       // the old tempo, so [position] (new tempo) is not used for MP3.
       final mp3Position = Duration(
@@ -601,18 +725,31 @@ class PlaybackController extends Notifier<PlaybackState> {
         position: mp3Position,
         speed: state.speed,
         source: PlaybackSource.mp3,
+        resume: wasPlaying,
       );
+      swappedOk = fell;
       final engine = _engine;
       if (fell && current() && result.tempoKnown && engine != null) {
         state = state.copyWith(clickStatus: ClickStatus.preparing);
         unawaited(_prepareClick(engine, _generation));
       }
     } finally {
+      // Neither swap took: the old engine is still the one in use.
+      if (!swappedOk && wasPlaying && current()) unawaited(old.play());
       _rerendering = false;
       if (_rerenderPending) {
         _rerenderPending = false;
         if (ref.mounted) unawaited(_rerender());
       }
+    }
+  }
+
+  Future<LiveRender?> _liveFileOrNull(ScoreResult result, int bpm) async {
+    try {
+      return await ref.read(liveFileMakerProvider)(result, _bars, bpm);
+    } on Object catch (e) {
+      debugPrint('Playback: live file failed: $e');
+      return null;
     }
   }
 
@@ -626,14 +763,18 @@ class PlaybackController extends Notifier<PlaybackState> {
     required double speed,
     required PlaybackSource source,
     int? renderedBpm,
+    bool? resume,
+    LiveRender? live,
   }) async {
     final old = _engine;
     if (old == null) return false;
     final generation = _generation;
-    final wasPlaying = state.playing;
+    final wasPlaying = resume ?? state.playing;
     PlaybackEngine? fresh;
     try {
-      fresh = ref.read(playbackEngineFactoryProvider)();
+      fresh = live != null
+          ? ref.read(liveEngineFactoryProvider)(live)
+          : ref.read(playbackEngineFactoryProvider)();
       await fresh.load(tracks);
       var clickOk = false;
       if (click != null) clickOk = await fresh.attachClick(click);

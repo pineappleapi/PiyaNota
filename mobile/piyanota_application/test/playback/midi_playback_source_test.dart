@@ -137,6 +137,30 @@ void main() {
       );
     });
 
+    test(
+      'playing: paused during the re-render, resumes on the new one',
+      () async {
+        final (c, h, _) = await open((_) async {
+          await Future<void>.delayed(const Duration(milliseconds: 30));
+          return (voices: wavs, click: null);
+        });
+        final ctl = c.read(playbackControllerProvider(kScoreId).notifier);
+        await ctl.play();
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        ctl.setBpm(150);
+        ctl.commitBpm();
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        expect(
+          h.engines.first.playing,
+          isFalse,
+          reason: 'paused while rendering',
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        expect(h.engines.length, 2);
+        expect(h.engines.last.playing, isTrue);
+      },
+    );
+
     test('failed re-render falls back to stretched mp3', () async {
       var first = true;
       final (c, h, _) = await open((_) async {

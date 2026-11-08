@@ -88,3 +88,99 @@ done:
     if (s) delete_fluid_settings(s);
     return rc;
 }
+
+/* ---- Live playback: one synth, one player, one audio output (one clock) ----
+ * Replaces five independent just_audio players, whose drift needed audible
+ * re-seeks. Per-voice level is MIDI CC7 on the voice's channel. The tempo is
+ * already in the file (Dart scales it), so there is no tempo API here. */
+#define LIVE_SAMPLE_RATE 44100
+#define LIVE_ERR_DRIVER 8
+#define LIVE_CC_VOLUME 7
+#define LIVE_CC_MAX 127
+
+typedef struct {
+    fluid_settings_t *settings;
+    fluid_synth_t *synth;
+    fluid_player_t *player;
+    fluid_audio_driver_t *driver;
+    char *mid;
+} piya_live;
+
+void piya_live_close(piya_live *h) {
+    if (!h) return;
+    if (h->driver) delete_fluid_audio_driver(h->driver);
+    if (h->player) delete_fluid_player(h->player);
+    if (h->synth) delete_fluid_synth(h->synth);
+    if (h->settings) delete_fluid_settings(h->settings);
+    free(h->mid);
+    free(h);
+}
+
+/* Returns NULL on failure with the ERR_* / LIVE_ERR_DRIVER code in *err. */
+piya_live *piya_live_open(const char *sf2, const char *mid, int *err) {
+    int rc = 0;
+    piya_live *h = calloc(1, sizeof(piya_live));
+    if (!h) { if (err) *err = ERR_SETTINGS; return NULL; }
+    h->mid = strdup(mid);
+    h->settings = new_fluid_settings();
+    if (!h->settings || !h->mid) { rc = ERR_SETTINGS; goto fail; }
+    fluid_settings_setint(h->settings, "synth.reverb.active", 0);
+    fluid_settings_setint(h->settings, "synth.chorus.active", 0);
+    fluid_settings_setnum(h->settings, "synth.sample-rate", LIVE_SAMPLE_RATE);
+    fluid_settings_setnum(h->settings, "synth.gain", SYNTH_GAIN);
+    fluid_settings_setstr(h->settings, "audio.driver", "oboe");
+    h->synth = new_fluid_synth(h->settings);
+    if (!h->synth) { rc = ERR_SYNTH; goto fail; }
+    if (fluid_synth_sfload(h->synth, sf2, 1) < 0) { rc = ERR_SFLOAD; goto fail; }
+    h->player = new_fluid_player(h->synth);
+    if (!h->player) { rc = ERR_PLAYER; goto fail; }
+    if (fluid_player_add(h->player, mid) != FLUID_OK) { rc = ERR_PLAYER_ADD; goto fail; }
+    /* Last: the driver starts pulling audio at once (silence until play). */
+    h->driver = new_fluid_audio_driver(h->settings, h->synth);
+    if (!h->driver) { rc = LIVE_ERR_DRIVER; goto fail; }
+    if (err) *err = 0;
+    return h;
+fail:
+    if (err) *err = rc;
+    piya_live_close(h);
+    return NULL;
+}
+
+/* A finished player cannot be restarted reliably across FluidSynth versions
+ * (its playlist is spent), so play-from-the-end builds a fresh one. */
+int piya_live_reset(piya_live *h) {
+    fluid_synth_all_sounds_off(h->synth, -1);
+    fluid_player_t *p = new_fluid_player(h->synth);
+    if (!p) return ERR_PLAYER;
+    if (fluid_player_add(p, h->mid) != FLUID_OK) { delete_fluid_player(p); return ERR_PLAYER_ADD; }
+    delete_fluid_player(h->player);
+    h->player = p;
+    return 0;
+}
+
+int piya_live_play(piya_live *h) { return fluid_player_play(h->player); }
+
+/* Stop leaves the tick where it was; notes already sounding are cut. */
+int piya_live_pause(piya_live *h) {
+    int rc = fluid_player_stop(h->player);
+    fluid_synth_all_sounds_off(h->synth, -1);
+    return rc;
+}
+
+int piya_live_seek(piya_live *h, int tick) {
+    fluid_synth_all_sounds_off(h->synth, -1);
+    return fluid_player_seek(h->player, tick);
+}
+
+int piya_live_tick(piya_live *h) { return fluid_player_get_current_tick(h->player); }
+int piya_live_total_ticks(piya_live *h) { return fluid_player_get_total_ticks(h->player); }
+int piya_live_is_playing(piya_live *h) {
+    return fluid_player_get_status(h->player) == FLUID_PLAYER_PLAYING;
+}
+
+/* Level 0..127 on one channel; CC7 is squared by the synth, the caller maps. */
+void piya_live_set_level(piya_live *h, int channel, int level) {
+    if (level < 0) level = 0;
+    if (level > LIVE_CC_MAX) level = LIVE_CC_MAX;
+    fluid_synth_cc(h->synth, channel, LIVE_CC_VOLUME, level);
+}

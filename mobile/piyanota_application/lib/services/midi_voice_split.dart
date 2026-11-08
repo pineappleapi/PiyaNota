@@ -105,33 +105,99 @@ Uint8List splitVoice(
   List<(int, int)> silentRanges = const [],
   double tempoScale = 1,
 }) {
-  if (tempoScale <= 0) throw MidiFormatException('Bad tempo scale $tempoScale');
   if (channel < 0 || channel > _kMaxChannel) {
     throw MidiFormatException('Bad channel $channel');
   }
+  return _splitChannels(smf, {channel: silentRanges}, tempoScale, const []);
+}
+
+/// Tick of the last event of any track. FluidSynth only knows its own total
+/// once playback has started, so live playback takes the length from here.
+int midiTotalTicks(Uint8List smf) {
+  if (smf.length < _kHeaderChunkBytes ||
+      String.fromCharCodes(smf.sublist(0, 4)) != 'MThd') {
+    throw const MidiFormatException('Not a MIDI file (bad header)');
+  }
+  final trackCount = (smf[10] << 8) | smf[11];
+  var pos = _kHeaderChunkBytes;
+  var longest = 0;
+  for (var t = 0; t < trackCount; t++) {
+    if (pos + 8 > smf.length) throw MidiFormatException('Missing track $t');
+    final end = pos + 8 + _be32(smf, pos + 4);
+    if (end > smf.length) throw MidiFormatException('Track $t is truncated');
+    final r = _Reader(smf, pos + 8, end);
+    var tick = 0;
+    int? running;
+    while (r.pos < r.end) {
+      tick += r.vlq();
+      var status = r.u8();
+      if (status == _kMeta) {
+        running = null;
+        r.u8();
+        r.bytes(r.vlq());
+        continue;
+      }
+      if (status == _kSysex || status == _kSysexEscape) {
+        running = null;
+        r.bytes(r.vlq());
+        continue;
+      }
+      if (status < _kStatusMin) {
+        if (running == null) throw const MidiFormatException('Bad status');
+        r.pos--;
+        status = running;
+      }
+      running = status;
+      final kind = status & 0xF0;
+      r.u8();
+      if (kind != _kProgramChange && kind != _kChannelPressure) r.u8();
+    }
+    if (tick > longest) longest = tick;
+    pos = end;
+  }
+  return longest;
+}
+
+/// One Standard MIDI File holding every channel of [silentByChannel] (its
+/// value is that channel's silent tick ranges, as for [splitVoice]) plus,
+/// when [clicks] is not empty, an extra track with the metronome on the
+/// percussion channel. For live playback through a single synth. Tempo is
+/// scaled by [tempoScale] exactly as in [splitVoice]; click ticks are score
+/// ticks, so the file's own tempo carries them.
+Uint8List buildLiveMidi(
+  Uint8List smf,
+  Map<int, List<(int, int)>> silentByChannel, {
+  double tempoScale = 1,
+  List<(int, bool)> clicks = const [],
+}) {
+  for (final c in silentByChannel.keys) {
+    if (c < 0 || c > _kMaxChannel) throw MidiFormatException('Bad channel $c');
+  }
+  return _splitChannels(smf, silentByChannel, tempoScale, clicks);
+}
+
+Uint8List _splitChannels(
+  Uint8List smf,
+  Map<int, List<(int, int)>> channels,
+  double tempoScale,
+  List<(int, bool)> clicks,
+) {
+  if (tempoScale <= 0) throw MidiFormatException('Bad tempo scale $tempoScale');
   if (smf.length < _kHeaderChunkBytes ||
       String.fromCharCodes(smf.sublist(0, 4)) != 'MThd' ||
       _be32(smf, 4) != _kHeaderDataLength) {
     throw const MidiFormatException('Not a MIDI file (bad header)');
   }
   final trackCount = (smf[10] << 8) | smf[11];
+  final extra = clicks.isEmpty ? 0 : 1;
   var pos = _kHeaderChunkBytes;
   final out = BytesBuilder()..add(smf.sublist(0, _kHeaderChunkBytes));
-  for (var t = 0; t < trackCount; t++) {
-    if (pos + 8 > smf.length ||
-        String.fromCharCodes(smf.sublist(pos, pos + 4)) != 'MTrk') {
-      throw MidiFormatException('Missing track $t', null, pos);
-    }
-    final end = pos + 8 + _be32(smf, pos + 4);
-    if (end > smf.length) {
-      throw MidiFormatException('Track $t is truncated', null, pos);
-    }
-    final body = _splitTrack(
-      _Reader(smf, pos + 8, end),
-      channel,
-      silentRanges,
-      tempoScale,
-    );
+  final header = out.toBytes();
+  header[10] = (trackCount + extra) >> 8;
+  header[11] = (trackCount + extra) & 0xFF;
+  out.clear();
+  out.add(header);
+  void addTrack(Uint8List body) {
     out
       ..add([0x4D, 0x54, 0x72, 0x6B]) // MTrk
       ..add([
@@ -141,19 +207,31 @@ Uint8List splitVoice(
         body.length & 0xFF,
       ])
       ..add(body);
+  }
+
+  for (var t = 0; t < trackCount; t++) {
+    if (pos + 8 > smf.length ||
+        String.fromCharCodes(smf.sublist(pos, pos + 4)) != 'MTrk') {
+      throw MidiFormatException('Missing track $t', null, pos);
+    }
+    final end = pos + 8 + _be32(smf, pos + 4);
+    if (end > smf.length) {
+      throw MidiFormatException('Track $t is truncated', null, pos);
+    }
+    addTrack(_splitTrack(_Reader(smf, pos + 8, end), channels, tempoScale));
     pos = end;
   }
+  if (clicks.isNotEmpty) addTrack(_clickTrackBody(clicks));
   return out.toBytes();
 }
 
 Uint8List _splitTrack(
   _Reader r,
-  int channel,
-  List<(int, int)> silent,
+  Map<int, List<(int, int)>> channels,
   double tempoScale,
 ) {
   final out = BytesBuilder();
-  final dropOff = <int, int>{}; // pitch -> note-offs still to drop
+  final dropOff = <int, int>{}; // channel<<8|pitch -> note-offs still to drop
   var tick = 0;
   var lastKept = 0;
   int? running;
@@ -212,15 +290,18 @@ Uint8List _splitTrack(
     final d1 = firstData ?? r.u8();
     final twoData = kind != _kProgramChange && kind != _kChannelPressure;
     final d2 = twoData ? r.u8() : null;
-    if ((status & _kChannelMask) != channel) continue;
+    final channel = status & _kChannelMask;
+    final silent = channels[channel];
+    if (silent == null) continue;
+    final dropKey = (channel << 8) | d1;
     final isOn = kind == _kNoteOn && (d2 ?? 0) > 0;
     final isOff = kind == _kNoteOff || (kind == _kNoteOn && !isOn);
     if (isOn && _isSilent(tick, silent)) {
-      dropOff[d1] = (dropOff[d1] ?? 0) + 1;
+      dropOff[dropKey] = (dropOff[dropKey] ?? 0) + 1;
       continue;
     }
-    if (isOff && (dropOff[d1] ?? 0) > 0) {
-      dropOff[d1] = dropOff[d1]! - 1;
+    if (isOff && (dropOff[dropKey] ?? 0) > 0) {
+      dropOff[dropKey] = dropOff[dropKey]! - 1;
       continue;
     }
     emit([status, d1, ?d2]);
@@ -232,29 +313,11 @@ Uint8List _splitTrack(
 /// entry of [clicks] ((tick, isDownbeat)): the high wood block on downbeats,
 /// the low one elsewhere. Rendered to its own WAV so the metronome can be toggled.
 Uint8List buildClickMidi(List<(int, bool)> clicks, int bpm) {
-  final events = <(int, int, List<int>)>[]; // tick, order (off first), bytes
-  for (final (tick, down) in clicks) {
-    final key = down ? kClickDownbeatKey : kClickKey;
-    final vel = down ? kClickDownbeatVelocity : kClickVelocity;
-    events
-      ..add((tick, 1, [0x90 | _kPercussionChannel, key, vel]))
-      ..add((tick + _kClickNoteTicks, 0, [0x80 | _kPercussionChannel, key, 0]));
-  }
-  events.sort((a, b) => a.$1 != b.$1 ? a.$1 - b.$1 : a.$2 - b.$2);
-  final body = BytesBuilder();
   final us = _kMsPerMinuteUs ~/ bpm;
-  body.add([
-    0x00, _kMeta, _kMetaTempo, _kTempoBytes, //
-    (us >> 16) & 0xFF, (us >> 8) & 0xFF, us & 0xFF,
-  ]);
-  var last = 0;
-  for (final (tick, _, bytes) in events) {
-    _putVlq(body, tick - last);
-    last = tick;
-    body.add(bytes);
-  }
-  body.add([0x00, _kMeta, 0x2F, 0x00]);
-  final b = body.toBytes();
+  final b = _clickTrackBody(
+    clicks,
+    tempoUs: us,
+  );
   return (BytesBuilder()
         ..add([0x4D, 0x54, 0x68, 0x64, 0, 0, 0, _kHeaderDataLength, 0, 0, 0, 1])
         ..add([_kPpq >> 8, _kPpq & 0xFF])
@@ -267,4 +330,33 @@ Uint8List buildClickMidi(List<(int, bool)> clicks, int bpm) {
         ])
         ..add(b))
       .toBytes();
+}
+
+/// Track body of the click notes; a tempo event only when [tempoUs] is given
+/// (inside a live file the conductor track already has the tempo).
+Uint8List _clickTrackBody(List<(int, bool)> clicks, {int? tempoUs}) {
+  final events = <(int, int, List<int>)>[]; // tick, order (off first), bytes
+  for (final (tick, down) in clicks) {
+    final key = down ? kClickDownbeatKey : kClickKey;
+    final vel = down ? kClickDownbeatVelocity : kClickVelocity;
+    events
+      ..add((tick, 1, [0x90 | _kPercussionChannel, key, vel]))
+      ..add((tick + _kClickNoteTicks, 0, [0x80 | _kPercussionChannel, key, 0]));
+  }
+  events.sort((a, b) => a.$1 != b.$1 ? a.$1 - b.$1 : a.$2 - b.$2);
+  final body = BytesBuilder();
+  if (tempoUs != null) {
+    body.add([
+      0x00, _kMeta, _kMetaTempo, _kTempoBytes, //
+      (tempoUs >> 16) & 0xFF, (tempoUs >> 8) & 0xFF, tempoUs & 0xFF,
+    ]);
+  }
+  var last = 0;
+  for (final (tick, _, bytes) in events) {
+    _putVlq(body, tick - last);
+    last = tick;
+    body.add(bytes);
+  }
+  body.add([0x00, _kMeta, 0x2F, 0x00]);
+  return body.toBytes();
 }
