@@ -99,18 +99,27 @@ final midiVoiceRendererProvider = Provider<MidiVoiceRenderer>((ref) {
     soundfont: ensureSoundfont,
   );
   final downloader = DioFileDownloader(ref.watch(dioProvider));
-  return (result, bars) => cache.renderVoices(
-    result,
-    bars: bars,
-    midiPath: () async {
-      final url = result.midiCombined!.url;
-      if (url.scheme == 'file') return url.toFilePath();
-      final temp = await getTemporaryDirectory();
-      final path = '${temp.path}/combined_${result.scoreId}.mid';
-      await downloader.download(url, path);
-      return path;
-    },
-  );
+  return (result, bars) async {
+    String? downloaded;
+    try {
+      return await cache.renderVoices(
+        result,
+        bars: bars,
+        midiPath: () async {
+          final url = result.midiCombined!.url;
+          if (url.scheme == 'file') return url.toFilePath();
+          final temp = await getTemporaryDirectory();
+          final path = '${temp.path}/combined_${result.scoreId}.mid';
+          downloaded = path;
+          await downloader.download(url, path);
+          return path;
+        },
+      );
+    } finally {
+      final d = downloaded;
+      if (d != null && File(d).existsSync()) File(d).deleteSync();
+    }
+  };
 });
 
 /// The app-made metronome click track (PIYA-209/210).

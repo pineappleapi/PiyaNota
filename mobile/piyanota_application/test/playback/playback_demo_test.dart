@@ -177,7 +177,7 @@ void main() {
         r'^\s+- (assets/\S*)',
         multiLine: true,
       ).allMatches(pubspec).map((m) => m[1]);
-      expect(bundled, ['assets/branding/']);
+      expect(bundled, ['assets/branding/', 'assets/soundfont/piano.sf2']);
     });
 
     test('no app code refers to a demo asset', () {

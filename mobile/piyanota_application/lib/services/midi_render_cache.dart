@@ -10,13 +10,13 @@ import 'midi_voice_split.dart';
 
 /// Bump when the render recipe changes (gain, split rules, soundfont) so old
 /// caches are not reused.
-const int kRenderVersion = 1;
+const int kRenderVersion = 2;
 
 /// Scores whose rendered voices are kept on disk; older ones are deleted.
 const int kRenderCacheKeepScores = 3;
 
-/// Common peak target for the four voices: 0.8 of int16 full scale.
-const int kRenderTargetPeak = 26214;
+/// Common peak target for the four voices: about 0.3 of int16 full scale.
+const int kRenderTargetPeak = 10000;
 
 /// Upper bound on the common gain so a near-silent render is not blown up.
 const double kRenderMaxGain = 4;
@@ -113,12 +113,13 @@ class MidiRenderCache {
         _touch(dir);
         return hit;
       }
-      final tmp = Directory('${dir.path}.tmp');
-      if (tmp.existsSync()) tmp.deleteSync(recursive: true);
+      // Unique per load so overlapping loads of one score cannot collide.
+      final stamp = now().microsecondsSinceEpoch;
+      final tmp = Directory('${dir.path}.$stamp.tmp');
       tmp.createSync(recursive: true);
       try {
         final smf = await File(await midiPath()).readAsBytes();
-        await _renderAll(smf, ranges, tmp);
+        await _renderAll(smf, ranges, tmp, stamp);
         File('${tmp.path}/$_kKeyFile').writeAsStringSync(key, flush: true);
       } on Object {
         if (tmp.existsSync()) tmp.deleteSync(recursive: true);
@@ -145,6 +146,7 @@ class MidiRenderCache {
     Uint8List smf,
     Map<VoicePart, List<(int, int)>> ranges,
     Directory out,
+    int stamp,
   ) async {
     final sf2 = await soundfont();
     final temp = await tempDir();
@@ -155,7 +157,7 @@ class MidiRenderCache {
         kVoiceChannel[voice]!,
         silentRanges: ranges[voice]!,
       );
-      final mid = File('${temp.path}/render_${voice.name}.mid');
+      final mid = File('${temp.path}/render_${voice.name}_$stamp.mid');
       await mid.writeAsBytes(split, flush: true);
       try {
         peaks.add(
@@ -195,7 +197,13 @@ class MidiRenderCache {
   void _evict(Directory root) {
     final used = <(int, Directory)>[];
     for (final e in root.listSync()) {
-      if (e is! Directory || e.path.endsWith('.tmp')) continue;
+      if (e is! Directory) continue;
+      // Orphan of a killed render; a live one is not at risk because renders
+      // of different scores rarely overlap and a lost one just re-renders.
+      if (e.path.endsWith('.tmp')) {
+        e.deleteSync(recursive: true);
+        continue;
+      }
       final f = File('${e.path}/used.txt');
       final ms = f.existsSync() ? int.tryParse(f.readAsStringSync()) ?? 0 : 0;
       used.add((ms, e));

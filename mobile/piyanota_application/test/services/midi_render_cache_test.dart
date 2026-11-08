@@ -30,7 +30,7 @@ void main() {
   late Directory tmp;
   late File mid;
   var renders = 0;
-  final peaks = <int>[1000, 2000, 13107, 500];
+  final peaks = <int>[1000, 2000, 5000, 500];
   final scaled = <double>[];
   var tick = 0;
 
@@ -83,7 +83,13 @@ void main() {
       await c.renderVoices(_result(id), midiPath: () async => mid.path);
     }
     final names = Directory('${tmp.path}/cache').listSync().map((e) => e.uri.pathSegments.where((s) => s.isNotEmpty).last).toSet();
-    expect(names, {'2_v1', '3_v1', '4_v1'});
+    expect(names, {'2_v2', '3_v2', '4_v2'});
+  });
+
+  test('orphaned .tmp dirs are evicted', () async {
+    final orphan = Directory('${tmp.path}/cache/9_v2.1.tmp')..createSync(recursive: true);
+    await make().renderVoices(_result(1), midiPath: () async => mid.path);
+    expect(orphan.existsSync(), isFalse);
   });
 
   test('synth unavailable -> null and no half cache', () async {

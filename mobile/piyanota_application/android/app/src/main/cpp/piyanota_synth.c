@@ -9,6 +9,9 @@
 #define SAMPLE_RATE 22050
 #define BLOCK_FRAMES 4096
 #define WAV_HEADER_BYTES 44
+#define SYNTH_GAIN 0.8
+/* Extra render after the last event so release tails are not cut. */
+#define TAIL_BLOCKS ((SAMPLE_RATE + BLOCK_FRAMES - 1) / BLOCK_FRAMES)
 
 #define ERR_SETTINGS 1
 #define ERR_SYNTH 2
@@ -45,6 +48,7 @@ int piya_render(const char *sf2, const char *mid, const char *wav_out, int *peak
     fluid_settings_setint(s, "synth.reverb.active", 0);
     fluid_settings_setint(s, "synth.chorus.active", 0);
     fluid_settings_setnum(s, "synth.sample-rate", SAMPLE_RATE);
+    fluid_settings_setnum(s, "synth.gain", SYNTH_GAIN);
     sy = new_fluid_synth(s);
     if (!sy) { rc = ERR_SYNTH; goto done; }
     if (fluid_synth_sfload(sy, sf2, 1) < 0) { rc = ERR_SFLOAD; goto done; }
@@ -60,7 +64,8 @@ int piya_render(const char *sf2, const char *mid, const char *wav_out, int *peak
     int16_t st[2 * BLOCK_FRAMES], mono[BLOCK_FRAMES];
     uint32_t frames = 0;
     int peak = 0;
-    while (fluid_player_get_status(p) == FLUID_PLAYER_PLAYING) {
+    int tail = 0;
+    while (fluid_player_get_status(p) == FLUID_PLAYER_PLAYING || tail < TAIL_BLOCKS) {
         fluid_synth_write_s16(sy, BLOCK_FRAMES, st, 0, 2, st, 1, 2);
         for (int i = 0; i < BLOCK_FRAMES; i++) {
             int m = ((int)st[2 * i] + (int)st[2 * i + 1]) / 2;
@@ -70,6 +75,7 @@ int piya_render(const char *sf2, const char *mid, const char *wav_out, int *peak
         }
         if (fwrite(mono, 2, BLOCK_FRAMES, f) != BLOCK_FRAMES) { rc = ERR_WRITE; goto done; }
         frames += BLOCK_FRAMES;
+        if (fluid_player_get_status(p) != FLUID_PLAYER_PLAYING) tail++;
     }
     make_header(hdr, frames * 2);
     rewind(f);

@@ -51,6 +51,13 @@ android {
         )
     }
 
+    // Both libc++_shared copies (plugins and the native build) are identical.
+    packaging {
+        jniLibs {
+            pickFirsts += "**/libc++_shared.so"
+        }
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.

@@ -29,6 +29,10 @@ class MidiSynthError implements Exception {
 const String _kSynthLib = 'libpiyanota_synth.so';
 const String _kSoundfontAsset = 'assets/soundfont/piano.sf2';
 const String _kSoundfontFile = 'piano.sf2';
+
+/// Size of assets/soundfont/piano.sf2; update with the asset. Lets a warm
+/// start skip loading the 32 MB asset into memory.
+const int kSoundfontBytes = 32319396;
 const int _kWavHeaderBytes = 44;
 const int _kInt16Max = 32767;
 const int _kInt16Min = -32768;
@@ -101,12 +105,12 @@ Future<void> scaleWav(String wavPath, double factor) {
 /// a real file path, not an asset) and returns its path. A size mismatch
 /// (interrupted copy or updated asset) triggers a re-copy.
 Future<String> ensureSoundfont() async {
-  final ByteData data = await rootBundle.load(_kSoundfontAsset);
   final Directory dir = await getApplicationSupportDirectory();
   final File out = File('${dir.path}/$_kSoundfontFile');
-  if (out.existsSync() && out.lengthSync() == data.lengthInBytes) {
+  if (out.existsSync() && out.lengthSync() == kSoundfontBytes) {
     return out.path;
   }
+  final ByteData data = await rootBundle.load(_kSoundfontAsset);
   await out.writeAsBytes(
     data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
     flush: true,
