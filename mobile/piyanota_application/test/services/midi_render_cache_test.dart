@@ -57,7 +57,8 @@ void main() {
 
   test('success: 4 wavs, one common gain from max peak', () async {
     final out = await make().renderVoices(_result(1), midiPath: () async => mid.path);
-    expect(out!.keys, VoicePart.values);
+    expect(out!.voices.keys, VoicePart.values);
+    expect(out.click, isNull); // no bars, no click
     expect(scaled, [2.0, 2.0, 2.0, 2.0]);
   });
 
@@ -77,17 +78,18 @@ void main() {
     expect(renders, 8);
   });
 
-  test('keeps newest 3 scores', () async {
+  test('keeps newest 4 renders', () async {
     final c = make();
-    for (final id in [1, 2, 3, 4]) {
+    for (final id in [1, 2, 3, 4, 5]) {
       await c.renderVoices(_result(id), midiPath: () async => mid.path);
     }
     final names = Directory('${tmp.path}/cache').listSync().map((e) => e.uri.pathSegments.where((s) => s.isNotEmpty).last).toSet();
-    expect(names, {'2_v2', '3_v2', '4_v2'});
+    expect(names.length, 4);
+    expect(names.any((n) => n.startsWith('1_')), isFalse);
   });
 
   test('orphaned .tmp dirs are evicted', () async {
-    final orphan = Directory('${tmp.path}/cache/9_v2.1.tmp')..createSync(recursive: true);
+    final orphan = Directory('${tmp.path}/cache/9_v3_b90.1.tmp')..createSync(recursive: true);
     await make().renderVoices(_result(1), midiPath: () async => mid.path);
     expect(orphan.existsSync(), isFalse);
   });
@@ -102,6 +104,24 @@ void main() {
   test('bad midi -> null', () async {
     File(mid.path).writeAsBytesSync([1, 2, 3]);
     expect(await make().renderVoices(_result(1), midiPath: () async => mid.path), isNull);
+  });
+
+  test('other bpm re-renders with scaled tempo; same bpm hits', () async {
+    final c = make();
+    await c.renderVoices(_result(1), midiPath: () async => mid.path, bpm: 60);
+    expect(renders, 4);
+    await c.renderVoices(_result(1), midiPath: () async => mid.path, bpm: 120);
+    expect(renders, 8);
+    await c.renderVoices(_result(1), midiPath: () async => throw StateError('no'), bpm: 60);
+    expect(renders, 8);
+  });
+
+  test('bars -> click wav rendered and scaled on its own', () async {
+    const bars = [BarInfo(bar: 1, startTick: 0, durTicks: 1920, numerator: 4, denominator: 4, meterSource: MeterSource.detected)];
+    final out = await make().renderVoices(_result(1), midiPath: () async => mid.path, bars: bars);
+    expect(out!.click, isNotNull);
+    expect(renders, 5);
+    expect(scaled.length, 5);
   });
 
   test('silentRangesFor: bar ticks win, ms fallback, per voice', () {

@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import '../models/export_selection.dart';
 import '../models/voice_part.dart';
 import '../services/export_service.dart';
+import '../services/midi_render_cache.dart';
 import '../services/notification_permission.dart';
 import 'auth_providers.dart';
 import 'capture_providers.dart';
@@ -101,9 +102,10 @@ bool exportWantsClick(PlaybackState state, ExportSelection selection) =>
 /// the file name never names a voice the file does not hold.
 ExportSelection exportableSelection(
   PlaybackState state,
-  ExportSelection selection,
-) {
-  final tracks = state.result?.audioTracks ?? const <VoicePart, Uri>{};
+  ExportSelection selection, {
+  Map<VoicePart, Uri>? tracks,
+}) {
+  tracks ??= state.result?.audioTracks ?? const <VoicePart, Uri>{};
   return selection.withAvailable({
     for (final voice in state.available)
       if (tracks[voice] != null) voice,
@@ -116,6 +118,10 @@ ExportSelection exportableSelection(
 /// written by [writeClick] inside the export (L4), so its time is on the
 /// bar and under Cancel; with no [writeClick] there is no click.
 ///
+/// With a [render] (MIDI-source scores) the inputs are the phone-rendered
+/// voice WAVs at the chosen BPM, at speed 1 (never time-stretched), and the
+/// click is the render's own. Without one, the server MP3s as before.
+///
 /// Throws [GenerationFailed] when no ticked voice is left: a file with no
 /// ticked voice must never be saved and reported as a success.
 ExportJob buildExportJob(
@@ -123,11 +129,21 @@ ExportJob buildExportJob(
   ExportSelection selection,
   String title, {
   Future<Uri> Function()? writeClick,
+  MidiRender? render,
   ExportNoticeText notice = ExportNoticeText.plain,
 }) {
-  final exported = exportableSelection(state, selection);
+  final tracks =
+      render?.voices ?? state.result?.audioTracks ?? const <VoicePart, Uri>{};
+  final exported = exportableSelection(state, selection, tracks: tracks);
   if (!exported.canDownload) throw const GenerationFailed();
-  final tracks = state.result?.audioTracks ?? const <VoicePart, Uri>{};
+  // The cache's click.wav must survive the export, which moves its extra
+  // track into its work folder and deletes it: hand over a copy.
+  final click = render?.click;
+  final write = render == null
+      ? writeClick
+      : click == null
+      ? null
+      : () => _copyToTemp(click);
   final inputs = <ExportInput>[
     for (final voice in VoicePart.values)
       if (exported.voices.contains(voice))
@@ -136,10 +152,10 @@ ExportJob buildExportJob(
   final clickGain = exportClickGain(state);
   return ExportJob(
     inputs: inputs,
-    prepare: exportWantsClick(state, exported) && writeClick != null
-        ? () async => (track: await writeClick(), gain: clickGain)
+    prepare: exportWantsClick(state, exported) && write != null
+        ? () async => (track: await write(), gain: clickGain)
         : null,
-    speed: state.speed,
+    speed: render != null ? 1 : state.speed,
     fileName: exportFileName(title: title, selection: exported),
     notice: notice,
   );
@@ -154,6 +170,7 @@ ExportJob buildExportJob(
 Future<ExportResult> runExport({
   required ExportService service,
   required Future<Uri> Function() writeClick,
+  Future<MidiRender?> Function()? renderMidi,
   required PlaybackState state,
   required ExportSelection selection,
   required String title,
@@ -170,10 +187,19 @@ Future<ExportResult> runExport({
   }
   Uri? click;
   try {
+    MidiRender? render;
+    if (renderMidi != null) {
+      // Not on the bar: the render has no progress. Cancel is honoured as
+      // soon as it returns. No render means no MP3 fallback (user decision).
+      render = await renderMidi();
+      cancel?.throwIfCancelled();
+      if (render == null) throw const GenerationFailed();
+    }
     final job = buildExportJob(
       state,
       selection,
       title,
+      render: render,
       writeClick: () async => click = await writeClick(),
       notice: notice,
     );
@@ -194,6 +220,12 @@ Future<ExportResult> runExport({
   } finally {
     if (click case final file?) await _deleteQuietly(file);
   }
+}
+
+Future<Uri> _copyToTemp(Uri file) async {
+  final dir = await Directory.systemTemp.createTemp('export_click');
+  final copy = await File.fromUri(file).copy('${dir.path}/click.wav');
+  return copy.uri;
 }
 
 Future<void> _deleteQuietly(Uri file) async {

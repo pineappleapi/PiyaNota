@@ -438,6 +438,7 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
     final controller = ref.read(provider.notifier);
     final state = ref.read(provider);
     final writeClick = controller.exportClickWriter();
+    final renderMidi = controller.exportMidiRenderer();
     final selection = _selection;
     final title = widget.title;
     final folder = treeUri;
@@ -449,6 +450,7 @@ class _ExportAudioSheetState extends ConsumerState<ExportAudioSheet> {
         run: (cancel, onProgress) => runExport(
           service: service,
           writeClick: writeClick,
+          renderMidi: renderMidi,
           state: state,
           selection: selection,
           title: title,

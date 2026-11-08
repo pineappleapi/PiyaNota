@@ -116,4 +116,40 @@ void main() {
     ]); // data byte, no status
     expect(() => splitVoice(bad, 0), throwsA(isA<MidiFormatException>()));
   });
+
+  test('tempoScale divides microseconds per beat, ticks unchanged', () {
+    final out = splitVoice(smf, 0, tempoScale: 2);
+    // 0x07A120 = 500000 us -> 250000 us = 0x03D090
+    final at = out.indexOfSub([0xFF, 0x51, 0x03]);
+    expect(out.sublist(at + 3, at + 6), [0x03, 0xD0, 0x90]);
+    expect(_events(out)[1], _events(splitVoice(smf, 0))[1]);
+  });
+
+  test('buildClickMidi: hi wood block on downbeat, low one otherwise, channel 10', () {
+    final ev = _events(buildClickMidi([(0, true), (480, false)], 120))[0];
+    expect(ev, [
+      (0, 'meta51:3'),
+      (0, '99:76'),
+      (30, '89:76'),
+      (480, '99:77'),
+      (510, '89:77'),
+      (510, 'meta2f:0'),
+    ]);
+  });
+}
+
+extension on Uint8List {
+  int indexOfSub(List<int> sub) {
+    for (var i = 0; i + sub.length <= length; i++) {
+      var ok = true;
+      for (var j = 0; j < sub.length; j++) {
+        if (this[i + j] != sub[j]) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) return i;
+    }
+    return -1;
+  }
 }

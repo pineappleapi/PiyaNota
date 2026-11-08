@@ -5,15 +5,17 @@ import 'package:flutter/foundation.dart';
 import '../models/measure_table.dart';
 import '../models/score_result.dart';
 import '../models/voice_part.dart';
+import 'metronome_click.dart';
 import 'midi_synth.dart';
 import 'midi_voice_split.dart';
 
 /// Bump when the render recipe changes (gain, split rules, soundfont) so old
 /// caches are not reused.
-const int kRenderVersion = 2;
+const int kRenderVersion = 3;
 
-/// Scores whose rendered voices are kept on disk; older ones are deleted.
-const int kRenderCacheKeepScores = 3;
+/// Renders (one per score and tempo) kept on disk; older ones are deleted.
+/// A few, so dragging the slider back to a recent tempo is instant.
+const int kRenderCacheKeepScores = 4;
 
 /// Common peak target for the four voices: about 0.3 of int16 full scale.
 const int kRenderTargetPeak = 10000;
@@ -32,6 +34,7 @@ const Map<VoicePart, int> kVoiceChannel = {
 const int _kPpq = 480;
 const int _kMsPerMinute = 60000;
 const String _kKeyFile = 'key.txt';
+const String _kClickFile = 'click.wav';
 const int _kFnvOffset = 0x811C9DC5;
 const int _kFnvPrime = 0x01000193;
 const int _kMask32 = 0xFFFFFFFF;
@@ -64,6 +67,10 @@ List<(int, int)> silentRangesFor(
   return ranges;
 }
 
+/// The four voice WAVs and the metronome click WAV (null when the score has
+/// no bar table to lay a click on).
+typedef MidiRender = ({Map<VoicePart, Uri> voices, Uri? click});
+
 typedef MidiSynthFn =
     Future<int> Function({
       required String sf2Path,
@@ -93,20 +100,28 @@ class MidiRenderCache {
   /// The four voice WAVs for [result], or null when the synth or the MIDI is
   /// unusable (the caller plays the MP3s instead). [midiPath] is only called
   /// on a cache miss, so a hit never downloads.
-  Future<Map<VoicePart, Uri>?> renderVoices(
+  ///
+  /// [bpm] is the chosen tempo (default: the score's own); the MIDI's tempo
+  /// is scaled to it so the audio is rendered, never time-stretched.
+  Future<MidiRender?> renderVoices(
     ScoreResult result, {
     required Future<String> Function() midiPath,
     List<BarInfo> bars = const [],
+    int? bpm,
   }) async {
+    final chosen = bpm ?? result.tempoBpm;
     final midi = result.midiCombined;
     if (midi == null) return null;
     final ranges = {
       for (final v in VoicePart.values)
         v: silentRangesFor(v, result.mutedMeasures, bars, result.tempoBpm),
     };
-    final key = '${midi.fileId}|${_hash(ranges.toString())}';
+    final key = '${midi.fileId}|$chosen|${_hash(ranges.toString())}|'
+        '${_hash(bars.map((b) => '${b.startTick}/${b.durTicks}').join(','))}';
     final root = await rootDir();
-    final dir = Directory('${root.path}/${result.scoreId}_v$kRenderVersion');
+    final dir = Directory(
+      '${root.path}/${result.scoreId}_v${kRenderVersion}_b$chosen',
+    );
     try {
       final hit = _readCache(dir, key);
       if (hit != null) {
@@ -119,7 +134,15 @@ class MidiRenderCache {
       tmp.createSync(recursive: true);
       try {
         final smf = await File(await midiPath()).readAsBytes();
-        await _renderAll(smf, ranges, tmp, stamp);
+        await _renderAll(
+          smf,
+          ranges,
+          tmp,
+          stamp,
+          chosen / result.tempoBpm,
+          chosen,
+          bars,
+        );
         File('${tmp.path}/$_kKeyFile').writeAsStringSync(key, flush: true);
       } on Object {
         if (tmp.existsSync()) tmp.deleteSync(recursive: true);
@@ -147,6 +170,9 @@ class MidiRenderCache {
     Map<VoicePart, List<(int, int)>> ranges,
     Directory out,
     int stamp,
+    double tempoScale,
+    int bpm,
+    List<BarInfo> bars,
   ) async {
     final sf2 = await soundfont();
     final temp = await tempDir();
@@ -156,6 +182,7 @@ class MidiRenderCache {
         smf,
         kVoiceChannel[voice]!,
         silentRanges: ranges[voice]!,
+        tempoScale: tempoScale,
       );
       final mid = File('${temp.path}/render_${voice.name}_$stamp.mid');
       await mid.writeAsBytes(split, flush: true);
@@ -172,14 +199,54 @@ class MidiRenderCache {
       }
     }
     final maxPeak = peaks.reduce((a, b) => a > b ? a : b);
-    if (maxPeak <= 0) return;
-    final gain = (kRenderTargetPeak / maxPeak).clamp(0.0, kRenderMaxGain);
-    for (final voice in VoicePart.values) {
-      await scale('${out.path}/${voice.name}.wav', gain);
+    if (maxPeak > 0) {
+      final gain = (kRenderTargetPeak / maxPeak).clamp(0.0, kRenderMaxGain);
+      for (final voice in VoicePart.values) {
+        await scale('${out.path}/${voice.name}.wav', gain);
+      }
+    }
+    await _renderClick(sf2, temp, out, stamp, bpm, bars);
+  }
+
+  /// The click as its own WAV (own level: it is toggled and mixed apart
+  /// from the voices). Skipped without bars: there is no grid to lay it on.
+  Future<void> _renderClick(
+    String sf2,
+    Directory temp,
+    Directory out,
+    int stamp,
+    int bpm,
+    List<BarInfo> bars,
+  ) async {
+    if (bars.isEmpty) return;
+    // planClicks times are tick x usPerTick; at 125 bpm that is exactly
+    // 1 ms per tick, so a click's millisecond is its tick.
+    const msPerTickBpm = 125;
+    final last = bars.last;
+    final plan = planClicks(
+      bars: bars,
+      events: const [],
+      tempoBpm: msPerTickBpm,
+      chosenBpm: bpm,
+      length: Duration(milliseconds: last.startTick + last.durTicks),
+    );
+    final clicks = [
+      for (var i = 0; i < plan.clicks.length; i++)
+        (plan.clicks[i].inMilliseconds, plan.levels[i] == ClickLevel.downbeat),
+    ];
+    if (clicks.isEmpty) return;
+    final mid = File('${temp.path}/render_click_$stamp.mid');
+    await mid.writeAsBytes(buildClickMidi(clicks, bpm), flush: true);
+    try {
+      final wav = '${out.path}/$_kClickFile';
+      final peak = await synth(sf2Path: sf2, midPath: mid.path, wavPath: wav);
+      if (peak > 0) await scale(wav, kRenderTargetPeak / peak);
+    } finally {
+      if (mid.existsSync()) mid.deleteSync();
     }
   }
 
-  Map<VoicePart, Uri>? _readCache(Directory dir, String key) {
+  MidiRender? _readCache(Directory dir, String key) {
     final keyFile = File('${dir.path}/$_kKeyFile');
     if (!keyFile.existsSync() || keyFile.readAsStringSync() != key) return null;
     final out = <VoicePart, Uri>{};
@@ -188,7 +255,8 @@ class MidiRenderCache {
       if (!f.existsSync()) return null;
       out[v] = f.uri;
     }
-    return out;
+    final click = File('${dir.path}/$_kClickFile');
+    return (voices: out, click: click.existsSync() ? click.uri : null);
   }
 
   void _touch(Directory dir) => File('${dir.path}/used.txt')

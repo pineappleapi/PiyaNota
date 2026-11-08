@@ -186,6 +186,12 @@ class ScoreTimeline {
 
   bool get isEmpty => _onsets.isEmpty;
 
+  /// Score time per audio time. Event and bar milliseconds are at the
+  /// score's own tempo; MIDI audio is rendered at the chosen one, so its
+  /// position must be scaled before the lookup. 1 for time-stretched MP3
+  /// (the engine reports media time there).
+  double audioToScore = 1;
+
   static List<TimingEvent> _sorted(List<TimingEvent> events) {
     final copy = [...events];
     mergeSort(copy, compare: (a, b) => a.timestampMs - b.timestampMs);
@@ -197,7 +203,10 @@ class ScoreTimeline {
   /// first onset it waits on the first one; after the last it stays there.
   IndicatorPosition? positionAt(Duration position) {
     if (_onsets.isEmpty) return null;
-    final t = position.inMicroseconds / Duration.microsecondsPerMillisecond;
+    final t =
+        position.inMicroseconds /
+        Duration.microsecondsPerMillisecond *
+        audioToScore;
     if (barStep) {
       final i = _lastAtOrBefore(_steps.length, (i) => _steps[i].startMs, t);
       final step = _steps[i < 0 ? 0 : i];

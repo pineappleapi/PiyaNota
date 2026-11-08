@@ -82,11 +82,11 @@ enum PlaybackSource { midi, mp3 }
 
 /// Renders the four voices from the result's combined MIDI; null means play
 /// the MP3s. Tests override it.
-typedef MidiVoiceRenderer =
-    Future<Map<VoicePart, Uri>?> Function(
-      ScoreResult result,
-      List<BarInfo> bars,
-    );
+typedef MidiVoiceRenderer = Future<MidiRender?> Function(
+  ScoreResult result,
+  List<BarInfo> bars,
+  int bpm,
+);
 
 final midiVoiceRendererProvider = Provider<MidiVoiceRenderer>((ref) {
   final cache = MidiRenderCache(
@@ -99,12 +99,13 @@ final midiVoiceRendererProvider = Provider<MidiVoiceRenderer>((ref) {
     soundfont: ensureSoundfont,
   );
   final downloader = DioFileDownloader(ref.watch(dioProvider));
-  return (result, bars) async {
+  return (result, bars, bpm) async {
     String? downloaded;
     try {
       return await cache.renderVoices(
         result,
         bars: bars,
+        bpm: bpm,
         midiPath: () async {
           final url = result.midiCombined!.url;
           if (url.scheme == 'file') return url.toFilePath();
@@ -296,6 +297,7 @@ class PlaybackState {
     Duration? duration,
     bool? reviewDismissed,
     Set<VoicePart>? failedVoices,
+    PlaybackSource? source,
   }) => PlaybackState(
     phase: phase ?? this.phase,
     error: clearError ? null : error ?? this.error,
@@ -315,7 +317,7 @@ class PlaybackState {
     reviewDismissed: reviewDismissed ?? this.reviewDismissed,
     timingUnavailable: timingUnavailable,
     failedVoices: failedVoices ?? this.failedVoices,
-    source: source,
+    source: source ?? this.source,
   );
 }
 
@@ -422,11 +424,16 @@ class PlaybackController extends Notifier<PlaybackState> {
 
     PlaybackEngine? engine;
     var source = PlaybackSource.mp3;
+    var clickAttached = false;
     try {
-      Map<VoicePart, Uri>? rendered;
+      MidiRender? rendered;
       if (result.midiCombined != null) {
         try {
-          rendered = await ref.read(midiVoiceRendererProvider)(result, bars);
+          rendered = await ref.read(midiVoiceRendererProvider)(
+            result,
+            bars,
+            result.tempoBpm,
+          );
         } on Object catch (e) {
           debugPrint('Playback: MIDI render failed, using MP3: $e');
         }
@@ -436,12 +443,15 @@ class PlaybackController extends Notifier<PlaybackState> {
         // Only the voices the result has audio for, so the mixer keys match.
         final wavs = {
           for (final v in result.audioTracks.keys)
-            if (rendered[v] != null) v: rendered[v]!,
+            if (rendered.voices[v] != null) v: rendered.voices[v]!,
         };
         try {
           engine = ref.read(playbackEngineFactoryProvider)();
           await engine.load(wavs);
           source = PlaybackSource.midi;
+          final renderedClick = rendered.click;
+          clickAttached =
+              renderedClick != null && await engine.attachClick(renderedClick);
         } on Object catch (e) {
           debugPrint('Playback: rendered WAVs failed, using MP3: $e');
           await _disposeQuietly(engine);
@@ -472,14 +482,10 @@ class PlaybackController extends Notifier<PlaybackState> {
       await _disposeQuietly(engine);
       return;
     }
-    _engine = engine;
     _bars = bars;
-    _plannedSubdivisions = null;
-    _playingSub = engine.playingChanges.listen((playing) {
-      if (ref.mounted) state = state.copyWith(playing: playing);
-    });
-    _failureSub = engine.failures.listen(_onFailure);
-    _clickFailureSub = engine.clickFailures.listen(_onClickFailure);
+    _renderedBpm = result.tempoBpm;
+    timeline.audioToScore = 1; // rendered at the score tempo (or MP3)
+    _wireEngine(engine);
     // PIYA-209-V2.2 replaces 209 AC5: voice sliders at 0.8, click at 0.5,
     // metronome off, speed at the score's tempo; the voices the
     // default selection left out start muted so the Mixer shows what is
@@ -504,12 +510,168 @@ class PlaybackController extends Notifier<PlaybackState> {
       bpm: result.tempoBpm,
       // No tempo, no grid to lay the click on (coordinator decision
       // 2026-10-09); the slider still runs relative to the assumed 90.
-      clickStatus: result.tempoKnown
-          ? ClickStatus.preparing
-          : ClickStatus.unavailable,
+      clickStatus: !result.tempoKnown
+          ? ClickStatus.unavailable
+          : source == PlaybackSource.midi
+          ? (clickAttached ? ClickStatus.ready : ClickStatus.unavailable)
+          : ClickStatus.preparing,
     );
     _applyGains();
-    if (result.tempoKnown) unawaited(_prepareClick(engine, generation));
+    // The MIDI path's click is a rendered WAV, already attached; the
+    // generated click only serves the time-stretched MP3 path.
+    if (result.tempoKnown && source == PlaybackSource.mp3) {
+      unawaited(_prepareClick(engine, generation));
+    }
+  }
+
+  void _wireEngine(PlaybackEngine engine) {
+    _engine = engine;
+    _plannedSubdivisions = null;
+    _playingSub = engine.playingChanges.listen((playing) {
+      if (ref.mounted) state = state.copyWith(playing: playing);
+    });
+    _failureSub = engine.failures.listen(_onFailure);
+    _clickFailureSub = engine.clickFailures.listen(_onClickFailure);
+  }
+
+  /// The bpm the current MIDI-rendered audio was made at.
+  int _renderedBpm = 0;
+  bool _rerendering = false;
+  bool _rerenderPending = false;
+
+  /// MIDI path: re-renders every voice and the click at the chosen bpm and
+  /// swaps them in, keeping the musical position. Never time-stretches
+  /// (chops at extreme speeds). Any failure falls back to the stretched MP3
+  /// path, which is what old scores use.
+  Future<void> _rerender() async {
+    if (_rerendering) {
+      _rerenderPending = true;
+      return;
+    }
+    final result = state.result;
+    final old = _engine;
+    final bpm = state.chosenBpm;
+    if (result == null || old == null || bpm == _renderedBpm) return;
+    _rerendering = true;
+    final generation = _generation;
+    bool current() => ref.mounted && generation == _generation;
+    try {
+      MidiRender? rendered;
+      try {
+        rendered = await ref.read(midiVoiceRendererProvider)(
+          result,
+          _bars,
+          bpm,
+        );
+      } on Object catch (e) {
+        debugPrint('Playback: MIDI re-render failed: $e');
+      }
+      if (!current()) return;
+      final voices = rendered == null
+          ? null
+          : {
+              for (final v in result.audioTracks.keys)
+                if (rendered.voices[v] != null) v: rendered.voices[v]!,
+            };
+      final position = Duration(
+        microseconds: (old.position.inMicroseconds * _renderedBpm / bpm)
+            .round(),
+      );
+      final swapped =
+          voices != null &&
+          await _swapEngine(
+            voices,
+            click: rendered!.click,
+            position: position,
+            speed: 1,
+            source: PlaybackSource.midi,
+            renderedBpm: bpm,
+          );
+      if (!current()) return;
+      if (swapped) return;
+      // Fallback keeps the old engine's musical position: it is still at
+      // the old tempo, so [position] (new tempo) is not used for MP3.
+      final mp3Position = Duration(
+        microseconds:
+            (old.position.inMicroseconds * _renderedBpm / result.tempoBpm)
+                .round(),
+      );
+      final fell = await _swapEngine(
+        result.audioTracks,
+        position: mp3Position,
+        speed: state.speed,
+        source: PlaybackSource.mp3,
+      );
+      final engine = _engine;
+      if (fell && current() && result.tempoKnown && engine != null) {
+        state = state.copyWith(clickStatus: ClickStatus.preparing);
+        unawaited(_prepareClick(engine, _generation));
+      }
+    } finally {
+      _rerendering = false;
+      if (_rerenderPending) {
+        _rerenderPending = false;
+        if (ref.mounted) unawaited(_rerender());
+      }
+    }
+  }
+
+  /// Loads [tracks] into a new engine, brings it to [position] (and playing
+  /// if the old one was), then replaces the old engine. The old engine is
+  /// untouched when anything fails, so false leaves playback as it was.
+  Future<bool> _swapEngine(
+    Map<VoicePart, Uri> tracks, {
+    Uri? click,
+    required Duration position,
+    required double speed,
+    required PlaybackSource source,
+    int? renderedBpm,
+  }) async {
+    final old = _engine;
+    if (old == null) return false;
+    final generation = _generation;
+    final wasPlaying = state.playing;
+    PlaybackEngine? fresh;
+    try {
+      fresh = ref.read(playbackEngineFactoryProvider)();
+      await fresh.load(tracks);
+      var clickOk = false;
+      if (click != null) clickOk = await fresh.attachClick(click);
+      if (speed != 1) await fresh.setSpeed(speed);
+      await fresh.seek(position);
+      if (!ref.mounted || generation != _generation) {
+        await _disposeQuietly(fresh);
+        return false;
+      }
+      if (wasPlaying) await old.pause();
+      unawaited(_playingSub?.cancel());
+      unawaited(_failureSub?.cancel());
+      unawaited(_clickFailureSub?.cancel());
+      final oldClickFile = _clickFile;
+      _clickFile = null;
+      _clickBusy = false;
+      _clickSwapping = false;
+      _replanPending = false;
+      _sentGains.clear();
+      _wireEngine(fresh);
+      if (renderedBpm != null) _renderedBpm = renderedBpm;
+      state = state.copyWith(
+        source: source,
+        duration: fresh.duration,
+        clickStatus: source == PlaybackSource.midi
+            ? (clickOk ? ClickStatus.ready : ClickStatus.unavailable)
+            : null,
+      );
+      _syncTimeScale();
+      _applyGains();
+      if (wasPlaying) await fresh.play();
+      unawaited(_disposeQuietly(old).then((_) => _deleteQuietly(oldClickFile)));
+      return true;
+    } on Object catch (e) {
+      debugPrint('Playback: engine swap failed: $e');
+      await _disposeQuietly(fresh);
+      return false;
+    }
   }
 
   /// Generates the click for this score at the current speed and adds it
@@ -651,6 +813,10 @@ class PlaybackController extends Notifier<PlaybackState> {
   void commitBpm() {
     final engine = _engine;
     if (engine == null || state.phase != PlaybackPhase.ready) return;
+    if (state.source == PlaybackSource.midi) {
+      unawaited(_rerender());
+      return;
+    }
     unawaited(engine.setSpeed(state.speed));
     if (state.clickStatus == ClickStatus.unavailable) return;
     if (_clickBusy) {
@@ -847,9 +1013,25 @@ class PlaybackController extends Notifier<PlaybackState> {
   Future<void> skipBy(Duration delta) => seek(position + delta);
 
   /// ⏮ / ⏭: see [skipTargets].
-  Future<void> skipToStart() => seek(_targets().back);
+  Future<void> skipToStart() => seek(_toAudio(_targets().back));
 
-  Future<void> skipToEnd() => seek(_targets().forward ?? state.duration);
+  Future<void> skipToEnd() {
+    final forward = _targets().forward;
+    return seek(forward == null ? state.duration : _toAudio(forward));
+  }
+
+  /// Timeline targets are score time; MIDI audio runs at the rendered bpm.
+  Duration _toAudio(Duration score) => Duration(
+    microseconds: (score.inMicroseconds / (state.timeline?.audioToScore ?? 1))
+        .round(),
+  );
+
+  /// Keeps the timeline's score-time/audio-time ratio in step with what the
+  /// engine is playing (see [ScoreTimeline.audioToScore]).
+  void _syncTimeScale() => state.timeline?.audioToScore =
+      state.source == PlaybackSource.midi && state.tempoBpm > 0
+      ? _renderedBpm / state.tempoBpm
+      : 1;
 
   ({Duration back, Duration? forward}) _targets() =>
       skipTargets(_eventsOf(state.timeline));
@@ -882,6 +1064,18 @@ class PlaybackController extends Notifier<PlaybackState> {
         length: length,
       ),
     );
+  }
+
+  /// For Export: renders (or fetches from the cache) the voices and click
+  /// at the chosen BPM. Null for MP3-source scores, which export as before.
+  /// Read now, like [exportClickWriter], so it outlives this controller.
+  Future<MidiRender?> Function()? exportMidiRenderer() {
+    final result = state.result;
+    if (state.source != PlaybackSource.midi || result == null) return null;
+    final render = ref.read(midiVoiceRendererProvider);
+    final bars = _bars;
+    final bpm = state.chosenBpm;
+    return () => render(result, bars, bpm);
   }
 
   List<TimingEvent> _eventsOf(ScoreTimeline? timeline) =>
@@ -1001,6 +1195,7 @@ class PlaybackController extends Notifier<PlaybackState> {
     _clickBusy = false;
     _replanPending = false;
     _clickSwapping = false;
+    _rerenderPending = false;
     _bars = const [];
     _plannedSubdivisions = null;
     unawaited(_playingSub?.cancel());
