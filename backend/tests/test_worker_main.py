@@ -51,9 +51,10 @@ def _seed_job(storage: MemoryStorage, pages: int = 2) -> tuple[int, list[str]]:
     return int(job["id"]), keys
 
 
-def _result(voices: tuple[str, ...] = VOICES, failed: list[str] | None = None, pages: int = 2) -> PipelineResult:
+def _result(voices: tuple[str, ...] = VOICES, failed: list[str] | None = None, pages: int = 2,
+            mp3: bool = True) -> PipelineResult:
     return PipelineResult(
-        mp3={v: b"mp3-" + v.encode() for v in voices}, midi={v: b"mid-" + v.encode() for v in voices},
+        mp3={v: b"mp3-" + v.encode() for v in voices if mp3}, midi={v: b"mid-" + v.encode() for v in voices},
         failed_voices=failed or [],
         failed_voice_causes={v: "unreadable" for v in failed or []},
         review={"reviewNeeded": False, "reasons": [], "items": [], "truncated": False}, muted_measures=[],
@@ -488,3 +489,12 @@ def test_cancel_during_publish_discards_combined_midi(
 
     process_one(storage=storage, runner=late_cancel, settings=settings)
     assert _count("scores") == 0 and set(storage.objects) == set(old_keys)
+
+
+def test_midi_only_result_completes_with_null_file_keys(app: Flask, settings: Settings) -> None:
+    storage = MemoryStorage()
+    job_id, _ = _seed_job(storage)
+    assert process_one(storage=storage, runner=_runner(_result(mp3=False)), settings=settings)
+    with db.transaction() as conn:
+        rows = conn.execute("SELECT file_key, midi_key FROM audio_tracks").fetchall()
+    assert len(rows) == 4 and all(r["file_key"] is None and r["midi_key"] for r in rows)

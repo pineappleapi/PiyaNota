@@ -78,6 +78,7 @@ def synthesize_satb(
     output_dir:      str  = "output/audio",
     bpm:             int  = DEFAULT_BPM,
     soundfont_path:  str  = "soundfont/piano.sf2",
+    render_audio:    bool = True,
 ) -> dict:
     """
     Converts four SATB voice event sequences into four MP3 files.
@@ -88,6 +89,7 @@ def synthesize_satb(
         output_dir:      Directory where MP3 files will be saved.
         bpm:             Playback tempo in beats per minute.
         soundfont_path:  Path to a .sf2 piano soundfont for rendering.
+        render_audio:    False writes the per-voice .mid only (the backend ships MIDI, not MP3).
 
     Returns:
         {voice: mp3_path} dict of output file paths.
@@ -117,6 +119,10 @@ def synthesize_satb(
         with open(midi_path, "wb") as f:
             midi.writeFile(f)
         print(f"  [Stage 5] {voice}: MIDI saved -> {midi_path}")
+
+        if not render_audio:
+            output_files[voice] = str(midi_path)
+            continue
 
         # -- Render MIDI -> WAV -> MP3 --
         mp3_path = output_path / f"{voice.lower()}.mp3"

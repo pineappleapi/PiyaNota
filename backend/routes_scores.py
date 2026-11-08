@@ -114,14 +114,14 @@ def result(score_id: int) -> tuple[Response, int]:
         "title": score["title"],
         "tempoBpm": score["tempo_bpm"],
         "audioTracks": {
-            t["voice"]: storage.signed_url(t["file_key"], ttl_seconds=ttl) for t in tracks
+            t["voice"]: storage.signed_url(t["file_key"], ttl_seconds=ttl) for t in tracks if t["file_key"]
         },
         "scoreImages": [storage.signed_url(p["object_key"], ttl_seconds=ttl) for p in pages],
         "scoreImageSizes": [{"width": p["width"], "height": p["height"]} for p in pages],
         "timingMetadataUrl": (
             storage.signed_url(timing["metadata_key"], ttl_seconds=ttl) if timing else None
         ),
-        "audioFiles": {t["voice"]: file(t["file_key"]) for t in tracks},
+        "audioFiles": {t["voice"]: file(t["file_key"]) for t in tracks if t["file_key"]},
         "pageFiles": [file(p["object_key"]) for p in pages],
         "timingFile": file(timing["metadata_key"]) if timing else None,
         "midiTracks": midi or None,  # null for scores converted before MIDI existed

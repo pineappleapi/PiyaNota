@@ -365,3 +365,12 @@ def test_client_review_codes_match_stage5() -> None:
             assert CLIENT_REVIEW_CODES == frozenset(ast.literal_eval(node.value.args[0]))
             return
     raise AssertionError("CLIENT_REVIEW_CODES not found in stage5_synthesis.py")
+
+
+def test_result_midi_only_score_has_empty_audio_and_midi_tracks(client: FlaskClient, headers: dict[str, str]) -> None:
+    sid, _ = _score(_uid(), tag="n", midi=True)
+    with db.transaction() as conn:
+        conn.execute("UPDATE audio_tracks SET file_key = NULL WHERE score_id = %s", (sid,))
+    data = client.get(f"/api/scores/{sid}/result", headers=headers).get_json()["data"]
+    assert data["audioTracks"] == {} and data["audioFiles"] == {}
+    assert set(data["midiTracks"]) == set(VOICES)

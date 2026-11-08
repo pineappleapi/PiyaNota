@@ -101,7 +101,7 @@ _USER_KEYS_SQL = """
 SELECT jp.object_key AS k FROM job_pages jp JOIN jobs j ON j.id = jp.job_id WHERE j.user_id = %(u)s
 UNION SELECT thumbnail_key FROM scores WHERE user_id = %(u)s AND thumbnail_key IS NOT NULL
 UNION SELECT midi_combined_key FROM scores WHERE user_id = %(u)s AND midi_combined_key IS NOT NULL
-UNION SELECT a.file_key FROM audio_tracks a JOIN scores s ON s.id = a.score_id WHERE s.user_id = %(u)s
+UNION SELECT a.file_key FROM audio_tracks a JOIN scores s ON s.id = a.score_id WHERE s.user_id = %(u)s AND a.file_key IS NOT NULL
 UNION SELECT a.midi_key FROM audio_tracks a JOIN scores s ON s.id = a.score_id WHERE s.user_id = %(u)s AND a.midi_key IS NOT NULL
 UNION SELECT t.metadata_key FROM timing_metadata t JOIN scores s ON s.id = t.score_id WHERE s.user_id = %(u)s
 """
@@ -255,7 +255,7 @@ def _purge_score(conn: Conn, score: dict[str, Any]) -> None:
     keys = [
         r["k"]
         for r in conn.execute(
-            "SELECT file_key AS k FROM audio_tracks WHERE score_id = %(s)s "
+            "SELECT file_key AS k FROM audio_tracks WHERE score_id = %(s)s AND file_key IS NOT NULL "
             "UNION SELECT midi_key FROM audio_tracks WHERE score_id = %(s)s AND midi_key IS NOT NULL "
             "UNION SELECT metadata_key FROM timing_metadata WHERE score_id = %(s)s "
             "UNION SELECT object_key FROM job_pages WHERE job_id = ANY(%(j)s)",

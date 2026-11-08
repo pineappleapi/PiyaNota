@@ -261,7 +261,7 @@ Index: `scores_user_idx` on `(user_id)`.
 | id | bigserial | no | | PK | |
 | score_id | bigint | no | | FK scores(id) ON DELETE CASCADE | PIYA-311 AC1 |
 | voice | text | no | | CHECK IN (`soprano`,`alto`,`tenor`,`bass`) | |
-| file_key | text | no | | | deviation 1 |
+| file_key | text | yes | | | deviation 1; NULL for MIDI-only scores (0007) |
 | created_at | timestamptz | no | `now()` | | |
 
 UNIQUE `(score_id, voice)`.

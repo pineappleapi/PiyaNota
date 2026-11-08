@@ -185,7 +185,7 @@ def real_stages() -> Stages:
             progress=progress)
 
     def synthesize(satb: dict[str, Any], out_dir: str, bpm: int, soundfont: str) -> dict[str, str]:
-        return synthesize_satb(satb, output_dir=out_dir, bpm=bpm, soundfont_path=soundfont)
+        return synthesize_satb(satb, output_dir=out_dir, bpm=bpm, soundfont_path=soundfont, render_audio=False)
 
     return Stages(preprocess, clean_page, detect, clef_key, transcribe, reconstruct_satb_with_report,
                   build_review, synthesize, lambda page: (int(page[0].shape[1]), int(page[0].shape[0])))
@@ -335,11 +335,13 @@ def run_pipeline(
     midi = {v.lower(): (out / f"{v.lower()}.mid").read_bytes() for v in VOICES
             if (out / f"{v.lower()}.mid").is_file()}
     shutil.rmtree(out, ignore_errors=True)
-    if not mp3:
+    # New scores are MIDI-only (render_audio=False); a non-empty mp3 only comes from an injected/legacy stage.
+    rendered = mp3.keys() if mp3 else midi.keys()
+    if not rendered:
         raise PipelineError("audio rendering failed")
-    # A voice whose render fell back to .mid has no MP3 either; it must not vanish from failedVoices.
+    # A voice with no rendered file must not vanish from failedVoices.
     failed = [v.lower() for v in VOICES
-              if v in report.get("failed_voices", []) or v.lower() not in mp3]
+              if v in report.get("failed_voices", []) or v.lower() not in rendered]
     return PipelineResult(
         mp3=mp3,
         midi={v: b for v, b in midi.items() if v not in failed},

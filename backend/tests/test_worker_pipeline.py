@@ -212,9 +212,9 @@ def test_missing_clef_key_file_raises(tmp_path: Path) -> None:
                      on_stage=lambda s, p: None, stages=_fake_stages())
 
 
-def test_midi_only_output_raises_audio_rendering_failed(tmp_path: Path) -> None:
-    with pytest.raises(PipelineError, match="audio rendering failed"):
-        _run(tmp_path, _fake_stages(midi_only=True))
+def test_midi_only_output_is_the_normal_result(tmp_path: Path) -> None:
+    result = _run(tmp_path, _fake_stages(midi_only=True))
+    assert result.mp3 == {} and len(result.midi) == 4 and result.failed_voices == []
 
 
 def test_input_errors_map_to_fixed_reasons(tmp_path: Path) -> None:
@@ -246,9 +246,8 @@ def test_stage4_bug_is_not_reported_as_unreadable_photos(tmp_path: Path) -> None
         _run(tmp_path, replace(_fake_stages(), reconstruct=raiser))
 
 
-def test_audio_failure_still_cleans_output_dir(tmp_path: Path) -> None:
-    with pytest.raises(PipelineError, match="audio rendering failed"):
-        _run(tmp_path, _fake_stages(midi_only=True))
+def test_midi_only_run_cleans_output_dir(tmp_path: Path) -> None:
+    _run(tmp_path, _fake_stages(midi_only=True))
     assert not (tmp_path / "w" / "audio").exists()
 
 

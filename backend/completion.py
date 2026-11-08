@@ -102,7 +102,7 @@ def complete_job(
         old_keys = [
             r["k"]
             for r in conn.execute(
-                "SELECT file_key AS k FROM audio_tracks WHERE score_id = %(s)s "
+                "SELECT file_key AS k FROM audio_tracks WHERE score_id = %(s)s AND file_key IS NOT NULL "
                 "UNION SELECT midi_key FROM audio_tracks WHERE score_id = %(s)s AND midi_key IS NOT NULL "
                 "UNION SELECT metadata_key FROM timing_metadata WHERE score_id = %(s)s "
                 "UNION SELECT object_key FROM job_pages WHERE job_id = %(j)s",
@@ -136,7 +136,9 @@ def complete_job(
     with conn.cursor() as cur:
         cur.executemany(
             "INSERT INTO audio_tracks (score_id, voice, file_key, midi_key) VALUES (%s, %s, %s, %s)",
-            [(score_id, voice, key, (midi_keys or {}).get(voice)) for voice, key in audio_keys.items()],
+            # file_key is NULL for MIDI-only scores (migration 0007).
+            [(score_id, voice, audio_keys.get(voice), (midi_keys or {}).get(voice))
+             for voice in dict.fromkeys([*audio_keys, *(midi_keys or {})])],
         )
     conn.execute("INSERT INTO timing_metadata (score_id, metadata_key) VALUES (%s, %s)", (score_id, timing_key))
     conn.execute(
