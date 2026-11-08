@@ -16,18 +16,30 @@ from backend import db, migrate
 from backend.config import Settings
 from backend.storage import MemoryStorage
 from backend.worker import health
-from backend.worker.main import UNEXPECTED_FAILURE_REASON, check_schema, process_one
+from backend.worker import main as worker_main
+from backend.worker.main import NO_PLAYBACK_FAILURE_REASON, UNEXPECTED_FAILURE_REASON, check_schema, process_one
 from backend.worker.pipeline import CleanPage, PipelineError, PipelineResult
 
 VOICES = ("soprano", "alto", "tenor", "bass")
 SECRET = "secret-token-xyz"
 HEARTBEAT_TEST_INTERVAL_S = 0.1
 HEARTBEAT_TEST_RUN_S = 0.6
+REAL_COMBINED_MIDI = worker_main._combined_midi
 
 
 @pytest.fixture(autouse=True)
 def _clean(db_clean: None) -> None:
     """Every test starts with empty tables."""
+
+
+@pytest.fixture(autouse=True)
+def _stub_combined_midi(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The fake pipeline result carries no bars; tests of the real builder call ``_real_combined_midi``."""
+    monkeypatch.setattr(worker_main, "_combined_midi", lambda result, timing: b"MThd-stub")
+
+
+def _real_combined_midi(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(worker_main, "_combined_midi", REAL_COMBINED_MIDI)
 
 
 def _jpeg(size: tuple[int, int] = (80, 60)) -> bytes:
@@ -238,24 +250,33 @@ def test_timing_enabled_builds_timing_from_inputs(
     assert got == {"bpm": 100} and b'"x": 1' in storage.get(key)
 
 
-@pytest.mark.parametrize("with_bars", [True, False])
-def test_combined_midi_uploaded_when_bars_exist_else_none(
-        app: Flask, settings: Settings, monkeypatch: pytest.MonkeyPatch, with_bars: bool) -> None:
-    import timing_export
-
-    bars = [dict(bar=1, startTick=0, durTicks=1920, numerator=4, denominator=4, pickup=False)]
-    ev = {"Soprano": [dict(type="note", pitch=72, tick_onset=0, duration_ticks=480)]}
+def test_combined_midi_uploaded_when_bars_exist(
+        app: Flask, settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
     storage = MemoryStorage()
     _seed_job(storage)
-    monkeypatch.setattr(timing_export, "build_timing", lambda **kw: {"events": [{"x": 1}], "bars": bars if with_bars else []})
-    result = replace(_result(), timing_inputs={"bpm": 100, "events": ev})
+    result = _bars_timing(monkeypatch)
     process_one(storage=storage, runner=_runner(result), settings=settings)
     with db.transaction() as conn:
         key = conn.execute("SELECT midi_combined_key FROM scores").fetchone()["midi_combined_key"]
-    if with_bars:
-        assert storage.get(key)[:4] == b"MThd"
-    else:
-        assert key is None
+    assert storage.get(key)[:4] == b"MThd"
+
+
+def test_no_bars_fails_job_and_uploads_nothing(
+        app: Flask, settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    import timing_export
+
+    storage = MemoryStorage()
+    _seed_job(storage)
+    before = set(storage.objects)
+    _real_combined_midi(monkeypatch)
+    monkeypatch.setattr(timing_export, "build_timing", lambda **kw: {"events": [{"x": 1}], "bars": []})
+    result = replace(_result(), timing_inputs={"bpm": 100, "events": {"Soprano": [{"type": "note"}]}})
+    process_one(storage=storage, runner=_runner(result), settings=settings)
+    with db.transaction() as conn:
+        job = conn.execute("SELECT status, failure_reason FROM jobs").fetchone()
+        assert conn.execute("SELECT count(*) AS n FROM scores").fetchone()["n"] == 0
+    assert job["status"] == "failed" and job["failure_reason"] == NO_PLAYBACK_FAILURE_REASON
+    assert set(storage.objects) == before
 
 
 def test_timing_disabled_uploads_empty_timing(app: Flask, settings: Settings) -> None:
@@ -454,13 +475,12 @@ def _bars_timing(monkeypatch: pytest.MonkeyPatch) -> PipelineResult:
     bars = [dict(bar=1, startTick=0, durTicks=1920, numerator=4, denominator=4, pickup=False)]
     ev = {"Soprano": [dict(type="note", pitch=72, tick_onset=0, duration_ticks=480)]}
     monkeypatch.setattr(timing_export, "build_timing", lambda **kw: {"events": [{"x": 1}], "bars": bars})
+    _real_combined_midi(monkeypatch)
     return replace(_result(), timing_inputs={"bpm": 100, "events": ev})
 
 
-def test_combined_midi_builder_error_still_completes_job(
+def test_combined_midi_builder_error_fails_job(
         app: Flask, settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
-    from backend.worker import main as worker_main
-
     storage = MemoryStorage()
     _seed_job(storage)
     result = _bars_timing(monkeypatch)
@@ -471,8 +491,8 @@ def test_combined_midi_builder_error_still_completes_job(
     monkeypatch.setattr(worker_main, "build_combined_midi", boom)
     process_one(storage=storage, runner=_runner(result), settings=settings)
     with db.transaction() as conn:
-        row = conn.execute("SELECT midi_combined_key FROM scores").fetchone()
-    assert row is not None and row["midi_combined_key"] is None
+        job = conn.execute("SELECT status, failure_reason FROM jobs").fetchone()
+    assert job["status"] == "failed" and job["failure_reason"] == NO_PLAYBACK_FAILURE_REASON
 
 
 def test_cancel_during_publish_discards_combined_midi(

@@ -32,8 +32,7 @@ TEST_DB_PORT = 55432
 TEST_DB_NAME = "piya_test"
 STAGE_PREFIX = "STAGE "
 TEST_DB_URL = "postgresql://piya:piya@localhost:55432/piya_test"
-RANGE_BYTES = 1024
-MIN_MP3_BYTES = 1000
+MIN_MIDI_BYTES = 40  # header + one track chunk header
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -217,14 +216,15 @@ def run(photos: list[Path]) -> int:
     res = client.get(f"/api/scores/{job['score_id']}/result", headers=headers)
     assert res.status_code == 200, res.get_json()
     data = res.get_json()["data"]
-    mp3_bytes: dict[str, int] = {}
-    for voice, url_ in data["audioTracks"].items():
-        path = url_.removeprefix(base)
-        part = client.get(path, headers={"Range": f"bytes=0-{RANGE_BYTES - 1}"})
-        assert part.status_code == 206 and len(part.data) == RANGE_BYTES, (voice, part.status_code)
-        full = client.get(path)
-        assert full.status_code == 200 and len(full.data) > MIN_MP3_BYTES, voice
-        mp3_bytes[voice] = len(full.data)
+    # New scores are MIDI-only: no MP3s, one combined MIDI (the app's playback file) plus per-voice MIDI.
+    assert not data["audioTracks"], "MIDI-only score must have no MP3 tracks"
+    assert data["midiCombined"], "midiCombined is missing: the score cannot play"
+    midi_bytes: dict[str, int] = {}
+    midi_files = {"combined": data["midiCombined"], **(data["midiTracks"] or {})}
+    for name, entry in midi_files.items():
+        full = client.get(entry["url"].removeprefix(base))
+        assert full.status_code == 200 and full.data[:4] == b"MThd" and len(full.data) > MIN_MIDI_BYTES, name
+        midi_bytes[name] = len(full.data)
     timing_raw = client.get(data["timingMetadataUrl"].removeprefix(base), headers={"Range": "bytes=0-"})
     assert timing_raw.status_code == 206
     timing = _validate_timing(timing_raw.get_json(), data["scoreImageSizes"])
@@ -245,7 +245,7 @@ def run(photos: list[Path]) -> int:
                               "WHERE key = ANY(%s)", (keys,)).fetchone()["n"]
         everything = conn.execute("SELECT coalesce(sum(octet_length(data)), 0) AS n FROM blobs").fetchone()["n"]
     report = {"pages": len(photos), "total_s": round(total_s, 1), "per_page_s": round(total_s / len(photos), 1),
-              "stage_s": stage_s, "mp3_bytes": mp3_bytes, "cleaned_page_sizes": data["scoreImageSizes"],
+              "stage_s": stage_s, "midi_bytes": midi_bytes, "cleaned_page_sizes": data["scoreImageSizes"],
               "cleaned_page_bytes": [len(i.data) for i in images], "score_blob_bytes": int(stored),
               "all_blob_bytes_incl_pending_delete": int(everything), "timing": timing,
               "failedVoices": data["failedVoices"], "review": data["review"]}

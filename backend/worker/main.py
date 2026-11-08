@@ -30,6 +30,7 @@ from backend.worker.pipeline import PipelineConfig, PipelineError, PipelineResul
 LOG = logging.getLogger(__name__)
 
 UNEXPECTED_FAILURE_REASON = "conversion failed"  # fixed text: reasons reach clients, details go to the log
+NO_PLAYBACK_FAILURE_REASON = "no playable audio could be built"  # distinct from a transient crash
 HEARTBEAT_JOIN_TIMEOUT_S = 10.0
 PROGRESS_WRITE_INTERVAL_S = 2.0
 EMPTY_TIMING: dict[str, Any] = {"events": []}
@@ -157,17 +158,25 @@ def _timing_bytes(result: PipelineResult, settings: Settings) -> bytes:
     return json.dumps(timing).encode("utf-8")
 
 
-def _combined_midi(result: PipelineResult, timing: bytes) -> bytes | None:
-    """Combined playback MIDI, or None when there are no usable bars; it must never fail a converted job."""
+def _combined_midi(result: PipelineResult, timing: bytes) -> bytes:
+    """Combined playback MIDI, the only thing the app plays for a new score.
+
+    Raises:
+        PipelineError: no usable bars/events, or the builder failed. Completing the job without it would
+            leave a "done" score that cannot play, so the job fails (and can be retried) instead.
+    """
     try:
         bars = json.loads(timing).get("bars")
         events = result.timing_inputs.get("events")
-        if not bars or not events:
-            return None
-        return build_combined_midi(events, bars, result.timing_inputs.get("bpm"), result.failed_voices)
-    except Exception as exc:  # noqa: BLE001 - optional artifact, per-voice MP3/MIDI still ship
-        LOG.error("combined midi failed, skipping: %s", describe_exception(exc))
-        return None
+        combined = build_combined_midi(events, bars, result.timing_inputs.get("bpm"),
+                                       result.failed_voices) if bars and events else None
+    except Exception as exc:  # noqa: BLE001 - any builder error becomes one clear job failure
+        LOG.error("combined midi failed: %s", describe_exception(exc))
+        raise PipelineError(NO_PLAYBACK_FAILURE_REASON) from exc
+    if combined is None:
+        LOG.error("combined midi unavailable: no usable bars/events")
+        raise PipelineError(NO_PLAYBACK_FAILURE_REASON)
+    return combined
 
 
 def _publish(job_id: int, result: PipelineResult, storage: Storage, settings: Settings,
@@ -187,17 +196,14 @@ def _publish(job_id: int, result: PipelineResult, storage: Storage, settings: Se
     thumb = completion.make_thumbnail(result.pages[0].served_jpeg)
     timing = _timing_bytes(result, settings)
     combined = _combined_midi(result, timing)
-    combined_key = new_key("midi", "mid") if combined is not None else None
-    all_keys = [*audio.values(), *midi.values(), timing_key, thumb_key, *page_keys]
-    if combined_key is not None:
-        all_keys.append(combined_key)
+    combined_key = new_key("midi", "mid")
+    all_keys = [*audio.values(), *midi.values(), timing_key, thumb_key, *page_keys, combined_key]
     uploaded.extend(all_keys)  # tracked before the puts: a failed put may still have written the object
     background.reserve_keys(all_keys)  # committed first so a crash mid-upload leaves a reaper row
     uploads = [(audio[v], result.mp3[v], "audio/mpeg") for v in audio]
     uploads += [(midi[v], result.midi[v], "audio/midi") for v in midi]
-    if combined_key is not None and combined is not None:
-        uploads.append((combined_key, combined, "audio/midi"))
-    uploads += [(timing_key, timing, "application/json"), (thumb_key, thumb, "image/jpeg")]
+    uploads += [(combined_key, combined, "audio/midi"),
+                (timing_key, timing, "application/json"), (thumb_key, thumb, "image/jpeg")]
     uploads += [(k, p.served_jpeg, "image/jpeg") for k, p in zip(page_keys, result.pages)]
     for key, data, content_type in uploads:
         storage.put(key, data, content_type)
