@@ -51,6 +51,9 @@ class LiveSynthPlaybackEngine implements PlaybackEngine {
   bool _wantPlaying = false;
   bool _disposed = false;
   bool _finished = false;
+  // False between play() and the native player really starting: until then
+  // synth.tick is stale, so position and pause use _resumeTick.
+  bool _started = false;
   bool _hasClick = false;
   int _resumeTick = 0;
   double _clickVolume = 0.5;
@@ -113,7 +116,9 @@ class LiveSynthPlaybackEngine implements PlaybackEngine {
   Duration get position {
     final synth = _synth;
     if (synth == null) return Duration.zero;
-    final tick = _wantPlaying && !_finished ? synth.tick : _resumeTick;
+    final tick = _wantPlaying && _started && !_finished
+        ? synth.tick
+        : _resumeTick;
     return _toTime(math.min(tick, _totalTicks));
   }
 
@@ -148,11 +153,6 @@ class LiveSynthPlaybackEngine implements PlaybackEngine {
   Future<void> play() async {
     final synth = _synth;
     if (_disposed || synth == null || _wantPlaying) return;
-    if (_finished || _resumeTick >= _totalTicks) {
-      synth.reset();
-      _resumeTick = 0;
-      _finished = false;
-    }
     _setPlaying(true);
     if (!await _setActive(true)) {
       debugPrint('Playback: audio focus denied; not starting');
@@ -160,8 +160,26 @@ class LiveSynthPlaybackEngine implements PlaybackEngine {
       return;
     }
     if (_disposed || !_wantPlaying) return;
+    // After the focus check, so a denied focus keeps the position.
+    if (_finished || _resumeTick >= _totalTicks) {
+      synth.reset();
+      _resumeTick = 0;
+      _finished = false;
+    }
     synth.seekTick(_resumeTick);
-    synth.play();
+    if (!synth.play()) {
+      _setPlaying(false);
+      unawaited(_setActive(false));
+      _failures.add(
+        PlaybackFailure(
+          VoicePart.values.first,
+          StateError('FluidSynth could not start the player'),
+          fatal: true,
+        ),
+      );
+      return;
+    }
+    _started = true;
     _poll?.cancel();
     _poll = Timer.periodic(_kEndPoll, (_) => _checkEnd());
   }
@@ -171,6 +189,7 @@ class LiveSynthPlaybackEngine implements PlaybackEngine {
     if (synth == null || !_wantPlaying) return;
     if (!synth.isPlaying) {
       _finished = true;
+      _started = false;
       _resumeTick = _totalTicks;
       _poll?.cancel();
       _setPlaying(false);
@@ -193,7 +212,8 @@ class LiveSynthPlaybackEngine implements PlaybackEngine {
   Future<void> pause() async {
     final synth = _synth;
     if (synth == null) return;
-    if (_wantPlaying && !_finished) _resumeTick = synth.tick;
+    if (_wantPlaying && _started && !_finished) _resumeTick = synth.tick;
+    _started = false;
     _poll?.cancel();
     _setPlaying(false);
     synth.pause();

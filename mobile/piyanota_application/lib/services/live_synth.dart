@@ -8,6 +8,7 @@ import 'midi_synth.dart';
 
 const String _kSynthLib = 'libpiyanota_synth.so';
 const int kLiveErrDriver = 8;
+const int _kFluidOk = 0;
 
 typedef _OpenC = Pointer<Void> Function(
     Pointer<Utf8>, Pointer<Utf8>, Pointer<Int32>);
@@ -80,7 +81,8 @@ class LiveSynth {
     return LiveSynth._(_openLib(), Pointer<Void>.fromAddress(address));
   }
 
-  void play() => _play(_h);
+  /// False when FluidSynth refused to start the player (FLUID_FAILED).
+  bool play() => _play(_h) == _kFluidOk;
   void pause() => _pause(_h);
 
   /// Rewinds a finished player (see piya_live_reset).

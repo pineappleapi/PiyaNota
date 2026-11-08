@@ -1,6 +1,7 @@
 /* MIDI -> mono 22050 Hz 16-bit WAV via FluidSynth (reverb/chorus off).
  * Called from Dart over dart:ffi, so no JNI and no global state. */
 #include <fluidsynth.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -104,6 +105,8 @@ typedef struct {
     fluid_player_t *player;
     fluid_audio_driver_t *driver;
     char *mid;
+    /* Guards h->player: reset swaps it while Dart may poll tick/is_playing. */
+    pthread_mutex_t lock;
 } piya_live;
 
 void piya_live_close(piya_live *h) {
@@ -113,6 +116,7 @@ void piya_live_close(piya_live *h) {
     if (h->synth) delete_fluid_synth(h->synth);
     if (h->settings) delete_fluid_settings(h->settings);
     free(h->mid);
+    pthread_mutex_destroy(&h->lock);
     free(h);
 }
 
@@ -121,6 +125,7 @@ piya_live *piya_live_open(const char *sf2, const char *mid, int *err) {
     int rc = 0;
     piya_live *h = calloc(1, sizeof(piya_live));
     if (!h) { if (err) *err = ERR_SETTINGS; return NULL; }
+    pthread_mutex_init(&h->lock, NULL);
     h->mid = strdup(mid);
     h->settings = new_fluid_settings();
     if (!h->settings || !h->mid) { rc = ERR_SETTINGS; goto fail; }
@@ -153,29 +158,55 @@ int piya_live_reset(piya_live *h) {
     fluid_player_t *p = new_fluid_player(h->synth);
     if (!p) return ERR_PLAYER;
     if (fluid_player_add(p, h->mid) != FLUID_OK) { delete_fluid_player(p); return ERR_PLAYER_ADD; }
-    delete_fluid_player(h->player);
+    pthread_mutex_lock(&h->lock);
+    fluid_player_t *old = h->player;
     h->player = p;
+    pthread_mutex_unlock(&h->lock);
+    delete_fluid_player(old);
     return 0;
 }
 
-int piya_live_play(piya_live *h) { return fluid_player_play(h->player); }
+int piya_live_play(piya_live *h) {
+    pthread_mutex_lock(&h->lock);
+    int rc = fluid_player_play(h->player);
+    pthread_mutex_unlock(&h->lock);
+    return rc;
+}
 
 /* Stop leaves the tick where it was; notes already sounding are cut. */
 int piya_live_pause(piya_live *h) {
+    pthread_mutex_lock(&h->lock);
     int rc = fluid_player_stop(h->player);
+    pthread_mutex_unlock(&h->lock);
     fluid_synth_all_sounds_off(h->synth, -1);
     return rc;
 }
 
 int piya_live_seek(piya_live *h, int tick) {
     fluid_synth_all_sounds_off(h->synth, -1);
-    return fluid_player_seek(h->player, tick);
+    pthread_mutex_lock(&h->lock);
+    int rc = fluid_player_seek(h->player, tick);
+    pthread_mutex_unlock(&h->lock);
+    return rc;
 }
 
-int piya_live_tick(piya_live *h) { return fluid_player_get_current_tick(h->player); }
-int piya_live_total_ticks(piya_live *h) { return fluid_player_get_total_ticks(h->player); }
+int piya_live_tick(piya_live *h) {
+    pthread_mutex_lock(&h->lock);
+    int t = fluid_player_get_current_tick(h->player);
+    pthread_mutex_unlock(&h->lock);
+    return t;
+}
+int piya_live_total_ticks(piya_live *h) {
+    pthread_mutex_lock(&h->lock);
+    int t = fluid_player_get_total_ticks(h->player);
+    pthread_mutex_unlock(&h->lock);
+    return t;
+}
 int piya_live_is_playing(piya_live *h) {
-    return fluid_player_get_status(h->player) == FLUID_PLAYER_PLAYING;
+    pthread_mutex_lock(&h->lock);
+    int playing = fluid_player_get_status(h->player) == FLUID_PLAYER_PLAYING;
+    pthread_mutex_unlock(&h->lock);
+    return playing;
 }
 
 /* Level 0..127 on one channel; CC7 is squared by the synth, the caller maps. */
