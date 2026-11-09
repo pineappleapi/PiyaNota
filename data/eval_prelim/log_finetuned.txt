@@ -1,0 +1,77 @@
+[prelim-ft] camera non_nobis_domine p1: 8 strips
+[prelim-ft] camera non_nobis_domine p2: 8 strips
+[prelim-ft] camera non_nobis_domine p3: 12 strips
+[prelim-ft] camera non_nobis_domine p4: PIPELINE FAILURE ValueError: [Stage 2] page 4: unsupported_staff_layout — detected 10 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[eval] non_nobis_domine seed1: 28 strips, reproduction failures 0
+[eval] non_nobis_domine seed2: 28 strips, reproduction failures 0
+[prelim-ft] camera honneur_a_toi p1: 8 strips
+[prelim-ft] camera honneur_a_toi p2: 12 strips
+[prelim-ft] camera honneur_a_toi p3: 8 strips
+[eval] honneur_a_toi seed1: 28 strips, reproduction failures 0
+[eval] honneur_a_toi seed2: 28 strips, reproduction failures 0
+[prelim-ft] camera gaano_ko_ikaw_kamahal p1: 8 strips
+[prelim-ft] camera gaano_ko_ikaw_kamahal p2: 8 strips
+[prelim-ft] camera gaano_ko_ikaw_kamahal p3: 8 strips
+[prelim-ft] camera gaano_ko_ikaw_kamahal p4: 8 strips
+[prelim-ft] camera gaano_ko_ikaw_kamahal p5: 12 strips
+[prelim-ft] camera gaano_ko_ikaw_kamahal p6: 8 strips
+[prelim-ft] camera gaano_ko_ikaw_kamahal p7: 8 strips
+page=8 yolo=9 classical=8 source=classical (tracker overrides YOLO)
+[prelim-ft] camera gaano_ko_ikaw_kamahal p8: 8 strips
+[prelim-ft] camera gaano_ko_ikaw_kamahal p9: 4 strips
+[eval] gaano_ko_ikaw_kamahal seed1: 72 strips, reproduction failures 0
+[eval] gaano_ko_ikaw_kamahal seed2: 72 strips, reproduction failures 0
+[prelim-ft] camera handog p1: 8 strips
+[prelim-ft] camera handog p2: 8 strips
+[prelim-ft] camera handog p3: PIPELINE FAILURE ValueError: [Stage 2] page 3: unsupported_staff_layout — detected 9 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-ft] camera handog p4: PIPELINE FAILURE ValueError: [Stage 2] page 4: unsupported_staff_layout — detected 10 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-ft] camera handog p5: PIPELINE FAILURE ValueError: [Stage 2] page 5: unsupported_staff_layout — detected 5 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-ft] camera handog p6: PIPELINE FAILURE ValueError: [Stage 2] page 6: unsupported_staff_layout — detected 7 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-ft] camera handog p7: PIPELINE FAILURE ValueError: [Stage 2] page 7: unsupported_staff_layout — detected 7 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-ft] camera handog p8: PIPELINE FAILURE ValueError: [Stage 2] page 8: unsupported_staff_layout — detected 6 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-ft] camera handog p9: PIPELINE FAILURE ValueError: [Stage 2] page 9: unsupported_staff_layout — detected 6 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-ft] camera handog p10: PIPELINE FAILURE ValueError: [Stage 2] page 10: unsupported_staff_layout — detected 10 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-ft] camera handog p11: 8 strips
+[prelim-ft] camera handog p12: PIPELINE FAILURE ValueError: [Stage 2] page 12: unsupported_staff_layout — detected 9 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[prelim-ft] camera handog p13: 8 strips
+[prelim-ft] camera handog p14: 8 strips
+[eval] handog seed1: 40 strips, reproduction failures 0
+[eval] handog seed2: 40 strips, reproduction failures 0
+[prelim-ft] camera dont_stop_me_now p1: 12 strips
+[prelim-ft] camera dont_stop_me_now p2: 12 strips
+[prelim-ft] camera dont_stop_me_now p3: 12 strips
+[prelim-ft] camera dont_stop_me_now p4: 12 strips
+[prelim-ft] camera dont_stop_me_now p5: 12 strips
+[eval] dont_stop_me_now seed1: 60 strips, reproduction failures 0
+[eval] dont_stop_me_now seed2: 60 strips, reproduction failures 0
+[prelim-ft] digital non_nobis_domine p1: 8 strips
+[prelim-ft] digital non_nobis_domine p2: 8 strips
+[prelim-ft] digital non_nobis_domine p3: 12 strips
+page=4 yolo=11 classical=10 source=yolo reason=classical_count_not_divisible_by_4
+[prelim-ft] digital non_nobis_domine p4: PIPELINE FAILURE ValueError: [Stage 2] page 4: unsupported_staff_layout — detected 11 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3).
+[eval] non_nobis_domine seed1: 28 strips, reproduction failures 0
+[eval] non_nobis_domine seed2: 28 strips, reproduction failures 0
+[prelim-ft] digital dont_stop_me_now p1: 12 strips
+[prelim-ft] digital dont_stop_me_now p2: 12 strips
+page=3 yolo=13 classical=12 source=classical (tracker overrides YOLO)
+[prelim-ft] digital dont_stop_me_now p3: 12 strips
+[prelim-ft] digital dont_stop_me_now p4: 12 strips
+[prelim-ft] digital dont_stop_me_now p5: 12 strips
+[eval] dont_stop_me_now seed1: 60 strips, reproduction failures 0
+[eval] dont_stop_me_now seed2: 60 strips, reproduction failures 0
+[prelim-ft] camera both_sides_now p1: 12 strips
+[prelim-ft] camera both_sides_now p2: 12 strips
+[prelim-ft] camera both_sides_now p3: 12 strips
+[prelim-ft] camera both_sides_now p4: 12 strips
+[prelim-ft] camera both_sides_now p6: 12 strips
+[prelim-ft] camera both_sides_now p7: 12 strips
+[prelim-ft] camera both_sides_now p8: 8 strips
+[prelim-ft] digital both_sides_now p1: 12 strips
+[prelim-ft] digital both_sides_now p2: 12 strips
+[prelim-ft] digital both_sides_now p3: 12 strips
+[prelim-ft] digital both_sides_now p4: 12 strips
+[prelim-ft] digital both_sides_now p5: 12 strips
+[prelim-ft] digital both_sides_now p6: 12 strips
+[prelim-ft] digital both_sides_now p7: 12 strips
+[prelim-ft] digital both_sides_now p8: 8 strips
+[prelim-ft] digital both_sides_now p9: 8 strips

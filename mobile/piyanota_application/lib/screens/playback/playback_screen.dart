@@ -1,0 +1,1878 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../models/score_result.dart';
+import '../../models/score_timeline.dart';
+import '../../models/voice_part.dart';
+import '../../routes/app_routes.dart';
+import '../../state/playback_providers.dart';
+import '../../state/processing_providers.dart';
+import '../../state/session_actions.dart';
+import '../../theme/app_theme.dart';
+import '../../widgets/primary_pill_button.dart';
+import '../retake/rephotograph.dart';
+import 'export_sheet.dart';
+import 'mixer_sheet.dart';
+import 'playback_alerts.dart';
+import 'playback_messages.dart';
+import 'sheet_parts.dart';
+import 'speed_sheet.dart';
+
+/// Score Playback & Rehearsal (PIYA-208): the original page image with an
+/// indicator band that follows the audio, S/A/T/B chips, and the transport.
+class PlaybackScreen extends ConsumerStatefulWidget {
+  const PlaybackScreen({super.key, required this.scoreId, required this.title});
+
+  final int scoreId;
+  final String title;
+
+  @override
+  ConsumerState<PlaybackScreen> createState() => _PlaybackScreenState();
+}
+
+class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+  /// What the seek bar, times and band show. Follows the engine's audio
+  /// position every frame while playing, and the finger while dragging
+  /// (AC7), so the band moves on the next frame, not after the seek lands.
+  final ValueNotifier<Duration> _display = ValueNotifier(Duration.zero);
+
+  /// Bumped on every seek the user asks for, so the score view scrolls the
+  /// band into view even if they scrolled away moments before.
+  final ValueNotifier<int> _jumps = ValueNotifier(0);
+  late final Ticker _ticker = createTicker((_) => _syncDisplay());
+  bool _dragging = false;
+
+  /// Bumped by every seek-bar change, so an earlier drag's seek finishing
+  /// late can't clear [_dragging] while a newer drag is in progress.
+  int _dragGeneration = 0;
+
+  /// A drag is under the finger and the first change has already paused
+  /// the audio. Unlike [_dragging], it ends at release, not when the seek
+  /// lands, so a new drag started meanwhile pauses again.
+  bool _dragHeld = false;
+
+  /// Audio should play again once the current drag's seek lands (AC2).
+  /// Set by the first change of a drag from the engine's state; left set
+  /// by a release whose seek is overtaken by a newer drag, so that drag
+  /// resumes it (the engine is already paused by then and would say no).
+  bool _resumeAfterDrag = false;
+  bool _leaving = false;
+
+  PlaybackController get _controller =>
+      ref.read(playbackControllerProvider(widget.scoreId).notifier);
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _ticker.dispose();
+    _display.dispose();
+    _jumps.dispose();
+    super.dispose();
+  }
+
+  /// Audio plays only while Playback is on screen (user decision
+  /// 2026-10-09: downloads, PIYA-211, are for listening elsewhere), so
+  /// backgrounding pauses and leaving releases the engine (the screen's
+  /// provider is autoDispose). No background-audio service, on purpose.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _resumeAfterDrag = false;
+      _run(_controller.pause(), 'pause on background');
+    }
+  }
+
+  void _syncDisplay() {
+    if (!_dragging) _display.value = _controller.position;
+  }
+
+  /// Fire-and-forget for transport calls: a throw is logged, never left
+  /// unhandled. Engine failures reach the screen through the controller
+  /// (a disabled chip, or the audio error once no voice is left), not
+  /// through these futures.
+  void _run(Future<void> call, String what) {
+    unawaited(
+      call.catchError((Object e, StackTrace stack) {
+        debugPrint('Playback: $what failed: $e\n$stack');
+      }),
+    );
+  }
+
+  Future<void> _afterSeek(Future<void> seek) async {
+    try {
+      await seek;
+    } on Object catch (e, stack) {
+      debugPrint('Playback: seek failed: $e\n$stack');
+    }
+    if (!mounted) return;
+    _syncDisplay();
+    _jumps.value++;
+  }
+
+  /// AC7: the display already shows [value]; a failed seek must still let
+  /// the seek bar, times and band follow the audio again.
+  Future<void> _onSeekEnd(Duration value) async {
+    final drag = _dragGeneration;
+    _dragHeld = false;
+    _display.value = value;
+    try {
+      await _controller.seek(value);
+    } on Object catch (e, stack) {
+      debugPrint('Playback: seek failed: $e\n$stack');
+    } finally {
+      // Resume even if the seek failed: the drag is over either way (AC7).
+      // Not at the very end (the engine restarts from 0 there), not once
+      // the screen is gone or the app went to the background meanwhile.
+      if (mounted && drag == _dragGeneration && _resumeAfterDrag) {
+        _resumeAfterDrag = false;
+        final atEnd =
+            value >=
+            ref.read(playbackControllerProvider(widget.scoreId)).duration;
+        if (!atEnd) _run(_controller.play(), 'play after drag');
+      }
+      if (drag == _dragGeneration) _dragging = false;
+      if (mounted && !_dragging) {
+        _syncDisplay();
+        _jumps.value++;
+      }
+    }
+  }
+
+  /// Silent while dragging (AC1): the first change of a drag remembers
+  /// whether to resume and pauses once, through the controller so all
+  /// voices and the click stop together; later ticks do nothing.
+  void _holdAudioForDrag() {
+    if (_dragHeld) return;
+    _dragHeld = true;
+    final playing = ref
+        .read(playbackControllerProvider(widget.scoreId))
+        .playing;
+    _resumeAfterDrag = _resumeAfterDrag || playing;
+    if (playing) _run(_controller.pause(), 'pause for drag');
+  }
+
+  /// Play/pause tapped mid-drag must not start audio under the finger, so
+  /// it only flips what happens on release.
+  void _onPlayPause() {
+    if (_dragHeld) {
+      _resumeAfterDrag = !_resumeAfterDrag;
+      return;
+    }
+    _run(_controller.togglePlay(), 'play');
+  }
+
+  void _onPlayingChanged(bool playing) {
+    if (playing) {
+      if (!_ticker.isActive) unawaited(_ticker.start());
+    } else {
+      if (_ticker.isActive) _ticker.stop();
+      _syncDisplay();
+    }
+  }
+
+  Future<void> _back() async {
+    if (_leaving) return;
+    _leaving = true;
+    try {
+      await _controller.pause();
+    } on Object catch (e, stack) {
+      // Leaving disposes the engine anyway, which stops the audio.
+      debugPrint('Playback: pause on leaving failed: $e\n$stack');
+    }
+    if (!mounted) return;
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) {
+      navigator.pop();
+    } else {
+      await navigator.pushReplacementNamed(AppRoutes.scoreLibrary);
+    }
+  }
+
+  Future<void> _toLogin() async {
+    if (_leaving) return;
+    _leaving = true;
+    await endLocalSession(ref);
+    if (!mounted) return;
+    await Navigator.of(context)
+        .pushNamedAndRemoveUntil(AppRoutes.login, (_) => false);
+  }
+
+  /// Voices already named in a failed-voice alert on this screen.
+  final Set<VoicePart> _announcedFailures = {};
+
+  /// The muted-measures alert was considered for this screen (shown,
+  /// hidden by "Don't show again", or nothing to show).
+  bool _mutedChecked = false;
+
+  /// Alerts are shown one after another, never stacked: the failed-voice
+  /// alert first, then the muted-measures one (gap doc item 6).
+  Future<void> _alerts = Future.value();
+
+  void _queueAlert(Future<void> Function() show) {
+    _alerts = _alerts.then((_) async {
+      if (!mounted || _leaving) return;
+      try {
+        await show();
+      } on Object catch (e, stack) {
+        debugPrint('Playback: alert failed: $e\n$stack');
+      }
+    });
+  }
+
+  /// Once the score is ready, and again whenever a voice drops out: the
+  /// failed-voice alert for voices not named yet (at open, PIYA-208
+  /// "Whole-voice failure alert"; mid-play, gap doc item 7), then, once
+  /// per screen, the muted-measures alert (PIYA-207 AC10 / PIYA-208). The
+  /// chip stays disabled for as long as the screen is open.
+  void _onAlertState(PlaybackState state) {
+    if (state.phase != PlaybackPhase.ready) return;
+    if (!_noticeChecked) {
+      _noticeChecked = true;
+      unawaited(_showNoticeOnce());
+    }
+    if (!_offerChecked) {
+      _offerChecked = true;
+      final result = state.result;
+      if (result != null) {
+        final flagged = {for (final f in result.review.voiceFlags) f.voice};
+        if (flagged.isNotEmpty) {
+          // The review flags carry the pages, so this prompt replaces the
+          // generic offer below for the same voices.
+          _queueAlert(() => _promptUnreadableVoices(result));
+        }
+        // A voice that failed without a review flag (e.g. a render fallback)
+        // still gets the generic retake offer. First in the queue: nothing
+        // else is shown until it's answered.
+        if (result.unreadableVoices.any((v) => !flagged.contains(v))) {
+          _queueAlert(() => _offerRephotograph(result));
+        }
+      }
+    }
+    // PIYA-208: `unreadable` voices were offered a retake by PIYA-207
+    // AC11 and keep their chip alert, so this one names only voices that
+    // can't be helped by one (`render_failed`, unknown, or the device).
+    final unreadable = state.result?.unreadableVoices ?? const <VoicePart>[];
+    final fresh = [
+      for (final voice in VoicePart.values)
+        if (state.failedVoices.contains(voice) &&
+            !unreadable.contains(voice) &&
+            !_announcedFailures.contains(voice))
+          voice,
+    ];
+    if (fresh.isNotEmpty) {
+      _announcedFailures.addAll(fresh);
+      final remaining = state.available.length;
+      _queueAlert(
+        () =>
+            showFailedVoicesAlert(context, voices: fresh, remaining: remaining),
+      );
+    }
+    if (!_mutedChecked) {
+      _mutedChecked = true;
+      final result = state.result;
+      final measures = result?.mutedMeasures ?? const [];
+      if (result != null && measures.isNotEmpty) {
+        _queueAlert(() => _showMuted(result, measures));
+      }
+    }
+  }
+
+  /// The general notice shows only the first time this score opens after
+  /// its conversion: hidden until the per-score flag says it is unseen, and
+  /// the flag is set at once so closing the app or leaving also ends it.
+  bool _noticeDismissed = true;
+  bool _noticeChecked = false;
+
+  Future<void> _showNoticeOnce() async {
+    if (await PlaybackPrefs.disclaimerSeen(widget.scoreId)) return;
+    await PlaybackPrefs.markDisclaimerSeen(widget.scoreId);
+    if (mounted) setState(() => _noticeDismissed = false);
+  }
+
+  /// One prompt per flagged voice; Retake stops the rest.
+  Future<void> _promptUnreadableVoices(ScoreResult result) async {
+    for (final flag in result.review.voiceFlags) {
+      if (!mounted || _leaving) return;
+      final retake = await showVoiceUnreadablePrompt(
+        context,
+        message: PlaybackMessages.voiceUnreadablePrompt(
+          flag.voice,
+          flag.pages,
+          result.scoreImages.length,
+        ),
+      );
+      // The existing whole-score retake; there is no per-page resubmit
+      // of a finished job, so the page numbers are advice only.
+      if (retake && mounted) return _rephotograph();
+    }
+  }
+
+  /// The PIYA-207 AC11 offer was considered for this screen.
+  bool _offerChecked = false;
+
+  /// PIYA-207 AC11 when the score is opened from the library (or anything
+  /// else that isn't Processing, which asks before routing here): until it
+  /// is answered for this `jobId`, the offer comes before the score is
+  /// used. Continue stays here; Re-photograph goes to Capture; system
+  /// Back returns to the library without an answer, so it is offered
+  /// again next time.
+  Future<void> _offerRephotograph(ScoreResult result) async {
+    // Same scope as the muted flag: the jobId, or `score-<id>` when the
+    // result has none (a contract gap, logged).
+    final scope = MutedAlertPrefs.scopeFor(result);
+    if (result.jobId == null) {
+      debugPrint(
+        'Playback: result ${result.scoreId} has no jobId; '
+        'Re-photograph offer keyed by $scope',
+      );
+    }
+    if (await RephotographOfferPrefs.isAnswered(scope)) return;
+    if (!mounted || _leaving) return;
+    final playable =
+        VoicePart.values.length - result.declaredFailedVoices.length;
+    final choice = await showRephotographOffer(
+      context,
+      voices: result.unreadableVoices,
+      playable: playable,
+    );
+    if (!mounted) return;
+    switch (choice) {
+      case null:
+        await _back();
+      case RephotographChoice.continuePlayback:
+        await RephotographOfferPrefs.markAnswered(scope);
+      case RephotographChoice.rephotograph:
+        await RephotographOfferPrefs.markAnswered(scope);
+        if (mounted) await _rephotograph();
+    }
+  }
+
+  /// Shown each time Playback opens unless "Don't show again for this
+  /// score" was ticked. Processing routes here on completion without
+  /// showing it itself (gap doc item 5), so a score opened straight from
+  /// Processing sees it exactly once.
+  Future<void> _showMuted(
+    ScoreResult result,
+    List<MutedMeasure> measures,
+  ) async {
+    final scope = MutedAlertPrefs.scopeFor(result);
+    if (await MutedAlertPrefs.isHidden(scope)) return;
+    if (!mounted || _leaving) return;
+    // A voice that has since failed as a whole is in the other alert.
+    final failed = ref
+        .read(playbackControllerProvider(widget.scoreId))
+        .failedVoices;
+    final shown = [
+      for (final measure in measures)
+        if (!failed.contains(measure.voice)) measure,
+    ];
+    if (shown.isEmpty) return;
+    final hide = await showMutedMeasuresAlert(context, measures: shown);
+    if (hide) await MutedAlertPrefs.hide(scope);
+  }
+
+  /// PIYA-208: an `unreadable` voice's disabled chip. Usable any number
+  /// of times; "Re-photograph" leaves Playback for Capture.
+  Future<void> _onUnreadableChip(VoicePart voice) async {
+    if (_leaving) return;
+    final retake = await showUnreadableVoiceAlert(context, voice: voice);
+    if (retake && mounted) await _rephotograph();
+  }
+
+  /// PIYA-207 AC12 from Playback: the whole score, pre-filled from one
+  /// PIYA-102 call on the result's job.
+  Future<void> _rephotograph() async {
+    if (_leaving) return;
+    final result = ref.read(playbackControllerProvider(widget.scoreId)).result;
+    final jobId =
+        result?.jobId ??
+        ref
+            .read(processingJobsProvider.notifier)
+            .completedJobOf(widget.scoreId)
+            ?.jobId;
+    if (jobId == null) {
+      debugPrint(
+        'Playback: no jobId for score ${widget.scoreId}; '
+        'whole-score retake not possible',
+      );
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: const Text(RephotographMessages.noJob),
+            duration: AppTheme.snackBarDuration,
+          ),
+        );
+      return;
+    }
+    _leaving = true;
+    try {
+      await _controller.pause();
+    } on Object catch (e, stack) {
+      // Leaving disposes the engine anyway, which stops the audio.
+      debugPrint('Playback: pause on leaving failed: $e\n$stack');
+    }
+    if (!mounted) return;
+    await startWholeRetake(
+      context,
+      ref,
+      jobId: jobId,
+      title: widget.title,
+      retakeOfScoreId: widget.scoreId,
+    );
+  }
+
+  void _toggleVoice(VoicePart voice) {
+    if (_controller.toggleVoice(voice)) return;
+    final state = ref.read(playbackControllerProvider(widget.scoreId));
+    if (state.selected.length == 1 && state.selected.contains(voice)) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: const Text(PlaybackMessages.keepOneVoice),
+            duration: AppTheme.snackBarDuration,
+          ),
+        );
+    }
+  }
+
+  /// A modal sheet, not a route push, so the music keeps playing
+  /// underneath (user decision 2026-10-09).
+  void _openExport() => unawaited(
+    openExportAudio(context, ref, scoreId: widget.scoreId, title: widget.title),
+  );
+
+  void _openMixer() => unawaited(
+    showPlaybackSheet(
+      context,
+      (_) => VoiceMixerSheet(
+        scoreId: widget.scoreId,
+        onRephotograph: () => unawaited(_rephotograph()),
+      ),
+    ),
+  );
+
+  void _openSpeed() => unawaited(
+    showPlaybackSheet(
+      context,
+      (_) => PlaybackSpeedSheet(scoreId: widget.scoreId),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = playbackControllerProvider(widget.scoreId);
+    ref.listen(provider.select((s) => s.playing), (_, playing) {
+      _onPlayingChanged(playing);
+    });
+    ref.listen(provider.select((s) => s.error), (_, error) {
+      if (error == PlaybackError.sessionExpired) unawaited(_toLogin());
+    });
+    ref.listen(
+      provider.select((s) => (s.phase, s.failedVoices)),
+      (_, _) => _onAlertState(ref.read(provider)),
+    );
+    final state = ref.watch(provider);
+    final ready = state.phase == PlaybackPhase.ready;
+    final error = state.error ?? PlaybackError.server;
+
+    final Widget body = switch (state.phase) {
+      PlaybackPhase.loading => const _LoadingView(),
+      PlaybackPhase.failed when state.error == PlaybackError.sessionExpired =>
+        const _LoadingView(),
+      PlaybackPhase.failed => _ErrorView(
+        error: error,
+        onRetry: error == PlaybackError.notFound
+            ? null
+            : () => _run(_controller.retry(), 'retry'),
+        onBack: () => unawaited(_back()),
+      ),
+      PlaybackPhase.ready => Stack(
+        children: [
+          Positioned.fill(
+            child: _ScoreView(
+              result: state.result!,
+              timeline: state.timeline ?? ScoreTimeline.empty,
+              display: _display,
+              jumps: _jumps,
+              playing: state.playing,
+            ),
+          ),
+          Positioned(
+            top: 8,
+            left: 12,
+            right: 12,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (!_noticeDismissed)
+                  _ReviewBanner(
+                    key: const ValueKey('accuracy-notice'),
+                    message: PlaybackMessages.accuracyNotice,
+                    dismissTooltip: PlaybackMessages.dismissNotice,
+                    onDismiss: () => setState(() => _noticeDismissed = true),
+                    fill: AppTheme.playbackNoticeFill,
+                    ink: AppTheme.playbackNoticeText,
+                    padding: const EdgeInsets.fromLTRB(16, 10, 4, 10),
+                  ),
+                if (state.showReviewBanner) ...[
+                  if (!_noticeDismissed) const SizedBox(height: 8),
+                  _ReviewBanner(
+                    key: const ValueKey('review-banner'),
+                    message: PlaybackMessages.review,
+                    dismissTooltip: PlaybackMessages.dismissReview,
+                    onDismiss: _controller.dismissReview,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    };
+
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) unawaited(_back());
+      },
+      child: Scaffold(
+        backgroundColor: Colors.white,
+        body: SafeArea(
+          bottom: !ready,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _Header(
+                title: widget.title,
+                arranger: state.arranger,
+                onBack: () => unawaited(_back()),
+                onDownload: ready ? _openExport : null,
+              ),
+              if (ready)
+                _VoiceChips(
+                  available: state.available,
+                  selected: state.selected,
+                  unreadable: {...?state.result?.unreadableVoices},
+                  onToggle: _toggleVoice,
+                  onUnreadable: (voice) => unawaited(_onUnreadableChip(voice)),
+                ),
+              if (ready && state.timingUnavailable)
+                const _IndicatorUnavailableNote(),
+              Expanded(child: body),
+            ],
+          ),
+        ),
+        bottomNavigationBar: ready
+            ? _ControlPanel(
+                display: _display,
+                duration: state.duration,
+                playing: state.playing,
+                onPlayPause: _onPlayPause,
+                onToStart: () =>
+                    unawaited(_afterSeek(_controller.skipToStart())),
+                onToEnd: () => unawaited(_afterSeek(_controller.skipToEnd())),
+                onBack5: () => unawaited(
+                  _afterSeek(_controller.skipBy(-PlaybackController.skipStep)),
+                ),
+                onForward5: () => unawaited(
+                  _afterSeek(_controller.skipBy(PlaybackController.skipStep)),
+                ),
+                onSeekChanged: (value) {
+                  _holdAudioForDrag();
+                  _dragging = true;
+                  _dragGeneration++;
+                  _display.value = value;
+                },
+                onSeekEnd: (value) => unawaited(_onSeekEnd(value)),
+                onMixer: _openMixer,
+                onSpeed: _openSpeed,
+              )
+            : null,
+      ),
+    );
+  }
+}
+
+class _Header extends StatelessWidget {
+  const _Header({
+    required this.title,
+    required this.arranger,
+    required this.onBack,
+    required this.onDownload,
+  });
+
+  final String title;
+  final String? arranger;
+  final VoidCallback onBack;
+  final VoidCallback? onDownload;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _NavyDisc(
+            icon: Icons.arrow_back_rounded,
+            tooltip: PlaybackMessages.back,
+            onPressed: onBack,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: MediaQuery.withClampedTextScaling(
+              maxScaleFactor: 1.3,
+              child: Column(
+                children: [
+                  Semantics(
+                    header: true,
+                    child: Text(
+                      title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: textTheme.titleLarge?.copyWith(
+                        fontSize: 22,
+                        height: 1.15,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.playbackTitle,
+                      ),
+                    ),
+                  ),
+                  if (arranger case final arranger?) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      PlaybackMessages.arrangedBy(arranger),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: textTheme.bodyMedium?.copyWith(
+                        color: AppTheme.playbackSubtle,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Kept in the layout while loading so the title stays centred.
+          Visibility.maintain(
+            visible: onDownload != null,
+            child: _NavyDisc(
+              icon: Icons.download_rounded,
+              tooltip: PlaybackMessages.download,
+              onPressed: onDownload,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NavyDisc extends StatelessWidget {
+  const _NavyDisc({
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback? onPressed;
+
+  /// The mockup's disc; the padded tap target makes it 48.
+  static const double _size = 44;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton.filled(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      icon: Icon(icon),
+      iconSize: 26,
+      style: IconButton.styleFrom(
+        backgroundColor: AppTheme.playbackNavy,
+        foregroundColor: Colors.white,
+        disabledBackgroundColor: AppTheme.playbackNavy,
+        disabledForegroundColor: Colors.white,
+        fixedSize: const Size.square(_size),
+        minimumSize: const Size.square(_size),
+        padding: EdgeInsets.zero,
+        tapTargetSize: MaterialTapTargetSize.padded,
+      ),
+    );
+  }
+}
+
+class _VoiceChips extends StatelessWidget {
+  const _VoiceChips({
+    required this.available,
+    required this.selected,
+    required this.unreadable,
+    required this.onToggle,
+    required this.onUnreadable,
+  });
+
+  final Set<VoicePart> available;
+  final Set<VoicePart> selected;
+  final Set<VoicePart> unreadable;
+  final ValueChanged<VoicePart> onToggle;
+  final ValueChanged<VoicePart> onUnreadable;
+
+  static const double _chipGap = 2;
+
+  /// Row width at which four chips just fit on one line (Roboto, scale 1.0,
+  /// 320 dp minus gutters); wider rows spend the spare width on longer chips.
+  static const double _tightRowWidth = 288;
+
+  /// Spare row width per extra dp of label padding on each side.
+  static const double _spareDivisor = 40;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    return MediaQuery.withClampedTextScaling(
+      maxScaleFactor: 1.3,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final extra =
+                ((constraints.maxWidth - _tightRowWidth) / _spareDivisor).clamp(
+                  0.0,
+                  double.infinity,
+                );
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  PlaybackMessages.selectVoices,
+                  style: textTheme.bodyMedium?.copyWith(
+                    color: AppTheme.playbackSubtle,
+                  ),
+                ),
+                // A Wrap, not a Row: one line is guaranteed only at text scale 1.0;
+                // above that it wraps rather than clips (NFR-10).
+                Wrap(
+                  spacing: _chipGap,
+                  children: [
+                    for (final voice in VoicePart.values)
+                      _VoiceChip(
+                        voice: voice,
+                        available: available.contains(voice),
+                        selected: selected.contains(voice),
+                        onToggle: onToggle,
+                        onUnavailableTap:
+                            !available.contains(voice) &&
+                                unreadable.contains(voice)
+                            ? () => onUnreadable(voice)
+                            : null,
+                        extraPadding: extra,
+                      ),
+                  ],
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _VoiceChip extends StatelessWidget {
+  const _VoiceChip({
+    required this.voice,
+    required this.available,
+    required this.selected,
+    required this.onToggle,
+    required this.extraPadding,
+    this.onUnavailableTap,
+  });
+
+  final VoicePart voice;
+  final bool available;
+  final bool selected;
+  final ValueChanged<VoicePart> onToggle;
+
+  /// Added to the label's horizontal padding: longer chips on wider rows.
+  final double extraPadding;
+
+  /// A disabled chip that still answers a tap (PIYA-208: an `unreadable`
+  /// voice offers the retake); null for one that doesn't.
+  final VoidCallback? onUnavailableTap;
+
+  static const double _unavailableAlpha = 0.45;
+
+  /// Sized so four selected chips (tick included) fit 360 dp minus the
+  /// 16 dp gutters at text scale 1.0 (PIYA-208-V2.5 AC1).
+  static const double _labelSize = 13;
+  static const double _chipPadding = 4;
+  static const double _labelPadding = 1;
+
+  /// Each voice's own colour, shared with the Voice Mixer; white on all
+  /// four is >= 4.5:1 (see AppTheme.mixerSoprano).
+  static const _voiceFill = {
+    VoicePart.soprano: AppTheme.mixerSoprano,
+    VoicePart.alto: AppTheme.mixerAlto,
+    VoicePart.tenor: AppTheme.mixerTenor,
+    VoicePart.bass: AppTheme.mixerBass,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final on = selected && available;
+    final chip = FilterChip(
+      key: ValueKey('voice-chip-${voice.name}'),
+      label: Text(PlaybackMessages.voiceChip(voice)),
+      selected: on,
+      onSelected: available ? (_) => onToggle(voice) : null,
+      showCheckmark: true,
+      checkmarkColor: Colors.white,
+      selectedColor: _voiceFill[voice],
+      padding: const EdgeInsets.all(_chipPadding),
+      labelPadding: EdgeInsets.symmetric(
+        horizontal: _labelPadding + extraPadding,
+      ),
+      backgroundColor: AppTheme.playbackChipFill,
+      disabledColor: AppTheme.playbackChipFill.withValues(
+        alpha: _unavailableAlpha,
+      ),
+      labelStyle: TextStyle(
+        fontSize: _labelSize,
+        fontWeight: FontWeight.w600,
+        color: on
+            ? Colors.white
+            : available
+            ? AppTheme.playbackChipText
+            : AppTheme.playbackChipText.withValues(alpha: _unavailableAlpha),
+        decoration: available ? null : TextDecoration.lineThrough,
+      ),
+      shape: const StadiumBorder(),
+      side: BorderSide.none,
+      materialTapTargetSize: MaterialTapTargetSize.padded,
+    );
+    if (available) return chip;
+    final tap = onUnavailableTap;
+    if (tap == null) {
+      return Semantics(hint: PlaybackMessages.voiceUnavailable, child: chip);
+    }
+    // The chip itself stays disabled (it can't be selected); the tap
+    // around it opens the alert.
+    return Semantics(
+      hint: PlaybackMessages.voiceUnavailable,
+      button: true,
+      onTap: tap,
+      child: GestureDetector(
+        key: ValueKey('voice-chip-tap-${voice.name}'),
+        behavior: HitTestBehavior.opaque,
+        onTap: tap,
+        child: chip,
+      ),
+    );
+  }
+}
+
+class _LoadingView extends StatelessWidget {
+  const _LoadingView();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Semantics(
+        liveRegion: true,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(color: AppTheme.playbackNavy),
+            const SizedBox(height: 16),
+            Text(
+              PlaybackMessages.loading,
+              style: Theme.of(context).textTheme.bodyLarge
+                  ?.copyWith(color: AppTheme.playbackSubtle),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The timing file didn't load: the audio plays, the band can't. Said
+/// once, quietly, so the missing band doesn't look like a bug.
+class _IndicatorUnavailableNote extends StatelessWidget {
+  const _IndicatorUnavailableNote();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      key: const ValueKey('indicator-unavailable'),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+      child: Text(
+        PlaybackMessages.indicatorUnavailable,
+        textAlign: TextAlign.center,
+        style: Theme.of(context).textTheme.bodySmall
+            ?.copyWith(color: AppTheme.playbackSubtle),
+      ),
+    );
+  }
+}
+
+/// FR-14: one view per failure kind, each with its own heading, icon and
+/// copy, so "still converting" never reads like "no internet".
+class _ErrorView extends StatelessWidget {
+  const _ErrorView({
+    required this.error,
+    required this.onRetry,
+    required this.onBack,
+  });
+
+  final PlaybackError error;
+
+  /// Null hides Retry: a score that is gone (404) won't come back by
+  /// asking again, so the only way on is back to the library.
+  final VoidCallback? onRetry;
+  final VoidCallback onBack;
+
+  static const double _iconSize = 48;
+
+  IconData get _icon => switch (error) {
+    PlaybackError.notReady => Icons.hourglass_top_rounded,
+    PlaybackError.notFound => Icons.search_off_rounded,
+    PlaybackError.network => Icons.wifi_off_rounded,
+    PlaybackError.audio => Icons.music_off_rounded,
+    PlaybackError.server ||
+    PlaybackError.sessionExpired => Icons.error_outline_rounded,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Icon(_icon, size: _iconSize, color: AppTheme.playbackNavy),
+          const SizedBox(height: 12),
+          Semantics(
+            header: true,
+            child: Text(
+              PlaybackMessages.errorHeading(error),
+              textAlign: TextAlign.center,
+              style: textTheme.headlineSmall?.copyWith(
+                fontSize: 22,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.playbackTitle,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Semantics(
+            liveRegion: true,
+            child: Text(
+              PlaybackMessages.errorBody(error),
+              textAlign: TextAlign.center,
+              style: textTheme.bodyLarge?.copyWith(
+                color: AppTheme.onboardingBody,
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          if (onRetry case final retry?) ...[
+            PrimaryPillButton(
+              label: PlaybackMessages.retry,
+              onPressed: retry,
+              backgroundColor: AppTheme.processingSecondary,
+            ),
+            const SizedBox(height: 8),
+          ],
+          OutlinedButton(
+            onPressed: onBack,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppTheme.processingSecondary,
+              side: const BorderSide(color: AppTheme.processingSecondary),
+              minimumSize: const Size.fromHeight(48),
+              shape: const StadiumBorder(),
+            ),
+            child: const Text(PlaybackMessages.backToLibrary),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReviewBanner extends StatelessWidget {
+  const _ReviewBanner({
+    super.key,
+    required this.message,
+    required this.dismissTooltip,
+    required this.onDismiss,
+    this.fill = AppTheme.playbackReviewFill,
+    this.ink = AppTheme.playbackReviewText,
+    this.padding = const EdgeInsets.only(left: 12),
+  });
+
+  final String message;
+  final String dismissTooltip;
+  final VoidCallback onDismiss;
+  final Color fill;
+  final Color ink;
+  final EdgeInsets padding;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: fill,
+      elevation: 2,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: padding,
+        child: Row(
+          children: [
+            Icon(Icons.info_outline_rounded, size: 20, color: ink),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Semantics(
+                liveRegion: true,
+                child: Text(
+                  message,
+                  style: Theme.of(context).textTheme.bodySmall
+                      ?.copyWith(fontSize: 13, color: ink),
+                ),
+              ),
+            ),
+            IconButton(
+              tooltip: dismissTooltip,
+              onPressed: onDismiss,
+              color: ink,
+              icon: const Icon(Icons.close_rounded, size: 20),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The original page images, fit to width and stacked vertically (FR-8,
+/// AC1, V2.4), with the indicator band drawn over the page it is on (AC6).
+///
+/// One [InteractiveViewer] is both the zoom and the scroll (V2.3, V2.4
+/// AC5): a scroll view around it fights it for vertical drags and clips
+/// the zoomed stack, so follow and seek move its translation instead.
+class _ScoreView extends StatefulWidget {
+  const _ScoreView({
+    required this.result,
+    required this.timeline,
+    required this.display,
+    required this.jumps,
+    required this.playing,
+  });
+
+  final ScoreResult result;
+  final ScoreTimeline timeline;
+  final ValueListenable<Duration> display;
+  final Listenable jumps;
+  final bool playing;
+
+  @override
+  State<_ScoreView> createState() => _ScoreViewState();
+}
+
+class _ScoreViewState extends State<_ScoreView>
+    with SingleTickerProviderStateMixin {
+  /// The band's width at the mockup's 412 dp screen width; scales with
+  /// the page.
+  static const double _bandWidth = 18;
+  static const double _referenceWidth = 412;
+  static const double _gutter = 12;
+  static const double _pageGap = 12;
+  static const double _padTop = 8;
+  static const double _padBottom = 16;
+
+  /// V2.3 AC1, user-approved 2026-10-28.
+  static const double _maxZoom = 4;
+
+  /// A page whose size isn't known yet is laid out as A4 portrait.
+  static const double _fallbackAspect = 1.414;
+
+  static const Duration _scrollDuration = Duration(milliseconds: 350);
+
+  /// Where the band's top (and, zoomed, its left) lands when the view
+  /// scrolls to it, as a fraction of the view.
+  static const double _followAnchor = 0.08;
+
+  /// A follow that would move the view less than this is skipped.
+  static const double _followSlack = 0.5;
+
+  /// How far one TalkBack scroll moves, as a fraction of the view, so a
+  /// line of the last screen stays in sight.
+  static const double _semanticScroll = 0.8;
+
+  final TransformationController _view = TransformationController();
+  late final AnimationController _scroll = AnimationController(
+    vsync: this,
+    duration: _scrollDuration,
+  )..addListener(_animateScroll);
+  Matrix4Tween? _scrollTween;
+  final Map<int, Size> _decoded = {};
+  final List<(ImageStream, ImageStreamListener)> _streams = [];
+
+  /// The user scrolled, panned or pinched: auto-follow stays off until
+  /// they tap play or seek (V2.4 AC3 [Call]).
+  bool _manual = false;
+  Offset _doubleTapAt = Offset.zero;
+  Size _viewport = Size.zero;
+  double _pageWidth = 0;
+  double _bandPx = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.display.addListener(_follow);
+    widget.jumps.addListener(_onJump);
+  }
+
+  @override
+  void didUpdateWidget(_ScoreView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // The display ticks every frame while playing, so the next one
+    // follows; moving the view here, mid-build, would rebuild the viewer.
+    if (widget.playing && !oldWidget.playing) _manual = false;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _resolveSizes();
+  }
+
+  @override
+  void dispose() {
+    widget.display.removeListener(_follow);
+    widget.jumps.removeListener(_onJump);
+    for (final (stream, listener) in _streams) {
+      stream.removeListener(listener);
+    }
+    _scroll.dispose();
+    _view.dispose();
+    super.dispose();
+  }
+
+  static ImageProvider? _imageFor(Uri? uri) =>
+      uri == null ? null : scoreImageFor(uri);
+
+  /// Pages without a server-given size are measured from the decoded
+  /// image (see ScoreResult.pageSizes).
+  void _resolveSizes() {
+    if (_streams.isNotEmpty) return;
+    final images = widget.result.scoreImages;
+    for (var i = 0; i < images.length; i++) {
+      if (widget.result.pageSizeAt(i) != null) continue;
+      final provider = _imageFor(images[i]);
+      if (provider == null) continue;
+      final stream = provider.resolve(createLocalImageConfiguration(context));
+      final listener = ImageStreamListener(
+        (info, _) {
+          if (!mounted) return;
+          setState(() {
+            _decoded[i] = Size(
+              info.image.width.toDouble(),
+              info.image.height.toDouble(),
+            );
+          });
+        },
+        onError: (error, _) {
+          // The page still shows (at A4 proportions); only the band's
+          // placement on it may be off.
+          debugPrint('Playback: page ${i + 1} size unreadable: $error');
+        },
+      );
+      stream.addListener(listener);
+      _streams.add((stream, listener));
+    }
+  }
+
+  Size? _naturalSize(int page) =>
+      widget.result.pageSizeAt(page) ?? _decoded[page];
+
+  double _pageHeight(int page) {
+    final size = _naturalSize(page);
+    return size == null
+        ? _pageWidth * _fallbackAspect
+        : _pageWidth * size.height / size.width;
+  }
+
+  double _scaleFor(int page) {
+    final size = _naturalSize(page);
+    return size == null ? 0 : _pageWidth / size.width;
+  }
+
+  double _pageTop(int page) {
+    var top = _padTop;
+    for (var i = 0; i < page; i++) {
+      top += _pageHeight(i) + _pageGap;
+    }
+    return top;
+  }
+
+  double get _contentHeight =>
+      _pageTop(widget.result.scoreImages.length) - _pageGap + _padBottom;
+
+  /// The view's matrix at [zoom], shifted by ([dx], [dy]) but kept inside
+  /// the stack, the same bounds the viewer keeps a pan in.
+  Matrix4 _clamped(double zoom, double dx, double dy) {
+    final minX = _viewport.width * (1 - zoom);
+    final minY = math.min(0.0, _viewport.height - _contentHeight * zoom);
+    return Matrix4.diagonal3Values(zoom, zoom, 1)
+      ..setTranslationRaw(dx.clamp(minX, 0), dy.clamp(minY, 0), 0);
+  }
+
+  /// A screen size change (rotation, split screen) can leave the old
+  /// translation past the stack's new end, showing blank space.
+  void _reclamp() {
+    if (!mounted) return;
+    final matrix = _view.value;
+    final shift = matrix.getTranslation();
+    _view.value = _clamped(matrix.getMaxScaleOnAxis(), shift.x, shift.y);
+  }
+
+  /// A TalkBack scroll (V2.4 AC3): manual, like a drag. [dx] and [dy] move
+  /// the stack on screen, so negative shows what is below or right.
+  void _scrollBy(double dx, double dy) {
+    _manual = true;
+    _scroll.stop();
+    final matrix = _view.value;
+    final shift = matrix.getTranslation();
+    _view.value = _clamped(
+      matrix.getMaxScaleOnAxis(),
+      shift.x + dx,
+      shift.y + dy,
+    );
+  }
+
+  /// The scroll actions SingleChildScrollView gave TalkBack, offered only
+  /// where the stack can still move that way.
+  Widget _withScrollActions(
+    BuildContext context,
+    Matrix4 matrix,
+    Widget? child,
+  ) {
+    final zoom = matrix.getMaxScaleOnAxis();
+    final shift = matrix.getTranslation();
+    final minX = _viewport.width * (1 - zoom);
+    final minY = math.min(0.0, _viewport.height - _contentHeight * zoom);
+    final stepX = _viewport.width * _semanticScroll;
+    final stepY = _viewport.height * _semanticScroll;
+    return Semantics(
+      container: true,
+      onScrollUp: shift.y > minY + _followSlack
+          ? () => _scrollBy(0, -stepY)
+          : null,
+      onScrollDown: shift.y < -_followSlack ? () => _scrollBy(0, stepY) : null,
+      onScrollLeft: shift.x > minX + _followSlack
+          ? () => _scrollBy(-stepX, 0)
+          : null,
+      onScrollRight: shift.x < -_followSlack ? () => _scrollBy(stepX, 0) : null,
+      child: child,
+    );
+  }
+
+  void _animateScroll() {
+    final tween = _scrollTween;
+    if (tween == null) return;
+    _view.value = tween.transform(Curves.easeInOut.transform(_scroll.value));
+  }
+
+  /// A seek the user asked for wins over a follow animation still running
+  /// (it would otherwise land on the old spot and ignore the jump), and
+  /// ends a manual hold (V2.4 AC3, AC4).
+  void _onJump() {
+    _manual = false;
+    _follow(interrupt: true);
+  }
+
+  /// Any pan, scroll or pinch by the user. Never a follow: those set the
+  /// matrix directly, which the viewer doesn't report as an interaction.
+  void _onUserMove(ScaleStartDetails _) {
+    _manual = true;
+    _scroll.stop();
+  }
+
+  /// Back to 1x (V2.3 AC3), keeping the tapped spot of the stack at the
+  /// same height on screen.
+  void _resetZoom() {
+    _scroll.stop();
+    final matrix = _view.value;
+    final zoom = matrix.getMaxScaleOnAxis();
+    final stackY = (_doubleTapAt.dy - matrix.getTranslation().y) / zoom;
+    _view.value = _clamped(1, 0, _doubleTapAt.dy - stackY);
+  }
+
+  /// Keeps the band on screen while it moves, at any zoom, unless the
+  /// user moved the view since the last play or seek (don't fight them).
+  void _follow({bool interrupt = false}) {
+    if (_manual || _viewport.isEmpty || _pageWidth <= 0) return;
+    if (_scroll.isAnimating && !interrupt) return;
+    final position = widget.timeline.positionAt(widget.display.value);
+    if (position == null) return;
+    if (position.pageIndex >= widget.result.scoreImages.length) return;
+    final scale = _scaleFor(position.pageIndex);
+    if (scale == 0) return;
+    final pageTop = _pageTop(position.pageIndex);
+    final matrix = _view.value;
+    final zoom = matrix.getMaxScaleOnAxis();
+    final shift = matrix.getTranslation();
+    final top = (pageTop + position.top * scale) * zoom + shift.y;
+    final bottom = (pageTop + position.bottom * scale) * zoom + shift.y;
+    final x = (_gutter + position.x * scale) * zoom + shift.x;
+    final halfBand = _bandPx / 2 * zoom;
+    final fitsY = top >= 0 && bottom <= _viewport.height;
+    final fitsX = x - halfBand >= 0 && x + halfBand <= _viewport.width;
+    if (fitsY && fitsX) return;
+    final end = _clamped(
+      zoom,
+      fitsX ? shift.x : shift.x - x + _viewport.width * _followAnchor,
+      fitsY ? shift.y : shift.y - top + _viewport.height * _followAnchor,
+    );
+    // Already as close as it gets: a band taller than the zoomed view, or
+    // one held back by the stack's edge, would otherwise restart this
+    // every frame.
+    final to = end.getTranslation();
+    if ((to.x - shift.x).abs() < _followSlack &&
+        (to.y - shift.y).abs() < _followSlack) {
+      return;
+    }
+    _scrollTween = Matrix4Tween(begin: matrix.clone(), end: end);
+    unawaited(_scroll.forward(from: 0));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final images = widget.result.scoreImages;
+    if (images.every((image) => image == null)) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            PlaybackMessages.noScoreImage,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyLarge
+                ?.copyWith(color: AppTheme.playbackSubtle),
+          ),
+        ),
+      );
+    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.biggest != _viewport) {
+          // After this layout, so the stack's new height is known.
+          WidgetsBinding.instance.addPostFrameCallback((_) => _reclamp());
+        }
+        _viewport = constraints.biggest;
+        _pageWidth = constraints.maxWidth - 2 * _gutter;
+        final bandWidth = _bandPx =
+            _bandWidth * MediaQuery.sizeOf(context).width / _referenceWidth;
+        // Nothing in the score is tappable (the band ignores pointers), so
+        // waiting to see a double-tap delays no single tap.
+        return ValueListenableBuilder<Matrix4>(
+          valueListenable: _view,
+          builder: _withScrollActions,
+          child: GestureDetector(
+            onDoubleTapDown: (details) => _doubleTapAt = details.localPosition,
+            onDoubleTap: _resetZoom,
+            child: InteractiveViewer(
+              key: const ValueKey('score-scroll'),
+              transformationController: _view,
+              constrained: false,
+              maxScale: _maxZoom,
+              onInteractionStart: _onUserMove,
+              child: SizedBox(
+                width: constraints.maxWidth,
+                height: _contentHeight,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    _gutter,
+                    _padTop,
+                    _gutter,
+                    _padBottom,
+                  ),
+                  child: Column(
+                    children: [
+                      for (var i = 0; i < images.length; i++) ...[
+                        if (i > 0) const SizedBox(height: _pageGap),
+                        _ScorePage(
+                          pageIndex: i,
+                          pageCount: images.length,
+                          image: _imageFor(images[i]),
+                          width: _pageWidth,
+                          height: _pageHeight(i),
+                          scale: _scaleFor(i),
+                          bandWidth: bandWidth,
+                          timeline: widget.timeline,
+                          display: widget.display,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ScorePage extends StatelessWidget {
+  const _ScorePage({
+    required this.pageIndex,
+    required this.pageCount,
+    required this.image,
+    required this.width,
+    required this.height,
+    required this.scale,
+    required this.bandWidth,
+    required this.timeline,
+    required this.display,
+  });
+
+  final int pageIndex;
+  final int pageCount;
+  final ImageProvider? image;
+  final double width;
+  final double height;
+
+  /// Page-image pixels to logical pixels; 0 while the size is unknown.
+  final double scale;
+  final double bandWidth;
+  final ScoreTimeline timeline;
+  final ValueListenable<Duration> display;
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = image;
+    return SizedBox(
+      key: ValueKey('score-page-$pageIndex'),
+      width: width,
+      height: height,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: provider == null
+                ? const ColoredBox(color: Colors.white)
+                : Image(
+                    image: provider,
+                    fit: BoxFit.contain,
+                    semanticLabel: PlaybackMessages.pageLabel(
+                      pageIndex + 1,
+                      pageCount,
+                    ),
+                    errorBuilder: (_, _, _) => const Center(
+                      child: Icon(
+                        Icons.broken_image_outlined,
+                        color: AppTheme.playbackSubtle,
+                      ),
+                    ),
+                  ),
+          ),
+          if (scale > 0)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: ValueListenableBuilder<Duration>(
+                  valueListenable: display,
+                  builder: (context, value, _) {
+                    final band = timeline.positionAt(value);
+                    if (band == null || band.pageIndex != pageIndex) {
+                      return const SizedBox.shrink();
+                    }
+                    return Stack(
+                      children: [
+                        Positioned(
+                          left: band.x * scale - bandWidth / 2,
+                          top: band.top * scale,
+                          width: bandWidth,
+                          height: (band.bottom - band.top) * scale,
+                          child: const DecoratedBox(
+                            key: ValueKey('playback-band'),
+                            decoration: BoxDecoration(
+                              color: AppTheme.playbackBand,
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ControlPanel extends StatelessWidget {
+  const _ControlPanel({
+    required this.display,
+    required this.duration,
+    required this.playing,
+    required this.onPlayPause,
+    required this.onToStart,
+    required this.onToEnd,
+    required this.onBack5,
+    required this.onForward5,
+    required this.onSeekChanged,
+    required this.onSeekEnd,
+    required this.onMixer,
+    required this.onSpeed,
+  });
+
+  final ValueListenable<Duration> display;
+  final Duration duration;
+  final bool playing;
+  final VoidCallback onPlayPause;
+  final VoidCallback onToStart;
+  final VoidCallback onToEnd;
+  final VoidCallback onBack5;
+  final VoidCallback onForward5;
+  final ValueChanged<Duration> onSeekChanged;
+  final ValueChanged<Duration> onSeekEnd;
+  final VoidCallback onMixer;
+  final VoidCallback onSpeed;
+
+  static const double _radius = 24;
+  static const double _playSize = 56;
+  static const double _trackHeight = 4;
+
+  /// The Slider insets its track by the overlay radius, so the time labels
+  /// are inset by the same amount to sit under the real track ends.
+  static const double _overlayRadius = 24;
+
+  /// Track bottom to the time labels' text box, from the playback mockup:
+  /// 14 dp to the digit tops (412 px image = 412 dp, scale 1, pixel-read),
+  /// minus ~5 dp of line leading. The 5 dp is an ESTIMATE, not derived from
+  /// the font's metrics (see the fix-round note in task-17-report.md).
+  static const double _barToTimeGap = 9;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final timeStyle = textTheme.bodyMedium?.copyWith(
+      color: Colors.white,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+    final maxMs = duration.inMilliseconds > 0 ? duration.inMilliseconds : 1;
+
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        gradient: AppTheme.playbackPanelGradient,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(_radius)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: MediaQuery.withClampedTextScaling(
+          maxScaleFactor: 1.3,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _CyanButton(
+                      icon: Icons.skip_previous_outlined,
+                      tooltip: PlaybackMessages.toStart,
+                      onPressed: onToStart,
+                    ),
+                    _CyanButton(
+                      icon: Icons.replay_5_rounded,
+                      tooltip: PlaybackMessages.back5,
+                      onPressed: onBack5,
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton.filled(
+                      key: const ValueKey('play-pause'),
+                      tooltip: playing
+                          ? PlaybackMessages.pause
+                          : PlaybackMessages.play,
+                      onPressed: onPlayPause,
+                      iconSize: 34,
+                      style: IconButton.styleFrom(
+                        backgroundColor: AppTheme.playbackAccent,
+                        foregroundColor: AppTheme.playbackNavy,
+                        fixedSize: const Size.square(_playSize),
+                      ),
+                      icon: Icon(
+                        playing
+                            ? Icons.pause_rounded
+                            : Icons.play_arrow_rounded,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _CyanButton(
+                      icon: Icons.forward_5_rounded,
+                      tooltip: PlaybackMessages.forward5,
+                      onPressed: onForward5,
+                    ),
+                    _CyanButton(
+                      icon: Icons.skip_next_outlined,
+                      tooltip: PlaybackMessages.toLastBar,
+                      onPressed: onToEnd,
+                    ),
+                  ],
+                ),
+                // The labels sit in the slider's own lower area and ignore
+                // touches, so the Slider keeps its full 48 dp hit box.
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        activeTrackColor: Colors.white,
+                        // Not in the mockup (its track is all white at 0:00):
+                        // a dimmer unplayed part shows progress at a glance.
+                        inactiveTrackColor: Colors.white.withValues(
+                          alpha: 0.45,
+                        ),
+                        thumbColor: Colors.white,
+                        overlayColor: Colors.white.withValues(alpha: 0.2),
+                        trackHeight: _trackHeight,
+                        thumbShape: const RoundSliderThumbShape(
+                          enabledThumbRadius: 9,
+                        ),
+                        overlayShape: const RoundSliderOverlayShape(
+                          overlayRadius: _overlayRadius,
+                        ),
+                        trackShape: const RoundedRectSliderTrackShape(),
+                        showValueIndicator: ShowValueIndicator.never,
+                      ),
+                      child: ValueListenableBuilder<Duration>(
+                        valueListenable: display,
+                        builder: (context, value, _) => Slider(
+                          key: const ValueKey('seek-bar'),
+                          value: value.inMilliseconds
+                              .clamp(0, maxMs)
+                              .toDouble(),
+                          max: maxMs.toDouble(),
+                          semanticFormatterCallback: (ms) =>
+                              PlaybackMessages.time(
+                                Duration(milliseconds: ms.round()),
+                              ),
+                          label: PlaybackMessages.seek,
+                          onChanged: (ms) =>
+                              onSeekChanged(Duration(milliseconds: ms.round())),
+                          onChangeEnd: (ms) =>
+                              onSeekEnd(Duration(milliseconds: ms.round())),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      left: _overlayRadius,
+                      right: _overlayRadius,
+                      top: _overlayRadius + _trackHeight / 2 + _barToTimeGap,
+                      child: IgnorePointer(
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            ValueListenableBuilder<Duration>(
+                              valueListenable: display,
+                              builder: (context, value, _) => Text(
+                                PlaybackMessages.time(
+                                  value > duration ? duration : value,
+                                ),
+                                key: const ValueKey('time-position'),
+                                style: timeStyle,
+                              ),
+                            ),
+                            Text(
+                              PlaybackMessages.time(duration),
+                              key: const ValueKey('time-duration'),
+                              style: timeStyle,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Flexible(
+                      child: _PanelAction(
+                        icon: const RotatedBox(
+                          quarterTurns: 1,
+                          child: Icon(
+                            Icons.tune_rounded,
+                            color: Colors.white,
+                            size: 28,
+                          ),
+                        ),
+                        label: PlaybackMessages.voiceMixer,
+                        onPressed: onMixer,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Flexible(
+                      child: _PanelAction(
+                        icon: const CustomPaint(
+                          size: Size.square(28),
+                          painter: _MetronomePainter(),
+                        ),
+                        label: PlaybackMessages.speed,
+                        onPressed: onSpeed,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CyanButton extends StatelessWidget {
+  const _CyanButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      iconSize: 30,
+      color: AppTheme.playbackAccent,
+      constraints: const BoxConstraints.tightFor(width: 48, height: 48),
+      icon: Icon(icon),
+    );
+  }
+}
+
+class _PanelAction extends StatelessWidget {
+  const _PanelAction({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final Widget icon;
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: label,
+      excludeSemantics: true,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(12),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  icon,
+                  const SizedBox(height: 2),
+                  Text(
+                    label,
+                    maxLines: 1,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A white outline metronome (no Material icon exists): a tapered body,
+/// its base, and a pendulum tipped to the right.
+class _MetronomePainter extends CustomPainter {
+  const _MetronomePainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+    final stroke = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w * 0.08
+      ..strokeJoin = StrokeJoin.round
+      ..strokeCap = StrokeCap.round;
+    final body = Path()
+      ..moveTo(w * 0.40, h * 0.08)
+      ..lineTo(w * 0.60, h * 0.08)
+      ..lineTo(w * 0.84, h * 0.92)
+      ..lineTo(w * 0.16, h * 0.92)
+      ..close();
+    canvas
+      ..drawPath(body, stroke)
+      ..drawLine(Offset(w * 0.24, h * 0.70), Offset(w * 0.76, h * 0.70), stroke)
+      ..drawLine(Offset(w * 0.50, h * 0.70), Offset(w * 0.86, h * 0.18), stroke)
+      ..drawCircle(
+        Offset(w * 0.73, h * 0.37),
+        w * 0.07,
+        Paint()..color = Colors.white,
+      );
+  }
+
+  @override
+  bool shouldRepaint(_MetronomePainter oldDelegate) => false;
+}
+
+/// A score page's image. A `file:` URI reaches here only from the local
+/// results store (F10, which checks it lies in the results folder) or the
+/// debug fake build: ScoreResult drops server-sent `file:` URLs.
+@visibleForTesting
+ImageProvider? scoreImageFor(Uri uri) => switch (uri.scheme) {
+  'file' => FileImage(File(uri.toFilePath())),
+  'http' || 'https' => NetworkImage(uri.toString()),
+  _ => null,
+};

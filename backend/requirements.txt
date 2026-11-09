@@ -1,0 +1,9 @@
+# Runtime dependencies, exact pins (PIYA-112). Regenerate the pins with `pip freeze` after an intentional upgrade.
+Flask==3.1.3
+gunicorn==26.2.0
+psycopg[binary]==3.3.6
+psycopg-pool==3.3.3
+argon2-cffi==25.1.0
+boto3==1.43.123
+Pillow==13.0.0
+pypdfium2==5.14.0

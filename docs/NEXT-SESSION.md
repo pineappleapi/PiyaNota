@@ -2,11 +2,9 @@
 
 Handoff doc for continuing PiyaNota work in a fresh session. Read this first; it links out to the
 full detail rather than repeating it. Written 2026-09-14, rewritten 2026-09-16, rewritten 2026-09-19,
-**2026-09-23 section prepended**, 2026-09-28 accuracy-targets section added on top (the 2026-09-19 retraining handoff below is still current).
+rewritten 2026-09-24, top sections added 2026-09-28.
 
 ## Transcription accuracy targets: camera pitch > 85%, SER < 15% (2026-09-28, newest, read first)
-
-> **This branch's copy is behind.** The 2026-09-24 to 2026-09-28 sections (clef/key classifier, fresh-photo eval, BUG-024..026) are only in `docs/NEXT-SESSION.md` on branch `piya106/groundtruth-eval` (worktree `D:\PiyaNota-training`). Read that copy after this section.
 
 **Goal (set by the user, 2026-09-28):** raise the final system to **pitch accuracy above 85%** and **token SER
 below 15%**. The target applies to **camera input**, the harder condition and the one the thesis hypothesis
@@ -70,6 +68,27 @@ on branch `piya106/groundtruth-eval` (worktree `D:\PiyaNota-training`).
    - BUG-016's single-variable experiments (grayscale vs binarized CRNN input; crop the system bracket).
 3. **Decoding without retraining.** Try CTC beam search with a measure-duration check against the time signature,
    to suppress spurious notes (insertions).
+   - **Plain beam search: NO-GO (2026-09-29, ml-cv-lead).** It was run without an LM on eval_prelim, which is
+     dev data, so this is diagnostic only. The two seeds' strip pools overlap, so 7082 is not N.
+     - Pitch: greedy 6129/7082; beam5/10/20 6136/6136/6134 (+0.1 pp at most).
+     - Token SER got worse: 32.38% → 32.78-32.94%.
+     - Paired beam20 vs greedy: 8 notes gained, 3 lost. Beam changed 143 note/accidental tokens and 383
+       others, mostly dots, multirests, slurs and digits.
+     - CPM raw token Levenshtein error rate (not the SOW SER definition):
+       - clean: about 0.02 pp better;
+       - distorted: about 0.2 pp better (4.53-4.54% → 4.34-4.38%).
+     - Worse SER on real scores means the CRNN is miscalibrated off its training distribution (BUG-011 class).
+     - Script: `beam_check.py` / `beam_followup.py` in the 2026-09-29 job tmp (not in the repo).
+   - **Oracle top-k on the same dev data.** Of 706 greedy note/accidental tokens that substitute a GT
+     note/accidental (1:1 alignment), the GT token was:
+     - the 2nd choice in 36%;
+     - in the top 3 in 50%;
+     - above p 1e-2 in 74%;
+     - both in the top 3 and above p 1e-2 in 47%.
+
+     So a rescoring step that knows which alternative is musically right (key signature, accidental
+     grammar, bar duration) has headroom. Plain beam has no such signal. This is a candidate for after
+     fine-tuning, not a result.
 4. **Training:**
    - Add camera-style augmentation to fine-tuning (illumination, shadow, blur, perspective, JPEG, paper texture) to
      close the 9 pp camera gap.
@@ -87,171 +106,179 @@ on branch `piya106/groundtruth-eval` (worktree `D:\PiyaNota-training`).
 - **The abstract's Remaining Work** already lists this accuracy work, the larger held-out set, the Flutter app and
   Flask integration, and the SUS study.
 
-## 2026-09-23 session — resume here after the PC restart
+## Fresh-photo pipeline eval: Stage 3 with and without the clef/key classifier (2026-09-28) - newest, read first
 
-**Why the restart:** mid-session the GPU/driver wedged (`CUDNN_STATUS_EXECUTION_FAILED` in the CRNN's
-BiLSTM, then `nvidia-smi` itself hung). The user restarted the PC to reset it. First thing to check on
-resume: `nvidia-smi` responds and `python -c "import torch; print(torch.cuda.is_available())"` is
-`True`.
+Branch `piya106/groundtruth-eval` (worktree `D:\PiyaNota-training`, no remote, nothing merged or pushed). Commits:
+`561e89e` (eval, scripts, scores, gt/) and `1e4f0e3` (docs, `rename_dataset/`, `output/audio_test/`).
+Full record:
+- `data/eval_fresh/REPORT.md`: interpretation, limits, and abstract text reviewed by ml-cv-lead.
+- `data/eval_fresh/REPORT_tables.md`: all numbers, per symbol and by voice. Confusion matrices are under `runs/scores/`.
+- `data/eval_fresh/PREREG.md`: the pre-registration and Amendment 1.
 
-**Current branch:** `feature/piya106-run-manifest` (branched from `main` @ `2351623`). **Nothing
-committed yet** — all work below is uncommitted in the working tree. Don't commit without the user's
-review (standing rule); senior-reviewer must review before any merge.
+Re-run from the repo root in the CPU venv (deterministic): `python data/eval_fresh/run_eval.py`, then
+`score_eval.py`, then `make_tables.py`.
 
-### What was done
+**What it tested:** the training-tree Stage 1/2/3 on real phone photos from `D:\PiyaNota\data\piyanota_dataset\`.
+Stage 3 ran in two versions:
+- **(a) as-is:** the CRNN reads the clef and key.
+- **(b) `stage3_clefkey.py`:** the ClefKeyNet clef and key replace the CRNN header. `resolve_clef` is the single
+  octave owner, and each system's key comes from a confident-majority vote.
 
-1. **Tenor strip diagnosis (ml-cv-lead).** The user asked whether Stage 3 correctly transcribed
-   `data/strips/page001_sys02_Tenor_vidx3.png` (source `data/raw/IMG_1085.JPG`) with the **base**
-   checkpoint `music_symbol_detection/crnn_cameraprimus_transcription.pt`. Verdict: **no** — wrong
-   clef (`clef.C-L3` vs treble-8vb `G-L2`), flats instead of the 4-sharp key signature, a hallucinated
-   `metersign.C`, invented eighth/beamed/sixteenth-rest content, every duration wrong; only the
-   barline count (3) matched. Ranked causes: (1) font domain gap = BUG-011 (dominant, needs
-   retraining); (2) binarized input + 3× thick stafflines vs Camera-PrIMuS grayscale (BUG-016,
-   preprocessing-testable); (3) system bracket/double barline left of the clef possibly read as a
-   C-clef half (BUG-016, hypothesis); (4) triplets unrepresentable in the vocabulary (BUG-015);
-   (5) ~2–3× wider note spacing than training (BUG-016, hypothesis). Ruled out: staff height/padding,
-   normalization/polarity. Also logged: viz filename collision across systems (BUG-014).
-   Suggested single-variable experiments are listed in BUG-016's repro column.
-2. **Run provenance tracking — `run_manifest.py` (new, PIYA-106, closes the provenance half of
-   BUG-017).** User decisions: ticket **PIYA-106**; manifests saved per run to
-   **`runs/omr/<run_id>/manifest.json`** (`runs/` is already git-ignored); **per-strip raw tokens +
-   per-token confidences included**. Records git commit/dirty files, argv/args, environment
-   (Python, torch/CUDA/cuDNN, GPU, pinned package versions), SHA-256 + size + mtime of CRNN/YOLO/
-   soundfont (CRNN also records its `epoch`), raw input image hashes → page index, params (YOLO
-   thresholds, `STRIP_HEIGHT`, CRNN img height, device, bpm), per-stage status + duration, per-strip
-   tokens/confidences, hashed outputs (events JSONs, audio). Used as a context manager so failed runs
-   still write a manifest with the failing stage + traceback.
-   - Wiring (all additive, `manifest: Optional[RunManifest] = None`): `preprocess_batch()` (Stage 1),
-     `detect_staff_regions()` (Stage 2), `process_strip()` + `transcribe_voice_sequences()`
-     (Stage 3), `run_full_pipeline()` (Stage 5); the `__main__` blocks of Stages 3/4/5 create the
-     manifest and gained a `--runs-dir` flag. `process_strip()` now calls `transcribe_strip(...,
-     return_confidence=True)` — the decoded symbols are identical by construction
-     (`_greedy_ctc_decode` wraps the confidence decoder), but this is **not yet empirically
-     confirmed** (see below).
-   - Diff: `run_manifest.py` (new), `stage1_preprocessing.py`, `stage2_detection.py`,
-     `stage3_transcription.py`, `stage4_reconstruction.py`, `stage5_synthesis.py`.
+Both fine-tuned CRNN seeds are reported as a range, with the original CRNN as a reference row. Pitch accuracy,
+end-to-end:
 
-### Verified so far
+| Piece (GT status) | Strips found | (a) as-is | (b) + classifier | Oracle clef/key |
+|---|---|---|---|---|
+| Non Nobis Domine (user-verified, **gated: PASS**) | 28/36 | 8.0-10.2% | **64.0%** (86% on found strips) | 64.0% |
+| Honneur a Toi (agent GT; mask-tuning piece) | 28/28 | 10.9-15.4% | 73.3-75.9% | 76.7-78.5% |
+| Gaano Ko Ikaw Kamahal (agent GT, unchecked) | 72/72 | 19.9-24.5% | 82.7-82.8% | 82.7-82.8% |
+| Handog (agent GT, unchecked, weakest; mask-tuning piece) | 40/52 | 9.5-9.8% | 54.1-54.6% (78% on found strips; Bass 15-26%) | same as (b) |
 
-- All six files compile (`python -m py_compile`).
-- One full Stage 1→3 CLI run into scratch dirs wrote a correct manifest: base CRNN identified by
-  sha256 `b1c9803c…d47e`, epoch 11; YOLO `f55bb851…8213`; GTX 1650 / CUDA 12.4 / cuDNN 90100.
-- Fixed a bug where `git status --porcelain` output was `.strip()`-ed, eating the first file's
-  leading character (`.gitignore` → `gitignore`); re-checked.
+- **Only Non Nobis is evidence.** Its GT was verified by the user, and it is the only gated piece (gate PASS for
+  both seeds). Honneur, Gaano and Handog use agent-made GT; Gaano and Handog were never checked, at the user's
+  request. Their numbers are diagnostic only and never pooled. Honneur and Handog are in the Stage 1 mask TUNING
+  split, so none of their numbers are fully held out.
+- **All of the gain comes from the clef/key header.** Note and rhythm tokens are unchanged. Token SER is still
+  33-50%, and rhythm is 64% end-to-end on Non Nobis. Every piece uses only standard voice clefs, so a
+  voice-default rule would score the same on clefs. One mid-piece key change (Gaano) was read correctly.
+- **Honneur fails its reference gate on review load (39%)** because of BUG-025: the ClefKeyNet crop lands wrong
+  under a page-edge shadow.
+- **Stage 2 loses whole pages** that contain a non-4-staff system: Non Nobis p4 (solo staff) and 9 of 14 Handog
+  pages (divisi). Logged as BUG-026.
+- New bugs:
+  - BUG-024: Stage 3 stacks an explicit accidental on top of the key alteration.
+  - BUG-025: the clef/key crop is misplaced under page-edge shadow.
+  - BUG-026: Stage 2 drops whole pages.
+- **The Non Nobis, Honneur, Gaano and Handog photos are now used.** They are TEST-only anyway, so any fix for
+  BUG-024/025/026 must be developed on other pieces.
 
-### NOT yet verified — do these next, in order
+**Ground truth moved to `gt/`** (see `gt/README.md`):
+- `gt/non_nobis_domine/` (user-verified)
+- `gt/honneur_a_toi/`
+- `gt/gaano_ko_ikaw_kamahal/`
+- `gt/handog/`
+- `gt/dont_stop_me_now/`
+- `gt/clef_key_labels/` (was `data/val_clefkey/`; SPENT)
+- `gt/both_sides_now/`
+- the annotation viewers, in `gt/tools/`
 
-1. **BUG-013 determinism check (blocks everything below) — DONE for the purpose of unblocking the
-   rest; GPU-side stress-testing deliberately stopped short.** Post-restart, `nvidia-smi`/
-   `torch.cuda.is_available()` both came back healthy. Ran a fresh version of last session's scratch
-   script (3× fresh-process decode of the 48 saved strips, `load_model()` + `transcribe_strip()` on
-   `sorted(glob(strips/*.png))`) on CPU and CUDA. **CPU: 3/3 identical — confirmed stable, not a
-   code-level nondeterminism.** **CUDA: crashed on the 2nd of 3 runs** with the same
-   `CUDNN_STATUS_EXECUTION_FAILED` as before the restart — reproduced, so this is real and
-   GPU-specific, not a fluke. Right after, the GPU briefly refused even a trivial matmul
-   (`CUDA-capable device(s) is/are busy or unavailable`) but self-recovered within ~1 min this time, no
-   second restart needed. Full detail: BUG-013 in `docs/bug-tracker.md`. **User decision (2026-09-23):
-   stop GPU testing, proceed CPU-only** — remaining sub-checks (GPU-stable 3/3, CPU==GPU, retry with
-   `cudnn.deterministic=True`/`benchmark=False`) are intentionally not done and are **not planned**
-   unless the user asks to resume them. All verification below runs CPU-only per that decision.
-2. **No-behaviour-change check for the manifest branch — DONE, 2026-09-23, CPU-only, identical.** Ran
-   HEAD's Stage 1–3 (exported via `git show HEAD:<file>` into a scratch dir, confirmed zero
-   `run_manifest`/`RunManifest` references) against the branch's Stage 1–3 (working tree, wired through
-   a real `RunManifest` exactly as the CLI's `__main__` block does), same input
-   (`data/raw/IMG_1085.JPG`), both CPU-forced. CPU-forcing note: `CUDA_VISIBLE_DEVICES=""` alone wasn't
-   enough — Ultralytics' YOLO call carries a `device="0"` default baked into the checkpoint's training
-   args, which crashes (`Invalid device id`) once the GPU is hidden from torch, and something in its
-   `device="cpu"` codepath also re-enables `torch.cuda.is_available()` afterwards; the test harness
-   (disposable driver scripts, not repo code) patches `ultralytics.engine.model.Model.__call__` to
-   default `device="cpu"` and pins `torch.cuda.is_available = lambda: False` before Stage 3 loads.
-   Result: preprocessed page, all detected strip crops, and all 4 voice `events.json` files
-   (soprano/alto/tenor/bass) are **byte-for-byte identical** between HEAD and the branch (`diff`/
-   `diff -rq` both clean). The branch's `manifest.json` for that run shows `status: completed`, all
-   three stages `completed` with durations, correct dirty git commit — confirms the manifest captures
-   provenance without altering pipeline output.
-3. **Failure-path test — DONE, 2026-09-23, all checks pass.** `with RunManifest(runs_root=<scratch>)
-   as m:` with `stage1_preprocessing` completing normally then `stage2_detection` raising
-   `ValueError`. Confirmed: exception re-raised out of the `with` block (not swallowed); manifest
-   top-level `status: "failed"`; `stages` shows `stage1_preprocessing: completed`,
-   `stage2_detection: failed`; `error` block present with `type: "ValueError"`, the original message,
-   and a non-empty traceback. One environment wrinkle (not a `run_manifest.py` bug): `_environment_info()`
-   calls `torch.cuda.get_device_name(0)` gated on `torch.cuda.is_available()`, and in this environment
-   `CUDA_VISIBLE_DEVICES=""` alone doesn't reliably make `is_available()` return `False` (same quirk hit
-   in item 2 — see there for detail), so the CPU-only test harness pins
-   `torch.cuda.is_available = lambda: False` directly rather than relying on the env var.
-4. **Stage 4 CLI path and Stage 5 `run_full_pipeline()` path — DONE, 2026-09-23, both clean, CPU-only.**
-   Stage 4's own `__main__` (Stages 1→4, real `RunManifest`) ran to completion: 48/37/32/36 events for
-   S/A/T/B (matching item 2's counts exactly, same input), 5 pre-existing SATB duration-mismatch
-   warnings printed (expected data-quality noise from this test image's transcription, unrelated to the
-   manifest diff — not a regression). `run_full_pipeline()` (Stages 1→5) also ran to completion:
-   `pydub`/`midi2audio` are confirmed not installed in this environment, so Stage 5 hit the documented
-   fallback and returned `.mid` paths for all 4 voices instead of `.mp3` — exactly the anticipated,
-   acceptable outcome, not a failure. Both manifests show `status: "completed"`, all 4–5 stages
-   `completed` with durations; the Stage 5 manifest additionally shows the missing `soundfont/piano.sf2`
-   recorded honestly as `{"exists": false}` rather than silently dropped or crashing, and all 8 expected
-   `outputs` entries (4× events, 4× audio) present. One self-inflicted slip during this check: the Stage
-   4 driver script omitted explicit `events_dir`/`viz_dir` overrides, so `transcribe_voice_sequences()`
-   fell through to its dead `D:\PiyaNota (Code)\...` default (BUG-017, already logged, out of scope)
-   and wrote 8 scratch files there — noticed and deleted immediately, not left behind; this was a test
-   script oversight, not a manifest-branch behavior change.
-5. **Self-verify + senior-reviewer — DONE, 2026-09-23. Verdict: recommend merge with changes; one
-   real bug found and fixed.** senior-reviewer's most important finding: `RunManifest.__exit__`
-   (`run_manifest.py`) only guarded `write()` against `OSError`, but `write()`'s `json.dump()` had no
-   `default=` fallback — a non-JSON-serializable value anywhere in the manifest data (concretely:
-   `checkpoint.get("epoch")` flowing into `add_asset(..., extra=...)` at
-   `stage3_transcription.py:1721`, whose type depends on how the Kaggle notebook serialized it) would
-   raise `TypeError` inside `__exit__`, which Python would then substitute for the real pipeline
-   exception already propagating — silently discarding the actual failure this feature exists to make
-   traceable. **Fixed:** `write()` now passes `default=str` to `json.dump`; `__exit__`'s guard widened
-   from `except OSError` to `except (OSError, TypeError, ValueError)`. Verified with two targeted
-   scenarios: (a) a non-serializable value in manifest data now writes cleanly via the `str` fallback;
-   (b) an unfixable write error (circular reference, which `default=str` can't help) occurring while an
-   original `ValueError` is already propagating now correctly surfaces the original `ValueError`, not
-   the write failure — confirmed the original masking behavior is gone. Re-ran the item-2
-   no-behaviour-change check after the fix: all 4 voice `events.json` files still byte-identical to
-   HEAD — the fix doesn't touch the normal-path data captured, only the failure path.
+Crops are gitignored and can be regenerated.
 
-   Six other findings, **not yet acted on, left for you to weigh in on**:
-   - `process_strip()` always calls `transcribe_strip(..., return_confidence=True)` even when
-     `manifest=None`, paying for confidence-decode overhead on every strip regardless of whether
-     anything reads it — not an output-correctness bug (verified: decoded symbols are identical
-     either way), but not literally free/additive either. Could gate on `return_confidence=manifest is
-     not None`.
-   - The shared hash-cache file (`sha256_file()`'s size+mtime fingerprint cache) has no file locking
-     and a non-atomic write — safe for a single sequential pipeline run (confirmed: a changed file
-     always re-hashes, a corrupted cache self-heals), but a real race risk if this backend ever serves
-     concurrent pipeline runs (relevant if Module 3 becomes multi-worker).
-   - Several new `RunManifest` methods (`set_params`, `add_input`, `add_stage_info`, `write`,
-     `__enter__`/`__exit__`) have no docstring, inconsistent with the rest of the module
-     (`add_asset`/`add_strip`/`stage()` are documented) and with CLAUDE.md's blanket Google-style-
-     docstring rule.
-   - `self.data`'s loose `Dict[str, JsonValue]` typing needs six `# type: ignore[...]` comments to
-     mutate — a `TypedDict` or small per-section dataclass would model it more honestly.
-   - Git hygiene: the working tree currently mixes the actual PIYA-106/BUG-017 code change with this
-     session's unrelated doc updates (BUG-013–016, this file, a CLAUDE.md section) *and* untracked,
-     pre-existing cruft from the earlier PIYA-201 mobile-scaffold session
-     (`.claude/skills/video-analyzer/`, `mobile/piyanota_application/references/` — the latter has a
-     51 MB `.mp4`) — a `git add -A`/`git add .` when committing would sweep all of it in. Must stage
-     named files only; the BUG-013–016 doc updates arguably belong in a separate commit from the
-     BUG-017 code fix.
-   - `_greedy_ctc_decode` was refactored to route through a new `_greedy_ctc_decode_with_confidence`
-     rather than left untouched with confidence tracking bolted on separately — behavior-preserving
-     (backed by the byte-identical no-behaviour-change result) but worth calling out explicitly as a
-     second, distinct kind of change bundled into what's otherwise described as additive wiring.
+**Suggested next actions (the user has not chosen yet):**
+1. Wire the classifier into the real `stage3_transcription.py` path (the plan doc's "Required before wiring"
+   items 1-5; `stage3_clefkey.py` is an eval-only wrapper), then re-test on fresh photos of new pieces.
+2. BUG-024: a small fix in `infer_pitch` (an explicit accidental should set the absolute alteration).
+3. BUG-025: fix the crop x0 under shadow, developed on non-test pages.
+4. BUG-026: make Stage 2 reject only the non-4-staff systems, not the whole page.
+5. If the Gaano/Handog numbers should count as more than diagnostic, the user checks their GT.
+6. Note reading (SER 33-50%) is now the main source of error. That is the CRNN font/photo domain gap (BUG-011).
 
-   Commit message prefix: `PIYA-106:` — only after user approval; still nothing committed.
+## Clef/key classifier - local CPU training ready (2026-09-27)
 
-### Deliberately out of scope (logged, not fixed)
+> **Superseded (2026-09-28):** the steps below are done. The T4 checkpoint was used under a user override, the
+> real-val eval FAILED (BUG-021), and the Dormi/Livin'/Flashlight set is SPENT. Labels now live in
+> `gt/clef_key_labels/`, and the Honneur GT is in `gt/honneur_a_toi/`. See the 2026-09-28 section above and the
+> plan doc.
 
-- Dead `D:\PiyaNota (Code)\...` defaults in `stage3_transcription.py` (BUG-017, second half).
-- Viz filename collision (BUG-014), tuplets (BUG-015), input-distribution experiments (BUG-016).
-- The user was offered — and has not yet answered — a small script to run BUG-016's experiments.
+Branch `piya106/groundtruth-eval` (worktree `D:\PiyaNota-training`, no remote, nothing merged). Full record: `docs/decisions/piya-106-clef-keysig-detector-plan.md`, sections "2026-09-26 amendment", "2026-09-27 review of local training code" and "2026-09-27 status after the R1-R6 / E1-E4 fixes".
+
+**Data roles:**
+
+- **Validation only (check-only, never tuning):** Dormi Jesu, Livin' on a Prayer and Flashlight (Flashlight is retired from test). Labels are in `data/val_clefkey/` (gitignored, sha-frozen).
+- **Test only:** DSMN and Honneur a Toi.
+- **Ground truth:** DSMN GT has 60 strips, re-frozen at sha 72edc5ca.... Honneur GT has 28 strips, sha 80219bdc...; `data/eval_honneur/gt/build_gt.py` is the generalised converter.
+
+**Training code:** `training/train_clef_key.py` and `training/eval_clef_key_realval.py`, with ml-cv-lead's R1-R6 / E1-E4 applied (`850f880`). The CPU-only venv `D:\venvs\piyanota-cpu` is the reference configuration. Smoke tests: S1 byte-identical x2, S3 resume identical in content.
+
+**The GPU is not usable (BUG-019).** Do not run CUDA torch or `nvidia-smi` until the PC is rebooted and the driver is reinstalled.
+
+**Next actions, in order:**
+
+1. The user reboots.
+2. ml-cv-lead confirms the E1 thresholds (1.0 spacing, 25%).
+3. The user gives the go for the full CPU run, about 6.5-9.5 h. The command is in the plan doc.
+4. Run the E4 coverage dry run.
+5. Review, then run the second seed.
+6. Run the one-shot real-val eval.
+
+**Awaiting the user's choice of pipeline change:** the Stage 3 double-dot fix (suggested first; Honneur scoring needs it), FR-14 Stage 4 report wiring, or PIYA-127 handling of 5-staff (obbligato) systems.
+
+## DSMN eval + Stage 3/4/5 review (2026-09-26)
+
+Full record: `docs/decisions/piya-106-dsmn-heldout-eval-2026-09-26.md`. Summary: Stage 1/2 ready for Stage 3 (with caveats);
+CRNN fails the SOW on DSMN (token SER 44.3-47.9% across the two seeds, pitch 10.6-11.4%, clef 2-3/23 correct), BUG-011 unfixed.
+Stage 3 dot/`slur.end` and Stage 5 hanging-note-on fixed (`1f237de`, `4021323`). Stage 3/4/5 rework not ready for main until Stage 4
+flags and a clef-unsure signal reach `run_full_pipeline`. PIYA-127 (FR-24 recapture, BUG-018) is drafted. Nothing merged or pushed.
+
+## PIYA-121 update (2026-09-25) - read before the 2026-09-24 section below
+
+Superseding note: the Stage 2 lyric mask described below (`_non_staff_ink_mask`, `mask_lyrics=`) has been REPLACED. The mask is now `non_staff_ink_mask` in Stage 1 (after dewarp) and Stage 2 only crops; strips come from a native-resolution strip source (rest/thin-glyph deformation root cause: binarising at 1600 px, BUG-016). Tie recall was the priority.
+
+- Split by piece (`training/step3_mask_split.json`, recorded before results): frozen = ama_namin, gaano_ko_ikaw_kamahal, salmo_150, non_nobis_domine; tuning = 10 pieces; DSMN/BSN = 'seen', not frozen, not independent of tuning. 4 pieces excluded as not open-score SATB (reasons in the JSON).
+- Results (`python training/step3_mask_audit.py --mode report --out data/audit`): frozen ties 120/120, slurs 25/25; tuning ties 670/684, slurs 116/117; band ink removed 0 on all 108 pages; BSN 80 strips (12/12/12/12/12/12/8) and DSMN 60 strips, SATB order OK; all 140 strips viewed at 1:1.
+- Honest limits: frozen set is small (4 pieces, 23 pages); tie audit is over detector-found ties only; 14 tuning ties lost and 31 tuning beam flags not viewed; lyric residual still visible (DSMN 11/15 systems; ~3/32 sampled dataset strips legible); the old-vs-new tie comparison was dropped (unpaired candidates, slow); rest-specific before/after exists only for DSMN page 1, set-level numbers are band-wide (BUG-016).
+- No Stage 3/CRNN was run on any of this. BUG-001 stays open. Nothing merged or pushed.
+- Untracked `ground_truth/` and `rename_dataset/` pre-date this work and are not part of PIYA-121.
+
+## Immediate next action (2026-09-24 update)
+
+**PIYA-106 Step 3 (fresh real-world test set) is actively in progress**, on branch
+`piya106/two-seed-rerun-amendment` (worktree `D:\PiyaNota-training`; **committed, unmerged into
+main**; senior-reviewer review of the full branch requested but not yet returned at write time —
+check for its report before treating this branch as merge-ready). Source material: 7 camera photos of
+"Both Sides Now" (`D:\PiyaNota\data\raw\Raw\IMG_1081-1084,1086-1088.JPG`), different piece/tool from
+the 48 BUG-011 diagnostic strips, matching the "Start Step 3 now" instruction below.
+
+Getting Stage 1/2 to detect these camera photos accurately at all turned into three sequential fixes,
+all committed on that branch:
+- **BUG-013** — Stage 1 staff curve tracking (`track_staff_curves`) + dewarp
+  (`dewarp_to_staff_grid`) + Stage 2 tracker cross-check (`_reconcile_with_classical`). Fixed wrong
+  staff counts (was 6-13 per page); now 12/12/12/12/12/12/8 = 80 staves, all correct on this photo
+  set. Tuned on these same 7 photos, not an independent eval.
+- **BUG-014** — content-adaptive strip crop (`_content_extent`/`_crop_and_resize`) fixed notes being
+  clipped at strip edges.
+- **BUG-015** — lyric masking (`_non_staff_ink_mask`, `mask_lyrics=` toggle, default on). Pixel-exact audit
+  2026-09-25 (`training/step3_mask_audit.py`, reproducible): 0 px removed in staff band on all 80 strips;
+  (pre-tie-fix figures) 79,789 px removed = 5.8% of ALL ink (46.8% of out-of-band ink by the script's definition). True lyric
+  residuals: 2 of 80 (page006_sys03_Tenor 'Aah', page003_sys01_Bass minor) + 1 unverified tiny fragment;
+  dynamics/labels/brace slivers remain (non-lyric). **Tie/slur deletion defect: fixed on this branch 2026-09-25** (`_tie_bridge_runs` in `stage2_detection.py`). Re-audit on the same 80 strips (not independent): 79,789 -> 41,962 px removed, still 0 px removed in the staff band, audit 'bridging removed piece' flags 20 -> 2 strips; the new strips are a strict superset of the old ones and the difference (220 pieces) was enumerated: 209 pieces are outer-staff-line wobble now kept, 11 are ties/slurs (no lyric/neighbour fragments among them). Viewed at native resolution for ~15 of the 20 flagged strips including page003_sys02_Bass and page006_sys03_Bass; the other 5 and the original 17-strip confirmed list were NOT re-checked individually, and the 0.5 hug threshold was picked on these same strips. Two small tie/slur residuals remain (page007_sys02_Soprano arc fragment, page002_sys03_Alto tie bottom). Lyric residual unchanged at 2/80. See BUG-015 in `docs/bug-tracker.md`.
+
+**BUG-001 (camera photos fail the divisible-by-4 staff count check) remains open by explicit user
+instruction** even though this branch's fixes resolve it for this specific photo set — it needs a
+fresh, different camera set to pass before it can be closed.
+
+**senior-reviewer's verdict on the full branch (687de98..HEAD, 2026-09-24): "ready with changes
+(nits only — no blocking correctness issues found)."** The nits (missing type hint, no per-strip
+masking log, two test docstrings overclaiming what they check, stats not independently
+reproducible from committed code) were fixed in a follow-up commit after the review. senior-reviewer
+also raised three questions it explicitly left for a human, not resolved by that review and not
+decided by this session — read before merging:
+1. Whether to merge the partial BUG-015 mitigation now and decide the YOLO text-line fallback in a
+   follow-up, or wait for the pixel-exact residual re-verification first — this directly gates
+   whether Stage 3 testing can start (the "don't test Stage 3 until masking is adequate" instruction
+   is itself unresolved).
+2. The branch name `piya106/two-seed-rerun-amendment` no longer describes its content (this session's
+   work is PIYA-121 Stage 1/2 fixes, unrelated to the PIYA-106 two-seed CRNN rerun the name
+   references) — cosmetic, consider a rename before merge so history doesn't mislead future readers.
+3. It couldn't find a separate committed ml-cv-lead artifact for the page006_sys03_Bass finding
+   beyond the bug-tracker correction note — that finding came from a live diagnostic session (ml-cv-lead
+   instrumented and traced `_non_staff_ink_mask`'s actual component decisions on that strip, not a
+   new commit), so there's no separate file to point to; flagging here in case that's insufficient
+   provenance for a merge decision.
+
+**Stage 3/CRNN has deliberately NOT been run on any of these 80 strips** — explicit user instruction:
+no Stage 3 testing until lyric masking is judged adequate (masking is not yet judged complete, see
+BUG-015 above). This is the actual Step 4 evaluation set; don't spend it on masking-tuning iteration.
+
+**Once masking is settled (either "good enough" or the YOLO fallback is built), the next action is
+Step 4: evaluate both seed checkpoints (`finetuned_font_seed1.pt` / `finetuned_font_seed2.pt`, see
+below) on this set once, reporting them as a range — do not average or cherry-pick.**
 
 ---
 
-## Retraining handoff (written 2026-09-19 — still current)
+**Checkpoint metadata, authoritative (2026-09-26, user decision: use the files' own metadata; sha256 matches data/eval_dsmn/checkpoint_hashes.txt):** the deployed `finetuned_font_seed{1,2}.pt` are from the 2026-09-23 two-seed run, not the 2026-09-19 run: seed1 epoch 2, `loo_font_ser` 0.0926, canary clean/distorted 0.0785/0.1311; seed2 epoch 2, `loo_font_ser` 0.0562, canary 0.0492/0.0865. Report as a range (0.0562-0.0926). Older 0.0523/0.0886 figures below refer to the 2026-09-19 run whose checkpoints were overwritten.
 
-## Immediate next action
+## Earlier context: PIYA-106 Step 2 (CRNN fine-tuning) status, as of 2026-09-19
 
 **The real two-seed `RUN_FINETUNING` run (under the cuDNN fix) is DONE.** Both checkpoints are valid
 and not invalidated: `crnn_weights/finetuned_font_seed1.pt` (best epoch 1, `loo_font_ser` 0.0523) and
@@ -259,9 +286,8 @@ and not invalidated: `crnn_weights/finetuned_font_seed1.pt` (best epoch 1, `loo_
 canary-clean spike to ~89% of the hard cap before partially recovering). ml-cv-lead's fourth review
 this session: **conditional GO to Step 3 — Step 2 is not formally closed.**
 
-**Start Step 3 now** — collect a fresh real-world test set (different piece/tool than the 48 strips
-already used for BUG-011 diagnosis; needs new photos/screenshots from the user). This can run in
-parallel with the open item below; neither blocks the other.
+Step 3 (above) is now underway per that conditional GO; the open items below still aren't resolved
+and still don't block Step 3.
 
 **Open items carried forward, not blocking Step 3 but not resolved — don't let these quietly drop:**
 - Seed=2's best epoch was 2, not 1 — this **disconfirms** the earlier read (from two isolated seed=1
@@ -294,7 +320,14 @@ either.
 
 ## Branches / commit state
 
-- **`fix/bug012-border-blank-overreach`** — *(2026-09-23: since merged into `main` @ `2351623`; no longer the current branch)* — no longer a single uncommitted unit; it
+- **`piya106/two-seed-rerun-amendment`** (worktree `D:\PiyaNota-training`, **current active branch as
+  of 2026-09-24**) — Step 3 camera-photo test-set work (BUG-013/014/015 above). Commits, top to
+  bottom: `b322457` lyric masking (BUG-015), `d374c2b` review follow-ups (named constants, dedupe
+  `STRIP_HEIGHT`, synthetic tests), `7be14ee`/`a908579` crop fix (BUG-014) + docs, `30b5b41`/`4d46d46`
+  tracker/dewarp fix (BUG-013). Not pushed (no remote on this worktree), not merged into
+  `D:\PiyaNota`'s checkout. senior-reviewer review of this branch was requested at end of session —
+  confirm its outcome before merging.
+- **`fix/bug012-border-blank-overreach`** (earlier branch, superseded as the active one) — no longer a single uncommitted unit; it
   now carries multiple merged-in-sequence commits from BUG-012's fix through this session's Step 2
   work:
   - `59212f7` PIYA-125: fix Stage 1 border-blanking content destruction (BUG-012)
@@ -357,7 +390,7 @@ Full plan + amendments: `docs/decisions/piya-106-crnn-font-retraining-plan.md`
 - Don't use `crnn_weights/finetuned_font.pt`, either `finetuned_font_seed{1,2}.pt` from before the
   2026-09-17 cuDNN fix, or `crnn_weights/repro_check_seed1.pt` — all invalidated or diagnostic-only
   (see above). The post-fix `finetuned_font_seed1.pt` / `finetuned_font_seed2.pt` (from the completed
-  two-seed run) ARE valid and usable — but report them as a range (0.0523–0.0886 loo_font_ser), never
+  two-seed run) ARE valid and usable — but report them as a range (0.0562–0.0926 loo_font_ser, the files' own 2026-09-23 metadata), never
   cherry-pick seed=1's better number.
 - Don't treat "epoch-1-is-always-best" as settled — that was a read from 2/2 *isolated seed=1* repro
   runs, and the real seed=2 run's best epoch was 2. Checkpoint-selection luck, not a property of
@@ -379,6 +412,13 @@ Full plan + amendments: `docs/decisions/piya-106-crnn-font-retraining-plan.md`
   quoted, don't present it as an independent confirmation.
 - Don't commit `docs/decisions/module2-flutter-framework.md` as part of PIYA-106 work — unrelated.
 - Don't commit anything without the user's explicit review/approval first (standing rule).
+- Don't run Stage 3/CRNN on the 80-strip Step 3 test set until lyric masking (BUG-015) is judged
+  adequate — explicit user instruction, still in force as of 2026-09-24.
+- Don't treat the BUG-015 eyeballed residual list as accurate without pixel-exact re-verification —
+  it has at least one confirmed false positive (page005_sys02_Alto) and the rest of the list beyond
+  page006_sys03_Bass is unconfirmed either way.
+- Don't close BUG-001 — still open by explicit user instruction even though this branch's fixes
+  resolve it for the one photo set tested so far.
 
 ## Reference index
 

@@ -1,0 +1,40 @@
+[
+  {
+    "type": "note",
+    "pitch": 60,
+    "chord_id": null,
+    "symbol": "note.whole-L0",
+    "slur": "start",
+    "duration_ticks": 1920,
+    "voice": "Alto",
+    "page_index": 1,
+    "sys_idx": 1,
+    "tick_onset": 0,
+    "measure_index": 1,
+    "time_signature": "4/4",
+    "note_id": "dont_stop_me_now_p01_s01_Alto_n001",
+    "tie_to_next": false,
+    "written_pitch": "C4",
+    "chord_tail": false,
+    "source_image": "dont_stop_me_now_pg01.jpg"
+  },
+  {
+    "type": "note",
+    "pitch": 62,
+    "chord_id": null,
+    "symbol": "note.whole-S0",
+    "slur": "end",
+    "duration_ticks": 1920,
+    "voice": "Alto",
+    "page_index": 1,
+    "sys_idx": 1,
+    "tick_onset": 1920,
+    "measure_index": 2,
+    "time_signature": "4/4",
+    "note_id": "dont_stop_me_now_p01_s01_Alto_n002",
+    "tie_to_next": false,
+    "written_pitch": "D4",
+    "chord_tail": false,
+    "source_image": "dont_stop_me_now_pg01.jpg"
+  }
+]

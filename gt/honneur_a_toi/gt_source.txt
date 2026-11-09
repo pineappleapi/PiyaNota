@@ -1,0 +1,38 @@
+# HAND-MADE / PROVISIONAL / single annotator (agent) / not verified by a musician
+# Piece: Honneur a Toi, pages 1-3 (piyanota_dataset/honneur_a_toi_pg01-03.jpg; phone photos of a printed MuseScore score). DIAGNOSTIC ONLY, not accuracy evidence.
+# Notation: clef:G|G8|F key:3# time:4/4 | (barline) ; notes <dur>[.]:<[^_=]?><Pitch><oct>[~][?]  dur in w h q e s ; rests r<dur>[.]
+# Key 3# (F#, C#, G#) is implied by the key signature and NOT written on notes; ^ _ = are written only where an accidental is printed on the note.
+# [ ... ] = beam group. ~ = tie to next note (same pitch, both heads visible). ~> tie leaves system, <~ tie arrives from previous system (OOV, excluded from token ref)
+# <OOV:desc> = unrepresentable (chord/divisi/grace/repeat/volta/fermata/etc).  ? = uncertain symbol.
+# Tenor clef is treble-8vb (clef:G8, printed as a G clef with an 8 below); Tenor pitches are WRITTEN (treble); sounding = written-12.
+# Volta brackets and the fermata are printed above the Soprano staff only, so their OOV marks appear on Soprano lines only; repeat barlines are printed on every staff.
+# #slurs N = count of phrase slurs (non-tie arcs), not in reference
+p1s1 Soprano: clef:G key:3# time:4/4 | rw | rw | rw | #slurs 0
+p1s1 Alto: clef:G key:3# time:4/4 | [ e.:A3 s:A3~ ] [ s:A3 e:A3 s:A3 ] q:A3 rq | [ e.:A3 s:A3~ ] [ s:A3 e:A3 s:A3 ] q:A3 rq | [ e.:A3 s:A3~ ] [ s:A3 e:A3 s:A3 ] q:A3 rq | #slurs 0
+p1s1 Tenor: clef:G8 key:3# time:4/4 | [ e.:E4 s:E4~ ] [ s:E4 e:E4 s:E4 ] q:E4 rq | [ e.:E4 s:E4~ ] [ s:E4 e:E4 s:E4 ] q:E4 rq | [ e.:E4 s:E4~ ] [ s:E4 e:E4 s:E4 ] q:E4 rq | #slurs 0
+p1s1 Bass: clef:F key:3# time:4/4 | [ e.:A2 s:A2~ ] [ s:A2 e:A2 s:A2 ] q:A2 rq | [ e.:A2 s:A2~ ] [ s:A2 e:A2 s:A2 ] q:A2 rq | [ e.:A2 s:A2~ ] [ s:A2 e:A2 s:A2 ] q:A2 rq | #slurs 0
+p1s2 Soprano: clef:G key:3# | rh. [ e.:A3 s:B3 ] | w:C4~ | h:C4 rq [ e.:C4 s:D4 ] | w:E4~> | #slurs 0
+p1s2 Alto: clef:G key:3# | [ e.:A3 s:A3~ ] [ s:A3 e:A3 s:A3 ] q:A3 rq | [ e.:A3 s:A3~ ] [ s:A3 e:A3 s:A3 ] q:A3 rq | [ e.:A3 s:A3~ ] [ s:A3 e:A3 s:A3 ] q:A3 rq | [ e.:A3 s:A3~ ] [ s:A3 e:A3 s:A3 ] q:A3 rq | #slurs 0
+p1s2 Tenor: clef:G8 key:3# | [ e.:E4 s:E4~ ] [ s:E4 e:E4 s:E4 ] q:E4 rq | [ e.:E4 s:E4~ ] [ s:E4 e:E4 s:E4 ] q:E4 rq | [ e.:E4 s:E4~ ] [ s:E4 e:E4 s:E4 ] q:E4 rq | [ e.:E4 s:E4~ ] [ s:E4 e:E4 s:E4 ] q:E4 rq | #slurs 0
+p1s2 Bass: clef:F key:3# | [ e.:A2 s:A2~ ] [ s:A2 e:A2 s:A2 ] q:A2 rq | [ e.:A2 s:A2~ ] [ s:A2 e:A2 s:A2 ] q:A2 rq | [ e.:A2 s:A2~ ] [ s:A2 e:A2 s:A2 ] q:A2 rq | [ e.:A2 s:A2~ ] [ s:A2 e:A2 s:A2 ] q:A2 rq | #slurs 0
+p2s1 Soprano: clef:G key:3# | h:E4<~ rq. e:E4 | <OOV:repeat-start> q:A3 q:C4 q:E4 [ e.:^D4 s:E4 ] | q:F4 [ e.:E4 s:^D4 ] q.:E4 e:E4 | #slurs 0
+p2s1 Alto: clef:G key:3# | [ e.:A3 s:A3~ ] [ s:A3 e:A3 s:A3 ] q:A3 rq | <OOV:repeat-start> [ e.:A3 s:A3~ ] [ s:A3 e:A3 s:A3 ] q:A3 rq | [ e.:A3 s:A3~ ] [ s:A3 e:A3 s:A3 ] q:A3 rq | #slurs 0
+p2s1 Tenor: clef:G8 key:3# | [ e.:E4 s:E4~ ] [ s:E4 e:E4 s:E4 ] q:E4 rq | <OOV:repeat-start> [ e.:E4 s:E4~ ] [ s:E4 e:E4 s:E4 ] q:E4 rq | [ e.:E4 s:E4~ ] [ s:E4 e:E4 s:E4 ] q:E4 rq | #slurs 0
+p2s1 Bass: clef:F key:3# | [ e.:A2 s:A2~ ] [ s:A2 e:A2 s:A2 ] q:A2 rq | <OOV:repeat-start> [ e.:A2 s:A2~ ] [ s:A2 e:A2 s:A2 ] q:A2 rq | [ e.:A2 s:A2~ ] [ s:A2 e:A2 s:A2 ] q:A2 rq | #slurs 0
+p2s2 Soprano: clef:G key:3# | [ e:E4 e:D4 e:C4 e:B3 ] q:A3 [ e.:B3 s:C4 ] | q:D4 [ e.:E4 s:F4 ] q.:C4 e:E4 | [ e.:B3? s:C4? ] [ e:B3? e:C4? ] q.:E4 e:E4 | [ e.:A4 s:A4 ] [ e.:G4 s:F4 ] q:G4 [ e:G4 e:G4 ] | #slurs 0
+p2s2 Alto: clef:G key:3# | [ e.:A3 s:A3~ ] [ s:A3 e:A3 s:A3 ] q:A3 rq | [ e.:B3 s:B3~ ] [ s:B3 e:B3 s:B3 ] q:B3 rq | [ e.:A3 s:A3~ ] [ s:A3 e:A3 s:A3 ] q:A3 q:E4 | [ e.:E4 s:E4 ] [ e.:E4 s:^D4 ] q:E4 [ e:E4 e:E4 ] | #slurs 0
+p2s2 Tenor: clef:G8 key:3# | [ e.:E4 s:E4~ ] [ s:E4 e:E4 s:E4 ] q:E4 rq | [ e.:F4 s:F4~ ] [ s:F4 e:F4 s:F4 ] q:E4 rq | [ e.:E4 s:E4~ ] [ s:E4 e:E4 s:E4 ] q:E4 q:E5 | [ e.:C5 s:C5 ] [ e.:B4 s:A4 ] q:B4 [ e:B4 e:B4 ] | #slurs 0
+p2s2 Bass: clef:F key:3# | [ e.:A2 s:A2~ ] [ s:A2 e:A2 s:A2 ] q:A2 rq | [ e.:B2 s:B2~ ] [ s:B2 e:B2 s:B2 ] q:E2 rq | [ e.:A2 s:A2~ ] [ s:A2 e:A2 s:A2 ] q:A2 [ e:A3 e:G3 ] | [ e.:F3 s:F3 ] [ e.:B2 s:B2 ] q:E3 [ e:E3 e:E3 ] | #slurs 0
+p2s3 Soprano: clef:G key:3# | <OOV:volta1> q:A4 q:B4 q.:A4 e:C5 | q:D5 q:D5 q.:C5 re | [ e.:E4 s:E4 ] [ e.:F4 s:F4 ] [ e.:G4 s:G4~ ] [ s:G4 e:G4 s:G4 ] | [ e.:F4 s:F4 ] [ e.:E4 s:E4 ] [ e.:E4 s:E4~ ] [ s:E4 e:E4 s:E4 ] | #slurs 0
+p2s3 Alto: clef:G key:3# | q:F4 q:G4 q.:E4 e:A4 | q:F4 q:G4 q.:A4 re | [ e.:B3 s:B3 ] [ e.:C4 s:C4 ] [ e.:B3 s:B3~ ] [ s:B3 e:B3 s:B3 ] | [ e.:D4 s:D4 ] [ e.:D4 s:D4 ] [ e.:C4 s:C4~ ] [ s:C4 re s:C4 ] | #slurs 0
+p2s3 Tenor: clef:G8 key:3# | q:D5 q:D5 q.:C5 e:E5 | q:D5 q:E5 q.:E5 e:D5 | [ e.:C5 s:B4 ] [ e.:A4 s:F4 ] q:E4 [ e:^D4 e:E4 ] | [ e:F4 e:G4 e:B4 e:A4 ] h:E4 | #slurs 0
+p2s3 Bass: clef:F key:3# | q:D3 q:E3 q.:A3 e:A3 | q:A3 q:B3 q.:A3 re | [ e.:G2 s:G2 ] [ e.:A2 s:A2 ] [ e.:E2 s:E2~ ] [ s:E2 e:E2 s:E2 ] | [ e.:B2 s:B2 ] [ e.:E2 s:E2 ] h:A2 | #slurs 0
+p3s1 Soprano: clef:G key:3# | h:E4 q:F4 q:A4 | [ e:G4 e:F4 ] q:E4 h:E4? | w:E4 | h..:A4 e:C5 | #slurs 0
+p3s1 Alto: clef:G key:3# | [ e.:G4 s:G4? ] [ e.:A4 s:A4 ] q.:F4 e:F4 | [ e.:G4 s:G4 ] [ e.:A4 s:A4 ] h:B4 | w:A4 | w:E4 | #slurs 0
+p3s1 Tenor: clef:G8 key:3# | q:B4 q:C5 h:D5 | q:D5 q:C5 h:G4 | [ e:A4 e:B4 e:C5 e:D5 ] h:C5~ | w:C5 | #slurs 0
+p3s1 Bass: clef:F key:3# | [ e.:E3 s:E3 ] [ e.:A2 s:A2 ] [ e.:B2 s:B2~ ] [ s:B2 e:B2 s:B2 ] | [ e.:E3 s:E3 ] [ e.:E3 s:E3 ] q.:E3 e:E3 | [ e:C4 e:G3 e:B3 e:F3 ] q:E3 [ e:^D3 e:E3 ] | [ e:F3 e:G3 e:A3 e:B3 ] q:C4 q:C4 | #slurs 0
+p3s2 Soprano: clef:G key:3# | q:D5 q:B4 [ e:A4 e:C4 e:E4 e:A4 ] | q:G4 [ e:A4 e:B4 ] h:A4~ | q:A4 [ e:A4 e:A4 ] q.:G4 e:E4 <OOV:repeat-end> | <OOV:volta2> q:A4 q:B4 q.:A4 e:C5 | h:D5 h:B4 | w:A4 <OOV:fermata> | #slurs 0
+p3s2 Alto: clef:G key:3# | q:E4 q:E4 q:E4 [ e:E4 e:E4 ] | q:E4 [ e:F4 e:F4 ] h:E4 | q:F4 [ e:F4 e:F4 ] h:E4 <OOV:repeat-end> | q:F4 q:G4 q.:E4 e:A4 | h:A4 h:G4 | w:E4 | #slurs 0
+p3s2 Tenor: clef:G8 key:3# | q:B4 q:D5 q:C5 [ e:C5 e:C5 ] | q:B4 [ e:D5 e:D5 ] h:C5 | q:D5 [ e:D5 e:D5 ] h:D5 <OOV:repeat-end> | q:D5 q:D5 q.:C5 e:E5 | h:F5 q:E5 q:D5 | w:C5 | #slurs 0
+p3s2 Bass: clef:F key:3# | q:G3 q:G3 q:A3 [ e:A3 e:A3 ] | q:E3 [ e:A2 e:A2 ] h:A2 | q:B2 [ e:B2 e:B2 ] q:E3 q:E2 <OOV:repeat-end> | q:D3 q:E3 q:A3 q:E3 | h:E3 h:E2 | w:A2 | #slurs 0
+# ---- annotation complete; GT frozen before any CRNN run. Uncertain items marked '?'. Lyrics, dynamics and articulations are ignored (not in reference vocabulary).

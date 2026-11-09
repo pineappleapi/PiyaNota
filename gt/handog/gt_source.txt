@@ -1,0 +1,122 @@
+# HAND-MADE / PROVISIONAL / single annotator (agent) / not verified by a musician
+# Piece: Handog, pages 1-14 (piyanota_dataset/handog_pg01-14.jpg; phone photos of a printed score). DIAGNOSTIC ONLY, not accuracy evidence.
+# Written 2026-09-28 from rectified staff crops (gt/tools/rect.py + show.py), BEFORE any pipeline run on these photos.
+# Scope: only 4-staff (S/A/T/B) systems are transcribed. Divisi systems (5-7 staves) are listed as <EXCLUDED ...> per staff:
+# they break Stage 2's 4-staves-per-system assumption (unsupported layout) and are reported under Stage 2 coverage only.
+# Repeats are not expanded (the strip is scored as printed). Common time (C). Key 3 flats unless a line says otherwise.
+# Notation: clef:G|G8|F key:3b | (barline) ; notes <dur>[.]:<[^_=]?><Pitch><oct>[~][?]  dur in w h q e s ; rests r<dur>[.]
+# Key-signature alterations are implied and NOT written on notes; ^ _ = are written only where an accidental is printed.
+# [ ... ] = beam group. ~ = tie to next note (same pitch). ~> tie leaves system, <~ tie arrives from previous system.
+# <OOV:chord d P1+P2> = two or more heads on one stem in one voice; <OOV:triplet d ...> = 3-in-2 tuplet of total duration d.
+# ? = uncertain symbol. Tenor clef is treble-8vb (clef:G8); Tenor pitches are WRITTEN (treble); sounding = written-12.
+# #slurs N = count of phrase slurs (non-tie arcs), not in reference
+p1s1 Soprano: clef:G key:3b | rq. q.:G4~ q:G4~ | w:G4 | rq. q.:C5~ q:C5~> | #slurs 0
+p1s1 Alto: clef:G key:3b | rq. q.:E4~ q:E4~ | w:E4 | rq. q.:_G4~ q:G4~> | #slurs 0
+p1s1 Tenor: clef:G8 key:3b | rq. q.:B4~ q:B4~ | w:B4 | rq. <OOV:chord q. B4+_D5> <OOV:chord q B4+D5> | #slurs 0
+p1s1 Bass: clef:F key:3b | [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] | [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] | [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] | #slurs 0
+p1s2 Soprano: clef:G key:3b | w:C5 | rq. <OOV:chord q. E4+G4?> <OOV:chord q E4+G4?> | <OOV:chord w E4+G4?> | #slurs 0
+p1s2 Alto: clef:G key:3b | w:_G4 | rq. q.:D4~ q:D4~ | w:D4 | #slurs 0
+p1s2 Tenor: clef:G8 key:3b | <OOV:chord w _D5+F5?> | [ e:B4 e:B4 ] [ e:B4 e:C5 ] h:B4 | [ e:B4 s:B4 s:B4~ ] [ s:B4 s:C5 e:D5~ ] [ e:D5 e:C5 ] [ e:B4 e:A4 ] | #slurs 0
+p1s2 Bass: clef:F key:3b | [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] | [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] | [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] | #slurs 0
+p2s1 Soprano: clef:G key:3b | rq. <OOV:chord q. _G4+C5?> <OOV:chord q _G4+C5?> | <OOV:chord w G4+C5?> | rq. <OOV:chord q. =E4+G4?> <OOV:chord q E4+G4?> | #slurs 0
+p2s1 Alto: clef:G key:3b | rq. <OOV:chord q. _C4+E4?> <OOV:chord q C4+E4?> | <OOV:chord w C4+E4?> | rq. q.:=D4~ q:D4~> | #slurs 0
+p2s1 Tenor: clef:G8 key:3b | [ e:G4 e:F4~ ] [ e:F4 s:G4 s:A4 ] h:B4~ | h:B4 rh | [ e:B4 e:B4 ] [ e:B4 e:C5 ] h:B4 | #slurs 0
+p2s1 Bass: clef:F key:3b | [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] | [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] | [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] | #slurs 0
+p2s2 Soprano: clef:G key:3b | <OOV:chord w E4+G4?> | rq. <OOV:chord q. _G4+C5?> <OOV:chord q _G4+C5?> | <OOV:chord w G4+C5?> | #slurs 0
+p2s2 Alto: clef:G key:3b | w:D4 | rq. <OOV:chord q. _C4+E4?> <OOV:chord q C4+E4?> | <OOV:chord w C4+E4?> | #slurs 0
+p2s2 Tenor: clef:G8 key:3b | [ e:B4 e:B4 ] [ e:B4 s:C5 s:D5~ ] [ e:D5 e:C5 ] [ e:B4 e:A4 ] | [ e:G4 e:F4~ ] [ e:F4 s:G4 s:A4 ] h:B4~ | h:B4 [ e:C5 e:B4 ] [ e.:A4 s:G4 ] | #slurs 0
+p2s2 Bass: clef:F key:3b | [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] | [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] | [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] | #slurs 0
+p3s1 Soprano: clef:G key:3b | <OOV:chord w C4+=E4?> | <OOV:chord w C4+E4?> | <OOV:chord w C4+E4?> | #slurs 0
+p3s1 Alto: clef:G key:3b | <OOV:chord w B3+C4?> | <OOV:chord w B3+C4?> | <OOV:chord w A3+C4?> | #slurs 0
+p3s1 Tenor: clef:G8 key:3b | q:C5~ [ s:C5 s:B4 s:A4 s:G4 ] [ e:C5 e:B4 ] [ e:A4 e:B4? ] | [ e:C5 e:D5 ] [ e:C5 s:D5 s:D5 ] [ e:A4 e:G4 ] [ e:F4 e:A4 ] | w:G4 | #slurs 1
+p3s1 Bass: clef:F key:3b | [ <OOV:chord e A2+E3> <OOV:chord e A2+E3> <OOV:chord e A2+E3> ] [ <OOV:chord e A2+E3> <OOV:chord e A2+E3> <OOV:chord e A2+E3> ] [ <OOV:chord e A2+E3> <OOV:chord e A2+E3> ] | [ <OOV:chord e A2+E3> <OOV:chord e A2+E3> <OOV:chord e A2+E3> ] [ <OOV:chord e A2+E3> <OOV:chord e A2+E3> <OOV:chord e A2+E3> ] [ <OOV:chord e A2+E3> <OOV:chord e A2+E3> ] | [ <OOV:chord e C3+G3> <OOV:chord e C3+G3> <OOV:chord e C3+G3> ] [ <OOV:chord e C3+G3> <OOV:chord e C3+G3> <OOV:chord e C3+G3> ] [ <OOV:chord e C3+G3> <OOV:chord e C3+G3> ] | #slurs 0
+p3s2 Staff1: <EXCLUDED divisi system: 5 staves (unsupported layout for Stage 2's 4-staves-per-system assumption)>
+p3s2 Staff2: <EXCLUDED divisi system: 5 staves>
+p3s2 Staff3: <EXCLUDED divisi system: 5 staves>
+p3s2 Staff4: <EXCLUDED divisi system: 5 staves>
+p3s2 Staff5: <EXCLUDED divisi system: 5 staves>
+p4s1 Staff1: <EXCLUDED divisi system: 5 staves>
+p4s1 Staff2: <EXCLUDED divisi system: 5 staves>
+p4s1 Staff3: <EXCLUDED divisi system: 5 staves>
+p4s1 Staff4: <EXCLUDED divisi system: 5 staves>
+p4s1 Staff5: <EXCLUDED divisi system: 5 staves>
+p4s2 Staff1: <EXCLUDED divisi system: 5 staves>
+p4s2 Staff2: <EXCLUDED divisi system: 5 staves>
+p4s2 Staff3: <EXCLUDED divisi system: 5 staves>
+p4s2 Staff4: <EXCLUDED divisi system: 5 staves>
+p4s2 Staff5: <EXCLUDED divisi system: 5 staves>
+p5s1 Staff1: <EXCLUDED divisi system: 5 staves>
+p5s1 Staff2: <EXCLUDED divisi system: 5 staves>
+p5s1 Staff3: <EXCLUDED divisi system: 5 staves>
+p5s1 Staff4: <EXCLUDED divisi system: 5 staves>
+p5s1 Staff5: <EXCLUDED divisi system: 5 staves>
+p6s1 Staff1: <EXCLUDED divisi system: 7 staves>
+p6s1 Staff2: <EXCLUDED divisi system: 7 staves>
+p6s1 Staff3: <EXCLUDED divisi system: 7 staves>
+p6s1 Staff4: <EXCLUDED divisi system: 7 staves>
+p6s1 Staff5: <EXCLUDED divisi system: 7 staves>
+p6s1 Staff6: <EXCLUDED divisi system: 7 staves>
+p6s1 Staff7: <EXCLUDED divisi system: 7 staves>
+p7s1 Staff1: <EXCLUDED divisi system: 7 staves>
+p7s1 Staff2: <EXCLUDED divisi system: 7 staves>
+p7s1 Staff3: <EXCLUDED divisi system: 7 staves>
+p7s1 Staff4: <EXCLUDED divisi system: 7 staves>
+p7s1 Staff5: <EXCLUDED divisi system: 7 staves>
+p7s1 Staff6: <EXCLUDED divisi system: 7 staves>
+p7s1 Staff7: <EXCLUDED divisi system: 7 staves>
+p8s1 Staff1: <EXCLUDED divisi system: 6 staves>
+p8s1 Staff2: <EXCLUDED divisi system: 6 staves>
+p8s1 Staff3: <EXCLUDED divisi system: 6 staves>
+p8s1 Staff4: <EXCLUDED divisi system: 6 staves>
+p8s1 Staff5: <EXCLUDED divisi system: 6 staves>
+p8s1 Staff6: <EXCLUDED divisi system: 6 staves>
+p9s1 Staff1: <EXCLUDED divisi system: 6 staves>
+p9s1 Staff2: <EXCLUDED divisi system: 6 staves>
+p9s1 Staff3: <EXCLUDED divisi system: 6 staves>
+p9s1 Staff4: <EXCLUDED divisi system: 6 staves>
+p9s1 Staff5: <EXCLUDED divisi system: 6 staves>
+p9s1 Staff6: <EXCLUDED divisi system: 6 staves>
+p10s1 Staff1: <EXCLUDED divisi system: 6 staves>
+p10s1 Staff2: <EXCLUDED divisi system: 6 staves>
+p10s1 Staff3: <EXCLUDED divisi system: 6 staves>
+p10s1 Staff4: <EXCLUDED divisi system: 6 staves>
+p10s1 Staff5: <EXCLUDED divisi system: 6 staves>
+p10s1 Staff6: <EXCLUDED divisi system: 6 staves>
+p10s2 Soprano: clef:G key:3b | [ e:B4 s:B4 s:B4~ ] [ s:B4 s:C5 e:D5~ ] [ e:D5 e:C5 ] [ e:B4? e:A4? ] | [ e:G4 e:F4~ ] [ e:F4 s:G4 s:A4 ] h:B4~ | h:B4 rh | #slurs 0
+p10s2 Alto: clef:G key:3b | [ e:G4 s:F4 s:E4~ ] [ s:E4 s:D4 e:C4~ ] [ e:C4 e:D4? ] [ e:E4? e:E4? ] | [ e:F4 e:F4~ ] [ e:F4 s:F4? s:F4? ] h:B3~ | h:B3 rh | #slurs 0
+p10s2 Tenor: clef:G8 key:3b | <OOV:chord q. B4+E5> q.:D5 <OOV:chord q =B4+E5> | <OOV:chord q. B4+D5?> q.:E5~ <OOV:chord q D5+E5> | <OOV:chord q. B4+E5> q.:D5 <OOV:chord q =B4+E5> | #slurs 0
+p10s2 Bass: clef:F key:3b | [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] | [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] | [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] | #slurs 0
+p11s1 Soprano: clef:G key:3b | [ e:B4 e:B4 ] [ e:B4 e:C5 ] h:B4 | [ s:B4 s:B4 e:B4~ ] [ e:B4 e:C5 ] [ e:D5 e:C5 ] [ e:B4 e:A4 ] | [ e:G4 e:F4 ] [ e.:G4 s:A4 ] h:B4~> | #slurs 0
+p11s1 Alto: clef:G key:3b | [ e:D4 e:D4 ] [ e:D4 e:E4 ] h:F4 | [ s:G4 s:F4 e:E4~ ] [ e:E4 e:D4 ] [ e:C4 e:D4 ] [ e:E4 e:E4 ] | [ e:F4 e:F4 ] [ e.:F4 s:F4? ] h:B3~> | #slurs 0
+p11s1 Tenor: clef:G8 key:3b | <OOV:chord q. B4+D5?> q.:C5? <OOV:chord q B4+C5?> | <OOV:chord q. B4+C5?> q.:C5? <OOV:chord q =A4+C5?> | <OOV:chord q. B4+D5?> q.:C5? <OOV:chord q B4+C5?> | #slurs 0
+p11s1 Bass: clef:F key:3b | [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] | [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] | [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] | #slurs 0
+p11s2 Soprano: clef:G key:3b | h:B4<~ [ e:C5 e:B4 ] [ e:A4 e:G4 ] | [ e:C5 e:B4 ] [ e.:A4 s:G4 ] [ e.:C5 s:B4 ] [ e:A4 e:B4 ] | [ s:C5 s:D5 e:C5~ ] [ e:C5 e:B4 ] [ e.:A4 s:G4 ] [ s:F4 e.:A4 ] | #slurs 0
+p11s2 Alto: clef:G key:3b | h:B3<~ [ e:C4 e:G4? ] [ e:F4 e:E4 ] | [ e:C4 e:C4 ] [ e.:C4 s:D4 ] [ e.:E4 s:E4 ] [ e:E4 e:E4 ] | [ s:F4 s:F4 e:F4~ ] [ e:F4 e:F4 ] [ e.:G4? s:G4? ] [ s:F4 e.:E4 ] | #slurs 0
+p11s2 Tenor: clef:G8 key:3b | <OOV:chord q. B4?+E5> q.:D5? <OOV:chord q =B4+E5> | [ <OOV:chord e G4?+C5?> <OOV:chord e G4?+C5?> <OOV:chord e G4?+C5?> ] [ <OOV:chord e G4?+C5?> <OOV:chord e G4?+C5?> <OOV:chord e G4?+C5?> ] [ <OOV:chord e G4?+C5?> <OOV:chord e G4?+C5?> ] | [ <OOV:chord e A4?+C5?> <OOV:chord e A4?+C5?> <OOV:chord e A4?+C5?> ] [ <OOV:chord e A4?+C5?> <OOV:chord e A4?+C5?> <OOV:chord e A4?+C5?> ] [ <OOV:chord e A4?+C5?> <OOV:chord e A4?+C5?> ] | #slurs 0
+p11s2 Bass: clef:F key:3b | [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] [ <OOV:chord e E3+B3> <OOV:chord e E3+B3> ] | [ <OOV:chord e A2+E3?> <OOV:chord e A2+E3?> <OOV:chord e A2+E3?> ] [ <OOV:chord e A2+E3?> <OOV:chord e A2+E3?> <OOV:chord e A2+E3?> ] [ <OOV:chord e A2+E3?> <OOV:chord e A2+E3?> ] | [ <OOV:chord e B2+F3?> <OOV:chord e B2+F3?> <OOV:chord e B2+F3?> ] [ <OOV:chord e B2+F3?> <OOV:chord e B2+F3?> <OOV:chord e B2+F3?> ] [ <OOV:chord e B2+F3?> <OOV:chord e B2+F3?> ] | #slurs 0
+p12s1 Staff1: <EXCLUDED divisi system: 5 staves>
+p12s1 Staff2: <EXCLUDED divisi system: 5 staves>
+p12s1 Staff3: <EXCLUDED divisi system: 5 staves>
+p12s1 Staff4: <EXCLUDED divisi system: 5 staves>
+p12s1 Staff5: <EXCLUDED divisi system: 5 staves>
+p12s2 Soprano: clef:G key:3b | h:C5 q:G5? q:F5 | q:E5 q:D5 q.:E5 e:F5 | h:B4 q:F5 q:E5 | q:D5 q:C5 q:D5 q:E5 | h:C5 q.:G5 e:F5 | q:E5 h:D5 [ e:E5? e:F5 ] | h:B4 q.:F5 e:E5 | #slurs 0
+p12s2 Alto: clef:G key:3b | <OOV:chord h G4+A4?> <OOV:chord q A4+C5> <OOV:chord q A4+C5> | <OOV:chord q A4+C5?> <OOV:chord q G4+B4> <OOV:chord q. G4+A4?> <OOV:chord e F4+C5?> | <OOV:chord h F4+B4?> <OOV:chord q G4+B4> <OOV:chord q G4+B4> | <OOV:chord q G4+B4> q:G4 q:G4 q:A4 | <OOV:chord h G4+B4?> <OOV:chord q. A4+C5?> <OOV:chord e A4+C5?> | <OOV:chord q A4+B4?> <OOV:chord h A4+C5?> [ <OOV:chord e A4+C5?> <OOV:chord e A4+C5?> ] | <OOV:chord h G4+B4?> <OOV:chord q. G4+B4?> <OOV:chord e G4+A4?> | #slurs 0
+p12s2 Tenor: clef:G8 key:3b | h:E5 q:G5 q:G5 | q:G5 q:F5 q.:E5 e:C5 | h:D5 q:F5 q:E5 | q:F5 q:E5 <OOV:chord q D5+E5?> <OOV:chord q E5+F5?> | h:E5 <OOV:chord q. E5+G5?> <OOV:chord e E5+G5?> | q:F5 h:F5? [ e:E5 e:E5 ] | <OOV:chord h E5+G5?> <OOV:chord q. E5+G5?> <OOV:chord e E5+G5?> | #slurs 0
+p12s2 Bass: clef:F key:3b | h:A3 q:C4? q:C4? | q:C4 q:B3 q.:A3 e:A3 | h:G3 q:G3 q:C4? | q:C4 q:C4 q:B3 q:B3 | h:A3 q.:A3 e:A3 | q:B3 h:B3 [ e:A3 e:A3 ] | <OOV:chord h A3+C4?> <OOV:chord q. G3+B3?> <OOV:chord e G3+B3?> | #slurs 0
+p13s1 Soprano: clef:G key:3b | q:D5 h.:E5 | h:E5 h:C5 | q.:E5 e:F5 h:E5 | q:D5 q:B4 q:D5 q:F5? | h:F5? <OOV:chord h G5+B5?> | <OOV:chord q. G5+B5?> re q:A5? q:G5 | <OOV:chord h F5+G5?> <OOV:chord h E5+F5?> | #slurs 1
+p13s1 Alto: clef:G key:3b | <OOV:chord q F4+C5?> <OOV:chord h. G4+D5?> | h:C5 h:B4 | h:A4 <OOV:chord h F4+B4> | <OOV:chord q F4+A4> <OOV:chord q F4+A4> <OOV:chord q F4+A4?> <OOV:chord q B4+D5?> | <OOV:chord h B4+D5?> <OOV:chord h B4+D5?> | <OOV:chord q. A4+B4?> re q:A4? q:G4 | h:G4 h:G4 | #slurs 0
+p13s1 Tenor: clef:G8 key:3b | q:E5 h.:F5 | h:E5 h:E5 | h:C5 h:C5 | q:D5 q:D5 q:D5 q:D5 | <OOV:chord h B4+D5?> <OOV:chord h B4+D5?> | <OOV:chord q. =B4+D5?> re q:A5? q:G5 | h:_D5? h:E5 | #slurs 0
+p13s1 Bass: clef:F key:3b | q:C4 h.:B3 | h:A3 h:A3 | h:F3 h:F3 | q:B3 q:B3 q:A3 q:A3 | h:G3 h:G3~ | q.:G3 re q:A3 q:G3? | h:C4 h:D4? | #slurs 0
+p13s2 Soprano: clef:G key:3b | q.:E5 e:F5 h:F5~ | q:F5 rq q:E5 q:F5 | w:F5~ | w:F5~> | #slurs 0
+p13s2 Alto: clef:G key:3b | h:F4? h:=B4~ | q:B4 rq q:G4 q:G4 | w:_B4~ | w:B4~> | #slurs 0
+p13s2 Tenor: clef:G8 key:3b | h:G5 h:F5~ | q:F5 rq q:E5 q:E5 | [ <OOV:chord e E5+_G5?> e:E5 e:E5 ] [ e:E5 e:E5 e:E5 ] [ e:E5 e:E5 ] | [ <OOV:chord e E5+G5?> e:E5 e:E5 ] [ e:E5 e:E5 e:E5 ] [ e:E5 e:E5 ] | #slurs 0
+p13s2 Bass: clef:F key:3b | h:C4 <OOV:chord h C4+D4?> | <OOV:chord q C4+D4?> rq <OOV:chord h A3+C4?> | [ <OOV:chord e B3+C4?> <OOV:chord e B3+C4?> <OOV:chord e B3+C4?> ] [ <OOV:chord e B3+C4?> <OOV:chord e B3+C4?> <OOV:chord e B3+C4?> ] [ <OOV:chord e B3+C4?> <OOV:chord e B3+C4?> ] | [ <OOV:chord e B3+C4?> <OOV:chord e B3+C4?> <OOV:chord e B3+C4?> ] [ <OOV:chord e B3+C4?> <OOV:chord e B3+C4?> <OOV:chord e B3+C4?> ] [ <OOV:chord e B3+C4?> <OOV:chord e B3+C4?> ] | #slurs 0
+p14s1 Soprano: clef:G key:3b | w:F5~<~ | w:F5 | #slurs 1
+p14s1 Alto: clef:G key:3b | w:B4~<~ | w:B4 | #slurs 1
+p14s1 Tenor: clef:G8 key:3b | [ <OOV:chord e E5+_G5?> e:E5 e:E5 ] [ e:E5 e:E5 e:E5 ] [ e:E5 e:E5 ] | [ <OOV:chord e E5+G5?> e:E5 e:E5 ] [ e:E5 e:E5 e:E5 ] [ e:E5 e:E5 ] | #slurs 0
+p14s1 Bass: clef:F key:3b | [ <OOV:chord e _A3+C4?> <OOV:chord e A3+C4?> <OOV:chord e A3+C4?> ] [ <OOV:chord e A3+C4?> <OOV:chord e A3+C4?> <OOV:chord e A3+C4?> ] [ <OOV:chord e A3+C4?> <OOV:chord e A3+C4?> ] | [ <OOV:chord e _A3+C4?> <OOV:chord e A3+C4?> <OOV:chord e A3+C4?> ] [ <OOV:chord e A3+C4?> <OOV:chord e A3+C4?> <OOV:chord e A3+C4?> ] [ <OOV:chord e A3+C4?> <OOV:chord e A3+C4?> ] | #slurs 0
+p14s2 Soprano: clef:G key:3b | w:E5 | w:E5 | <OOV:chord w E5+B5?> | #slurs 1
+p14s2 Alto: clef:G key:3b | w:G4 | w:G4 | w:G4 | #slurs 1
+p14s2 Tenor: clef:G8 key:3b | [ <OOV:chord e E5+F5?> e:E5 e:E5 ] [ e:E5 e:E5 e:E5 ] [ e:E5 e:E5 ] | [ <OOV:chord e E5+F5?> e:E5 e:E5 ] [ e:E5 e:E5 e:E5 ] [ e:E5 e:E5 ] | <OOV:chord w E5+F5?> | #slurs 0
+p14s2 Bass: clef:F key:3b | [ <OOV:chord e G3+B3> <OOV:chord e G3+B3> <OOV:chord e G3+B3> ] [ <OOV:chord e G3+B3> <OOV:chord e G3+B3> <OOV:chord e G3+B3> ] [ <OOV:chord e G3+B3> <OOV:chord e G3+B3> ] | [ <OOV:chord e G3+B3> <OOV:chord e G3+B3> <OOV:chord e G3+B3> ] [ <OOV:chord e G3+B3> <OOV:chord e G3+B3> <OOV:chord e G3+B3> ] [ <OOV:chord e G3+B3> <OOV:chord e G3+B3> ] | <OOV:chord w E3+B3?> | #slurs 0
+# ---- annotation complete

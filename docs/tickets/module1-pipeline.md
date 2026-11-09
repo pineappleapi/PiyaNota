@@ -6,18 +6,76 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
 
 ### PIYA-101 — Submit Score for Processing API
 **Method:** POST
-**Context:** Accepts image arrays only, in reading order. PDF pages must already be rasterized by the upload-handling layer (PIYA-310) before reaching this endpoint.
+**Context:** Accepts image arrays only, in reading order. PDF pages must already be rasterized by the upload-handling layer (PIYA-310) before reaching this endpoint. *(Amended 2026-10-08, PIYA-206, backend-lead: the request is `multipart/form-data`. Each page image is one file part named `pages`, sent in reading order; part order is page order. The score metadata fields in AC8 travel as text parts in the same request.)*
 
 **Acceptance Criteria:**
 1. Accepts an ordered array of page images (JPEG/PNG) and creates a new processing job scoped to the authenticated user's account.
-2. Returns 400 if the array is empty or exceeds 20 pages.
-3. Returns 415 if any submitted file is not JPEG or PNG.
+2. Returns 400 if the array is empty or exceeds 20 pages. *(2026-10-08: error codes `no_pages` and `too_many_pages`, per AC9.)*
+3. Returns 415 if any submitted file is not JPEG or PNG. *(2026-10-08: error code `unsupported_file_type`, with the offending `pageIndex`. The type is decided from the file's magic bytes, not from the part's `Content-Type` or filename. HEIC and WebP are rejected; the client re-encodes every page after its edits (AC10), so it sends JPEG or PNG.)*
 4. Returns a `job_id` and status `"queued"` within 1 second of submission; does not block until processing completes.
 5. Each page is tagged internally with its `page_index`, reflecting submission order, preserved through every downstream stage.
-6. If the processing queue is at capacity, returns 429 with an estimated wait time instead of silently dropping the request.
+6. If the processing queue is at capacity, returns 429 with an estimated wait time instead of silently dropping the request. *(2026-10-08: error code `queue_full`. The wait is sent both as a `Retry-After` header and as `error.retryAfterSeconds`. A per-user submission limit is a separate 429, `rate_limited`, per AC9.)*
 7. The submission is logged with `job_id`, `user_id`, `page_count`, and timestamp.
+8. **Score metadata fields** (added 2026-10-08, PIYA-206, user decision; canonical values chosen by backend-lead). Sent as text parts next to the files. *(2026-10-09: `composer` renamed to `arranger`, with error codes `arranger_too_long` / `arranger_invalid` and column `jobs.arranger`, user decision — the field holds the arranger.)*
 
-**Response Schema:**
+   | Field | Required | Rule | Stored in `jobs` (PIYA-311) | 400 error code |
+   |---|---|---|---|---|
+   | `title` | yes | 1–120 characters after trimming | `title` | `title_required` (missing or blank), `title_too_long`, `title_invalid` |
+   | `arranger` | no | at most 120 characters after trimming | `arranger`, NULL when absent | `arranger_too_long`, `arranger_invalid` |
+   | `tempoBpm` | no | ASCII digits only, integer 30–240; absent means `fallbackTempoBpm` if sent, else 90 (PIYA-323) | `tempo_bpm`, always stored (settled at submit; `tempo_source` records where it came from) | `invalid_tempo` |
+   | `keySignature` | no | one of the 15 values below, exact case | `key_signature`, NULL when absent | `invalid_key_signature` |
+   | `timeSignature` | no | one of `4/4`, `3/4`, `2/4`, `6/8`, `2/2` | `time_signature`, NULL when absent | `invalid_time_signature` |
+
+   `keySignature` values (major key named by accidental count; ASCII `#` and lowercase `b`, never `♯`/`♭`):
+
+   | Sharps | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+   |---|---|---|---|---|---|---|---|---|
+   | value | `C` | `G` | `D` | `A` | `E` | `B` | `F#` | `C#` |
+
+   | Flats | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+   |---|---|---|---|---|---|---|---|
+   | value | `F` | `Bb` | `Eb` | `Ab` | `Db` | `Gb` | `Cb` |
+
+   - **Absent values.** "Not sure" (key) and "Other" (time signature) are both expressed by omitting the field, and the server stores NULL. Multipart cannot carry `null`; an optional field sent with an empty or whitespace-only value is treated as absent. The literal string `"null"` gets no special handling: it is an invalid enumerated value (400), and as `arranger` it would be stored as text, so the client must omit the field as agreed.
+   - **Character counting.** Values are trimmed and NFC-normalized, then counted in Unicode code points (Python `len()`, PostgreSQL `char_length()`). Text containing control characters (Unicode category Cc, including newlines and tabs) is rejected with `title_invalid` / `arranger_invalid`.
+   - **`fallbackTempoBpm`** *(added 2026-10-17, PIYA-323 in `module3-backend.md`)*. Optional, same rule and error code as `tempoBpm`. Sent only when Speed is "Not sure"; sending it with `tempoBpm` returns 400 `duplicate_field`.
+   - A field sent more than once returns 400 `duplicate_field`. Unrecognized field names are ignored and not stored, so a newer client still works against an older server.
+   - **Meaning.** `keySignature` and `timeSignature` are display labels only. They are never passed to the pipeline; Stages 3–4 use their own clef/key/time-signature detection. `tempoBpm` is the default playback speed, and the four tracks are rendered at it (Stage 5 `bpm`). It counts **quarter notes per minute whatever the time signature** (Stage 5 writes a quarter-note MIDI tempo at 480 PPQ), so `6/8` at dotted-quarter = 60 is `tempoBpm` 90, and `2/2` at half = 60 is `tempoBpm` 120. The submitted (or default) tempo takes precedence over any detected tempo marking. *(added 2026-10-09, user decision: PIYA-109 AC2 now says the same. The tempo stays one quarter-note BPM for the whole piece, whatever the meter or meter changes; the metronome click works out each measure's beat from that BPM, see PIYA-210.)*
+9. **Errors** (added 2026-10-08, PIYA-206 / PIYA-215 AC3). Every error uses the standard envelope with an `error` object, so the app can map `error.code` to its own message. `message` is English text for logs, not for display:
+   ```json
+   { "data": null, "success": false, "status": 400, "message": "Title is required",
+     "error": { "code": "title_required", "field": "title" } }
+   ```
+   `field` is set for field errors, `pageIndex` (numbered as in AC5) for errors about one file, and `retryAfterSeconds` for 429.
+
+   | Status | Codes |
+   |---|---|
+   | 400 | `no_pages`, `too_many_pages`, `mixed_input_types`, `duplicate_field`, plus the AC8 field codes |
+   | 401 | session rule shared by every authenticated endpoint |
+   | 413 | `file_too_large` (one image over 10 MB), `request_too_large` (body over 100 MB), `image_pixels_too_large` (a page decodes to more than 50 megapixels) |
+   | 415 | `unsupported_file_type` |
+   | 422 | `corrupt_image` (passes the magic-byte check but cannot be decoded) |
+   | 429 | `rate_limited` (per-user submission limit; starting value 10 per user per rolling hour, set in config), `queue_full` (AC6) |
+
+   - Only one error is returned. If several apply, the first in this order wins: 401, 429 `rate_limited`, 413, 400 field errors, 400 `mixed_input_types` / `no_pages`, 415, 422, 400 `too_many_pages`, 429 `queue_full`.
+   - A PDF part sent here together with images returns 400 `mixed_input_types`. A PDF sent alone returns 415; PDFs go to PIYA-310.
+   - The reverse proxy may answer an oversized body with its own 413 and no JSON. Its body limit and Flask's `MAX_CONTENT_LENGTH` must both be 100 MB, and the client treats any 413 without a readable `error.code` as `request_too_large`.
+10. **EXIF and orientation** (added 2026-10-08, PIYA-206, user decision). The client strips EXIF and applies rotation and crop to the pixels before upload, so the server receives final, already-edited images:
+    - The server decodes every page **ignoring** the EXIF Orientation tag and re-encodes it during standardization (PIYA-320) with no metadata (no EXIF, XMP, IPTC or comments). Only the re-encoded image is written to storage; the bytes as uploaded are never persisted. GPS and other EXIF values are never stored or logged.
+    - OpenCV's `cv2.imread` / `cv2.imdecode` apply EXIF orientation by default, so decode with `cv2.IMREAD_IGNORE_ORIENTATION` (or use Pillow without `ImageOps.exif_transpose`). Test: a JPEG carrying Orientation = 6 comes out of standardization with its pixels unrotated, in the orientation in which they were submitted.
+11. **No partial state** (added 2026-10-08). The job row and its stored page images are committed together. On any error, no job row is left behind, and page images already written for that request are deleted.
+12. **Whole-score retake** *(added 2026-10-14, user decision 2026-10-14: "Re-photograph retakes the WHOLE score: back to Capture with pages cleared, title/details kept (a failed voice has no single bad page)")*. An optional text part `replacesJobId` marks the submission as a retake of an earlier job. The pages and the AC8 metadata are sent in full, as for a new score; the server never copies metadata from the old job.
+    - `replacesJobId` must name a job of the caller, else 404 `job_not_found`, the same as an unknown id (FR-27). That job must have failed with `incomplete_voice_sequence` or completed with at least one `"unreadable"` value in `failedVoiceCauses` (PIYA-103 AC10), and must not already be superseded, else 409 `not_retakeable`. If an unfinished retake of the same job exists, 409 `retake_in_progress`, so a double tap does not start two jobs. Check order: ownership (404) first, then `retake_in_progress`, then `not_retakeable`, so a double tap reports the retake already running rather than `not_retakeable`. *(Amended 2026-10-14, review.)* This is enforced by a partial unique index (PIYA-311 AC8), not by a check-then-insert.
+    - A new job with a new `jobId` is always created, as in PIYA-116. The old job is never re-run.
+    - **Retake of a completed job keeps the same `scoreId`.** Its `scores` row is not touched while the new job runs, so the old result stays on the server; the app does not open it during the retake (PIYA-207 AC12, user decision 2026-10-14). When the new job completes, the PIYA-321 completion transaction updates that `scores` row from the new job's metadata and sets `jobs.score_id`, instead of inserting a row, and sets the old job's `superseded_by_job_id`. After the commit, the old job's audio, timing file and page images are deleted (FR-12). Anything a crash leaves behind is removed by PIYA-111 cleanup. If the new job fails or is cancelled, the score keeps its old result.
+    - **Retake of a failed job:** no `scores` row exists yet (PIYA-321 creates it on completion), so the new job completes into a new `scoreId` as usual. The old job's `superseded_by_job_id` is set in the transaction that creates the new job, and a superseded failed job is left out of library lists (PIYA-308, PIYA-218).
+    - Why the same `scoreId`: the user is fixing one score, not adding another. A new `scoreId` would leave a duplicate N-voice entry for the user to find and delete, and would lose `last_accessed_at`. Keeping the old result until the retake completes means a failed or abandoned retake loses nothing.
+    - Deleting the score (PIYA-309) while its retake runs cancels the retake (PIYA-114).
+    - The response echoes `replacesJobId` when it was sent. The old-to-new job link is logged, as in PIYA-116 AC6.
+    - Server side: PIYA-311 AC8 (columns, index), PIYA-321 AC5 (update instead of insert), PIYA-309 AC6 (cancel a running retake) in `module3-backend.md`.
+    - A superseded completed job's results are gone, so PIYA-103 for it returns 410 `job_superseded` with `replacementJobId` (ownership is checked first, so other users still get 404). The app normally never asks: it opens scores by `scoreId`.
+
+**Response Schema:** *(2026-10-08: the response echoes the stored `title` and `tempoBpm`, the latter with the default applied. `arranger`, `keySignature` and `timeSignature` are echoed only when present and omitted otherwise, never `null`.)* *(2026-10-09: renamed from `composer`, user decision — the field holds the arranger.)*
 ```json
 {
   "data": {
@@ -25,7 +83,12 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
     "userId": 214,
     "pageCount": 3,
     "status": "queued",
-    "submittedAt": "2026-09-10T09:15:00Z"
+    "submittedAt": "2026-09-10T09:15:00Z",
+    "title": "Bayan Ko",
+    "arranger": "Constancio de Guzman",
+    "tempoBpm": 90,
+    "keySignature": "Eb",
+    "timeSignature": "4/4"
   },
   "success": true,
   "status": 202,
@@ -44,7 +107,14 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
 3. Returns `percent_complete` (0–100), calculated from completed stages across all pages.
 4. Returns 404 if `job_id` doesn't exist or doesn't belong to caller's account.
 5. If status is `failed`, includes `failure_reason` and the specific `page_index` that failed, when applicable.
+   *(Amended 2026-10-14, backend-lead review.)* In the response these are `failureReason` (the snake_case code) and `pageIndex` (0-based per PIYA-117 "Index bases", `null` when the failure is not page-specific, e.g. `incomplete_voice_sequence`, `synthesis_failed`, `internal_error`). The full code set: `preprocessing_error`, `no_staff_detected`, `ambiguous_staff_count`, `unsupported_staff_layout` (page-specific), and `incomplete_voice_sequence`, `synthesis_failed`, `stage_timeout`, `server_restart`, `internal_error` (`pageIndex: null`).
 6. Response time under 500ms regardless of underlying job state.
+7. **Failed voices on `complete`** *(added 2026-10-14, user decision 2026-10-14: "When a voice fails completely, the app offers re-photograph AS SOON AS PROCESSING IS DONE, before Playback opens")*. When status is `complete`, the response carries `failedVoices` and `failedVoiceCauses` with the same values as PIYA-103 AC10, read from the job record. Both are `null` for every other status. The app offers the retake when any `failedVoiceCauses` value is `"unreadable"` (PIYA-207 AC11), without fetching the result. These two fields are used rather than a `retakeSuggested` boolean because the dialog must name the voices and count the ones that will play, so a boolean would need the voice list anyway. AC6's 500 ms limit still applies.
+8. **Submitted details** *(added 2026-10-14, user request 2026-10-14 to pre-fill a retake after a reinstall; option chosen by backend-lead)*. Every response carries the job's submitted metadata, read from its `jobs` row (PIYA-311 AC7): `title`, `tempoBpm`, and `arranger`, `keySignature`, `timeSignature` only when present, omitted otherwise, as in the PIYA-101 response. The `jobs` row exists for queued, running, failed and completed jobs alike, so one call pre-fills the whole-score retake (PIYA-207 AC12) for a failed job as well as a completed one, after a reinstall too, with no new endpoint. The app still needs the `jobId`: for a completed score it comes from the result fetch, and for a failed job after a reinstall it depends on PIYA-308 listing failed scans (PIYA-218 backend dependency).
+9. **Read path and polling limit** *(added 2026-10-22, backend-lead recommendation for PIYA-218 AC13 background polling; see the "Client background status polling" note at the end of `module3-backend.md`)*.
+   - Job state is read from the durable `jobs` row only (PIYA-311 AC7), never from the pipeline worker process or GPU host, so each poll is one indexed, account-scoped row read and AC6's 500 ms holds whatever the worker is doing.
+   - A per-user read limit applies: 120 status requests per user per minute (set in config). Over the limit, the endpoint returns 429 `rate_limited` with a `Retry-After` header and `error.retryAfterSeconds`, the same envelope as PIYA-101 AC9.
+   - This read limit is a separate counter from the PIYA-101/310 submission limit, so polling never uses up a user's submissions.
 
 **Response Schema:**
 ```json
@@ -56,6 +126,11 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
     "totalPages": 3,
     "percentComplete": 75,
     "failureReason": null,
+    "failedVoices": null,
+    "failedVoiceCauses": null,
+    "title": "Bayan Ko",
+    "tempoBpm": 90,
+    "keySignature": "Eb",
     "estimatedRemainingSeconds": 62
   },
   "success": true,
@@ -71,10 +146,37 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
 
 **Acceptance Criteria:**
 1. Returns 409 (not 200) if job status is not yet `complete`.
-2. Once complete, returns all four SATB audio track URLs (soprano, alto, tenor, bass), preprocessed page image URL(s) for playback overlay, and tick-based timing metadata for the playback indicator.
+2. Once complete, returns all four SATB audio track URLs (soprano, alto, tenor, bass), preprocessed page image URL(s) for playback overlay, and tick-based timing metadata for the playback indicator. *(added 2026-10-09, user decision: "all four" now means every voice not listed in `failedVoices` (AC10). A failed voice has no `audioTracks` key.)*
 3. Returns 404 if `job_id` doesn't exist or doesn't belong to caller's account.
 4. Every returned audio track URL is independently playable/downloadable without additional auth beyond the session token.
 5. Repeated calls return cached results and do not re-trigger pipeline computation.
+6. Once complete, the response includes a `review` object. `reviewNeeded` is true whenever any Stage 3 strip flag or Stage 4 reconstruction flag carries `review_needed`, or the clef/key classifier was disabled. `reasons` lists the distinct flag codes. `items` holds at most 200 entries, each with `code`, `voice`, `pageIndex`, `systemIndex`, `bar`, and `truncated` is set when entries were left out. `reviewNeeded: false` means no flag was raised, not that the transcription is verified correct. Model provenance (checkpoint hash, gate status) is never included in the response. *(Added 2026-09-29, backend-lead review. While the clef/key classifier has not passed its real-photo gate (BUG-021), every job carries the reason `clef_key_unvalidated`, so `reviewNeeded` is always true. The pipeline side is `stage5_synthesis.run_full_pipeline_with_report()` / `build_review()`; flag codes stay snake_case, voice is lowercase.)*
+
+7. Once complete, the response includes `title` (always present) and `arranger` (omitted when absent, never `null`), read from the job's `scores` row (PIYA-321), so Playback (PIYA-208) can show its header ("arr. by <arranger>") when opened straight from Processing without a library fetch. *(Added 2026-10-09, user decision — closes the "PIYA-103 result has no title/composer" contract gap reported by frontend-lead; the field is `arranger`, not `composer`.)*
+8. Once complete, the response includes `tempoBpm`, the tempo the four tracks were rendered at (the stored `tempo_bpm`, 90 when none was submitted; same quarter-note-per-minute meaning as PIYA-101 AC8). The Speed modal (PIYA-210) shows speed in BPM, so the client plays at rate = chosen BPM ÷ `tempoBpm`, and the metronome click (PIYA-209/210) is generated client-side at the chosen BPM. *(Added 2026-10-09, user decision for PIYA-210.)* *(added 2026-10-09, user decision: `tempoBpm` is one quarter-note BPM for the whole piece. The click is laid out measure by measure from the timing file's `bars` table (PIYA-117 AC9) by the rules in PIYA-210, not as one click per quarter note.)*
+9. **Muted measures** *(added 2026-10-09, user decision)*. Once complete, the response includes `mutedMeasures`: the measures of a voice that Stage 5 rendered as silence because Stage 4's repair of that measure threw notes away (PIYA-109 AC8). It is always present and is `[]` when nothing was muted. Each entry:
+
+   | Field | Type | Meaning |
+   |---|---|---|
+   | `voice` | string | lowercase, as in `audioTracks` |
+   | `bar` | int or null | printed measure number (PIYA-117 AC7, pickup = 0); `null` when Stage 4 could not anchor the voice-strip to the bar grid |
+   | `pageIndex` | int | 0-based, as in PIYA-117 "Index bases" |
+   | `systemIndex` | int | 0-based within its page |
+   | `startMs` / `endMs` | int | the silent span at the rendered tempo (`tempoBpm`), on the same clock as the timing file's `timestampMs`; `endMs` is exclusive |
+   | `reason` | string | the Stage 4 flag code that caused it, snake_case |
+
+   - Muted reasons (repair was lossy): `bar_overflow_clipped`, `suspected_missing_barline` (clipped), `bar_length_invariant_failed`, `local_placement_overrun` (notes dropped), and `pickup_length_mismatch` only when its action is `trimmed_head_to_pickup`.
+   - Never muted (the measure was only scaled or compressed, nothing thrown away): `bar_overflow_run_scaled`, `suspected_tuplet` (compressed). A `pickup_length_mismatch` that was only right-aligned is not muted either.
+   - Muting is by tick span, so it works where `bar` is `null`. Only that voice is silent in the span; the other voices and the rest of that voice play.
+   - Entries are ordered by start tick (hence `startMs`), then voice in SATB order (soprano, alto, tenor, bass). The list is not capped. *(Amended 2026-10-14.)*
+   - Every muted measure also appears in `review.items` unless `truncated` is true (muted items are listed before other flags), with the same `reason` as its `code`, so `review.reviewNeeded` is true whenever `mutedMeasures` is non-empty. *(Amended 2026-10-09, review round: `review.items` order is failed voices, then muted measures in `mutedMeasures` order, then other Stage 4 flags, then per-strip flags.)*
+10. **Failed voices** *(added 2026-10-09, user decision)*. One voice that comes back empty from Stage 4, or whose audio Stage 5 cannot produce, no longer fails the job (PIYA-108 AC4/AC5, PIYA-109 AC9). The job fails only if all four voices fail. The response includes `failedVoices`, a list of lowercase voice names in SATB order (e.g. `["tenor"]`). It is always present and is `[]` when every voice rendered. A voice in `failedVoices` has no `audioTracks` entry and no `mutedMeasures` entries. *(Resolved 2026-10-14 by `docs/decisions/meter-click-and-muting-gaps.md` resolution 4: a voice Stage 5 could not render has no events in the timing file, matching `failedVoices`.)* `review.reasons` includes `voice_failed` whenever `failedVoices` is non-empty, with one `review.items` entry per failed voice: `{"code": "voice_failed", "voice": "tenor", "pageIndex": null, "systemIndex": null, "bar": null}`. *(Amended 2026-10-14, user decision 2026-10-14: "Offer re-photograph ONLY when photos are the cause".)* The response also includes `failedVoiceCauses`, an object whose keys are exactly the voices in `failedVoices` (lowercase). Each value is one of:
+    - `"unreadable"`: Stage 4 placed no events for that voice (PIYA-108 AC4). The photos are the cause, so the app offers a whole-score retake (PIYA-207 AC11).
+    - `"render_failed"`: Stage 4 placed events, but Stage 5 could not produce the audio (PIYA-109 AC9). This is a server fault: the app shows the PIYA-208 failed-voice alert with "try again later", and offers no retake.
+
+    It is always present and is `{}` when `failedVoices` is `[]`. No other values are defined; the client treats an unknown value as `render_failed` (no retake). The job record stores it with `failedVoices`, so PIYA-102 AC7 can return it without the result.
+
+*(2026-10-09: open gap. This endpoint is keyed by `job_id`, but the library opens scores by `scoreId`. See PIYA-308 AC8 in `module3-backend.md`. Playback (PIYA-208) is currently built against a fake keyed by score.)*
 
 **Response Schema:**
 ```json
@@ -82,6 +184,9 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
   "data": {
     "jobId": "job_8841",
     "scoreId": 552,
+    "title": "Bayan Ko",
+    "arranger": "Constancio de Guzman",
+    "tempoBpm": 90,
     "audioTracks": {
       "soprano": "https://cdn.piyanota.app/audio/job_8841_soprano.mp3",
       "alto": "https://cdn.piyanota.app/audio/job_8841_alto.mp3",
@@ -89,7 +194,21 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
       "bass": "https://cdn.piyanota.app/audio/job_8841_bass.mp3"
     },
     "scoreImages": ["https://cdn.piyanota.app/pages/job_8841_p1.png"],
-    "timingMetadataUrl": "https://cdn.piyanota.app/timing/job_8841.json"
+    "timingMetadataUrl": "https://cdn.piyanota.app/timing/job_8841.json",
+    "review": {
+      "reviewNeeded": true,
+      "reasons": ["bar_overflow_clipped", "clef_key_unvalidated", "key_no_majority"],
+      "items": [
+        {"code": "key_no_majority", "voice": "tenor", "pageIndex": 1, "systemIndex": 2, "bar": null},
+        {"code": "bar_overflow_clipped", "voice": "bass", "pageIndex": 0, "systemIndex": 0, "bar": 4}
+      ],
+      "truncated": false
+    },
+    "mutedMeasures": [
+      {"voice": "bass", "bar": 4, "pageIndex": 0, "systemIndex": 0, "startMs": 8000, "endMs": 10667, "reason": "bar_overflow_clipped"}
+    ],
+    "failedVoices": [],
+    "failedVoiceCauses": {}
   },
   "success": true,
   "status": 200,
@@ -139,7 +258,7 @@ _Covers: API tickets (client-facing), pipeline stage tickets (internal), infrast
 
 ### PIYA-116 — Resubmit Failed Page API
 **Method:** POST
-**Trigger:** Invoked from PIYA-207 when user selects "Retake Page" after `no_staff_detected` or `preprocessing_error`.
+**Trigger:** Invoked from PIYA-207 when user selects "Retake Page" after `no_staff_detected` or `preprocessing_error`. *(2026-10-14: a whole-score retake, after `incomplete_voice_sequence` or for a completed job with an `unreadable` voice, goes through PIYA-101 AC12, not here. AC3's 409 already rejects it.)*
 
 **Acceptance Criteria:**
 1. Requires authentication; accepts `jobId`, `pageIndex`, replacement image.
@@ -258,6 +377,12 @@ domain, not decoding). AC5's staff-position + chord tagging is likewise produced
 not `chord_group_id` as written here — left as-is per the user; note it's also read by
 `stage4_reconstruction.py` (chord counting/reporting), so a future rename must update both files.
 
+**Fresh-photo eval note (2026-09-28):** `data/eval_fresh/REPORT.md` is the first measurement against a
+user-verified Filipino-dataset GT: Non Nobis Domine, 36 strips.
+- Token SER is 58.3-58.5% as-is and 50.2-50.8% with the clef/key classifier (fine-tuned seed range). Both are far
+  above AC1's 15%, so AC1 is not met.
+- The remaining error is note and rhythm reading (the BUG-011 domain gap), not the clef/key header.
+
 **AC1 decision (2026-09-10):** No hand-annotated Filipino SATB test set exists yet to measure the
 15% SER target against directly. User decision: accept the Camera-PrIMuS-derived SER comparison
 (`compare_omr_baselines.py`) as an interim proxy metric for AC1 while a subset of the Filipino SATB
@@ -274,6 +399,14 @@ below — it runs the real CRNN decode path (not ground-truth tokens) end to end
 proxy this project has to "does symbol transcription plus pitch inference actually work together,"
 which token-level SER alone can't answer.
 
+**Clef/key classifier status (2026-09-27):** this is a flag-only side model for the BUG-011 clef collapse. The plan and decisions are in `docs/decisions/piya-106-clef-keysig-detector-plan.md`.
+
+- Local training code is ready and reviewed: ml-cv-lead gave a conditional GO, and fixes R1-R6 / E1-E4 are applied in `850f880`.
+- The CPU-only venv is the reference configuration, because the GPU is unreliable (BUG-019).
+- No full training run has started, and no accuracy number exists yet.
+- Validation is Dormi Jesu, Livin' on a Prayer and Flashlight, check-only. DSMN and Honneur a Toi stay test-only.
+- Stage 3 integration (including the `key_plan` for mid-piece key changes) has not started.
+
 ---
 
 ### PIYA-107 — Pitch Inference (Clef-Aware Diatonic Mapping)
@@ -286,6 +419,9 @@ which token-level SER alone can't answer.
 4. Defaults key signature to `K = 0` and time signature to 4/4 if either not detected on a staff.
 5. Groups chord-tagged noteheads (shared `chord_group_id`) into a single chord event; all others treated as individual note events.
 6. Every output pitch event includes pitch, duration, time signature, voice label, page index, position.
+7. **Time signature per measure, including mid-strip changes** *(added 2026-10-09, user decision)*. A time signature is read wherever it is engraved in the strip: in the header, or after a barline mid-strip (a mid-line meter change). It applies from that measure on, and each event's `time_signature` is the meter of the measure it sits in, not the strip header's. Today the meter is read only in the header states (`clef` / `keysig` / `fixed_header` in `infer_pitch()`); in `body` a metersign is ignored and every `digit.*` token is taken as a multirest count, so a mid-strip `3/4` is lost (BUG-051).
+8. **Meter digits vs multirest counts by staff position** *(added 2026-10-09, user decision)*. In the Camera-PrIMuS vocabulary a time-signature digit sits on the staff (numerator `digit.N-L4`, denominator `digit.N-L2`) and a multirest count sits above it (`digit.N-S5`). Stage 3 tells them apart by that position, not by where the digit falls in the token order: an `S5` digit is never read as a meter, and an `L4` + `L2` pair is never read as a multirest count, in the header or the body. This fixes BUG-035 (a strip-start multirest count read as a meter) and the mid-strip case in BUG-051.
+9. **Detected vs defaulted meter** *(added 2026-10-09, user decision)*. Each event also carries `time_signature_source`: `"detected"` when its measure's meter was read in this strip (header or mid-strip, AC7), `"default"` when the strip had no meter at or before that measure and AC4's 4/4 was stamped. Stage 4 uses this to inherit the previous meter instead of reading a defaulted 4/4 as a change (PIYA-108 AC7).
 
 **AC5 decision (2026-09-10):** Two ways to satisfy "groups chord-tagged noteheads into a single
 chord event" were on the table: (a) merge same-onset noteheads into one multi-pitch event object,
@@ -365,22 +501,31 @@ the base training run finishing so AC4's fine-tune can proceed with explicit mul
 1. Sorts all strips by `page_index`, then vertical position, to establish global reading order before assembly.
 2. Appends each strip's event sequence to its corresponding voice sequence (S/A/T/B) without altering event order.
 3. Preserves chord events, clefs, key signatures, time signatures, and barlines unmodified during assembly.
-4. Verifies all four voice sequences are non-empty before marking the stage complete.
-5. If any voice sequence is empty, sets job status to `failed` with `failure_reason = "incomplete_voice_sequence"`, identifying the missing voice, triggers recapture prompt (FR-24).
+4. Verifies all four voice sequences are non-empty before marking the stage complete. *(added 2026-10-09, user decision: an empty voice no longer stops the stage. It is reported as a failed voice (PIYA-103 AC10) and the other voices continue to Stage 5. Today `reconstruct_satb()` raises `ValueError` if any voice is empty; that raise moves to the all-four-empty case.)*
+5. If any voice sequence is empty, sets job status to `failed` with `failure_reason = "incomplete_voice_sequence"`, identifying the missing voice, triggers recapture prompt (FR-24). *(added 2026-10-09, user decision: the job fails this way only when **all four** voices are empty or fail in Stage 5 (PIYA-109 AC9). One to three failed voices give a completed job with `failedVoices`.)* *(Amended 2026-10-14, user decision 2026-10-14.)* A voice that is empty after this stage gets the cause `unreadable` (PIYA-103 AC10). `incomplete_voice_sequence` now leads to a whole-score retake (PIYA-101 AC12, PIYA-207 AC12), not a page recapture: a failed voice has no single bad page, and `pageIndex` is `null`. Stage 4 still raises it when all four voices are empty. Stage 5 also raises it when all four fail across Stages 4 and 5 and at least one was empty (PIYA-109 AC9).
+6. **Per-measure meter** *(added 2026-10-09, user decision)*. Stage 4 lays out bars measure by measure, each measure's length taken from its own meter (PIYA-107 AC7), so bar ticks can vary inside one system. A meter change at any barline, mid-system included, takes effect from that measure. The voices' meter for a measure is decided by consensus across voices, as `_consensus_time_signatures()` does per system today. `report["systems"]` gives, per system, `first_bar`, `n_bars`, `start_tick` and the ticks and time signature **of each bar** (a single `bar_ticks` / `time_signature` per system is no longer enough), and `pickup_ticks` stays at the top level. A multirest covers the bar count Stage 3 read for it, each bar at its own meter's length, not its tick total divided by one bar's length (`_measure_span()` today assumes 4/4 whole-note bars).
+7. **Inherit, don't reset, on a defaulted meter** *(added 2026-10-09, user decision)*. A measure whose meter is only Stage 3's default (`time_signature_source: "default"`, PIYA-107 AC9) inherits the last detected meter. A detected meter always counts, including a detected 4/4 after another meter. This removes the known limit in `_consensus_time_signatures()` ("a real change back to 4/4 mid-piece is invisible"). Each bar also records how its meter was obtained: `detected` (a meter was read for it in its own system: the strip header, or a change at or before it in that strip), `inherited` (carried over from an earlier system), `default` (no meter detected at or before it anywhere, 4/4 used) or `unknown` (Stage 4 could not establish one); PIYA-117 AC9 publishes this as `meterSource`.
+8. **Tick span on lossy repairs** *(added 2026-10-09, user decision)*. Every flag whose repair threw notes away (the muted reasons in PIYA-103 AC9) carries `start_tick` and `end_tick`, the global tick span (end exclusive) of the measure whose content was lost, so Stage 5 can silence it even where `bar` is `null`. For a bar-anchored measure this is that bar's span; for `pickup_length_mismatch` with `trimmed_head_to_pickup` it is the pickup, `[0, pickup_ticks)`. For `local_placement_overrun` (a voice-strip with no bar anchoring) the span runs from the earliest trimmed note's onset to the system end, with `bar: null` and `page_index`/`sys_idx` set (gap-doc resolution 2; rests shortened by the trim do not count, and notes dropped past the system end never sounded, so they need no span). `pickup_length_mismatch` / `trimmed_head_to_pickup` carries its span only when a note was dropped or a note lost its head; a trim that removed only rests is not muted. *(Amended 2026-10-14, review round 3.)*
 
 ---
 
 ### PIYA-109 — MIDI-Based Piano Audio Synthesis
-**Trigger:** Internal — invoked after SATB Part Reconstruction confirms all four voices are complete.
+**Trigger:** Internal — invoked after SATB Part Reconstruction confirms all four voices are complete. *(added 2026-10-09, user decision: invoked when Stage 4 has at least one non-empty voice; see PIYA-108 AC4/AC5.)*
 
 **Acceptance Criteria:**
 1. Encodes each voice as an independent MIDI track at 480 PPQ (pulses per quarter note).
-2. Applies default tempo of 90 BPM unless a detected tempo marking overrides it.
+2. Renders every track at the job's `tempoBpm` (PIYA-101 AC8; 90 when none was submitted), one quarter-note tempo for the whole piece. A detected tempo marking never overrides it. *(added 2026-10-09, user decision; replaces "Applies default tempo of 90 BPM unless a detected tempo marking overrides it", which contradicted PIYA-101 AC8.)*
 3. Encodes dotted notes at 1.5× base duration, double-dotted at 1.75×.
 4. Encodes rests by advancing the tick counter without generating note events.
 5. Encodes chord notes with identical onset/offset ticks to guarantee simultaneous playback.
-6. Outputs exactly four independently playable audio files (S/A/T/B) per job upon successful synthesis.
+6. Outputs exactly four independently playable audio files (S/A/T/B) per job upon successful synthesis. *(added 2026-10-09, user decision: one file per voice that did not fail (AC9); a failed voice has no file.)*
 7. Synthesis for a 3-page score completes in under 30 seconds on deployed hardware, as part of the overall ≤2-min/page budget.
+8. **Damaged measures play as silence** *(added 2026-10-09, user decision)*. For each Stage 4 flag whose repair was lossy (the muted reasons in PIYA-103 AC9, with the tick span from PIYA-108 AC8), that voice is silent from `start_tick` to `end_tick`: notes starting inside the span are not emitted, and a note that starts earlier and sounds into the span is cut at `start_tick`. Measures that were only scaled or compressed (`bar_overflow_run_scaled`, `suspected_tuplet`) play as repaired. The other voices, and the rest of the muted voice, are unaffected. Each silenced span becomes one `mutedMeasures` entry, with `startMs` / `endMs` converted at `tempoBpm` the same way as the timing file.
+9. **One voice failing does not fail the job** *(added 2026-10-09, user decision)*. A voice that is empty after Stage 4, or whose audio cannot be produced, is left out of the output and listed in `failedVoices` (PIYA-103 AC10). The other voices are still rendered and the job completes. The job fails only if all four voices fail. *(Amended 2026-10-09, backend-lead review.)* Rendering-infrastructure failure is not a capture failure: if all four voices fail and at least one of them failed in Stage 5 rendering (it was not empty after Stage 4), the job fails with `failure_reason = "synthesis_failed"` (a server error; no recapture prompt). `incomplete_voice_sequence` is used only when every voice was empty after Stage 4. The pipeline raises `stage4_reconstruction.PipelineFailure` (a `ValueError`) carrying the code in its `failure_reason` attribute; the backend keys on that code, never on the message text. The backend uploads only the files listed in `audio`; a failed voice's leftover .mid/.wav is not served. *(Amended 2026-10-14, backend-lead review.)* PIYA-102 reports it as `failureReason: "synthesis_failed"` with `pageIndex: null`; the app shows retry-later copy, not recapture. Any other exception escaping `run_full_pipeline_with_report` that is not a `PipelineFailure` is recorded by the backend as `failureReason: "internal_error"`, never `incomplete_voice_sequence`. A `bars` table that would drift from the audio (PIYA-117 AC9) raises `PipelineFailure` with `internal_error` itself. `PipelineFailure` pickles with its `failure_reason` intact, so it survives a worker-process boundary.
+
+   *(Amended 2026-10-14, user decision 2026-10-14; replaces the job-level rule above.)* user decision 2026-10-14: "if every voice failed and AT LEAST ONE was empty (mix of empty + render failures), report `incomplete_voice_sequence` (retake offered, whole score), not `synthesis_failed`. `synthesis_failed` only when all four were read but all failed to render." So when all four voices fail, the reason is `incomplete_voice_sequence` if at least one was empty after Stage 4 (cause `unreadable`), and `synthesis_failed` only when all four had events after Stage 4 and none rendered. A retake can fix an empty voice; when every voice was read, re-photographing would not help. The sentences above saying that one Stage 5 render failure among the four gives `synthesis_failed`, and that `incomplete_voice_sequence` is used only when every voice was empty, no longer hold. Code to change: `stage5_synthesis.run_full_pipeline_with_report()` now picks `FAILURE_SYNTHESIS` when any failed voice had events (`rendered_but_failed`). It must instead pick `FAILURE_INCOMPLETE_VOICE_SEQUENCE` when any failed voice was empty. Stage 4's own all-four-empty raise in `reconstruct_satb_with_report()` is unchanged.
+10. **Per-voice failure cause** *(added 2026-10-14, user decision 2026-10-14)*. `run_full_pipeline_with_report()` returns `failedVoiceCauses` next to `failedVoices` (PIYA-103 AC10): lowercase voice to `"unreadable"` or `"render_failed"`, with keys exactly the members of `failedVoices`. The dict key is camelCase like the other client-bound keys there (`failedVoices`, `mutedMeasures`). Internal names stay snake_case (`failed_voice_causes`, constants `CAUSE_UNREADABLE` / `CAUSE_RENDER_FAILED`). A voice is `unreadable` when it is in Stage 4's `report["failed_voices"]` (empty after reconstruction), else `render_failed`. Both causes keep the one `voice_failed` review item; no new review code. Tests pin three cases: tenor empty and the other three rendered gives `{"tenor": "unreadable"}`; all four failed with one empty raises `incomplete_voice_sequence`; all four read and none rendered raises `synthesis_failed`.
+
 
 ## Infrastructure & Reliability Tickets
 
@@ -437,10 +582,51 @@ the base training run finishing so AC4's fine-tune can proceed with explicit mul
 4. Stores metadata as JSON; produces exactly one metadata file per completed score.
 5. Metadata generation adds less than 5 seconds to total processing time.
 6. Output is accessible through PIYA-103.
+7. Every event carries `bar`, the 1-based measure number taken from Stage 4's `global_bar`. A pickup (anacrusis) measure is `bar: 0`, so the first full measure is always `bar: 1` and the numbers match the printed score. `bar` is `null` for events in a voice-strip that Stage 4 could not anchor to the bar grid (its `placed_by_local_ticks` flag), and the client must accept `null`. Rest events are included, so a measure that starts on a rest still has an event on its downbeat. A note tied across a barline is one event (Stage 4 merges ties) and keeps the bar it starts in. *(Added 2026-10-09, for PIYA-208's ⏮ first-measure / ⏭ last-measure-start buttons. Depends on Stage 4 bar tracking in `stage4_reconstruction.py`; when bars are not anchored, those buttons can only approximate.)*
+8. Every event also carries `systemIndex` (Stage 2's `sys_idx`, already on every Stage 3/4 event) and `systemTopY` / `systemBottomY` (the top of the system's first staff and the bottom of its last staff, in the same pixel space as `y`). The Playback band spans the whole system. Without these fields the client has to guess the band's height from the four voices' note `y` values near one timestamp, which shrinks when the voices sit close together and breaks when a voice is resting. Stage 2 already has these staff boxes, so the cost is three integers per event. *(Added 2026-10-09, backend-lead; adopted by the user the same day. The client still falls back to note `y` values when the fields are absent.)*
+9. **Measure table** *(added 2026-10-09, user decision)*. The file also holds `bars`, one entry per measure of the whole piece, in order, so the client can lay out the metronome click per measure (PIYA-210). It is built from Stage 4's layout (`report["systems"]`: `first_bar`, `n_bars`, `start_tick`, each bar's ticks and time signature, PIYA-108 AC6; and `pickup_ticks`), not from any voice's events, so a measure where a voice rests, failed or was muted still has its entry.
+
+   | Field | Type | Meaning |
+   |---|---|---|
+   | `bar` | int | printed measure number as in AC7; `0` = pickup |
+   | `startMs` | int | start at the rendered tempo (`tempoBpm`), same clock as `timestampMs` |
+   | `durMs` | int | the measure's actual length at the rendered tempo |
+   | `startTick` | int | global tick at 480 PPQ |
+   | `durTicks` | int | the measure's actual length in ticks (a pickup or a short final bar is shorter than its meter) |
+   | `numerator` | int or null | `null` only when `meterSource` is `unknown` |
+   | `denominator` | int or null | `null` only when `meterSource` is `unknown` |
+   | `meterSource` | string | `detected`, `inherited`, `default` or `unknown` (PIYA-108 AC7) |
+   | `pickup` | bool | `true` only for the bar-0 entry |
+   | `groups` | null | reserved for beat grouping; always `null` for now and ignored by the client |
+
+   - Entries tile the piece with no gaps: the first starts at tick 0, and each `startTick` is the previous `startTick + durTicks`. A multirest of N bars gives N entries.
+   - A pickup entry carries the opening meter it was engraved under (the meter Stage 4 measured the pickup against, stored as `report["systems"][0]["opening_meter"]`), which can differ from bar 1's when a meter change sits right after the pickup. The client places its clicks as the end of a full bar of that meter.
+   - With `meterSource: "default"` the meter is the 4/4 Stage 4 assumed, written as `4/4`.
+   - `durMs` is the next entry's `startMs` minus this one's, so rounding never opens a gap. The table ends at the last layout bar; the audio can run slightly longer (e.g. a note held past the final barline). *(Amended 2026-10-09, review round.)* `build_bars_table` refuses (RuntimeError) a layout whose tiled `startTick` disagrees with a system's `start_tick`, so the table can never drift from the audio.
+
+**Record shape (2026-10-09):** PIYA-117 and PIYA-118 describe the **same file**: one JSON array per score (AC4), each element one event holding both the timing fields above and PIYA-118's `x`/`y` (PIYA-118 AC6). PIYA-118's example below is the subset it adds, not a second record type. `timingMetadataUrl` in PIYA-103 serves this array. *(added 2026-10-09, user decision: the top level is now an object, `{"events": [...], "bars": [...]}`. `events` is the event array described here; `bars` is AC9. The client already accepts both a bare event array and `{"events": [...]}`; a file with no `bars` gets the plain quarter-note click fallback in PIYA-210.)*
+
+**Index bases (0-based API indices decided by the user 2026-10-09; timing-file `voice` casing per gap-doc resolution 12):** no ticket fixes whether `pageIndex` counts from 0 or 1. The pipeline counts from 1 internally (Stage 1 `page_index`, Stage 2 `sys_idx`; snake_case names are always 1-based). The app counts pages from 0 (PIYA-116 retake, PIYA-207 failure page). Decision: in every API response, `pageIndex` counts from 0 and indexes `scoreImages` directly, and `systemIndex` counts from 0 within its page. The conversion happens where a field is renamed from `page_index`/`sys_idx` to `pageIndex`/`systemIndex`, which is in `stage5_synthesis` (`build_review`, `build_muted_measures`, and the timing-file writer once it exists). Every camelCase index the pipeline returns, including `review_detail` stored on the job record, is already 0-based. The backend passes them through unchanged and must not subtract again. `bar` stays 1-based because it is a printed measure number, not an index. This applies to PIYA-101/102/103/116 as well, not only this file. Timing-event `voice` casing follows `docs/decisions/meter-click-and-muting-gaps.md` resolution 12: it stays capitalised (`"Soprano"`) and the client matches case-insensitively; `mutedMeasures`/`failedVoices`/`review.items` are lowercase. No timing-file event writer exists yet (PIYA-117 is still open). Whoever builds it must emit camelCase `pageIndex`/`systemIndex` through `stage5_synthesis._zero_based`, from the pre-mute `satb` (never `apply_muted_spans` output, which splits notes into extra events), and the backend must not subtract again. *(Amended 2026-10-14, review round 3.)*
 
 **Example Record:**
 ```json
-{ "timestampMs": 12500, "pageIndex": 1, "voice": "Soprano", "tick": 960, "eventId": 45 }
+{ "timestampMs": 12500, "pageIndex": 0, "voice": "Soprano", "tick": 960, "eventId": 45, "x": 1432, "y": 528, "bar": 3 }
+```
+With the optional AC8 fields: `"systemIndex": 0, "systemTopY": 410, "systemBottomY": 1190`.
+
+**Example file** *(added 2026-10-09, user decision)*: a one-quarter pickup in 3/4, then a change to 6/8 at bar 3, at `tempoBpm` 90 (one quarter = 480 ticks = 666.67 ms):
+```json
+{
+  "events": [
+    { "timestampMs": 0, "pageIndex": 0, "voice": "Soprano", "tick": 0, "eventId": 0, "x": 312, "y": 528, "bar": 0 }
+  ],
+  "bars": [
+    { "bar": 0, "startMs": 0,    "durMs": 667,  "startTick": 0,    "durTicks": 480,  "numerator": 3, "denominator": 4, "meterSource": "detected", "pickup": true,  "groups": null },
+    { "bar": 1, "startMs": 667,  "durMs": 2000, "startTick": 480,  "durTicks": 1440, "numerator": 3, "denominator": 4, "meterSource": "detected", "pickup": false, "groups": null },
+    { "bar": 2, "startMs": 2667, "durMs": 2000, "startTick": 1920, "durTicks": 1440, "numerator": 3, "denominator": 4, "meterSource": "detected", "pickup": false, "groups": null },
+    { "bar": 3, "startMs": 4667, "durMs": 2000, "startTick": 3360, "durTicks": 1440, "numerator": 6, "denominator": 8, "meterSource": "detected", "pickup": false, "groups": null }
+  ]
+}
 ```
 
 ---
@@ -455,10 +641,11 @@ the base training run finishing so AC4's fine-tune can proceed with explicit mul
 4. Coordinates remain aligned after image scaling performed by the mobile client.
 5. Position accuracy is visually validated against evaluation scores.
 6. Generated coordinates are stored within the timing metadata file.
+7. Each event carries the `bar` defined in PIYA-117 AC7 alongside its coordinates (and PIYA-117 AC8's `systemIndex` / `systemTopY` / `systemBottomY`). `x`/`y` are pixels in `scoreImages[pageIndex]` at its served resolution. *(Added 2026-10-09; see PIYA-117 "Record shape" and "Index bases".)*
 
-**Example Entry:**
+**Example Entry** (the fields this ticket adds to the PIYA-117 event; the full merged event is shown under PIYA-117):
 ```json
-{ "timestampMs": 12500, "pageIndex": 1, "x": 1432, "y": 528 }
+{ "timestampMs": 12500, "pageIndex": 0, "voice": "Soprano", "tick": 960, "eventId": 45, "x": 1432, "y": 528, "bar": 3 }
 ```
 
 ---
@@ -525,3 +712,39 @@ upgraded from reasoned to empirically verified: `compare_omr_baselines.py` never
 48-strip verification against the Finding-fixed code: identical 2/48 result, confirming no
 regression from the review-driven refactor. Ready for user merge approval — no code changes remain
 outstanding.
+
+### PIYA-126 — Chord / Divisi Support in Symbol Transcription (deferred; number provisional)
+**Trigger:** Divisi (two notes on one staff at the same time) is common in the target SATB scores, and
+both divisi notes must sound in the same voice track. Stage 3 cannot represent simultaneous notes:
+Camera-PrIMuS is monophonic with no chord token, and Stage 3's `chord_id` block never fires.
+**Sequencing:** Do NOT start until PIYA-106 fine-tuning Steps 2–7 are closed (font fix and chord fix
+must not be confounded). Full design and 11-step plan: `docs/decisions/piya-106-chord-vocabulary-plan.md`.
+
+**Interim scope (now):** the pipeline is monophonic-only. It should *detect* likely divisi/chord
+strips (e.g. bar overflow that looks like stacked notes, vertically stacked noteheads in the strip)
+and flag them `review_needed` rather than silently playing them as sequential notes.
+
+**Acceptance Criteria (draft, to be confirmed with the user):**
+1. Data-only CTC frame-budget feasibility audit passes for chords up to the chosen size (per-epoch
+   zero-loss counter added).
+2. Chord token (`chordnote-*`) added to the end of `VOCAB`; existing indices and the
+   `finetuned_font_seed{1,2}.pt` checkpoints unchanged until PIYA-106 closes.
+3. `infer_pitch` emits chord members with shared onset/duration and an explicit `chord_id`.
+4. Training data built from ds2_dense and camera-grandstaff (label source only, split per staff);
+   SynthSalienceChoralSet is not usable for training.
+5. `piyanota_dataset` remains test-only; results reported per source, per font, chord vs non-chord.
+6. ml-cv-lead review before training code and after any reported number; senior-reviewer before merge.
+
+### PIYA-127 — Recapture Prompt & Page Replacement (FR-24)
+**Trigger:** A page cannot be used: zero staves (`no_staff_detected`), staff count not a multiple of 4
+(`unsupported_staff_layout`), or a missing voice (`incomplete_voice_sequence`). Split out of BUG-001
+(signed off 2026-09-26); tracked as BUG-018. Full spec, checklist and draft acceptance criteria:
+`docs/tickets/recapture-prompt-fr24.md`.
+**Summary:** Today a zero-box page is silently skipped and the other failures are bare `ValueError`s, so
+PIYA-102/116 have no structured reason or `page_index` to act on. Needs (1) one structured failure type with
+reason + `page_index`, (2) the recapture checklist on the app (steady phone, good lighting, eye level, nothing
+blocking the page), and (3) retake replaces the failed page in place: new image id, same `page_index`, other
+pages' order untouched, old image kept as superseded. Overlaps PIYA-116 (job-level resubmit) - reconcile
+before implementation. Acceptance criteria are DRAFT until confirmed with the user.
+*(2026-10-14, user decision 2026-10-14: `incomplete_voice_sequence` is no longer a page recapture. A failed voice has no single bad page, so the whole score is retaken through PIYA-101 AC12 (`replacesJobId`), not through PIYA-116 or this ticket's page replacement. This ticket covers the page-specific reasons only.)*
+

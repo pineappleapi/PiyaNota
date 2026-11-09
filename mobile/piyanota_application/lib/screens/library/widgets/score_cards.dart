@@ -1,0 +1,750 @@
+import 'package:flutter/material.dart';
+
+import '../../../models/library_entry.dart';
+import '../../../theme/app_theme.dart';
+import '../../../state/processing_providers.dart';
+import '../../scan_status/scan_status_messages.dart';
+import '../library_messages.dart';
+
+/// Card geometry shared by the Add Score card, score cards and loading
+/// skeletons — all read off the 412 dp mockup, where every card is 82 dp
+/// tall with a 50 dp icon tile inset 20 dp and the text 14 dp after it.
+class _CardMetrics {
+  _CardMetrics._();
+
+  static const double minHeight = 82;
+  static const double radius = 12;
+  static const double outlineWidth = 1;
+  static const double tileSize = 50;
+  static const double tileRadius = 8;
+  static const double leftInset = 20;
+  static const double tileToText = 14;
+  static const double verticalPadding = 12;
+  // Keeps titles and subtitles clear of the chevron (top-right) and the
+  // 48 dp trash target (bottom-right), so a tap on the text can never land
+  // on Delete.
+  static const double rightReserve = 48;
+}
+
+/// Outlined, rounded card body with the project's darken-on-press SOP
+/// (frontend-piyanota.md "Interaction states") instead of a ripple.
+class _CardShell extends StatelessWidget {
+  const _CardShell({
+    required this.fill,
+    required this.child,
+    this.onTap,
+    this.onLongPress,
+    this.overlays = const [],
+    this.rightReserve = _CardMetrics.rightReserve,
+  });
+
+  final Color fill;
+  final double rightReserve;
+  final Widget child;
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
+  final List<Widget> overlays;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: fill,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(_CardMetrics.radius),
+        side: const BorderSide(
+          color: AppTheme.libraryCardOutline,
+          width: _CardMetrics.outlineWidth,
+        ),
+      ),
+      child: Stack(
+        children: [
+          InkWell(
+            onTap: onTap,
+            onLongPress: onLongPress,
+            splashFactory: NoSplash.splashFactory,
+            highlightColor: AppTheme.darken(fill),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                minHeight: _CardMetrics.minHeight,
+              ),
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  _CardMetrics.leftInset,
+                  _CardMetrics.verticalPadding,
+                  rightReserve,
+                  _CardMetrics.verticalPadding,
+                ),
+                child: child,
+              ),
+            ),
+          ),
+          ...overlays,
+        ],
+      ),
+    );
+  }
+}
+
+/// Icon tile + text column, vertically centred like the mockup.
+class _CardRow extends StatelessWidget {
+  const _CardRow({
+    required this.tileColor,
+    required this.tile,
+    required this.text,
+  });
+
+  final Color tileColor;
+  final Widget tile;
+  final Widget text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: _CardMetrics.tileSize,
+          height: _CardMetrics.tileSize,
+          decoration: BoxDecoration(
+            color: tileColor,
+            borderRadius: BorderRadius.circular(_CardMetrics.tileRadius),
+          ),
+          alignment: Alignment.center,
+          child: tile,
+        ),
+        const SizedBox(width: _CardMetrics.tileToText),
+        Expanded(child: text),
+      ],
+    );
+  }
+}
+
+/// PIYA-205 AC8 entry point: the white "Add Score" card at the top of the
+/// list.
+class AddScoreCard extends StatelessWidget {
+  const AddScoreCard({super.key, required this.onTap});
+
+  final VoidCallback onTap;
+
+  static const double _titleSize = 24;
+  static const double _subtitleSize = 13;
+  // The mockup's subtitle is visibly tracked tighter than the default.
+  static const double _subtitleTracking = -0.3;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+
+    return Semantics(
+      button: true,
+      child: _CardShell(
+        fill: Colors.white,
+        onTap: onTap,
+        child: _CardRow(
+          tileColor: AppTheme.libraryAddTileFill,
+          tile: const _PlusGlyph(),
+          text: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                LibraryMessages.addScoreTitle,
+                style: textTheme.titleLarge?.copyWith(
+                  fontSize: _titleSize,
+                  fontWeight: FontWeight.w700,
+                  height: 1.15,
+                  color: AppTheme.libraryCardTitle,
+                ),
+              ),
+              Text(
+                LibraryMessages.addScoreSubtitle,
+                style: textTheme.bodySmall?.copyWith(
+                  fontSize: _subtitleSize,
+                  letterSpacing: _subtitleTracking,
+                  height: 1.25,
+                  color: AppTheme.libraryAddSubtitle,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// One saved score. Tapping the card opens Playback (AC7); the trash icon
+/// is its own tap target so deleting can never also open the score.
+class ScoreCard extends StatelessWidget {
+  const ScoreCard({
+    super.key,
+    required this.entry,
+    required this.onTap,
+    required this.onDelete,
+    this.onEdit,
+    this.isDeleting = false,
+    this.scanFailed = false,
+  });
+
+  final LibraryEntry entry;
+  final VoidCallback onTap;
+  final VoidCallback onDelete;
+
+  /// PIYA-205-V2.4: opens the edit form. Null hides the pencil.
+  final VoidCallback? onEdit;
+
+  /// PIYA-218 AC2/AC3: this card's scan failed. The card says so in place
+  /// of its subtitle; tapping it opens the failure view, and it can still
+  /// be deleted from here.
+  final bool scanFailed;
+
+  /// While a delete request is in flight the trash shows a spinner and both
+  /// taps are disabled, so the user can't open a score that is about to
+  /// disappear or fire a second delete.
+  final bool isDeleting;
+
+  static const double _titleSize = 18;
+  // Slightly tighter than the mockup's 1.2 so a wrapped 2-line title reads
+  // as one block (round-2 design polish).
+  static const double _titleLineHeight = 1.15;
+  // 12 sp (was the mockup's 13) per the user's "smaller, modern" request;
+  // #575757 on the card fill is ~5.2:1, still WCAG AA for small text.
+  static const double _subtitleSize = 12;
+
+  /// PIYA-205-V2.2: space between the title's and the details line's boxes.
+  /// Reference (PIYA205_HomePage_Version2.png, 1 px = 1 dp): title baseline
+  /// to details baseline is 21 dp; with Plus Jakarta Sans line boxes
+  /// (18 x 1.15, 12 x 1.3) that is 15.9 dp with no gap, so 21 - 15.9 = 5.
+  static const double titleToDetailsGap = 5;
+  static const double _chevronSize = 18;
+  static const double _chevronInset = 8;
+  // Glyph 20 dp (was 16): the reference's trash ink is 11 x 13 dp
+  // (PIYA205_HomePage_Version2.png, measured), which is a 20 dp Material
+  // glyph's ink (14/24 wide).
+  static const double _trashSize = 20;
+  static const double _spinnerSize = 14;
+  static const double _spinnerStroke = 2;
+  // Two separate 48 dp targets (Android minimum). Padding, not margin, places
+  // the glyph inside each target, so the two ink areas sit 16 dp apart
+  // (6 + 4 gap + 6; was 32) while the targets themselves never overlap.
+  static const double _hitSize = 48;
+  static const double _hitGap = 4;
+  static const double _compactShrink = 8;
+  static const double _glyphNear = 6;
+  static const double _glyphFar = _hitSize - _trashSize - _glyphNear;
+  // Glyph sits 7 dp above the card's bottom edge, as in the mockup.
+  static const double _glyphBottom = 7;
+  static const double _glyphTop = _hitSize - _trashSize - _glyphBottom;
+  // The text column reserves both targets so a tap on the details line can't
+  // land on either.
+  static const double _editRightReserve = 2 * _hitSize + _hitGap;
+
+  Widget _actionButton({
+    required EdgeInsets padding,
+    required String label,
+    required VoidCallback? onPressed,
+    required Widget icon,
+    Key? key,
+  }) {
+    return Semantics(
+      button: true,
+      enabled: onPressed != null,
+      label: label,
+      onTap: onPressed,
+      excludeSemantics: true,
+      child: IconButton(
+        key: key,
+        onPressed: onPressed,
+        visualDensity: VisualDensity.compact,
+        padding: padding,
+        // Compact density shrinks tight constraints by 8 dp per axis, so ask
+        // for 8 more to land on exactly 48.
+        constraints: const BoxConstraints.tightFor(
+          width: _hitSize + _compactShrink,
+          height: _hitSize + _compactShrink,
+        ),
+        splashRadius: _hitSize / 2,
+        highlightColor: AppTheme.darken(AppTheme.libraryScoreCardFill),
+        splashColor: Colors.transparent,
+        hoverColor: Colors.transparent,
+        icon: icon,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final score = entry.score;
+    final subtitle = LibraryMessages.cardSubtitle(score);
+
+    return _CardShell(
+      fill: AppTheme.libraryScoreCardFill,
+      onTap: isDeleting ? null : onTap,
+      rightReserve: onEdit == null
+          ? _CardMetrics.rightReserve
+          : _editRightReserve,
+      overlays: [
+        const Positioned(
+          top: _chevronInset,
+          right: _chevronInset,
+          child: ExcludeSemantics(
+            child: Icon(
+              Icons.chevron_right_rounded,
+              size: _chevronSize,
+              color: AppTheme.libraryCardTitle,
+            ),
+          ),
+        ),
+        if (onEdit case final onEdit?)
+          Positioned(
+            right: _hitSize + _hitGap,
+            bottom: 0,
+            child: _actionButton(
+              key: const ValueKey('score-card-edit'),
+              padding: const EdgeInsets.fromLTRB(
+                _glyphFar,
+                _glyphTop,
+                _glyphNear,
+                _glyphBottom,
+              ),
+              label: LibraryMessages.editSemantics(entry.displayTitle),
+              onPressed: isDeleting ? null : onEdit,
+              icon: const Icon(
+                Icons.edit_rounded,
+                size: _trashSize,
+                color: AppTheme.libraryTrash,
+              ),
+            ),
+          ),
+        Positioned(
+          right: 0,
+          bottom: 0,
+          child: _actionButton(
+            key: const ValueKey('score-card-delete'),
+            padding: const EdgeInsets.fromLTRB(
+              _glyphNear,
+              _glyphTop,
+              _glyphFar,
+              _glyphBottom,
+            ),
+            label: isDeleting
+                ? LibraryMessages.deleting
+                : LibraryMessages.deleteSemantics(entry.displayTitle),
+            onPressed: isDeleting ? null : onDelete,
+            icon: isDeleting
+                ? const SizedBox.square(
+                    dimension: _trashSize,
+                    child: Center(
+                      child: SizedBox.square(
+                        dimension: _spinnerSize,
+                        child: CircularProgressIndicator(
+                          strokeWidth: _spinnerStroke,
+                          color: AppTheme.libraryTrash,
+                          semanticsLabel: LibraryMessages.deleting,
+                        ),
+                      ),
+                    ),
+                  )
+                : const Icon(
+                    Icons.delete_rounded,
+                    size: _trashSize,
+                    color: AppTheme.libraryTrash,
+                  ),
+          ),
+        ),
+      ],
+      child: Semantics(
+        button: true,
+        enabled: !isDeleting,
+        child: _CardRow(
+          tileColor: Colors.white,
+          tile: ScoreThumbnail(url: score.thumbnailUrl),
+          text: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                entry.displayTitle,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: textTheme.titleMedium?.copyWith(
+                  fontSize: _titleSize,
+                  fontWeight: FontWeight.w700,
+                  height: _titleLineHeight,
+                  color: AppTheme.libraryCardTitle,
+                ),
+              ),
+              // Also under a failed card's red line; skipped when there are
+              // no details at all so the title isn't followed by dead space.
+              if (scanFailed || subtitle.isNotEmpty)
+                const SizedBox(height: titleToDetailsGap),
+              if (scanFailed)
+                Text(
+                  ScanStatusMessages.failedCard,
+                  key: const ValueKey('score-card-failed'),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: textTheme.bodySmall?.copyWith(
+                    fontSize: _subtitleSize,
+                    height: 1.3,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.errorRed,
+                  ),
+                )
+              // Left out entirely when every part is missing, rather than
+              // leaving an empty line under the title.
+              else if (subtitle.isNotEmpty)
+                Text(
+                  subtitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: textTheme.bodySmall?.copyWith(
+                    fontSize: _subtitleSize,
+                    height: 1.3,
+                    color: AppTheme.libraryScoreSubtitle,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// PIYA-218 AC4: a score whose scan is still running. Title, a small bar,
+/// "Converting… N%" and a dimmed thumbnail; no chevron or trash, because
+/// it can't be played or deleted yet. Tap follows the navigation rule
+/// (Processing); long-press offers "Cancel scan". The percent is the
+/// tracker's own, so it always matches Processing and the bell (AC1).
+///
+/// Paused (no connection) shows a Try again button instead of a frozen
+/// bar, and 90 s without progress swaps the label for the stalled copy
+/// (AC10). When the scan completes the library swaps this for a
+/// [ScoreCard] in the same list row (the row's key, not this widget's),
+/// so it changes in place without reloading the list.
+class ScanningScoreCard extends StatelessWidget {
+  const ScanningScoreCard({
+    super.key,
+    required this.title,
+    required this.job,
+    required this.onTap,
+    required this.onLongPress,
+    required this.onRetry,
+    this.thumbnailUrl,
+  });
+
+  final String title;
+  final TrackedJob job;
+  final String? thumbnailUrl;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+  final VoidCallback onRetry;
+
+  static const double _titleSize = 18;
+  static const double _titleLineHeight = 1.15;
+  static const double _labelSize = 12;
+  static const double _barHeight = 4;
+  static const double _barGap = 6;
+  static const double _maxPercent = 100;
+  // Dimmed so the card reads as "not ready yet" (spec §4).
+  static const double _thumbnailOpacity = 0.4;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final paused = job.phase == TrackedPhase.paused;
+    final label = paused
+        ? ScanStatusMessages.paused
+        : job.isStalled
+        ? ScanStatusMessages.stalled
+        : ScanStatusMessages.converting(job.percent);
+
+    return Semantics(
+      button: true,
+      label: paused
+          ? ScanStatusMessages.pausedSemantics(title)
+          : ScanStatusMessages.cardSemantics(title, job.percent),
+      onLongPressHint: ScanStatusMessages.longPressHint,
+      child: _CardShell(
+        fill: AppTheme.libraryScoreCardFill,
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: ExcludeSemantics(
+          excluding: !paused,
+          child: _CardRow(
+            tileColor: Colors.white,
+            tile: Opacity(
+              key: const ValueKey('scanning-thumbnail'),
+              opacity: _thumbnailOpacity,
+              child: ScoreThumbnail(url: thumbnailUrl),
+            ),
+            text: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: textTheme.titleMedium?.copyWith(
+                    fontSize: _titleSize,
+                    fontWeight: FontWeight.w700,
+                    height: _titleLineHeight,
+                    color: AppTheme.libraryCardTitle,
+                  ),
+                ),
+                const SizedBox(height: _barGap),
+                LinearProgressIndicator(
+                  value: job.percent / _maxPercent,
+                  minHeight: _barHeight,
+                  color: AppTheme.processingSecondary,
+                  backgroundColor: Colors.white,
+                  borderRadius: BorderRadius.circular(_barHeight / 2),
+                ),
+                const SizedBox(height: _barGap),
+                Text(
+                  label,
+                  key: const ValueKey('scanning-label'),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: textTheme.bodySmall?.copyWith(
+                    fontSize: _labelSize,
+                    height: 1.3,
+                    color: AppTheme.libraryScoreSubtitle,
+                  ),
+                ),
+                if (paused)
+                  TextButton.icon(
+                    key: const ValueKey('scanning-retry'),
+                    onPressed: onRetry,
+                    style: TextButton.styleFrom(
+                      // The blue is only 3.2:1 on the card fill; the
+                      // card's own title colour keeps the label AA.
+                      foregroundColor: AppTheme.libraryCardTitle,
+                      minimumSize: const Size(48, 48),
+                      padding: EdgeInsets.zero,
+                    ),
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text(ScanStatusMessages.retry),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The score's thumbnail when the API supplies one and it loads; otherwise
+/// (no URL, still loading, or a failed load) the mockup's music-note glyph,
+/// so a broken image never leaves an empty tile.
+class ScoreThumbnail extends StatelessWidget {
+  const ScoreThumbnail({super.key, required this.url});
+
+  final String? url;
+
+  static const double _noteIconSize = 38;
+
+  static const Widget _fallback = Icon(
+    Icons.music_note_outlined,
+    key: ValueKey('score-thumbnail-fallback'),
+    size: _noteIconSize,
+    color: AppTheme.libraryIconBlue,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final url = this.url;
+    if (url == null) return _fallback;
+    final cacheSize =
+        (_CardMetrics.tileSize * MediaQuery.devicePixelRatioOf(context))
+            .round();
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(_CardMetrics.tileRadius),
+      child: Image.network(
+        url,
+        width: _CardMetrics.tileSize,
+        height: _CardMetrics.tileSize,
+        fit: BoxFit.cover,
+        // Decode at tile size, not the source resolution, so a long library
+        // of page-sized thumbnails doesn't balloon memory.
+        cacheWidth: cacheSize,
+        excludeFromSemantics: true,
+        loadingBuilder: (context, child, progress) =>
+            progress == null ? child : _fallback,
+        errorBuilder: (context, error, stackTrace) => _fallback,
+      ),
+    );
+  }
+}
+
+/// Loading placeholder in the score-card style (AC5), with a light shimmer
+/// band sweeping across the bars.
+///
+/// The sweep is bounded to a few passes and then rests static, so a slow
+/// network doesn't keep the frame scheduler busy indefinitely (and widget
+/// tests' pumpAndSettle still settles). With reduce motion
+/// (MediaQuery.disableAnimations) it never starts.
+class ScoreCardSkeleton extends StatefulWidget {
+  const ScoreCardSkeleton({super.key});
+
+  @override
+  State<ScoreCardSkeleton> createState() => ScoreCardSkeletonState();
+}
+
+@visibleForTesting
+class ScoreCardSkeletonState extends State<ScoreCardSkeleton>
+    with SingleTickerProviderStateMixin {
+  static const double _barHeight = 12;
+  static const double _titleBarFraction = 0.75;
+  static const double _subtitleBarFraction = 0.5;
+  static const double _barGap = 10;
+  static const double _barRadius = 6;
+  static const Duration _sweepDuration = Duration(milliseconds: 1400);
+  static const int _maxSweeps = 5;
+  // Half-width of the highlight band, as a fraction of the bar's width.
+  static const double _bandHalfWidth = 0.15;
+
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: _sweepDuration,
+  );
+  int _sweeps = 0;
+  bool _started = false;
+
+  /// For tests: whether the shimmer is currently running.
+  bool get isShimmering => _controller.isAnimating;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addStatusListener((status) {
+      if (status != AnimationStatus.completed) return;
+      _sweeps++;
+      if (_sweeps < _maxSweeps) {
+        _controller.forward(from: 0);
+      } else {
+        // Rest with the band off-bar, i.e. the plain static skeleton.
+        _controller.value = 0;
+      }
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _controller.stop();
+      _controller.value = 0;
+    } else if (!_started) {
+      _started = true;
+      _controller.forward();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final baseColor = Colors.white.withValues(
+      alpha: AppTheme.librarySkeletonBaseAlpha,
+    );
+    final highlightColor = Colors.white.withValues(
+      alpha: AppTheme.librarySkeletonHighlightAlpha,
+    );
+
+    Widget bar(double fraction) => FractionallySizedBox(
+      alignment: Alignment.centerLeft,
+      widthFactor: fraction,
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) {
+          // At t = 0 (and when resting) the band sits fully left of the
+          // bar, so the bar is the plain base colour.
+          final centre =
+              -_bandHalfWidth + _controller.value * (1 + 2 * _bandHalfWidth);
+          return Container(
+            height: _barHeight,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(_barRadius),
+              gradient: LinearGradient(
+                colors: [baseColor, highlightColor, baseColor],
+                stops: [
+                  centre - _bandHalfWidth,
+                  centre,
+                  centre + _bandHalfWidth,
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+
+    return _CardShell(
+      fill: AppTheme.libraryScoreCardFill,
+      child: _CardRow(
+        tileColor: Colors.white,
+        tile: const SizedBox.shrink(),
+        text: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            bar(_titleBarFraction),
+            const SizedBox(height: _barGap),
+            bar(_subtitleBarFraction),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The Add Score tile's thin, round-capped "+", drawn rather than taken
+/// from Icons.add: at the mockup's 31 dp span Material's glyph would need a
+/// 53 dp icon box (overflowing the 50 dp tile) and its stroke is heavier.
+class _PlusGlyph extends StatelessWidget {
+  const _PlusGlyph();
+
+  static const double _span = 31;
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox.square(
+      dimension: _span,
+      child: CustomPaint(painter: _PlusPainter()),
+    );
+  }
+}
+
+class _PlusPainter extends CustomPainter {
+  const _PlusPainter();
+
+  static const double _stroke = 4;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = AppTheme.libraryIconBlue
+      ..strokeWidth = _stroke
+      ..strokeCap = StrokeCap.round;
+    // Inset by half the stroke so the round caps end exactly at the span.
+    const inset = _stroke / 2;
+    final mid = size.width / 2;
+    canvas.drawLine(
+      Offset(mid, inset),
+      Offset(mid, size.height - inset),
+      paint,
+    );
+    canvas.drawLine(Offset(inset, mid), Offset(size.width - inset, mid), paint);
+  }
+
+  @override
+  bool shouldRepaint(_PlusPainter oldDelegate) => false;
+}

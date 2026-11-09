@@ -1,2 +1,5 @@
 *.pt filter=lfs diff=lfs merge=lfs -text
 *.pth filter=lfs diff=lfs merge=lfs -text
+clef_key_core.py text eol=lf
+mobile/piyanota_application/android/app/src/main/jniLibs/**/*.so filter=lfs diff=lfs merge=lfs -text
+mobile/piyanota_application/assets/soundfont/*.sf2 filter=lfs diff=lfs merge=lfs -text

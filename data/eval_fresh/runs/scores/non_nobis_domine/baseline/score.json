@@ -1,0 +1,5915 @@
+{
+ "piece": "non_nobis_domine",
+ "crnn": "baseline",
+ "gt_status": "hand-transcribed, verified by the author",
+ "extra_strips_not_in_gt": [],
+ "repro_failures": 0,
+ "stage2_coverage": {
+  "1": {
+   "expected_staves": 8,
+   "detected": 8,
+   "failure": null
+  },
+  "2": {
+   "expected_staves": 8,
+   "detected": 8,
+   "failure": null
+  },
+  "3": {
+   "expected_staves": 12,
+   "detected": 12,
+   "failure": null
+  },
+  "4": {
+   "expected_staves": 10,
+   "detected": 0,
+   "failure": "ValueError: [Stage 2] page 4: unsupported_staff_layout \u2014 detected 10 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+  }
+ },
+ "a": {
+  "headline": {
+   "n_strips": 36,
+   "n_detected": 28,
+   "token_ser": 0.7236641221374046,
+   "pitch_acc_sow": 0.06909090909090909,
+   "strict_acc": 0.04,
+   "rhythm_acc": 0.4779874213836478,
+   "n_gt_notes": 275,
+   "clef_acc": 0.03571428571428571,
+   "key_acc": 0.10714285714285714,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 27,
+   "silent_key_wrong_staves": 25,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 1.6682926829268292,
+   "note_precision": 0.05555555555555555,
+   "note_f1": 0.061588330632090765
+  },
+  "ci95": {
+   "token_ser": [
+    0.6251498706551085,
+    0.8275230879242929
+   ],
+   "pitch_acc_sow": [
+    0.01706195406953202,
+    0.13026377217553683
+   ],
+   "strict_acc": [
+    0.0035460992907801418,
+    0.08917777449698397
+   ]
+  },
+  "headline_detected_only": {
+   "n_strips": 28,
+   "n_detected": 28,
+   "token_ser": 0.6350806451612904,
+   "pitch_acc_sow": 0.09268292682926829,
+   "strict_acc": 0.05365853658536585,
+   "rhythm_acc": 0.6440677966101694,
+   "n_gt_notes": 205,
+   "clef_acc": 0.03571428571428571,
+   "key_acc": 0.10714285714285714,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 27,
+   "silent_key_wrong_staves": 25,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 1.6682926829268292,
+   "note_precision": 0.05555555555555555,
+   "note_f1": 0.06946983546617916
+  },
+  "headline_no_uncertain": {
+   "n_strips": 30,
+   "n_detected": 22,
+   "token_ser": 0.7334525939177102,
+   "pitch_acc_sow": 0.08050847457627118,
+   "strict_acc": 0.046610169491525424,
+   "rhythm_acc": 0.4684014869888476,
+   "n_gt_notes": 236,
+   "clef_acc": 0.045454545454545456,
+   "key_acc": 0.13636363636363635,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 21,
+   "silent_key_wrong_staves": 19,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 1.6686746987951808,
+   "note_precision": 0.06859205776173286,
+   "note_f1": 0.07407407407407407
+  },
+  "by_voice": {
+   "Alto": {
+    "n_strips": 9,
+    "n_detected": 7,
+    "token_ser": 0.71875,
+    "pitch_acc_sow": 0.0,
+    "strict_acc": 0.0,
+    "rhythm_acc": 0.4533333333333333,
+    "n_gt_notes": 60,
+    "clef_acc": 0.0,
+    "key_acc": 0.0,
+    "octave_wrong_staves": 0,
+    "silent_wrong_staves": 0,
+    "silent_wrong_rate": 0.0,
+    "double_octave_staves": 0,
+    "silent_clef_wrong_staves": 7,
+    "silent_key_wrong_staves": 7,
+    "flagged_and_wrong_staves": 0,
+    "review_needed_rate": 0.0,
+    "note_count_ratio": 1.6818181818181819,
+    "note_precision": 0.0,
+    "note_f1": null
+   },
+   "Bass": {
+    "n_strips": 9,
+    "n_detected": 7,
+    "token_ser": 0.7521367521367521,
+    "pitch_acc_sow": 0.0,
+    "strict_acc": 0.0,
+    "rhythm_acc": 0.5714285714285714,
+    "n_gt_notes": 33,
+    "clef_acc": 0.0,
+    "key_acc": 0.2857142857142857,
+    "octave_wrong_staves": 0,
+    "silent_wrong_staves": 0,
+    "silent_wrong_rate": 0.0,
+    "double_octave_staves": 0,
+    "silent_clef_wrong_staves": 7,
+    "silent_key_wrong_staves": 5,
+    "flagged_and_wrong_staves": 0,
+    "review_needed_rate": 0.0,
+    "note_count_ratio": 2.193548387096774,
+    "note_precision": 0.0,
+    "note_f1": null
+   },
+   "Soprano": {
+    "n_strips": 9,
+    "n_detected": 7,
+    "token_ser": 0.665,
+    "pitch_acc_sow": 0.0594059405940594,
+    "strict_acc": 0.039603960396039604,
+    "rhythm_acc": 0.47863247863247865,
+    "n_gt_notes": 101,
+    "clef_acc": 0.14285714285714285,
+    "key_acc": 0.14285714285714285,
+    "octave_wrong_staves": 0,
+    "silent_wrong_staves": 0,
+    "silent_wrong_rate": 0.0,
+    "double_octave_staves": 0,
+    "silent_clef_wrong_staves": 6,
+    "silent_key_wrong_staves": 6,
+    "flagged_and_wrong_staves": 0,
+    "review_needed_rate": 0.0,
+    "note_count_ratio": 1.1973684210526316,
+    "note_precision": 0.06593406593406594,
+    "note_f1": 0.0625
+   },
+   "Tenor": {
+    "n_strips": 9,
+    "n_detected": 7,
+    "token_ser": 0.7752808988764045,
+    "pitch_acc_sow": 0.16049382716049382,
+    "strict_acc": 0.08641975308641975,
+    "rhythm_acc": 0.46153846153846156,
+    "n_gt_notes": 81,
+    "clef_acc": 0.0,
+    "key_acc": 0.0,
+    "octave_wrong_staves": 0,
+    "silent_wrong_staves": 0,
+    "silent_wrong_rate": 0.0,
+    "double_octave_staves": 0,
+    "silent_clef_wrong_staves": 7,
+    "silent_key_wrong_staves": 7,
+    "flagged_and_wrong_staves": 0,
+    "review_needed_rate": 0.0,
+    "note_count_ratio": 2.0185185185185186,
+    "note_precision": 0.11926605504587157,
+    "note_f1": 0.1368421052631579
+   }
+  },
+  "by_page": {
+   "1": {
+    "n_strips": 8,
+    "n_detected": 8,
+    "token_ser": 0.5797872340425532,
+    "pitch_acc_sow": 0.07777777777777778,
+    "strict_acc": 0.05555555555555555,
+    "rhythm_acc": 0.7254901960784313,
+    "n_gt_notes": 90,
+    "clef_acc": 0.0,
+    "key_acc": 0.0,
+    "octave_wrong_staves": 0,
+    "silent_wrong_staves": 0,
+    "silent_wrong_rate": 0.0,
+    "double_octave_staves": 0,
+    "silent_clef_wrong_staves": 8,
+    "silent_key_wrong_staves": 8,
+    "flagged_and_wrong_staves": 0,
+    "review_needed_rate": 0.0,
+    "note_count_ratio": 1.4,
+    "note_precision": 0.05555555555555555,
+    "note_f1": 0.06481481481481481
+   },
+   "2": {
+    "n_strips": 8,
+    "n_detected": 8,
+    "token_ser": 0.6518987341772152,
+    "pitch_acc_sow": 0.11267605633802817,
+    "strict_acc": 0.028169014084507043,
+    "rhythm_acc": 0.525,
+    "n_gt_notes": 71,
+    "clef_acc": 0.0,
+    "key_acc": 0.25,
+    "octave_wrong_staves": 0,
+    "silent_wrong_staves": 0,
+    "silent_wrong_rate": 0.0,
+    "double_octave_staves": 0,
+    "silent_clef_wrong_staves": 8,
+    "silent_key_wrong_staves": 6,
+    "flagged_and_wrong_staves": 0,
+    "review_needed_rate": 0.0,
+    "note_count_ratio": 1.380281690140845,
+    "note_precision": 0.08163265306122448,
+    "note_f1": 0.09467455621301775
+   },
+   "3": {
+    "n_strips": 12,
+    "n_detected": 12,
+    "token_ser": 0.6866666666666666,
+    "pitch_acc_sow": 0.09090909090909091,
+    "strict_acc": 0.09090909090909091,
+    "rhythm_acc": 0.6666666666666666,
+    "n_gt_notes": 44,
+    "clef_acc": 0.08333333333333333,
+    "key_acc": 0.08333333333333333,
+    "octave_wrong_staves": 0,
+    "silent_wrong_staves": 0,
+    "silent_wrong_rate": 0.0,
+    "double_octave_staves": 0,
+    "silent_clef_wrong_staves": 11,
+    "silent_key_wrong_staves": 11,
+    "flagged_and_wrong_staves": 0,
+    "review_needed_rate": 0.0,
+    "note_count_ratio": 2.6818181818181817,
+    "note_precision": 0.03389830508474576,
+    "note_f1": 0.04938271604938272
+   },
+   "4": {
+    "n_strips": 8,
+    "n_detected": 0,
+    "token_ser": 1.0,
+    "pitch_acc_sow": 0.0,
+    "strict_acc": 0.0,
+    "rhythm_acc": 0.0,
+    "n_gt_notes": 70,
+    "clef_acc": null,
+    "key_acc": null,
+    "octave_wrong_staves": 0,
+    "silent_wrong_staves": 0,
+    "silent_wrong_rate": null,
+    "double_octave_staves": 0,
+    "silent_clef_wrong_staves": 0,
+    "silent_key_wrong_staves": 0,
+    "flagged_and_wrong_staves": 0,
+    "review_needed_rate": null,
+    "note_count_ratio": null,
+    "note_precision": null,
+    "note_f1": null
+   }
+  },
+  "per_symbol": {
+   "quarter note": {
+    "n": 76,
+    "symbol_correct": 27,
+    "symbol_and_pitch_correct": 3
+   },
+   "eighth note": {
+    "n": 74,
+    "symbol_correct": 57,
+    "symbol_and_pitch_correct": 5
+   },
+   "whole note": {
+    "n": 43,
+    "symbol_correct": 13,
+    "symbol_and_pitch_correct": 2
+   },
+   "half note": {
+    "n": 36,
+    "symbol_correct": 16,
+    "symbol_and_pitch_correct": 1
+   },
+   "dotted half note": {
+    "n": 29,
+    "symbol_correct": 14,
+    "symbol_and_pitch_correct": 0
+   },
+   "quarter rest": {
+    "n": 27,
+    "symbol_correct": 17,
+    "symbol_and_pitch_correct": 18
+   },
+   "dotted quarter note": {
+    "n": 17,
+    "symbol_correct": 6,
+    "symbol_and_pitch_correct": 0
+   },
+   "half rest": {
+    "n": 13,
+    "symbol_correct": 2,
+    "symbol_and_pitch_correct": 1
+   },
+   "whole rest": {
+    "n": 3,
+    "symbol_correct": 0,
+    "symbol_and_pitch_correct": 0
+   }
+  },
+  "per_token_class": {
+   "barline": {
+    "n_ref": 212,
+    "n_pred": 147,
+    "exact": 142,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.6698113207547169,
+    "recall_class": 0.6698113207547169,
+    "precision_exact": 0.9659863945578231
+   },
+   "note.quarter": {
+    "n_ref": 93,
+    "n_pred": 40,
+    "exact": 27,
+    "class_ok_position_wrong": 4,
+    "recall_exact": 0.2903225806451613,
+    "recall_class": 0.3333333333333333,
+    "precision_exact": 0.675
+   },
+   "note.half": {
+    "n_ref": 65,
+    "n_pred": 38,
+    "exact": 30,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.46153846153846156,
+    "recall_class": 0.46153846153846156,
+    "precision_exact": 0.7894736842105263
+   },
+   "dot": {
+    "n_ref": 46,
+    "n_pred": 43,
+    "exact": 29,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.6304347826086957,
+    "recall_class": 0.6304347826086957,
+    "precision_exact": 0.6744186046511628
+   },
+   "note.whole": {
+    "n_ref": 43,
+    "n_pred": 14,
+    "exact": 10,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.23255813953488372,
+    "recall_class": 0.23255813953488372,
+    "precision_exact": 0.7142857142857143
+   },
+   "accidental.flat": {
+    "n_ref": 37,
+    "n_pred": 31,
+    "exact": 2,
+    "class_ok_position_wrong": 13,
+    "recall_exact": 0.05405405405405406,
+    "recall_class": 0.40540540540540543,
+    "precision_exact": 0.06451612903225806
+   },
+   "clef.G": {
+    "n_ref": 27,
+    "n_pred": 1,
+    "exact": 1,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.037037037037037035,
+    "recall_class": 0.037037037037037035,
+    "precision_exact": 1.0
+   },
+   "rest.quarter": {
+    "n_ref": 27,
+    "n_pred": 22,
+    "exact": 17,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.6296296296296297,
+    "recall_class": 0.6296296296296297,
+    "precision_exact": 0.7727272727272727
+   },
+   "note.beamedRight1": {
+    "n_ref": 25,
+    "n_pred": 35,
+    "exact": 11,
+    "class_ok_position_wrong": 4,
+    "recall_exact": 0.44,
+    "recall_class": 0.6,
+    "precision_exact": 0.3142857142857143
+   },
+   "note.beamedLeft1": {
+    "n_ref": 24,
+    "n_pred": 21,
+    "exact": 13,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.5416666666666666,
+    "recall_class": 0.5416666666666666,
+    "precision_exact": 0.6190476190476191
+   },
+   "rest.half": {
+    "n_ref": 13,
+    "n_pred": 2,
+    "exact": 2,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.15384615384615385,
+    "recall_class": 0.15384615384615385,
+    "precision_exact": 1.0
+   },
+   "note.eighth": {
+    "n_ref": 13,
+    "n_pred": 36,
+    "exact": 9,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.6923076923076923,
+    "recall_class": 0.6923076923076923,
+    "precision_exact": 0.25
+   },
+   "note.beamedBoth1": {
+    "n_ref": 12,
+    "n_pred": 27,
+    "exact": 11,
+    "class_ok_position_wrong": 1,
+    "recall_exact": 0.9166666666666666,
+    "recall_class": 1.0,
+    "precision_exact": 0.4074074074074074
+   },
+   "clef.F": {
+    "n_ref": 9,
+    "n_pred": 0,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.0,
+    "recall_class": 0.0,
+    "precision_exact": null
+   },
+   "metersign.C": {
+    "n_ref": 4,
+    "n_pred": 10,
+    "exact": 2,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.5,
+    "recall_class": 0.5,
+    "precision_exact": 0.2
+   },
+   "rest.whole": {
+    "n_ref": 3,
+    "n_pred": 0,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.0,
+    "recall_class": 0.0,
+    "precision_exact": null
+   },
+   "accidental.natural": {
+    "n_ref": 2,
+    "n_pred": 9,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.0,
+    "recall_class": 0.0,
+    "precision_exact": 0.0
+   },
+   "clef.C": {
+    "n_ref": 0,
+    "n_pred": 29,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.eighth-S": {
+    "n_ref": 0,
+    "n_pred": 2,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.sixteenth": {
+    "n_ref": 0,
+    "n_pred": 8,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.thirty_second": {
+    "n_ref": 0,
+    "n_pred": 2,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "fermata.above": {
+    "n_ref": 0,
+    "n_pred": 4,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.beamedLeft2": {
+    "n_ref": 0,
+    "n_pred": 5,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "rest.eighth": {
+    "n_ref": 0,
+    "n_pred": 4,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "accidental.sharp": {
+    "n_ref": 0,
+    "n_pred": 33,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "<unk>": {
+    "n_ref": 0,
+    "n_pred": 2,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "gracenote.eighth": {
+    "n_ref": 0,
+    "n_pred": 2,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "digit.4": {
+    "n_ref": 0,
+    "n_pred": 7,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "digit.3": {
+    "n_ref": 0,
+    "n_pred": 3,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.beamedRight1-L": {
+    "n_ref": 0,
+    "n_pred": 2,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.beamedBoth3": {
+    "n_ref": 0,
+    "n_pred": 2,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "digit.2": {
+    "n_ref": 0,
+    "n_pred": 3,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.quarter-L": {
+    "n_ref": 0,
+    "n_pred": 1,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.half-S": {
+    "n_ref": 0,
+    "n_pred": 1,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.beamedBoth2": {
+    "n_ref": 0,
+    "n_pred": 3,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.beamedRight2": {
+    "n_ref": 0,
+    "n_pred": 2,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.beamedBoth1-L": {
+    "n_ref": 0,
+    "n_pred": 2,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   }
+  },
+  "diagnostics": {
+   "range_suspect": [
+    {
+     "strip": "page003_sys01_Bass",
+     "median": 72.0,
+     "octave_wrong": false
+    },
+    {
+     "strip": "page003_sys03_Bass",
+     "median": 65.0,
+     "octave_wrong": false
+    }
+   ],
+   "cross_system_jumps": [
+    {
+     "voice": "Soprano",
+     "from_": "page002_sys01_Soprano",
+     "to": "page002_sys02_Soprano",
+     "jump": 11.0,
+     "octave_wrong": [
+      false,
+      false
+     ]
+    },
+    {
+     "voice": "Soprano",
+     "from_": "page003_sys02_Soprano",
+     "to": "page003_sys03_Soprano",
+     "jump": -15.0,
+     "octave_wrong": [
+      false,
+      false
+     ]
+    },
+    {
+     "voice": "Bass",
+     "from_": "page003_sys01_Bass",
+     "to": "page003_sys02_Bass",
+     "jump": -17.0,
+     "octave_wrong": [
+      false,
+      false
+     ]
+    },
+    {
+     "voice": "Bass",
+     "from_": "page003_sys02_Bass",
+     "to": "page003_sys03_Bass",
+     "jump": 10.0,
+     "octave_wrong": [
+      false,
+      false
+     ]
+    }
+   ],
+   "octave_wrong_caught_by_range": 0,
+   "octave_wrong_total": 0,
+   "tie_unresolved": "not computed: Stage 4 is not part of this run"
+  },
+  "strips": [
+   {
+    "strip_id": "page001_sys01_Soprano",
+    "voice": "Soprano",
+    "page": 1,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 29,
+    "tok_err": 23,
+    "n_hyp": 39,
+    "sow": [
+     2,
+     16
+    ],
+    "strict": [
+     0,
+     16
+    ],
+    "rhythm": [
+     10,
+     18
+    ],
+    "n_gt_notes": 16,
+    "n_pred_notes": 23,
+    "median_offset": -8.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": 0,
+    "pred_median_pitch": 65.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page001_sys01_Alto",
+    "voice": "Alto",
+    "page": 1,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 22,
+    "tok_err": 20,
+    "n_hyp": 33,
+    "sow": [
+     0,
+     9
+    ],
+    "strict": [
+     0,
+     9
+    ],
+    "rhythm": [
+     8,
+     11
+    ],
+    "n_gt_notes": 9,
+    "n_pred_notes": 16,
+    "median_offset": -10.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": 1,
+    "pred_median_pitch": 55.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page001_sys01_Tenor",
+    "voice": "Tenor",
+    "page": 1,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 28,
+    "tok_err": 20,
+    "n_hyp": 37,
+    "sow": [
+     5,
+     15
+    ],
+    "strict": [
+     5,
+     15
+    ],
+    "rhythm": [
+     13,
+     17
+    ],
+    "n_gt_notes": 15,
+    "n_pred_notes": 20,
+    "median_offset": 2.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": 0,
+    "pred_median_pitch": 62.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page001_sys01_Bass",
+    "voice": "Bass",
+    "page": 1,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 21,
+    "tok_err": 13,
+    "n_hyp": 27,
+    "sow": [
+     0,
+     9
+    ],
+    "strict": [
+     0,
+     9
+    ],
+    "rhythm": [
+     6,
+     10
+    ],
+    "n_gt_notes": 9,
+    "n_pred_notes": 9,
+    "median_offset": 11.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": 1,
+    "pred_median_pitch": 64.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page001_sys02_Soprano",
+    "voice": "Soprano",
+    "page": 1,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 24,
+    "tok_err": 7,
+    "n_hyp": 35,
+    "sow": [
+     0,
+     11
+    ],
+    "strict": [
+     0,
+     11
+    ],
+    "rhythm": [
+     11,
+     13
+    ],
+    "n_gt_notes": 11,
+    "n_pred_notes": 15,
+    "median_offset": -10.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": -2,
+    "pred_median_pitch": 62.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page001_sys02_Alto",
+    "voice": "Alto",
+    "page": 1,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 17,
+    "tok_err": 8,
+    "n_hyp": 31,
+    "sow": [
+     0,
+     6
+    ],
+    "strict": [
+     0,
+     6
+    ],
+    "rhythm": [
+     5,
+     8
+    ],
+    "n_gt_notes": 6,
+    "n_pred_notes": 17,
+    "median_offset": -10.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": 2,
+    "pred_median_pitch": 55.0,
+    "n_unc": 3
+   },
+   {
+    "strip_id": "page001_sys02_Tenor",
+    "voice": "Tenor",
+    "page": 1,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 23,
+    "tok_err": 6,
+    "n_hyp": 30,
+    "sow": [
+     0,
+     11
+    ],
+    "strict": [
+     0,
+     11
+    ],
+    "rhythm": [
+     11,
+     12
+    ],
+    "n_gt_notes": 11,
+    "n_pred_notes": 14,
+    "median_offset": 2.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": 1,
+    "pred_median_pitch": 62.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page001_sys02_Bass",
+    "voice": "Bass",
+    "page": 1,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 24,
+    "tok_err": 12,
+    "n_hyp": 27,
+    "sow": [
+     0,
+     13
+    ],
+    "strict": [
+     0,
+     13
+    ],
+    "rhythm": [
+     10,
+     13
+    ],
+    "n_gt_notes": 13,
+    "n_pred_notes": 12,
+    "median_offset": 9.5,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": 1,
+    "pred_median_pitch": 60.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page002_sys01_Soprano",
+    "voice": "Soprano",
+    "page": 2,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 25,
+    "tok_err": 13,
+    "n_hyp": 23,
+    "sow": [
+     0,
+     10
+    ],
+    "strict": [
+     0,
+     10
+    ],
+    "rhythm": [
+     4,
+     14
+    ],
+    "n_gt_notes": 10,
+    "n_pred_notes": 8,
+    "median_offset": -11.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": -2,
+    "pred_median_pitch": 55.0,
+    "n_unc": 1
+   },
+   {
+    "strip_id": "page002_sys01_Alto",
+    "voice": "Alto",
+    "page": 2,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 27,
+    "tok_err": 14,
+    "n_hyp": 29,
+    "sow": [
+     0,
+     12
+    ],
+    "strict": [
+     0,
+     12
+    ],
+    "rhythm": [
+     8,
+     15
+    ],
+    "n_gt_notes": 12,
+    "n_pred_notes": 10,
+    "median_offset": -11.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": -2,
+    "pred_median_pitch": 51.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page002_sys01_Tenor",
+    "voice": "Tenor",
+    "page": 2,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 32,
+    "tok_err": 16,
+    "n_hyp": 29,
+    "sow": [
+     5,
+     16
+    ],
+    "strict": [
+     1,
+     16
+    ],
+    "rhythm": [
+     8,
+     18
+    ],
+    "n_gt_notes": 16,
+    "n_pred_notes": 12,
+    "median_offset": 2.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": -2,
+    "pred_median_pitch": 57.5,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page002_sys01_Bass",
+    "voice": "Bass",
+    "page": 2,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 15,
+    "tok_err": 10,
+    "n_hyp": 22,
+    "sow": [
+     0,
+     4
+    ],
+    "strict": [
+     0,
+     4
+    ],
+    "rhythm": [
+     1,
+     4
+    ],
+    "n_gt_notes": 4,
+    "n_pred_notes": 8,
+    "median_offset": 10.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 55.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page002_sys02_Soprano",
+    "voice": "Soprano",
+    "page": 2,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 27,
+    "tok_err": 15,
+    "n_hyp": 29,
+    "sow": [
+     0,
+     19
+    ],
+    "strict": [
+     0,
+     19
+    ],
+    "rhythm": [
+     14,
+     19
+    ],
+    "n_gt_notes": 19,
+    "n_pred_notes": 19,
+    "median_offset": -11.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": 1,
+    "pred_median_pitch": 66.0,
+    "n_unc": 1
+   },
+   {
+    "strip_id": "page002_sys02_Alto",
+    "voice": "Alto",
+    "page": 2,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 15,
+    "tok_err": 7,
+    "n_hyp": 20,
+    "sow": [
+     0,
+     7
+    ],
+    "strict": [
+     0,
+     7
+    ],
+    "rhythm": [
+     4,
+     7
+    ],
+    "n_gt_notes": 7,
+    "n_pred_notes": 7,
+    "median_offset": -10.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": 2,
+    "pred_median_pitch": 57.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page002_sys02_Tenor",
+    "voice": "Tenor",
+    "page": 2,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 10,
+    "tok_err": 21,
+    "n_hyp": 35,
+    "sow": [
+     3,
+     3
+    ],
+    "strict": [
+     1,
+     3
+    ],
+    "rhythm": [
+     3,
+     3
+    ],
+    "n_gt_notes": 3,
+    "n_pred_notes": 24,
+    "median_offset": 2.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": 1,
+    "pred_median_pitch": 66.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page002_sys02_Bass",
+    "voice": "Bass",
+    "page": 2,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 7,
+    "tok_err": 7,
+    "n_hyp": 21,
+    "sow": [
+     0,
+     0
+    ],
+    "strict": [
+     0,
+     0
+    ],
+    "rhythm": [
+     0,
+     0
+    ],
+    "n_gt_notes": 0,
+    "n_pred_notes": 10,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 64.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys01_Soprano",
+    "voice": "Soprano",
+    "page": 3,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 18,
+    "tok_err": 15,
+    "n_hyp": 30,
+    "sow": [
+     0,
+     10
+    ],
+    "strict": [
+     0,
+     10
+    ],
+    "rhythm": [
+     3,
+     10
+    ],
+    "n_gt_notes": 10,
+    "n_pred_notes": 7,
+    "median_offset": -9.5,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": -3,
+    "pred_median_pitch": 67.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys01_Alto",
+    "voice": "Alto",
+    "page": 3,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 14,
+    "tok_err": 9,
+    "n_hyp": 28,
+    "sow": [
+     0,
+     3
+    ],
+    "strict": [
+     0,
+     3
+    ],
+    "rhythm": [
+     3,
+     3
+    ],
+    "n_gt_notes": 3,
+    "n_pred_notes": 9,
+    "median_offset": -9.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": -2,
+    "pred_median_pitch": 61.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys01_Tenor",
+    "voice": "Tenor",
+    "page": 3,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 12,
+    "tok_err": 9,
+    "n_hyp": 40,
+    "sow": [
+     0,
+     4
+    ],
+    "strict": [
+     0,
+     4
+    ],
+    "rhythm": [
+     4,
+     4
+    ],
+    "n_gt_notes": 4,
+    "n_pred_notes": 21,
+    "median_offset": 2.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": -2,
+    "pred_median_pitch": 63.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys01_Bass",
+    "voice": "Bass",
+    "page": 3,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 13,
+    "tok_err": 11,
+    "n_hyp": 38,
+    "sow": [
+     0,
+     3
+    ],
+    "strict": [
+     0,
+     3
+    ],
+    "rhythm": [
+     1,
+     3
+    ],
+    "n_gt_notes": 3,
+    "n_pred_notes": 17,
+    "median_offset": 22.5,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": -2,
+    "pred_median_pitch": 72.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys02_Soprano",
+    "voice": "Soprano",
+    "page": 3,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 19,
+    "tok_err": 5,
+    "n_hyp": 25,
+    "sow": [
+     4,
+     8
+    ],
+    "strict": [
+     4,
+     8
+    ],
+    "rhythm": [
+     10,
+     10
+    ],
+    "n_gt_notes": 8,
+    "n_pred_notes": 9,
+    "median_offset": 0.5,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": 2,
+    "pred_median_pitch": 70.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys02_Alto",
+    "voice": "Alto",
+    "page": 3,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 16,
+    "tok_err": 8,
+    "n_hyp": 19,
+    "sow": [
+     0,
+     5
+    ],
+    "strict": [
+     0,
+     5
+    ],
+    "rhythm": [
+     4,
+     7
+    ],
+    "n_gt_notes": 5,
+    "n_pred_notes": 7,
+    "median_offset": -10.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": 1,
+    "pred_median_pitch": 54.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys02_Tenor",
+    "voice": "Tenor",
+    "page": 3,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 11,
+    "tok_err": 4,
+    "n_hyp": 19,
+    "sow": [
+     0,
+     3
+    ],
+    "strict": [
+     0,
+     3
+    ],
+    "rhythm": [
+     3,
+     3
+    ],
+    "n_gt_notes": 3,
+    "n_pred_notes": 9,
+    "median_offset": 2.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": 2,
+    "pred_median_pitch": 62.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys02_Bass",
+    "voice": "Bass",
+    "page": 3,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 10,
+    "tok_err": 7,
+    "n_hyp": 21,
+    "sow": [
+     0,
+     2
+    ],
+    "strict": [
+     0,
+     2
+    ],
+    "rhythm": [
+     1,
+     2
+    ],
+    "n_gt_notes": 2,
+    "n_pred_notes": 8,
+    "median_offset": -0.5,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": -2,
+    "pred_median_pitch": 55.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys03_Soprano",
+    "voice": "Soprano",
+    "page": 3,
+    "sys": 3,
+    "detected": true,
+    "n_ref": 10,
+    "tok_err": 7,
+    "n_hyp": 20,
+    "sow": [
+     0,
+     2
+    ],
+    "strict": [
+     0,
+     2
+    ],
+    "rhythm": [
+     4,
+     4
+    ],
+    "n_gt_notes": 2,
+    "n_pred_notes": 10,
+    "median_offset": -10.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 55.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys03_Alto",
+    "voice": "Alto",
+    "page": 3,
+    "sys": 3,
+    "detected": true,
+    "n_ref": 10,
+    "tok_err": 10,
+    "n_hyp": 23,
+    "sow": [
+     0,
+     2
+    ],
+    "strict": [
+     0,
+     2
+    ],
+    "rhythm": [
+     2,
+     4
+    ],
+    "n_gt_notes": 2,
+    "n_pred_notes": 8,
+    "median_offset": -17.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": 1,
+    "pred_median_pitch": 47.0,
+    "n_unc": 2
+   },
+   {
+    "strip_id": "page003_sys03_Tenor",
+    "voice": "Tenor",
+    "page": 3,
+    "sys": 3,
+    "detected": true,
+    "n_ref": 10,
+    "tok_err": 10,
+    "n_hyp": 20,
+    "sow": [
+     0,
+     2
+    ],
+    "strict": [
+     0,
+     2
+    ],
+    "rhythm": [
+     0,
+     3
+    ],
+    "n_gt_notes": 2,
+    "n_pred_notes": 9,
+    "median_offset": -3.5,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": -2,
+    "pred_median_pitch": 57.0,
+    "n_unc": 1
+   },
+   {
+    "strip_id": "page003_sys03_Bass",
+    "voice": "Bass",
+    "page": 3,
+    "sys": 3,
+    "detected": true,
+    "n_ref": 7,
+    "tok_err": 8,
+    "n_hyp": 21,
+    "sow": [
+     0,
+     0
+    ],
+    "strict": [
+     0,
+     0
+    ],
+    "rhythm": [
+     1,
+     1
+    ],
+    "n_gt_notes": 0,
+    "n_pred_notes": 4,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": "C",
+    "key_gt": -1,
+    "key_pred": -2,
+    "pred_median_pitch": 65.0,
+    "n_unc": 1
+   },
+   {
+    "strip_id": "page004_sys01_Soprano",
+    "voice": "Soprano",
+    "page": 4,
+    "sys": 1,
+    "detected": false,
+    "n_ref": 28,
+    "tok_err": 28,
+    "n_hyp": 0,
+    "sow": [
+     0,
+     16
+    ],
+    "strict": [
+     0,
+     16
+    ],
+    "rhythm": [
+     0,
+     18
+    ],
+    "n_gt_notes": 16,
+    "n_pred_notes": 0,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": null,
+    "key_gt": -1,
+    "key_pred": null,
+    "pred_median_pitch": null,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page004_sys01_Alto",
+    "voice": "Alto",
+    "page": 4,
+    "sys": 1,
+    "detected": false,
+    "n_ref": 21,
+    "tok_err": 21,
+    "n_hyp": 0,
+    "sow": [
+     0,
+     9
+    ],
+    "strict": [
+     0,
+     9
+    ],
+    "rhythm": [
+     0,
+     11
+    ],
+    "n_gt_notes": 9,
+    "n_pred_notes": 0,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": null,
+    "key_gt": -1,
+    "key_pred": null,
+    "pred_median_pitch": null,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page004_sys01_Tenor",
+    "voice": "Tenor",
+    "page": 4,
+    "sys": 1,
+    "detected": false,
+    "n_ref": 27,
+    "tok_err": 27,
+    "n_hyp": 0,
+    "sow": [
+     0,
+     15
+    ],
+    "strict": [
+     0,
+     15
+    ],
+    "rhythm": [
+     0,
+     17
+    ],
+    "n_gt_notes": 15,
+    "n_pred_notes": 0,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": null,
+    "key_gt": -1,
+    "key_pred": null,
+    "pred_median_pitch": null,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page004_sys01_Bass",
+    "voice": "Bass",
+    "page": 4,
+    "sys": 1,
+    "detected": false,
+    "n_ref": 8,
+    "tok_err": 8,
+    "n_hyp": 0,
+    "sow": [
+     0,
+     0
+    ],
+    "strict": [
+     0,
+     0
+    ],
+    "rhythm": [
+     0,
+     0
+    ],
+    "n_gt_notes": 0,
+    "n_pred_notes": 0,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": null,
+    "key_gt": -1,
+    "key_pred": null,
+    "pred_median_pitch": null,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page004_sys02_Soprano",
+    "voice": "Soprano",
+    "page": 4,
+    "sys": 2,
+    "detected": false,
+    "n_ref": 20,
+    "tok_err": 20,
+    "n_hyp": 0,
+    "sow": [
+     0,
+     9
+    ],
+    "strict": [
+     0,
+     9
+    ],
+    "rhythm": [
+     0,
+     11
+    ],
+    "n_gt_notes": 9,
+    "n_pred_notes": 0,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": null,
+    "key_gt": -1,
+    "key_pred": null,
+    "pred_median_pitch": null,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page004_sys02_Alto",
+    "voice": "Alto",
+    "page": 4,
+    "sys": 2,
+    "detected": false,
+    "n_ref": 18,
+    "tok_err": 18,
+    "n_hyp": 0,
+    "sow": [
+     0,
+     7
+    ],
+    "strict": [
+     0,
+     7
+    ],
+    "rhythm": [
+     0,
+     9
+    ],
+    "n_gt_notes": 7,
+    "n_pred_notes": 0,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": null,
+    "key_gt": -1,
+    "key_pred": null,
+    "pred_median_pitch": null,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page004_sys02_Tenor",
+    "voice": "Tenor",
+    "page": 4,
+    "sys": 2,
+    "detected": false,
+    "n_ref": 25,
+    "tok_err": 25,
+    "n_hyp": 0,
+    "sow": [
+     0,
+     12
+    ],
+    "strict": [
+     0,
+     12
+    ],
+    "rhythm": [
+     0,
+     14
+    ],
+    "n_gt_notes": 12,
+    "n_pred_notes": 0,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": null,
+    "key_gt": -1,
+    "key_pred": null,
+    "pred_median_pitch": null,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page004_sys02_Bass",
+    "voice": "Bass",
+    "page": 4,
+    "sys": 2,
+    "detected": false,
+    "n_ref": 12,
+    "tok_err": 12,
+    "n_hyp": 0,
+    "sow": [
+     0,
+     2
+    ],
+    "strict": [
+     0,
+     2
+    ],
+    "rhythm": [
+     0,
+     2
+    ],
+    "n_gt_notes": 2,
+    "n_pred_notes": 0,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": null,
+    "key_gt": -1,
+    "key_pred": null,
+    "pred_median_pitch": null,
+    "n_unc": 0
+   }
+  ]
+ },
+ "b": {
+  "headline": {
+   "n_strips": 36,
+   "n_detected": 28,
+   "token_ser": 0.6229007633587786,
+   "pitch_acc_sow": 0.5236363636363637,
+   "strict_acc": 0.38545454545454544,
+   "rhythm_acc": 0.4779874213836478,
+   "n_gt_notes": 275,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.10714285714285714,
+   "note_count_ratio": 1.6682926829268292,
+   "note_precision": 0.42105263157894735,
+   "note_f1": 0.46677471636952994
+  },
+  "ci95": {
+   "token_ser": [
+    0.5078752863527114,
+    0.7358856787318075
+   ],
+   "pitch_acc_sow": [
+    0.38810296846011133,
+    0.6601740828804347
+   ],
+   "strict_acc": [
+    0.2736192386087185,
+    0.5
+   ]
+  },
+  "headline_detected_only": {
+   "n_strips": 28,
+   "n_detected": 28,
+   "token_ser": 0.5020161290322581,
+   "pitch_acc_sow": 0.7024390243902439,
+   "strict_acc": 0.5170731707317073,
+   "rhythm_acc": 0.6440677966101694,
+   "n_gt_notes": 205,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.10714285714285714,
+   "note_count_ratio": 1.6682926829268292,
+   "note_precision": 0.42105263157894735,
+   "note_f1": 0.526508226691042
+  },
+  "headline_no_uncertain": {
+   "n_strips": 30,
+   "n_detected": 22,
+   "token_ser": 0.6422182468694096,
+   "pitch_acc_sow": 0.5042372881355932,
+   "strict_acc": 0.3771186440677966,
+   "rhythm_acc": 0.4684014869888476,
+   "n_gt_notes": 236,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.09090909090909091,
+   "note_count_ratio": 1.6686746987951808,
+   "note_precision": 0.4296028880866426,
+   "note_f1": 0.4639376218323587
+  },
+  "by_voice": {
+   "Alto": {
+    "n_strips": 9,
+    "n_detected": 7,
+    "token_ser": 0.59375,
+    "pitch_acc_sow": 0.48333333333333334,
+    "strict_acc": 0.3,
+    "rhythm_acc": 0.4533333333333333,
+    "n_gt_notes": 60,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "octave_wrong_staves": 0,
+    "silent_wrong_staves": 0,
+    "silent_wrong_rate": 0.0,
+    "double_octave_staves": 0,
+    "silent_clef_wrong_staves": 0,
+    "silent_key_wrong_staves": 0,
+    "flagged_and_wrong_staves": 0,
+    "review_needed_rate": 0.0,
+    "note_count_ratio": 1.6818181818181819,
+    "note_precision": 0.3918918918918919,
+    "note_f1": 0.43283582089552236
+   },
+   "Bass": {
+    "n_strips": 9,
+    "n_detected": 7,
+    "token_ser": 0.6068376068376068,
+    "pitch_acc_sow": 0.5757575757575758,
+    "strict_acc": 0.42424242424242425,
+    "rhythm_acc": 0.5714285714285714,
+    "n_gt_notes": 33,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "octave_wrong_staves": 0,
+    "silent_wrong_staves": 0,
+    "silent_wrong_rate": 0.0,
+    "double_octave_staves": 0,
+    "silent_clef_wrong_staves": 0,
+    "silent_key_wrong_staves": 0,
+    "flagged_and_wrong_staves": 0,
+    "review_needed_rate": 0.14285714285714285,
+    "note_count_ratio": 2.193548387096774,
+    "note_precision": 0.27941176470588236,
+    "note_f1": 0.37623762376237624
+   },
+   "Soprano": {
+    "n_strips": 9,
+    "n_detected": 7,
+    "token_ser": 0.595,
+    "pitch_acc_sow": 0.5445544554455446,
+    "strict_acc": 0.39603960396039606,
+    "rhythm_acc": 0.47863247863247865,
+    "n_gt_notes": 101,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "octave_wrong_staves": 0,
+    "silent_wrong_staves": 0,
+    "silent_wrong_rate": 0.0,
+    "double_octave_staves": 0,
+    "silent_clef_wrong_staves": 0,
+    "silent_key_wrong_staves": 0,
+    "flagged_and_wrong_staves": 0,
+    "review_needed_rate": 0.2857142857142857,
+    "note_count_ratio": 1.1973684210526316,
+    "note_precision": 0.6043956043956044,
+    "note_f1": 0.5729166666666666
+   },
+   "Tenor": {
+    "n_strips": 9,
+    "n_detected": 7,
+    "token_ser": 0.6910112359550562,
+    "pitch_acc_sow": 0.5061728395061729,
+    "strict_acc": 0.41975308641975306,
+    "rhythm_acc": 0.46153846153846156,
+    "n_gt_notes": 81,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "octave_wrong_staves": 0,
+    "silent_wrong_staves": 0,
+    "silent_wrong_rate": 0.0,
+    "double_octave_staves": 0,
+    "silent_clef_wrong_staves": 0,
+    "silent_key_wrong_staves": 0,
+    "flagged_and_wrong_staves": 0,
+    "review_needed_rate": 0.0,
+    "note_count_ratio": 2.0185185185185186,
+    "note_precision": 0.3761467889908257,
+    "note_f1": 0.4315789473684211
+   }
+  },
+  "by_page": {
+   "1": {
+    "n_strips": 8,
+    "n_detected": 8,
+    "token_ser": 0.4734042553191489,
+    "pitch_acc_sow": 0.7888888888888889,
+    "strict_acc": 0.6333333333333333,
+    "rhythm_acc": 0.7254901960784313,
+    "n_gt_notes": 90,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "octave_wrong_staves": 0,
+    "silent_wrong_staves": 0,
+    "silent_wrong_rate": 0.0,
+    "double_octave_staves": 0,
+    "silent_clef_wrong_staves": 0,
+    "silent_key_wrong_staves": 0,
+    "flagged_and_wrong_staves": 0,
+    "review_needed_rate": 0.0,
+    "note_count_ratio": 1.4,
+    "note_precision": 0.5634920634920635,
+    "note_f1": 0.6574074074074073
+   },
+   "2": {
+    "n_strips": 8,
+    "n_detected": 8,
+    "token_ser": 0.5632911392405063,
+    "pitch_acc_sow": 0.6619718309859155,
+    "strict_acc": 0.43661971830985913,
+    "rhythm_acc": 0.525,
+    "n_gt_notes": 71,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "octave_wrong_staves": 0,
+    "silent_wrong_staves": 0,
+    "silent_wrong_rate": 0.0,
+    "double_octave_staves": 0,
+    "silent_clef_wrong_staves": 0,
+    "silent_key_wrong_staves": 0,
+    "flagged_and_wrong_staves": 0,
+    "review_needed_rate": 0.125,
+    "note_count_ratio": 1.380281690140845,
+    "note_precision": 0.47959183673469385,
+    "note_f1": 0.5562130177514792
+   },
+   "3": {
+    "n_strips": 12,
+    "n_detected": 12,
+    "token_ser": 0.47333333333333333,
+    "pitch_acc_sow": 0.5909090909090909,
+    "strict_acc": 0.4090909090909091,
+    "rhythm_acc": 0.6666666666666666,
+    "n_gt_notes": 44,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "octave_wrong_staves": 0,
+    "silent_wrong_staves": 0,
+    "silent_wrong_rate": 0.0,
+    "double_octave_staves": 0,
+    "silent_clef_wrong_staves": 0,
+    "silent_key_wrong_staves": 0,
+    "flagged_and_wrong_staves": 0,
+    "review_needed_rate": 0.16666666666666666,
+    "note_count_ratio": 2.6818181818181817,
+    "note_precision": 0.22033898305084745,
+    "note_f1": 0.3209876543209877
+   },
+   "4": {
+    "n_strips": 8,
+    "n_detected": 0,
+    "token_ser": 1.0,
+    "pitch_acc_sow": 0.0,
+    "strict_acc": 0.0,
+    "rhythm_acc": 0.0,
+    "n_gt_notes": 70,
+    "clef_acc": null,
+    "key_acc": null,
+    "octave_wrong_staves": 0,
+    "silent_wrong_staves": 0,
+    "silent_wrong_rate": null,
+    "double_octave_staves": 0,
+    "silent_clef_wrong_staves": 0,
+    "silent_key_wrong_staves": 0,
+    "flagged_and_wrong_staves": 0,
+    "review_needed_rate": null,
+    "note_count_ratio": null,
+    "note_precision": null,
+    "note_f1": null
+   }
+  },
+  "per_symbol": {
+   "quarter note": {
+    "n": 76,
+    "symbol_correct": 27,
+    "symbol_and_pitch_correct": 22
+   },
+   "eighth note": {
+    "n": 74,
+    "symbol_correct": 57,
+    "symbol_and_pitch_correct": 46
+   },
+   "whole note": {
+    "n": 43,
+    "symbol_correct": 13,
+    "symbol_and_pitch_correct": 9
+   },
+   "half note": {
+    "n": 36,
+    "symbol_correct": 16,
+    "symbol_and_pitch_correct": 15
+   },
+   "dotted half note": {
+    "n": 29,
+    "symbol_correct": 14,
+    "symbol_and_pitch_correct": 12
+   },
+   "quarter rest": {
+    "n": 27,
+    "symbol_correct": 17,
+    "symbol_and_pitch_correct": 18
+   },
+   "dotted quarter note": {
+    "n": 17,
+    "symbol_correct": 6,
+    "symbol_and_pitch_correct": 2
+   },
+   "half rest": {
+    "n": 13,
+    "symbol_correct": 2,
+    "symbol_and_pitch_correct": 2
+   },
+   "whole rest": {
+    "n": 3,
+    "symbol_correct": 0,
+    "symbol_and_pitch_correct": 0
+   }
+  },
+  "per_token_class": {
+   "barline": {
+    "n_ref": 212,
+    "n_pred": 148,
+    "exact": 144,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.6792452830188679,
+    "recall_class": 0.6792452830188679,
+    "precision_exact": 0.972972972972973
+   },
+   "note.quarter": {
+    "n_ref": 93,
+    "n_pred": 39,
+    "exact": 27,
+    "class_ok_position_wrong": 4,
+    "recall_exact": 0.2903225806451613,
+    "recall_class": 0.3333333333333333,
+    "precision_exact": 0.6923076923076923
+   },
+   "note.half": {
+    "n_ref": 65,
+    "n_pred": 40,
+    "exact": 30,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.46153846153846156,
+    "recall_class": 0.46153846153846156,
+    "precision_exact": 0.75
+   },
+   "dot": {
+    "n_ref": 46,
+    "n_pred": 42,
+    "exact": 29,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.6304347826086957,
+    "recall_class": 0.6304347826086957,
+    "precision_exact": 0.6904761904761905
+   },
+   "note.whole": {
+    "n_ref": 43,
+    "n_pred": 15,
+    "exact": 10,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.23255813953488372,
+    "recall_class": 0.23255813953488372,
+    "precision_exact": 0.6666666666666666
+   },
+   "accidental.flat": {
+    "n_ref": 37,
+    "n_pred": 34,
+    "exact": 29,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.7837837837837838,
+    "recall_class": 0.7837837837837838,
+    "precision_exact": 0.8529411764705882
+   },
+   "clef.G": {
+    "n_ref": 27,
+    "n_pred": 21,
+    "exact": 21,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.7777777777777778,
+    "recall_class": 0.7777777777777778,
+    "precision_exact": 1.0
+   },
+   "rest.quarter": {
+    "n_ref": 27,
+    "n_pred": 23,
+    "exact": 18,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.6666666666666666,
+    "recall_class": 0.6666666666666666,
+    "precision_exact": 0.782608695652174
+   },
+   "note.beamedRight1": {
+    "n_ref": 25,
+    "n_pred": 36,
+    "exact": 11,
+    "class_ok_position_wrong": 4,
+    "recall_exact": 0.44,
+    "recall_class": 0.6,
+    "precision_exact": 0.3055555555555556
+   },
+   "note.beamedLeft1": {
+    "n_ref": 24,
+    "n_pred": 21,
+    "exact": 13,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.5416666666666666,
+    "recall_class": 0.5416666666666666,
+    "precision_exact": 0.6190476190476191
+   },
+   "rest.half": {
+    "n_ref": 13,
+    "n_pred": 3,
+    "exact": 2,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.15384615384615385,
+    "recall_class": 0.15384615384615385,
+    "precision_exact": 0.6666666666666666
+   },
+   "note.eighth": {
+    "n_ref": 13,
+    "n_pred": 31,
+    "exact": 9,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.6923076923076923,
+    "recall_class": 0.6923076923076923,
+    "precision_exact": 0.2903225806451613
+   },
+   "note.beamedBoth1": {
+    "n_ref": 12,
+    "n_pred": 27,
+    "exact": 11,
+    "class_ok_position_wrong": 1,
+    "recall_exact": 0.9166666666666666,
+    "recall_class": 1.0,
+    "precision_exact": 0.4074074074074074
+   },
+   "clef.F": {
+    "n_ref": 9,
+    "n_pred": 7,
+    "exact": 7,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.7777777777777778,
+    "recall_class": 0.7777777777777778,
+    "precision_exact": 1.0
+   },
+   "metersign.C": {
+    "n_ref": 4,
+    "n_pred": 10,
+    "exact": 2,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.5,
+    "recall_class": 0.5,
+    "precision_exact": 0.2
+   },
+   "rest.whole": {
+    "n_ref": 3,
+    "n_pred": 0,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.0,
+    "recall_class": 0.0,
+    "precision_exact": null
+   },
+   "accidental.natural": {
+    "n_ref": 2,
+    "n_pred": 8,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.0,
+    "recall_class": 0.0,
+    "precision_exact": 0.0
+   },
+   "note.eighth-S": {
+    "n_ref": 0,
+    "n_pred": 2,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.sixteenth": {
+    "n_ref": 0,
+    "n_pred": 7,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.thirty_second": {
+    "n_ref": 0,
+    "n_pred": 2,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "fermata.above": {
+    "n_ref": 0,
+    "n_pred": 4,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.beamedLeft2": {
+    "n_ref": 0,
+    "n_pred": 5,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "rest.eighth": {
+    "n_ref": 0,
+    "n_pred": 4,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "<unk>": {
+    "n_ref": 0,
+    "n_pred": 2,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "accidental.sharp": {
+    "n_ref": 0,
+    "n_pred": 23,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "gracenote.eighth": {
+    "n_ref": 0,
+    "n_pred": 3,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "digit.4": {
+    "n_ref": 0,
+    "n_pred": 5,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "digit.3": {
+    "n_ref": 0,
+    "n_pred": 4,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.beamedRight1-L": {
+    "n_ref": 0,
+    "n_pred": 2,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.beamedBoth3": {
+    "n_ref": 0,
+    "n_pred": 2,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "digit.2": {
+    "n_ref": 0,
+    "n_pred": 3,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.quarter-L": {
+    "n_ref": 0,
+    "n_pred": 1,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.half-S": {
+    "n_ref": 0,
+    "n_pred": 1,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.beamedBoth2": {
+    "n_ref": 0,
+    "n_pred": 3,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.beamedRight2": {
+    "n_ref": 0,
+    "n_pred": 2,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "digit.1": {
+    "n_ref": 0,
+    "n_pred": 1,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "rest.sixteenth": {
+    "n_ref": 0,
+    "n_pred": 1,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.beamedBoth1-L": {
+    "n_ref": 0,
+    "n_pred": 2,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   }
+  },
+  "diagnostics": {
+   "range_suspect": [],
+   "cross_system_jumps": [
+    {
+     "voice": "Soprano",
+     "from_": "page002_sys01_Soprano",
+     "to": "page002_sys02_Soprano",
+     "jump": 11.0,
+     "octave_wrong": [
+      false,
+      false
+     ]
+    },
+    {
+     "voice": "Bass",
+     "from_": "page003_sys01_Bass",
+     "to": "page003_sys02_Bass",
+     "jump": -10.0,
+     "octave_wrong": [
+      false,
+      false
+     ]
+    },
+    {
+     "voice": "Bass",
+     "from_": "page003_sys02_Bass",
+     "to": "page003_sys03_Bass",
+     "jump": 10.0,
+     "octave_wrong": [
+      false,
+      false
+     ]
+    }
+   ],
+   "octave_wrong_caught_by_range": 0,
+   "octave_wrong_total": 0,
+   "tie_unresolved": "not computed: Stage 4 is not part of this run"
+  },
+  "strips": [
+   {
+    "strip_id": "page001_sys01_Soprano",
+    "voice": "Soprano",
+    "page": 1,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 29,
+    "tok_err": 21,
+    "n_hyp": 39,
+    "sow": [
+     15,
+     16
+    ],
+    "strict": [
+     9,
+     16
+    ],
+    "rhythm": [
+     10,
+     18
+    ],
+    "n_gt_notes": 16,
+    "n_pred_notes": 23,
+    "median_offset": -3.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 69.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page001_sys01_Alto",
+    "voice": "Alto",
+    "page": 1,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 22,
+    "tok_err": 17,
+    "n_hyp": 32,
+    "sow": [
+     8,
+     9
+    ],
+    "strict": [
+     5,
+     9
+    ],
+    "rhythm": [
+     8,
+     11
+    ],
+    "n_gt_notes": 9,
+    "n_pred_notes": 16,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 65.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page001_sys01_Tenor",
+    "voice": "Tenor",
+    "page": 1,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 28,
+    "tok_err": 19,
+    "n_hyp": 38,
+    "sow": [
+     11,
+     15
+    ],
+    "strict": [
+     10,
+     15
+    ],
+    "rhythm": [
+     13,
+     17
+    ],
+    "n_gt_notes": 15,
+    "n_pred_notes": 20,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": "G8vb",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 60.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page001_sys01_Bass",
+    "voice": "Bass",
+    "page": 1,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 21,
+    "tok_err": 10,
+    "n_hyp": 26,
+    "sow": [
+     7,
+     9
+    ],
+    "strict": [
+     6,
+     9
+    ],
+    "rhythm": [
+     6,
+     10
+    ],
+    "n_gt_notes": 9,
+    "n_pred_notes": 9,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": "F",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 53.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page001_sys02_Soprano",
+    "voice": "Soprano",
+    "page": 1,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 24,
+    "tok_err": 4,
+    "n_hyp": 34,
+    "sow": [
+     9,
+     11
+    ],
+    "strict": [
+     8,
+     11
+    ],
+    "rhythm": [
+     11,
+     13
+    ],
+    "n_gt_notes": 11,
+    "n_pred_notes": 15,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 72.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page001_sys02_Alto",
+    "voice": "Alto",
+    "page": 1,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 17,
+    "tok_err": 5,
+    "n_hyp": 30,
+    "sow": [
+     5,
+     6
+    ],
+    "strict": [
+     4,
+     6
+    ],
+    "rhythm": [
+     5,
+     8
+    ],
+    "n_gt_notes": 6,
+    "n_pred_notes": 17,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 65.0,
+    "n_unc": 3
+   },
+   {
+    "strip_id": "page001_sys02_Tenor",
+    "voice": "Tenor",
+    "page": 1,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 23,
+    "tok_err": 4,
+    "n_hyp": 29,
+    "sow": [
+     9,
+     11
+    ],
+    "strict": [
+     8,
+     11
+    ],
+    "rhythm": [
+     11,
+     12
+    ],
+    "n_gt_notes": 11,
+    "n_pred_notes": 14,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": "G8vb",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 60.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page001_sys02_Bass",
+    "voice": "Bass",
+    "page": 1,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 24,
+    "tok_err": 9,
+    "n_hyp": 26,
+    "sow": [
+     7,
+     13
+    ],
+    "strict": [
+     7,
+     13
+    ],
+    "rhythm": [
+     10,
+     13
+    ],
+    "n_gt_notes": 13,
+    "n_pred_notes": 12,
+    "median_offset": -1.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": "F",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 50.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page002_sys01_Soprano",
+    "voice": "Soprano",
+    "page": 2,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 25,
+    "tok_err": 11,
+    "n_hyp": 22,
+    "sow": [
+     6,
+     10
+    ],
+    "strict": [
+     2,
+     10
+    ],
+    "rhythm": [
+     4,
+     14
+    ],
+    "n_gt_notes": 10,
+    "n_pred_notes": 8,
+    "median_offset": -1.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 65.0,
+    "n_unc": 1
+   },
+   {
+    "strip_id": "page002_sys01_Alto",
+    "voice": "Alto",
+    "page": 2,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 27,
+    "tok_err": 11,
+    "n_hyp": 28,
+    "sow": [
+     7,
+     12
+    ],
+    "strict": [
+     5,
+     12
+    ],
+    "rhythm": [
+     8,
+     15
+    ],
+    "n_gt_notes": 12,
+    "n_pred_notes": 10,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 62.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page002_sys01_Tenor",
+    "voice": "Tenor",
+    "page": 2,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 32,
+    "tok_err": 13,
+    "n_hyp": 28,
+    "sow": [
+     11,
+     16
+    ],
+    "strict": [
+     6,
+     16
+    ],
+    "rhythm": [
+     8,
+     18
+    ],
+    "n_gt_notes": 16,
+    "n_pred_notes": 12,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": "G8vb",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 56.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page002_sys01_Bass",
+    "voice": "Bass",
+    "page": 2,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 15,
+    "tok_err": 8,
+    "n_hyp": 22,
+    "sow": [
+     2,
+     4
+    ],
+    "strict": [
+     1,
+     4
+    ],
+    "rhythm": [
+     1,
+     4
+    ],
+    "n_gt_notes": 4,
+    "n_pred_notes": 8,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": "F",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 45.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page002_sys02_Soprano",
+    "voice": "Soprano",
+    "page": 2,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 27,
+    "tok_err": 14,
+    "n_hyp": 30,
+    "sow": [
+     14,
+     19
+    ],
+    "strict": [
+     11,
+     19
+    ],
+    "rhythm": [
+     14,
+     19
+    ],
+    "n_gt_notes": 19,
+    "n_pred_notes": 19,
+    "median_offset": -1.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": true,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 76.0,
+    "n_unc": 1
+   },
+   {
+    "strip_id": "page002_sys02_Alto",
+    "voice": "Alto",
+    "page": 2,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 15,
+    "tok_err": 5,
+    "n_hyp": 20,
+    "sow": [
+     4,
+     7
+    ],
+    "strict": [
+     3,
+     7
+    ],
+    "rhythm": [
+     4,
+     7
+    ],
+    "n_gt_notes": 7,
+    "n_pred_notes": 7,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 67.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page002_sys02_Tenor",
+    "voice": "Tenor",
+    "page": 2,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 10,
+    "tok_err": 20,
+    "n_hyp": 36,
+    "sow": [
+     3,
+     3
+    ],
+    "strict": [
+     3,
+     3
+    ],
+    "rhythm": [
+     3,
+     3
+    ],
+    "n_gt_notes": 3,
+    "n_pred_notes": 24,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": "G8vb",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 64.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page002_sys02_Bass",
+    "voice": "Bass",
+    "page": 2,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 7,
+    "tok_err": 7,
+    "n_hyp": 22,
+    "sow": [
+     0,
+     0
+    ],
+    "strict": [
+     0,
+     0
+    ],
+    "rhythm": [
+     0,
+     0
+    ],
+    "n_gt_notes": 0,
+    "n_pred_notes": 10,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": "F",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 53.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys01_Soprano",
+    "voice": "Soprano",
+    "page": 3,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 18,
+    "tok_err": 12,
+    "n_hyp": 29,
+    "sow": [
+     3,
+     10
+    ],
+    "strict": [
+     2,
+     10
+    ],
+    "rhythm": [
+     3,
+     10
+    ],
+    "n_gt_notes": 10,
+    "n_pred_notes": 7,
+    "median_offset": 1.5,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": true,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 78.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys01_Alto",
+    "voice": "Alto",
+    "page": 3,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 14,
+    "tok_err": 6,
+    "n_hyp": 27,
+    "sow": [
+     1,
+     3
+    ],
+    "strict": [
+     0,
+     3
+    ],
+    "rhythm": [
+     3,
+     3
+    ],
+    "n_gt_notes": 3,
+    "n_pred_notes": 9,
+    "median_offset": 2.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 71.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys01_Tenor",
+    "voice": "Tenor",
+    "page": 3,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 12,
+    "tok_err": 6,
+    "n_hyp": 39,
+    "sow": [
+     4,
+     4
+    ],
+    "strict": [
+     4,
+     4
+    ],
+    "rhythm": [
+     4,
+     4
+    ],
+    "n_gt_notes": 4,
+    "n_pred_notes": 21,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": "G8vb",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 62.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys01_Bass",
+    "voice": "Bass",
+    "page": 3,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 13,
+    "tok_err": 8,
+    "n_hyp": 37,
+    "sow": [
+     2,
+     3
+    ],
+    "strict": [
+     0,
+     3
+    ],
+    "rhythm": [
+     1,
+     3
+    ],
+    "n_gt_notes": 3,
+    "n_pred_notes": 17,
+    "median_offset": 5.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": true,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": "F",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 55.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys02_Soprano",
+    "voice": "Soprano",
+    "page": 3,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 19,
+    "tok_err": 4,
+    "n_hyp": 25,
+    "sow": [
+     7,
+     8
+    ],
+    "strict": [
+     7,
+     8
+    ],
+    "rhythm": [
+     10,
+     10
+    ],
+    "n_gt_notes": 8,
+    "n_pred_notes": 9,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 69.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys02_Alto",
+    "voice": "Alto",
+    "page": 3,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 16,
+    "tok_err": 5,
+    "n_hyp": 18,
+    "sow": [
+     4,
+     5
+    ],
+    "strict": [
+     1,
+     5
+    ],
+    "rhythm": [
+     4,
+     7
+    ],
+    "n_gt_notes": 5,
+    "n_pred_notes": 7,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 64.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys02_Tenor",
+    "voice": "Tenor",
+    "page": 3,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 11,
+    "tok_err": 2,
+    "n_hyp": 19,
+    "sow": [
+     3,
+     3
+    ],
+    "strict": [
+     3,
+     3
+    ],
+    "rhythm": [
+     3,
+     3
+    ],
+    "n_gt_notes": 3,
+    "n_pred_notes": 9,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": "G8vb",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 60.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys02_Bass",
+    "voice": "Bass",
+    "page": 3,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 10,
+    "tok_err": 4,
+    "n_hyp": 20,
+    "sow": [
+     1,
+     2
+    ],
+    "strict": [
+     0,
+     2
+    ],
+    "rhythm": [
+     1,
+     2
+    ],
+    "n_gt_notes": 2,
+    "n_pred_notes": 8,
+    "median_offset": -10.5,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": "F",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 45.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys03_Soprano",
+    "voice": "Soprano",
+    "page": 3,
+    "sys": 3,
+    "detected": true,
+    "n_ref": 10,
+    "tok_err": 5,
+    "n_hyp": 20,
+    "sow": [
+     1,
+     2
+    ],
+    "strict": [
+     1,
+     2
+    ],
+    "rhythm": [
+     4,
+     4
+    ],
+    "n_gt_notes": 2,
+    "n_pred_notes": 10,
+    "median_offset": 0.5,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 65.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys03_Alto",
+    "voice": "Alto",
+    "page": 3,
+    "sys": 3,
+    "detected": true,
+    "n_ref": 10,
+    "tok_err": 7,
+    "n_hyp": 22,
+    "sow": [
+     0,
+     2
+    ],
+    "strict": [
+     0,
+     2
+    ],
+    "rhythm": [
+     2,
+     4
+    ],
+    "n_gt_notes": 2,
+    "n_pred_notes": 8,
+    "median_offset": -7.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 57.0,
+    "n_unc": 2
+   },
+   {
+    "strip_id": "page003_sys03_Tenor",
+    "voice": "Tenor",
+    "page": 3,
+    "sys": 3,
+    "detected": true,
+    "n_ref": 10,
+    "tok_err": 7,
+    "n_hyp": 19,
+    "sow": [
+     0,
+     2
+    ],
+    "strict": [
+     0,
+     2
+    ],
+    "rhythm": [
+     0,
+     3
+    ],
+    "n_gt_notes": 2,
+    "n_pred_notes": 9,
+    "median_offset": -5.5,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": "G8vb",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 55.0,
+    "n_unc": 1
+   },
+   {
+    "strip_id": "page003_sys03_Bass",
+    "voice": "Bass",
+    "page": 3,
+    "sys": 3,
+    "detected": true,
+    "n_ref": 7,
+    "tok_err": 5,
+    "n_hyp": 20,
+    "sow": [
+     0,
+     0
+    ],
+    "strict": [
+     0,
+     0
+    ],
+    "rhythm": [
+     1,
+     1
+    ],
+    "n_gt_notes": 0,
+    "n_pred_notes": 4,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": "F",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 55.0,
+    "n_unc": 1
+   },
+   {
+    "strip_id": "page004_sys01_Soprano",
+    "voice": "Soprano",
+    "page": 4,
+    "sys": 1,
+    "detected": false,
+    "n_ref": 28,
+    "tok_err": 28,
+    "n_hyp": 0,
+    "sow": [
+     0,
+     16
+    ],
+    "strict": [
+     0,
+     16
+    ],
+    "rhythm": [
+     0,
+     18
+    ],
+    "n_gt_notes": 16,
+    "n_pred_notes": 0,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": null,
+    "key_gt": -1,
+    "key_pred": null,
+    "pred_median_pitch": null,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page004_sys01_Alto",
+    "voice": "Alto",
+    "page": 4,
+    "sys": 1,
+    "detected": false,
+    "n_ref": 21,
+    "tok_err": 21,
+    "n_hyp": 0,
+    "sow": [
+     0,
+     9
+    ],
+    "strict": [
+     0,
+     9
+    ],
+    "rhythm": [
+     0,
+     11
+    ],
+    "n_gt_notes": 9,
+    "n_pred_notes": 0,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": null,
+    "key_gt": -1,
+    "key_pred": null,
+    "pred_median_pitch": null,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page004_sys01_Tenor",
+    "voice": "Tenor",
+    "page": 4,
+    "sys": 1,
+    "detected": false,
+    "n_ref": 27,
+    "tok_err": 27,
+    "n_hyp": 0,
+    "sow": [
+     0,
+     15
+    ],
+    "strict": [
+     0,
+     15
+    ],
+    "rhythm": [
+     0,
+     17
+    ],
+    "n_gt_notes": 15,
+    "n_pred_notes": 0,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": null,
+    "key_gt": -1,
+    "key_pred": null,
+    "pred_median_pitch": null,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page004_sys01_Bass",
+    "voice": "Bass",
+    "page": 4,
+    "sys": 1,
+    "detected": false,
+    "n_ref": 8,
+    "tok_err": 8,
+    "n_hyp": 0,
+    "sow": [
+     0,
+     0
+    ],
+    "strict": [
+     0,
+     0
+    ],
+    "rhythm": [
+     0,
+     0
+    ],
+    "n_gt_notes": 0,
+    "n_pred_notes": 0,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": null,
+    "key_gt": -1,
+    "key_pred": null,
+    "pred_median_pitch": null,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page004_sys02_Soprano",
+    "voice": "Soprano",
+    "page": 4,
+    "sys": 2,
+    "detected": false,
+    "n_ref": 20,
+    "tok_err": 20,
+    "n_hyp": 0,
+    "sow": [
+     0,
+     9
+    ],
+    "strict": [
+     0,
+     9
+    ],
+    "rhythm": [
+     0,
+     11
+    ],
+    "n_gt_notes": 9,
+    "n_pred_notes": 0,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": null,
+    "key_gt": -1,
+    "key_pred": null,
+    "pred_median_pitch": null,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page004_sys02_Alto",
+    "voice": "Alto",
+    "page": 4,
+    "sys": 2,
+    "detected": false,
+    "n_ref": 18,
+    "tok_err": 18,
+    "n_hyp": 0,
+    "sow": [
+     0,
+     7
+    ],
+    "strict": [
+     0,
+     7
+    ],
+    "rhythm": [
+     0,
+     9
+    ],
+    "n_gt_notes": 7,
+    "n_pred_notes": 0,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": null,
+    "key_gt": -1,
+    "key_pred": null,
+    "pred_median_pitch": null,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page004_sys02_Tenor",
+    "voice": "Tenor",
+    "page": 4,
+    "sys": 2,
+    "detected": false,
+    "n_ref": 25,
+    "tok_err": 25,
+    "n_hyp": 0,
+    "sow": [
+     0,
+     12
+    ],
+    "strict": [
+     0,
+     12
+    ],
+    "rhythm": [
+     0,
+     14
+    ],
+    "n_gt_notes": 12,
+    "n_pred_notes": 0,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": null,
+    "key_gt": -1,
+    "key_pred": null,
+    "pred_median_pitch": null,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page004_sys02_Bass",
+    "voice": "Bass",
+    "page": 4,
+    "sys": 2,
+    "detected": false,
+    "n_ref": 12,
+    "tok_err": 12,
+    "n_hyp": 0,
+    "sow": [
+     0,
+     2
+    ],
+    "strict": [
+     0,
+     2
+    ],
+    "rhythm": [
+     0,
+     2
+    ],
+    "n_gt_notes": 2,
+    "n_pred_notes": 0,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": null,
+    "key_gt": -1,
+    "key_pred": null,
+    "pred_median_pitch": null,
+    "n_unc": 0
+   }
+  ]
+ },
+ "oracle": {
+  "headline": {
+   "n_strips": 36,
+   "n_detected": 28,
+   "token_ser": 0.6229007633587786,
+   "pitch_acc_sow": 0.5236363636363637,
+   "strict_acc": 0.38545454545454544,
+   "rhythm_acc": 0.4779874213836478,
+   "n_gt_notes": 275,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 1.6682926829268292,
+   "note_precision": 0.42105263157894735,
+   "note_f1": 0.46677471636952994
+  },
+  "ci95": {
+   "token_ser": [
+    0.5078752863527114,
+    0.7358856787318075
+   ],
+   "pitch_acc_sow": [
+    0.38810296846011133,
+    0.6601740828804347
+   ],
+   "strict_acc": [
+    0.2736192386087185,
+    0.5
+   ]
+  },
+  "headline_detected_only": {
+   "n_strips": 28,
+   "n_detected": 28,
+   "token_ser": 0.5020161290322581,
+   "pitch_acc_sow": 0.7024390243902439,
+   "strict_acc": 0.5170731707317073,
+   "rhythm_acc": 0.6440677966101694,
+   "n_gt_notes": 205,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 1.6682926829268292,
+   "note_precision": 0.42105263157894735,
+   "note_f1": 0.526508226691042
+  },
+  "headline_no_uncertain": {
+   "n_strips": 30,
+   "n_detected": 22,
+   "token_ser": 0.6422182468694096,
+   "pitch_acc_sow": 0.5042372881355932,
+   "strict_acc": 0.3771186440677966,
+   "rhythm_acc": 0.4684014869888476,
+   "n_gt_notes": 236,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 1.6686746987951808,
+   "note_precision": 0.4296028880866426,
+   "note_f1": 0.4639376218323587
+  },
+  "by_voice": {
+   "Alto": {
+    "n_strips": 9,
+    "n_detected": 7,
+    "token_ser": 0.59375,
+    "pitch_acc_sow": 0.48333333333333334,
+    "strict_acc": 0.3,
+    "rhythm_acc": 0.4533333333333333,
+    "n_gt_notes": 60,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "octave_wrong_staves": 0,
+    "silent_wrong_staves": 0,
+    "silent_wrong_rate": 0.0,
+    "double_octave_staves": 0,
+    "silent_clef_wrong_staves": 0,
+    "silent_key_wrong_staves": 0,
+    "flagged_and_wrong_staves": 0,
+    "review_needed_rate": 0.0,
+    "note_count_ratio": 1.6818181818181819,
+    "note_precision": 0.3918918918918919,
+    "note_f1": 0.43283582089552236
+   },
+   "Bass": {
+    "n_strips": 9,
+    "n_detected": 7,
+    "token_ser": 0.6068376068376068,
+    "pitch_acc_sow": 0.5757575757575758,
+    "strict_acc": 0.42424242424242425,
+    "rhythm_acc": 0.5714285714285714,
+    "n_gt_notes": 33,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "octave_wrong_staves": 0,
+    "silent_wrong_staves": 0,
+    "silent_wrong_rate": 0.0,
+    "double_octave_staves": 0,
+    "silent_clef_wrong_staves": 0,
+    "silent_key_wrong_staves": 0,
+    "flagged_and_wrong_staves": 0,
+    "review_needed_rate": 0.0,
+    "note_count_ratio": 2.193548387096774,
+    "note_precision": 0.27941176470588236,
+    "note_f1": 0.37623762376237624
+   },
+   "Soprano": {
+    "n_strips": 9,
+    "n_detected": 7,
+    "token_ser": 0.595,
+    "pitch_acc_sow": 0.5445544554455446,
+    "strict_acc": 0.39603960396039606,
+    "rhythm_acc": 0.47863247863247865,
+    "n_gt_notes": 101,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "octave_wrong_staves": 0,
+    "silent_wrong_staves": 0,
+    "silent_wrong_rate": 0.0,
+    "double_octave_staves": 0,
+    "silent_clef_wrong_staves": 0,
+    "silent_key_wrong_staves": 0,
+    "flagged_and_wrong_staves": 0,
+    "review_needed_rate": 0.0,
+    "note_count_ratio": 1.1973684210526316,
+    "note_precision": 0.6043956043956044,
+    "note_f1": 0.5729166666666666
+   },
+   "Tenor": {
+    "n_strips": 9,
+    "n_detected": 7,
+    "token_ser": 0.6910112359550562,
+    "pitch_acc_sow": 0.5061728395061729,
+    "strict_acc": 0.41975308641975306,
+    "rhythm_acc": 0.46153846153846156,
+    "n_gt_notes": 81,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "octave_wrong_staves": 0,
+    "silent_wrong_staves": 0,
+    "silent_wrong_rate": 0.0,
+    "double_octave_staves": 0,
+    "silent_clef_wrong_staves": 0,
+    "silent_key_wrong_staves": 0,
+    "flagged_and_wrong_staves": 0,
+    "review_needed_rate": 0.0,
+    "note_count_ratio": 2.0185185185185186,
+    "note_precision": 0.3761467889908257,
+    "note_f1": 0.4315789473684211
+   }
+  },
+  "by_page": {
+   "1": {
+    "n_strips": 8,
+    "n_detected": 8,
+    "token_ser": 0.4734042553191489,
+    "pitch_acc_sow": 0.7888888888888889,
+    "strict_acc": 0.6333333333333333,
+    "rhythm_acc": 0.7254901960784313,
+    "n_gt_notes": 90,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "octave_wrong_staves": 0,
+    "silent_wrong_staves": 0,
+    "silent_wrong_rate": 0.0,
+    "double_octave_staves": 0,
+    "silent_clef_wrong_staves": 0,
+    "silent_key_wrong_staves": 0,
+    "flagged_and_wrong_staves": 0,
+    "review_needed_rate": 0.0,
+    "note_count_ratio": 1.4,
+    "note_precision": 0.5634920634920635,
+    "note_f1": 0.6574074074074073
+   },
+   "2": {
+    "n_strips": 8,
+    "n_detected": 8,
+    "token_ser": 0.5632911392405063,
+    "pitch_acc_sow": 0.6619718309859155,
+    "strict_acc": 0.43661971830985913,
+    "rhythm_acc": 0.525,
+    "n_gt_notes": 71,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "octave_wrong_staves": 0,
+    "silent_wrong_staves": 0,
+    "silent_wrong_rate": 0.0,
+    "double_octave_staves": 0,
+    "silent_clef_wrong_staves": 0,
+    "silent_key_wrong_staves": 0,
+    "flagged_and_wrong_staves": 0,
+    "review_needed_rate": 0.0,
+    "note_count_ratio": 1.380281690140845,
+    "note_precision": 0.47959183673469385,
+    "note_f1": 0.5562130177514792
+   },
+   "3": {
+    "n_strips": 12,
+    "n_detected": 12,
+    "token_ser": 0.47333333333333333,
+    "pitch_acc_sow": 0.5909090909090909,
+    "strict_acc": 0.4090909090909091,
+    "rhythm_acc": 0.6666666666666666,
+    "n_gt_notes": 44,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "octave_wrong_staves": 0,
+    "silent_wrong_staves": 0,
+    "silent_wrong_rate": 0.0,
+    "double_octave_staves": 0,
+    "silent_clef_wrong_staves": 0,
+    "silent_key_wrong_staves": 0,
+    "flagged_and_wrong_staves": 0,
+    "review_needed_rate": 0.0,
+    "note_count_ratio": 2.6818181818181817,
+    "note_precision": 0.22033898305084745,
+    "note_f1": 0.3209876543209877
+   },
+   "4": {
+    "n_strips": 8,
+    "n_detected": 0,
+    "token_ser": 1.0,
+    "pitch_acc_sow": 0.0,
+    "strict_acc": 0.0,
+    "rhythm_acc": 0.0,
+    "n_gt_notes": 70,
+    "clef_acc": null,
+    "key_acc": null,
+    "octave_wrong_staves": 0,
+    "silent_wrong_staves": 0,
+    "silent_wrong_rate": null,
+    "double_octave_staves": 0,
+    "silent_clef_wrong_staves": 0,
+    "silent_key_wrong_staves": 0,
+    "flagged_and_wrong_staves": 0,
+    "review_needed_rate": null,
+    "note_count_ratio": null,
+    "note_precision": null,
+    "note_f1": null
+   }
+  },
+  "per_symbol": {
+   "quarter note": {
+    "n": 76,
+    "symbol_correct": 27,
+    "symbol_and_pitch_correct": 22
+   },
+   "eighth note": {
+    "n": 74,
+    "symbol_correct": 57,
+    "symbol_and_pitch_correct": 46
+   },
+   "whole note": {
+    "n": 43,
+    "symbol_correct": 13,
+    "symbol_and_pitch_correct": 9
+   },
+   "half note": {
+    "n": 36,
+    "symbol_correct": 16,
+    "symbol_and_pitch_correct": 15
+   },
+   "dotted half note": {
+    "n": 29,
+    "symbol_correct": 14,
+    "symbol_and_pitch_correct": 12
+   },
+   "quarter rest": {
+    "n": 27,
+    "symbol_correct": 17,
+    "symbol_and_pitch_correct": 18
+   },
+   "dotted quarter note": {
+    "n": 17,
+    "symbol_correct": 6,
+    "symbol_and_pitch_correct": 2
+   },
+   "half rest": {
+    "n": 13,
+    "symbol_correct": 2,
+    "symbol_and_pitch_correct": 2
+   },
+   "whole rest": {
+    "n": 3,
+    "symbol_correct": 0,
+    "symbol_and_pitch_correct": 0
+   }
+  },
+  "per_token_class": {
+   "barline": {
+    "n_ref": 212,
+    "n_pred": 148,
+    "exact": 144,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.6792452830188679,
+    "recall_class": 0.6792452830188679,
+    "precision_exact": 0.972972972972973
+   },
+   "note.quarter": {
+    "n_ref": 93,
+    "n_pred": 39,
+    "exact": 27,
+    "class_ok_position_wrong": 4,
+    "recall_exact": 0.2903225806451613,
+    "recall_class": 0.3333333333333333,
+    "precision_exact": 0.6923076923076923
+   },
+   "note.half": {
+    "n_ref": 65,
+    "n_pred": 40,
+    "exact": 30,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.46153846153846156,
+    "recall_class": 0.46153846153846156,
+    "precision_exact": 0.75
+   },
+   "dot": {
+    "n_ref": 46,
+    "n_pred": 42,
+    "exact": 29,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.6304347826086957,
+    "recall_class": 0.6304347826086957,
+    "precision_exact": 0.6904761904761905
+   },
+   "note.whole": {
+    "n_ref": 43,
+    "n_pred": 15,
+    "exact": 10,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.23255813953488372,
+    "recall_class": 0.23255813953488372,
+    "precision_exact": 0.6666666666666666
+   },
+   "accidental.flat": {
+    "n_ref": 37,
+    "n_pred": 34,
+    "exact": 29,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.7837837837837838,
+    "recall_class": 0.7837837837837838,
+    "precision_exact": 0.8529411764705882
+   },
+   "clef.G": {
+    "n_ref": 27,
+    "n_pred": 21,
+    "exact": 21,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.7777777777777778,
+    "recall_class": 0.7777777777777778,
+    "precision_exact": 1.0
+   },
+   "rest.quarter": {
+    "n_ref": 27,
+    "n_pred": 23,
+    "exact": 18,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.6666666666666666,
+    "recall_class": 0.6666666666666666,
+    "precision_exact": 0.782608695652174
+   },
+   "note.beamedRight1": {
+    "n_ref": 25,
+    "n_pred": 36,
+    "exact": 11,
+    "class_ok_position_wrong": 4,
+    "recall_exact": 0.44,
+    "recall_class": 0.6,
+    "precision_exact": 0.3055555555555556
+   },
+   "note.beamedLeft1": {
+    "n_ref": 24,
+    "n_pred": 21,
+    "exact": 13,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.5416666666666666,
+    "recall_class": 0.5416666666666666,
+    "precision_exact": 0.6190476190476191
+   },
+   "rest.half": {
+    "n_ref": 13,
+    "n_pred": 3,
+    "exact": 2,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.15384615384615385,
+    "recall_class": 0.15384615384615385,
+    "precision_exact": 0.6666666666666666
+   },
+   "note.eighth": {
+    "n_ref": 13,
+    "n_pred": 31,
+    "exact": 9,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.6923076923076923,
+    "recall_class": 0.6923076923076923,
+    "precision_exact": 0.2903225806451613
+   },
+   "note.beamedBoth1": {
+    "n_ref": 12,
+    "n_pred": 27,
+    "exact": 11,
+    "class_ok_position_wrong": 1,
+    "recall_exact": 0.9166666666666666,
+    "recall_class": 1.0,
+    "precision_exact": 0.4074074074074074
+   },
+   "clef.F": {
+    "n_ref": 9,
+    "n_pred": 7,
+    "exact": 7,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.7777777777777778,
+    "recall_class": 0.7777777777777778,
+    "precision_exact": 1.0
+   },
+   "metersign.C": {
+    "n_ref": 4,
+    "n_pred": 10,
+    "exact": 2,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.5,
+    "recall_class": 0.5,
+    "precision_exact": 0.2
+   },
+   "rest.whole": {
+    "n_ref": 3,
+    "n_pred": 0,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.0,
+    "recall_class": 0.0,
+    "precision_exact": null
+   },
+   "accidental.natural": {
+    "n_ref": 2,
+    "n_pred": 8,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": 0.0,
+    "recall_class": 0.0,
+    "precision_exact": 0.0
+   },
+   "note.eighth-S": {
+    "n_ref": 0,
+    "n_pred": 2,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.sixteenth": {
+    "n_ref": 0,
+    "n_pred": 7,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.thirty_second": {
+    "n_ref": 0,
+    "n_pred": 2,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "fermata.above": {
+    "n_ref": 0,
+    "n_pred": 4,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.beamedLeft2": {
+    "n_ref": 0,
+    "n_pred": 5,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "rest.eighth": {
+    "n_ref": 0,
+    "n_pred": 4,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "<unk>": {
+    "n_ref": 0,
+    "n_pred": 2,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "accidental.sharp": {
+    "n_ref": 0,
+    "n_pred": 23,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "gracenote.eighth": {
+    "n_ref": 0,
+    "n_pred": 3,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "digit.4": {
+    "n_ref": 0,
+    "n_pred": 5,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "digit.3": {
+    "n_ref": 0,
+    "n_pred": 4,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.beamedRight1-L": {
+    "n_ref": 0,
+    "n_pred": 2,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.beamedBoth3": {
+    "n_ref": 0,
+    "n_pred": 2,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "digit.2": {
+    "n_ref": 0,
+    "n_pred": 3,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.quarter-L": {
+    "n_ref": 0,
+    "n_pred": 1,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.half-S": {
+    "n_ref": 0,
+    "n_pred": 1,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.beamedBoth2": {
+    "n_ref": 0,
+    "n_pred": 3,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.beamedRight2": {
+    "n_ref": 0,
+    "n_pred": 2,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "digit.1": {
+    "n_ref": 0,
+    "n_pred": 1,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "rest.sixteenth": {
+    "n_ref": 0,
+    "n_pred": 1,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   },
+   "note.beamedBoth1-L": {
+    "n_ref": 0,
+    "n_pred": 2,
+    "exact": 0,
+    "class_ok_position_wrong": 0,
+    "recall_exact": null,
+    "recall_class": null,
+    "precision_exact": 0.0
+   }
+  },
+  "diagnostics": {
+   "range_suspect": [],
+   "cross_system_jumps": [
+    {
+     "voice": "Soprano",
+     "from_": "page002_sys01_Soprano",
+     "to": "page002_sys02_Soprano",
+     "jump": 11.0,
+     "octave_wrong": [
+      false,
+      false
+     ]
+    },
+    {
+     "voice": "Bass",
+     "from_": "page003_sys01_Bass",
+     "to": "page003_sys02_Bass",
+     "jump": -10.0,
+     "octave_wrong": [
+      false,
+      false
+     ]
+    },
+    {
+     "voice": "Bass",
+     "from_": "page003_sys02_Bass",
+     "to": "page003_sys03_Bass",
+     "jump": 10.0,
+     "octave_wrong": [
+      false,
+      false
+     ]
+    }
+   ],
+   "octave_wrong_caught_by_range": 0,
+   "octave_wrong_total": 0,
+   "tie_unresolved": "not computed: Stage 4 is not part of this run"
+  },
+  "strips": [
+   {
+    "strip_id": "page001_sys01_Soprano",
+    "voice": "Soprano",
+    "page": 1,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 29,
+    "tok_err": 21,
+    "n_hyp": 39,
+    "sow": [
+     15,
+     16
+    ],
+    "strict": [
+     9,
+     16
+    ],
+    "rhythm": [
+     10,
+     18
+    ],
+    "n_gt_notes": 16,
+    "n_pred_notes": 23,
+    "median_offset": -3.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 69.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page001_sys01_Alto",
+    "voice": "Alto",
+    "page": 1,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 22,
+    "tok_err": 17,
+    "n_hyp": 32,
+    "sow": [
+     8,
+     9
+    ],
+    "strict": [
+     5,
+     9
+    ],
+    "rhythm": [
+     8,
+     11
+    ],
+    "n_gt_notes": 9,
+    "n_pred_notes": 16,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 65.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page001_sys01_Tenor",
+    "voice": "Tenor",
+    "page": 1,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 28,
+    "tok_err": 19,
+    "n_hyp": 38,
+    "sow": [
+     11,
+     15
+    ],
+    "strict": [
+     10,
+     15
+    ],
+    "rhythm": [
+     13,
+     17
+    ],
+    "n_gt_notes": 15,
+    "n_pred_notes": 20,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": "G8vb",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 60.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page001_sys01_Bass",
+    "voice": "Bass",
+    "page": 1,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 21,
+    "tok_err": 10,
+    "n_hyp": 26,
+    "sow": [
+     7,
+     9
+    ],
+    "strict": [
+     6,
+     9
+    ],
+    "rhythm": [
+     6,
+     10
+    ],
+    "n_gt_notes": 9,
+    "n_pred_notes": 9,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": "F",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 53.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page001_sys02_Soprano",
+    "voice": "Soprano",
+    "page": 1,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 24,
+    "tok_err": 4,
+    "n_hyp": 34,
+    "sow": [
+     9,
+     11
+    ],
+    "strict": [
+     8,
+     11
+    ],
+    "rhythm": [
+     11,
+     13
+    ],
+    "n_gt_notes": 11,
+    "n_pred_notes": 15,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 72.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page001_sys02_Alto",
+    "voice": "Alto",
+    "page": 1,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 17,
+    "tok_err": 5,
+    "n_hyp": 30,
+    "sow": [
+     5,
+     6
+    ],
+    "strict": [
+     4,
+     6
+    ],
+    "rhythm": [
+     5,
+     8
+    ],
+    "n_gt_notes": 6,
+    "n_pred_notes": 17,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 65.0,
+    "n_unc": 3
+   },
+   {
+    "strip_id": "page001_sys02_Tenor",
+    "voice": "Tenor",
+    "page": 1,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 23,
+    "tok_err": 4,
+    "n_hyp": 29,
+    "sow": [
+     9,
+     11
+    ],
+    "strict": [
+     8,
+     11
+    ],
+    "rhythm": [
+     11,
+     12
+    ],
+    "n_gt_notes": 11,
+    "n_pred_notes": 14,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": "G8vb",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 60.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page001_sys02_Bass",
+    "voice": "Bass",
+    "page": 1,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 24,
+    "tok_err": 9,
+    "n_hyp": 26,
+    "sow": [
+     7,
+     13
+    ],
+    "strict": [
+     7,
+     13
+    ],
+    "rhythm": [
+     10,
+     13
+    ],
+    "n_gt_notes": 13,
+    "n_pred_notes": 12,
+    "median_offset": -1.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": "F",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 50.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page002_sys01_Soprano",
+    "voice": "Soprano",
+    "page": 2,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 25,
+    "tok_err": 11,
+    "n_hyp": 22,
+    "sow": [
+     6,
+     10
+    ],
+    "strict": [
+     2,
+     10
+    ],
+    "rhythm": [
+     4,
+     14
+    ],
+    "n_gt_notes": 10,
+    "n_pred_notes": 8,
+    "median_offset": -1.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 65.0,
+    "n_unc": 1
+   },
+   {
+    "strip_id": "page002_sys01_Alto",
+    "voice": "Alto",
+    "page": 2,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 27,
+    "tok_err": 11,
+    "n_hyp": 28,
+    "sow": [
+     7,
+     12
+    ],
+    "strict": [
+     5,
+     12
+    ],
+    "rhythm": [
+     8,
+     15
+    ],
+    "n_gt_notes": 12,
+    "n_pred_notes": 10,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 62.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page002_sys01_Tenor",
+    "voice": "Tenor",
+    "page": 2,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 32,
+    "tok_err": 13,
+    "n_hyp": 28,
+    "sow": [
+     11,
+     16
+    ],
+    "strict": [
+     6,
+     16
+    ],
+    "rhythm": [
+     8,
+     18
+    ],
+    "n_gt_notes": 16,
+    "n_pred_notes": 12,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": "G8vb",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 56.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page002_sys01_Bass",
+    "voice": "Bass",
+    "page": 2,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 15,
+    "tok_err": 8,
+    "n_hyp": 22,
+    "sow": [
+     2,
+     4
+    ],
+    "strict": [
+     1,
+     4
+    ],
+    "rhythm": [
+     1,
+     4
+    ],
+    "n_gt_notes": 4,
+    "n_pred_notes": 8,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": "F",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 45.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page002_sys02_Soprano",
+    "voice": "Soprano",
+    "page": 2,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 27,
+    "tok_err": 14,
+    "n_hyp": 30,
+    "sow": [
+     14,
+     19
+    ],
+    "strict": [
+     11,
+     19
+    ],
+    "rhythm": [
+     14,
+     19
+    ],
+    "n_gt_notes": 19,
+    "n_pred_notes": 19,
+    "median_offset": -1.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 76.0,
+    "n_unc": 1
+   },
+   {
+    "strip_id": "page002_sys02_Alto",
+    "voice": "Alto",
+    "page": 2,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 15,
+    "tok_err": 5,
+    "n_hyp": 20,
+    "sow": [
+     4,
+     7
+    ],
+    "strict": [
+     3,
+     7
+    ],
+    "rhythm": [
+     4,
+     7
+    ],
+    "n_gt_notes": 7,
+    "n_pred_notes": 7,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 67.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page002_sys02_Tenor",
+    "voice": "Tenor",
+    "page": 2,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 10,
+    "tok_err": 20,
+    "n_hyp": 36,
+    "sow": [
+     3,
+     3
+    ],
+    "strict": [
+     3,
+     3
+    ],
+    "rhythm": [
+     3,
+     3
+    ],
+    "n_gt_notes": 3,
+    "n_pred_notes": 24,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": "G8vb",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 64.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page002_sys02_Bass",
+    "voice": "Bass",
+    "page": 2,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 7,
+    "tok_err": 7,
+    "n_hyp": 22,
+    "sow": [
+     0,
+     0
+    ],
+    "strict": [
+     0,
+     0
+    ],
+    "rhythm": [
+     0,
+     0
+    ],
+    "n_gt_notes": 0,
+    "n_pred_notes": 10,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": "F",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 53.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys01_Soprano",
+    "voice": "Soprano",
+    "page": 3,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 18,
+    "tok_err": 12,
+    "n_hyp": 29,
+    "sow": [
+     3,
+     10
+    ],
+    "strict": [
+     2,
+     10
+    ],
+    "rhythm": [
+     3,
+     10
+    ],
+    "n_gt_notes": 10,
+    "n_pred_notes": 7,
+    "median_offset": 1.5,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 78.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys01_Alto",
+    "voice": "Alto",
+    "page": 3,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 14,
+    "tok_err": 6,
+    "n_hyp": 27,
+    "sow": [
+     1,
+     3
+    ],
+    "strict": [
+     0,
+     3
+    ],
+    "rhythm": [
+     3,
+     3
+    ],
+    "n_gt_notes": 3,
+    "n_pred_notes": 9,
+    "median_offset": 2.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 71.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys01_Tenor",
+    "voice": "Tenor",
+    "page": 3,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 12,
+    "tok_err": 6,
+    "n_hyp": 39,
+    "sow": [
+     4,
+     4
+    ],
+    "strict": [
+     4,
+     4
+    ],
+    "rhythm": [
+     4,
+     4
+    ],
+    "n_gt_notes": 4,
+    "n_pred_notes": 21,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": "G8vb",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 62.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys01_Bass",
+    "voice": "Bass",
+    "page": 3,
+    "sys": 1,
+    "detected": true,
+    "n_ref": 13,
+    "tok_err": 8,
+    "n_hyp": 37,
+    "sow": [
+     2,
+     3
+    ],
+    "strict": [
+     0,
+     3
+    ],
+    "rhythm": [
+     1,
+     3
+    ],
+    "n_gt_notes": 3,
+    "n_pred_notes": 17,
+    "median_offset": 5.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": "F",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 55.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys02_Soprano",
+    "voice": "Soprano",
+    "page": 3,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 19,
+    "tok_err": 4,
+    "n_hyp": 25,
+    "sow": [
+     7,
+     8
+    ],
+    "strict": [
+     7,
+     8
+    ],
+    "rhythm": [
+     10,
+     10
+    ],
+    "n_gt_notes": 8,
+    "n_pred_notes": 9,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 69.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys02_Alto",
+    "voice": "Alto",
+    "page": 3,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 16,
+    "tok_err": 5,
+    "n_hyp": 18,
+    "sow": [
+     4,
+     5
+    ],
+    "strict": [
+     1,
+     5
+    ],
+    "rhythm": [
+     4,
+     7
+    ],
+    "n_gt_notes": 5,
+    "n_pred_notes": 7,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 64.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys02_Tenor",
+    "voice": "Tenor",
+    "page": 3,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 11,
+    "tok_err": 2,
+    "n_hyp": 19,
+    "sow": [
+     3,
+     3
+    ],
+    "strict": [
+     3,
+     3
+    ],
+    "rhythm": [
+     3,
+     3
+    ],
+    "n_gt_notes": 3,
+    "n_pred_notes": 9,
+    "median_offset": 0.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": "G8vb",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 60.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys02_Bass",
+    "voice": "Bass",
+    "page": 3,
+    "sys": 2,
+    "detected": true,
+    "n_ref": 10,
+    "tok_err": 4,
+    "n_hyp": 20,
+    "sow": [
+     1,
+     2
+    ],
+    "strict": [
+     0,
+     2
+    ],
+    "rhythm": [
+     1,
+     2
+    ],
+    "n_gt_notes": 2,
+    "n_pred_notes": 8,
+    "median_offset": -10.5,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": "F",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 45.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys03_Soprano",
+    "voice": "Soprano",
+    "page": 3,
+    "sys": 3,
+    "detected": true,
+    "n_ref": 10,
+    "tok_err": 5,
+    "n_hyp": 20,
+    "sow": [
+     1,
+     2
+    ],
+    "strict": [
+     1,
+     2
+    ],
+    "rhythm": [
+     4,
+     4
+    ],
+    "n_gt_notes": 2,
+    "n_pred_notes": 10,
+    "median_offset": 0.5,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 65.0,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page003_sys03_Alto",
+    "voice": "Alto",
+    "page": 3,
+    "sys": 3,
+    "detected": true,
+    "n_ref": 10,
+    "tok_err": 7,
+    "n_hyp": 22,
+    "sow": [
+     0,
+     2
+    ],
+    "strict": [
+     0,
+     2
+    ],
+    "rhythm": [
+     2,
+     4
+    ],
+    "n_gt_notes": 2,
+    "n_pred_notes": 8,
+    "median_offset": -7.0,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": "G",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 57.0,
+    "n_unc": 2
+   },
+   {
+    "strip_id": "page003_sys03_Tenor",
+    "voice": "Tenor",
+    "page": 3,
+    "sys": 3,
+    "detected": true,
+    "n_ref": 10,
+    "tok_err": 7,
+    "n_hyp": 19,
+    "sow": [
+     0,
+     2
+    ],
+    "strict": [
+     0,
+     2
+    ],
+    "rhythm": [
+     0,
+     3
+    ],
+    "n_gt_notes": 2,
+    "n_pred_notes": 9,
+    "median_offset": -5.5,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": "G8vb",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 55.0,
+    "n_unc": 1
+   },
+   {
+    "strip_id": "page003_sys03_Bass",
+    "voice": "Bass",
+    "page": 3,
+    "sys": 3,
+    "detected": true,
+    "n_ref": 7,
+    "tok_err": 5,
+    "n_hyp": 20,
+    "sow": [
+     0,
+     0
+    ],
+    "strict": [
+     0,
+     0
+    ],
+    "rhythm": [
+     1,
+     1
+    ],
+    "n_gt_notes": 0,
+    "n_pred_notes": 4,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": "F",
+    "key_gt": -1,
+    "key_pred": -1,
+    "pred_median_pitch": 55.0,
+    "n_unc": 1
+   },
+   {
+    "strip_id": "page004_sys01_Soprano",
+    "voice": "Soprano",
+    "page": 4,
+    "sys": 1,
+    "detected": false,
+    "n_ref": 28,
+    "tok_err": 28,
+    "n_hyp": 0,
+    "sow": [
+     0,
+     16
+    ],
+    "strict": [
+     0,
+     16
+    ],
+    "rhythm": [
+     0,
+     18
+    ],
+    "n_gt_notes": 16,
+    "n_pred_notes": 0,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": null,
+    "key_gt": -1,
+    "key_pred": null,
+    "pred_median_pitch": null,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page004_sys01_Alto",
+    "voice": "Alto",
+    "page": 4,
+    "sys": 1,
+    "detected": false,
+    "n_ref": 21,
+    "tok_err": 21,
+    "n_hyp": 0,
+    "sow": [
+     0,
+     9
+    ],
+    "strict": [
+     0,
+     9
+    ],
+    "rhythm": [
+     0,
+     11
+    ],
+    "n_gt_notes": 9,
+    "n_pred_notes": 0,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": null,
+    "key_gt": -1,
+    "key_pred": null,
+    "pred_median_pitch": null,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page004_sys01_Tenor",
+    "voice": "Tenor",
+    "page": 4,
+    "sys": 1,
+    "detected": false,
+    "n_ref": 27,
+    "tok_err": 27,
+    "n_hyp": 0,
+    "sow": [
+     0,
+     15
+    ],
+    "strict": [
+     0,
+     15
+    ],
+    "rhythm": [
+     0,
+     17
+    ],
+    "n_gt_notes": 15,
+    "n_pred_notes": 0,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": null,
+    "key_gt": -1,
+    "key_pred": null,
+    "pred_median_pitch": null,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page004_sys01_Bass",
+    "voice": "Bass",
+    "page": 4,
+    "sys": 1,
+    "detected": false,
+    "n_ref": 8,
+    "tok_err": 8,
+    "n_hyp": 0,
+    "sow": [
+     0,
+     0
+    ],
+    "strict": [
+     0,
+     0
+    ],
+    "rhythm": [
+     0,
+     0
+    ],
+    "n_gt_notes": 0,
+    "n_pred_notes": 0,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": null,
+    "key_gt": -1,
+    "key_pred": null,
+    "pred_median_pitch": null,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page004_sys02_Soprano",
+    "voice": "Soprano",
+    "page": 4,
+    "sys": 2,
+    "detected": false,
+    "n_ref": 20,
+    "tok_err": 20,
+    "n_hyp": 0,
+    "sow": [
+     0,
+     9
+    ],
+    "strict": [
+     0,
+     9
+    ],
+    "rhythm": [
+     0,
+     11
+    ],
+    "n_gt_notes": 9,
+    "n_pred_notes": 0,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": null,
+    "key_gt": -1,
+    "key_pred": null,
+    "pred_median_pitch": null,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page004_sys02_Alto",
+    "voice": "Alto",
+    "page": 4,
+    "sys": 2,
+    "detected": false,
+    "n_ref": 18,
+    "tok_err": 18,
+    "n_hyp": 0,
+    "sow": [
+     0,
+     7
+    ],
+    "strict": [
+     0,
+     7
+    ],
+    "rhythm": [
+     0,
+     9
+    ],
+    "n_gt_notes": 7,
+    "n_pred_notes": 0,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G",
+    "clef_pred": null,
+    "key_gt": -1,
+    "key_pred": null,
+    "pred_median_pitch": null,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page004_sys02_Tenor",
+    "voice": "Tenor",
+    "page": 4,
+    "sys": 2,
+    "detected": false,
+    "n_ref": 25,
+    "tok_err": 25,
+    "n_hyp": 0,
+    "sow": [
+     0,
+     12
+    ],
+    "strict": [
+     0,
+     12
+    ],
+    "rhythm": [
+     0,
+     14
+    ],
+    "n_gt_notes": 12,
+    "n_pred_notes": 0,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "G8vb",
+    "clef_pred": null,
+    "key_gt": -1,
+    "key_pred": null,
+    "pred_median_pitch": null,
+    "n_unc": 0
+   },
+   {
+    "strip_id": "page004_sys02_Bass",
+    "voice": "Bass",
+    "page": 4,
+    "sys": 2,
+    "detected": false,
+    "n_ref": 12,
+    "tok_err": 12,
+    "n_hyp": 0,
+    "sow": [
+     0,
+     2
+    ],
+    "strict": [
+     0,
+     2
+    ],
+    "rhythm": [
+     0,
+     2
+    ],
+    "n_gt_notes": 2,
+    "n_pred_notes": 0,
+    "median_offset": null,
+    "octave_wrong": false,
+    "double_octave": false,
+    "review": false,
+    "silent_wrong": false,
+    "clef_gt": "F",
+    "clef_pred": null,
+    "key_gt": -1,
+    "key_pred": null,
+    "pred_median_pitch": null,
+    "n_unc": 0
+   }
+  ]
+ },
+ "b_minus_a_sow": {
+  "point": 0.4545454545454546,
+  "ci95": [
+   0.32855649977032614,
+   0.5861418898883065
+  ]
+ },
+ "gate": {
+  "silent_wrong_b_le_a": true,
+  "zero_double_octave_b": true,
+  "sow_gain_ge_20pts": true,
+  "review_le_25pct": true,
+  "pass": true
+ },
+ "gated": true
+}

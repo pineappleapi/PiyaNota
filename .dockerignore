@@ -1,0 +1,8 @@
+# Build context is the repo root; the image needs only backend/.
+*
+!backend/
+backend/.venv/
+backend/.env
+backend/tests/
+**/__pycache__/
+**/*.pyc

@@ -1,0 +1,8 @@
+# Dont Stop Me Now -- hand-transcribed ground truth (open-score SATB, 4/4, key sig: 1 flat = Bb)
+# Written by reading dont_stop_me_now_pgNN.jpg. Only finished systems appear here.
+# Syntax: see build_ground_truth.py docstring. Tenor is authored as WRITTEN (treble clef, 8vb implied).
+# Author uncertainty is recorded in verify.txt, not here.
+page 1 sys 1 Soprano: | r/h (C4/q F4/q | G4)/w
+page 1 sys 1 Alto:    | (C4/w | D4)/w
+page 1 sys 1 Tenor:   G4/e | (G4/e F4)/q F4/e F4/e A4/e C5/e F5/e | E5/h r/e C5/e A4/e G4~/e
+page 1 sys 1 Bass:    | F3+(F2/w | A2)/w

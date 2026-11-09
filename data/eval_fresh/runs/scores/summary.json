@@ -1,0 +1,1964 @@
+{
+ "non_nobis_domine/seed1": {
+  "a": {
+   "n_strips": 36,
+   "n_detected": 28,
+   "token_ser": 0.583206106870229,
+   "pitch_acc_sow": 0.08,
+   "strict_acc": 0.06181818181818182,
+   "rhythm_acc": 0.6477987421383647,
+   "n_gt_notes": 275,
+   "clef_acc": 0.03571428571428571,
+   "key_acc": 0.5,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 27,
+   "silent_key_wrong_staves": 14,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 1.726829268292683,
+   "note_precision": 0.062146892655367235,
+   "note_f1": 0.0699523052464229,
+   "ci95": {
+    "token_ser": [
+     0.4590335776980559,
+     0.7105731517657322
+    ],
+    "pitch_acc_sow": [
+     0.030099705786204644,
+     0.1443461848005211
+    ],
+    "strict_acc": [
+     0.014492753623188406,
+     0.1236793691444873
+    ]
+   }
+  },
+  "b": {
+   "n_strips": 36,
+   "n_detected": 28,
+   "token_ser": 0.5083969465648855,
+   "pitch_acc_sow": 0.64,
+   "strict_acc": 0.5781818181818181,
+   "rhythm_acc": 0.6477987421383647,
+   "n_gt_notes": 275,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.07142857142857142,
+   "note_count_ratio": 1.726829268292683,
+   "note_precision": 0.4971751412429379,
+   "note_f1": 0.5596184419713832,
+   "ci95": {
+    "token_ser": [
+     0.37634289127837517,
+     0.642865346751258
+    ],
+    "pitch_acc_sow": [
+     0.47933314361601215,
+     0.7923693224860839
+    ],
+    "strict_acc": [
+     0.41968830144012625,
+     0.7269237588652482
+    ]
+   }
+  },
+  "oracle": {
+   "n_strips": 36,
+   "n_detected": 28,
+   "token_ser": 0.5083969465648855,
+   "pitch_acc_sow": 0.64,
+   "strict_acc": 0.5781818181818181,
+   "rhythm_acc": 0.6477987421383647,
+   "n_gt_notes": 275,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 1.726829268292683,
+   "note_precision": 0.4971751412429379,
+   "note_f1": 0.5596184419713832,
+   "ci95": {
+    "token_ser": [
+     0.37634289127837517,
+     0.642865346751258
+    ],
+    "pitch_acc_sow": [
+     0.47933314361601215,
+     0.7923693224860839
+    ],
+    "strict_acc": [
+     0.41968830144012625,
+     0.7269237588652482
+    ]
+   }
+  },
+  "gate": {
+   "silent_wrong_b_le_a": true,
+   "zero_double_octave_b": true,
+   "sow_gain_ge_20pts": true,
+   "review_le_25pct": true,
+   "pass": true
+  },
+  "b_minus_a_sow": {
+   "point": 0.56,
+   "ci95": [
+    0.40859470923094093,
+    0.712558624283481
+   ]
+  },
+  "stage2_coverage": {
+   "1": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "2": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "3": {
+    "expected_staves": 12,
+    "detected": 12,
+    "failure": null
+   },
+   "4": {
+    "expected_staves": 10,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 4: unsupported_staff_layout \u2014 detected 10 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   }
+  }
+ },
+ "non_nobis_domine/seed2": {
+  "a": {
+   "n_strips": 36,
+   "n_detected": 28,
+   "token_ser": 0.5847328244274809,
+   "pitch_acc_sow": 0.10181818181818182,
+   "strict_acc": 0.08,
+   "rhythm_acc": 0.6352201257861635,
+   "n_gt_notes": 275,
+   "clef_acc": 0.07142857142857142,
+   "key_acc": 0.8214285714285714,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 26,
+   "silent_key_wrong_staves": 5,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 1.697560975609756,
+   "note_precision": 0.08045977011494253,
+   "note_f1": 0.0898876404494382,
+   "ci95": {
+    "token_ser": [
+     0.4638837049643196,
+     0.7099288868646803
+    ],
+    "pitch_acc_sow": [
+     0.03596479958890031,
+     0.18999283154121846
+    ],
+    "strict_acc": [
+     0.011996442687747036,
+     0.17101765392471546
+    ]
+   }
+  },
+  "b": {
+   "n_strips": 36,
+   "n_detected": 28,
+   "token_ser": 0.5022900763358779,
+   "pitch_acc_sow": 0.64,
+   "strict_acc": 0.5709090909090909,
+   "rhythm_acc": 0.6352201257861635,
+   "n_gt_notes": 275,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.03571428571428571,
+   "note_count_ratio": 1.697560975609756,
+   "note_precision": 0.5057471264367817,
+   "note_f1": 0.5650080256821831,
+   "ci95": {
+    "token_ser": [
+     0.370361509835194,
+     0.6356694636334044
+    ],
+    "pitch_acc_sow": [
+     0.485015091307841,
+     0.7913579854937487
+    ],
+    "strict_acc": [
+     0.4222940328239282,
+     0.7211547397769517
+    ]
+   }
+  },
+  "oracle": {
+   "n_strips": 36,
+   "n_detected": 28,
+   "token_ser": 0.5022900763358779,
+   "pitch_acc_sow": 0.64,
+   "strict_acc": 0.5709090909090909,
+   "rhythm_acc": 0.6352201257861635,
+   "n_gt_notes": 275,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 1.697560975609756,
+   "note_precision": 0.5057471264367817,
+   "note_f1": 0.5650080256821831,
+   "ci95": {
+    "token_ser": [
+     0.370361509835194,
+     0.6356694636334044
+    ],
+    "pitch_acc_sow": [
+     0.485015091307841,
+     0.7913579854937487
+    ],
+    "strict_acc": [
+     0.4222940328239282,
+     0.7211547397769517
+    ]
+   }
+  },
+  "gate": {
+   "silent_wrong_b_le_a": true,
+   "zero_double_octave_b": true,
+   "sow_gain_ge_20pts": true,
+   "review_le_25pct": true,
+   "pass": true
+  },
+  "b_minus_a_sow": {
+   "point": 0.5381818181818182,
+   "ci95": [
+    0.3929565610298482,
+    0.6850430154564012
+   ]
+  },
+  "stage2_coverage": {
+   "1": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "2": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "3": {
+    "expected_staves": 12,
+    "detected": 12,
+    "failure": null
+   },
+   "4": {
+    "expected_staves": 10,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 4: unsupported_staff_layout \u2014 detected 10 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   }
+  }
+ },
+ "non_nobis_domine/baseline": {
+  "a": {
+   "n_strips": 36,
+   "n_detected": 28,
+   "token_ser": 0.7236641221374046,
+   "pitch_acc_sow": 0.06909090909090909,
+   "strict_acc": 0.04,
+   "rhythm_acc": 0.4779874213836478,
+   "n_gt_notes": 275,
+   "clef_acc": 0.03571428571428571,
+   "key_acc": 0.10714285714285714,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 27,
+   "silent_key_wrong_staves": 25,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 1.6682926829268292,
+   "note_precision": 0.05555555555555555,
+   "note_f1": 0.061588330632090765,
+   "ci95": {
+    "token_ser": [
+     0.6251498706551085,
+     0.8275230879242929
+    ],
+    "pitch_acc_sow": [
+     0.01706195406953202,
+     0.13026377217553683
+    ],
+    "strict_acc": [
+     0.0035460992907801418,
+     0.08917777449698397
+    ]
+   }
+  },
+  "b": {
+   "n_strips": 36,
+   "n_detected": 28,
+   "token_ser": 0.6229007633587786,
+   "pitch_acc_sow": 0.5236363636363637,
+   "strict_acc": 0.38545454545454544,
+   "rhythm_acc": 0.4779874213836478,
+   "n_gt_notes": 275,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.10714285714285714,
+   "note_count_ratio": 1.6682926829268292,
+   "note_precision": 0.42105263157894735,
+   "note_f1": 0.46677471636952994,
+   "ci95": {
+    "token_ser": [
+     0.5078752863527114,
+     0.7358856787318075
+    ],
+    "pitch_acc_sow": [
+     0.38810296846011133,
+     0.6601740828804347
+    ],
+    "strict_acc": [
+     0.2736192386087185,
+     0.5
+    ]
+   }
+  },
+  "oracle": {
+   "n_strips": 36,
+   "n_detected": 28,
+   "token_ser": 0.6229007633587786,
+   "pitch_acc_sow": 0.5236363636363637,
+   "strict_acc": 0.38545454545454544,
+   "rhythm_acc": 0.4779874213836478,
+   "n_gt_notes": 275,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 1.6682926829268292,
+   "note_precision": 0.42105263157894735,
+   "note_f1": 0.46677471636952994,
+   "ci95": {
+    "token_ser": [
+     0.5078752863527114,
+     0.7358856787318075
+    ],
+    "pitch_acc_sow": [
+     0.38810296846011133,
+     0.6601740828804347
+    ],
+    "strict_acc": [
+     0.2736192386087185,
+     0.5
+    ]
+   }
+  },
+  "gate": {
+   "silent_wrong_b_le_a": true,
+   "zero_double_octave_b": true,
+   "sow_gain_ge_20pts": true,
+   "review_le_25pct": true,
+   "pass": true
+  },
+  "b_minus_a_sow": {
+   "point": 0.4545454545454546,
+   "ci95": [
+    0.32855649977032614,
+    0.5861418898883065
+   ]
+  },
+  "stage2_coverage": {
+   "1": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "2": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "3": {
+    "expected_staves": 12,
+    "detected": 12,
+    "failure": null
+   },
+   "4": {
+    "expected_staves": 10,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 4: unsupported_staff_layout \u2014 detected 10 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   }
+  }
+ },
+ "honneur_a_toi/seed1": {
+  "a": {
+   "n_strips": 28,
+   "n_detected": 28,
+   "token_ser": 0.4566160520607375,
+   "pitch_acc_sow": 0.10925925925925926,
+   "strict_acc": 0.07407407407407407,
+   "rhythm_acc": 0.7610921501706485,
+   "n_gt_notes": 540,
+   "clef_acc": 0.21428571428571427,
+   "key_acc": 0.03571428571428571,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 22,
+   "silent_key_wrong_staves": 27,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 0.9555555555555556,
+   "note_precision": 0.11434108527131782,
+   "note_f1": 0.11174242424242425,
+   "ci95": {
+    "token_ser": [
+     0.36068855691816964,
+     0.5649647613618697
+    ],
+    "pitch_acc_sow": [
+     0.03508601269711243,
+     0.1986950831141885
+    ],
+    "strict_acc": [
+     0.013155439905734485,
+     0.14928057553956833
+    ]
+   }
+  },
+  "b": {
+   "n_strips": 28,
+   "n_detected": 28,
+   "token_ser": 0.4197396963123644,
+   "pitch_acc_sow": 0.7592592592592593,
+   "strict_acc": 0.6407407407407407,
+   "rhythm_acc": 0.7610921501706485,
+   "n_gt_notes": 540,
+   "clef_acc": 0.9642857142857143,
+   "key_acc": 0.8571428571428571,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 4,
+   "review_needed_rate": 0.39285714285714285,
+   "note_count_ratio": 0.9555555555555556,
+   "note_precision": 0.7945736434108527,
+   "note_f1": 0.7765151515151515,
+   "ci95": {
+    "token_ser": [
+     0.3261059728556872,
+     0.5225448184002396
+    ],
+    "pitch_acc_sow": [
+     0.6352289121862076,
+     0.8573891551224226
+    ],
+    "strict_acc": [
+     0.5119047619047619,
+     0.7491453131332024
+    ]
+   }
+  },
+  "oracle": {
+   "n_strips": 28,
+   "n_detected": 28,
+   "token_ser": 0.4197396963123644,
+   "pitch_acc_sow": 0.7851851851851852,
+   "strict_acc": 0.6537037037037037,
+   "rhythm_acc": 0.7610921501706485,
+   "n_gt_notes": 540,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 0.9555555555555556,
+   "note_precision": 0.8217054263565892,
+   "note_f1": 0.803030303030303,
+   "ci95": {
+    "token_ser": [
+     0.32684672238723494,
+     0.5238675548945326
+    ],
+    "pitch_acc_sow": [
+     0.6921641126158232,
+     0.8656068444641176
+    ],
+    "strict_acc": [
+     0.5438548609515055,
+     0.7544827484343613
+    ]
+   }
+  },
+  "gate": {
+   "silent_wrong_b_le_a": true,
+   "zero_double_octave_b": true,
+   "sow_gain_ge_20pts": true,
+   "review_le_25pct": false,
+   "pass": false
+  },
+  "b_minus_a_sow": {
+   "point": 0.65,
+   "ci95": [
+    0.5025852693325101,
+    0.7753278362345799
+   ]
+  },
+  "stage2_coverage": {
+   "1": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "2": {
+    "expected_staves": 12,
+    "detected": 12,
+    "failure": null
+   },
+   "3": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   }
+  }
+ },
+ "honneur_a_toi/seed2": {
+  "a": {
+   "n_strips": 28,
+   "n_detected": 28,
+   "token_ser": 0.47396963123644253,
+   "pitch_acc_sow": 0.1537037037037037,
+   "strict_acc": 0.1111111111111111,
+   "rhythm_acc": 0.7542662116040956,
+   "n_gt_notes": 540,
+   "clef_acc": 0.2857142857142857,
+   "key_acc": 0.10714285714285714,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 20,
+   "silent_key_wrong_staves": 25,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 0.9425925925925925,
+   "note_precision": 0.16306483300589392,
+   "note_f1": 0.1582459485224023,
+   "ci95": {
+    "token_ser": [
+     0.37943369751964456,
+     0.5820993157081487
+    ],
+    "pitch_acc_sow": [
+     0.058698221643895036,
+     0.2738420149719275
+    ],
+    "strict_acc": [
+     0.030591922661152356,
+     0.21346354166666665
+    ]
+   }
+  },
+  "b": {
+   "n_strips": 28,
+   "n_detected": 28,
+   "token_ser": 0.4349240780911063,
+   "pitch_acc_sow": 0.7333333333333333,
+   "strict_acc": 0.6074074074074074,
+   "rhythm_acc": 0.7542662116040956,
+   "n_gt_notes": 540,
+   "clef_acc": 0.9642857142857143,
+   "key_acc": 0.8571428571428571,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 4,
+   "review_needed_rate": 0.39285714285714285,
+   "note_count_ratio": 0.9425925925925925,
+   "note_precision": 0.7779960707269156,
+   "note_f1": 0.7550047664442326,
+   "ci95": {
+    "token_ser": [
+     0.3400531363190472,
+     0.5373951014832162
+    ],
+    "pitch_acc_sow": [
+     0.6061774309959428,
+     0.8384935151313602
+    ],
+    "strict_acc": [
+     0.479389414547605,
+     0.7174252717391302
+    ]
+   }
+  },
+  "oracle": {
+   "n_strips": 28,
+   "n_detected": 28,
+   "token_ser": 0.4349240780911063,
+   "pitch_acc_sow": 0.7666666666666667,
+   "strict_acc": 0.6259259259259259,
+   "rhythm_acc": 0.7542662116040956,
+   "n_gt_notes": 540,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 0.9425925925925925,
+   "note_precision": 0.8133595284872298,
+   "note_f1": 0.7893231649189705,
+   "ci95": {
+    "token_ser": [
+     0.3400425147650173,
+     0.5374535354455213
+    ],
+    "pitch_acc_sow": [
+     0.6716537497150672,
+     0.850399236123604
+    ],
+    "strict_acc": [
+     0.5144917064589092,
+     0.7238192679206913
+    ]
+   }
+  },
+  "gate": {
+   "silent_wrong_b_le_a": true,
+   "zero_double_octave_b": true,
+   "sow_gain_ge_20pts": true,
+   "review_le_25pct": false,
+   "pass": false
+  },
+  "b_minus_a_sow": {
+   "point": 0.5796296296296296,
+   "ci95": [
+    0.4180652629739646,
+    0.7270840669014084
+   ]
+  },
+  "stage2_coverage": {
+   "1": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "2": {
+    "expected_staves": 12,
+    "detected": 12,
+    "failure": null
+   },
+   "3": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   }
+  }
+ },
+ "honneur_a_toi/baseline": {
+  "a": {
+   "n_strips": 28,
+   "n_detected": 28,
+   "token_ser": 0.7678958785249458,
+   "pitch_acc_sow": 0.07407407407407407,
+   "strict_acc": 0.044444444444444446,
+   "rhythm_acc": 0.5494880546075085,
+   "n_gt_notes": 540,
+   "clef_acc": 0.0,
+   "key_acc": 0.07142857142857142,
+   "octave_wrong_staves": 1,
+   "silent_wrong_staves": 1,
+   "silent_wrong_rate": 0.03571428571428571,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 28,
+   "silent_key_wrong_staves": 26,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 0.8796296296296297,
+   "note_precision": 0.08421052631578947,
+   "note_f1": 0.07881773399014778,
+   "ci95": {
+    "token_ser": [
+     0.6177412859996134,
+     0.9403006060809563
+    ],
+    "pitch_acc_sow": [
+     0.02682470515795955,
+     0.14910150044130618
+    ],
+    "strict_acc": [
+     0.005824399295273082,
+     0.11174669757138166
+    ]
+   }
+  },
+  "b": {
+   "n_strips": 28,
+   "n_detected": 28,
+   "token_ser": 0.7169197396963124,
+   "pitch_acc_sow": 0.5055555555555555,
+   "strict_acc": 0.3685185185185185,
+   "rhythm_acc": 0.5494880546075085,
+   "n_gt_notes": 540,
+   "clef_acc": 0.9642857142857143,
+   "key_acc": 0.8571428571428571,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 1,
+   "flagged_and_wrong_staves": 3,
+   "review_needed_rate": 0.39285714285714285,
+   "note_count_ratio": 0.8796296296296297,
+   "note_precision": 0.5747368421052632,
+   "note_f1": 0.5379310344827587,
+   "ci95": {
+    "token_ser": [
+     0.5683605341246291,
+     0.8862969046763512
+    ],
+    "pitch_acc_sow": [
+     0.37331862483634776,
+     0.636397784185764
+    ],
+    "strict_acc": [
+     0.23900716591665036,
+     0.4955900552673515
+    ]
+   }
+  },
+  "oracle": {
+   "n_strips": 28,
+   "n_detected": 28,
+   "token_ser": 0.7190889370932755,
+   "pitch_acc_sow": 0.5092592592592593,
+   "strict_acc": 0.37222222222222223,
+   "rhythm_acc": 0.5494880546075085,
+   "n_gt_notes": 540,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 0.8796296296296297,
+   "note_precision": 0.5789473684210527,
+   "note_f1": 0.5418719211822661,
+   "ci95": {
+    "token_ser": [
+     0.5695503990305898,
+     0.8895267702656812
+    ],
+    "pitch_acc_sow": [
+     0.38159306648622254,
+     0.6370749665327977
+    ],
+    "strict_acc": [
+     0.2453109487887418,
+     0.49702963125768
+    ]
+   }
+  },
+  "gate": {
+   "silent_wrong_b_le_a": true,
+   "zero_double_octave_b": true,
+   "sow_gain_ge_20pts": true,
+   "review_le_25pct": false,
+   "pass": false
+  },
+  "b_minus_a_sow": {
+   "point": 0.43148148148148147,
+   "ci95": [
+    0.29163306451612897,
+    0.5728452762626471
+   ]
+  },
+  "stage2_coverage": {
+   "1": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "2": {
+    "expected_staves": 12,
+    "detected": 12,
+    "failure": null
+   },
+   "3": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   }
+  }
+ },
+ "gaano_ko_ikaw_kamahal/seed1": {
+  "a": {
+   "n_strips": 72,
+   "n_detected": 72,
+   "token_ser": 0.4277305428384565,
+   "pitch_acc_sow": 0.199252801992528,
+   "strict_acc": 0.11457036114570361,
+   "rhythm_acc": 0.802647412755716,
+   "n_gt_notes": 803,
+   "clef_acc": 0.1527777777777778,
+   "key_acc": 0.2222222222222222,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 61,
+   "silent_key_wrong_staves": 56,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 1.1407222914072228,
+   "note_precision": 0.17467248908296942,
+   "note_f1": 0.18615474112856312,
+   "ci95": {
+    "token_ser": [
+     0.3871099938262977,
+     0.4682295443339038
+    ],
+    "pitch_acc_sow": [
+     0.13978363971308744,
+     0.26474367393736364
+    ],
+    "strict_acc": [
+     0.06316946280444494,
+     0.17337641331658285
+    ]
+   }
+  },
+  "b": {
+   "n_strips": 72,
+   "n_detected": 72,
+   "token_ser": 0.33355134074558535,
+   "pitch_acc_sow": 0.8268991282689913,
+   "strict_acc": 0.7023661270236613,
+   "rhythm_acc": 0.802647412755716,
+   "n_gt_notes": 803,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.041666666666666664,
+   "note_count_ratio": 1.1407222914072228,
+   "note_precision": 0.7248908296943232,
+   "note_f1": 0.772542175683537,
+   "ci95": {
+    "token_ser": [
+     0.2977531245243007,
+     0.3713533752844955
+    ],
+    "pitch_acc_sow": [
+     0.7888550958816303,
+     0.862816559683823
+    ],
+    "strict_acc": [
+     0.6491458205488211,
+     0.7512023628048781
+    ]
+   }
+  },
+  "oracle": {
+   "n_strips": 72,
+   "n_detected": 72,
+   "token_ser": 0.33355134074558535,
+   "pitch_acc_sow": 0.8268991282689913,
+   "strict_acc": 0.7023661270236613,
+   "rhythm_acc": 0.802647412755716,
+   "n_gt_notes": 803,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 1.1407222914072228,
+   "note_precision": 0.7248908296943232,
+   "note_f1": 0.772542175683537,
+   "ci95": {
+    "token_ser": [
+     0.2977531245243007,
+     0.3713533752844955
+    ],
+    "pitch_acc_sow": [
+     0.7888550958816303,
+     0.862816559683823
+    ],
+    "strict_acc": [
+     0.6491458205488211,
+     0.7512023628048781
+    ]
+   }
+  },
+  "gate": {
+   "silent_wrong_b_le_a": true,
+   "zero_double_octave_b": true,
+   "sow_gain_ge_20pts": true,
+   "review_le_25pct": true,
+   "pass": true
+  },
+  "b_minus_a_sow": {
+   "point": 0.6276463262764632,
+   "ci95": [
+    0.5613607955356605,
+    0.6934788564881408
+   ]
+  },
+  "stage2_coverage": {
+   "1": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "2": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "3": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "4": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "5": {
+    "expected_staves": 12,
+    "detected": 12,
+    "failure": null
+   },
+   "6": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "7": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "8": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "9": {
+    "expected_staves": 4,
+    "detected": 4,
+    "failure": null
+   }
+  }
+ },
+ "gaano_ko_ikaw_kamahal/seed2": {
+  "a": {
+   "n_strips": 72,
+   "n_detected": 72,
+   "token_ser": 0.4375408763897973,
+   "pitch_acc_sow": 0.24533001245330013,
+   "strict_acc": 0.17434620174346202,
+   "rhythm_acc": 0.8074608904933814,
+   "n_gt_notes": 803,
+   "clef_acc": 0.25,
+   "key_acc": 0.25,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 54,
+   "silent_key_wrong_staves": 54,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 1.1170610211706102,
+   "note_precision": 0.21962095875139354,
+   "note_f1": 0.23176470588235296,
+   "ci95": {
+    "token_ser": [
+     0.4022523403686456,
+     0.4742276333771179
+    ],
+    "pitch_acc_sow": [
+     0.17206235410143084,
+     0.325445623342175
+    ],
+    "strict_acc": [
+     0.10778746107693475,
+     0.25216738980576614
+    ]
+   }
+  },
+  "b": {
+   "n_strips": 72,
+   "n_detected": 72,
+   "token_ser": 0.34924787442773053,
+   "pitch_acc_sow": 0.8281444582814446,
+   "strict_acc": 0.709838107098381,
+   "rhythm_acc": 0.8074608904933814,
+   "n_gt_notes": 803,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.125,
+   "note_count_ratio": 1.1170610211706102,
+   "note_precision": 0.7413600891861761,
+   "note_f1": 0.7823529411764706,
+   "ci95": {
+    "token_ser": [
+     0.3175842096242451,
+     0.3820529801324503
+    ],
+    "pitch_acc_sow": [
+     0.7903589453618838,
+     0.8635249304604143
+    ],
+    "strict_acc": [
+     0.655713300363684,
+     0.7623789510497944
+    ]
+   }
+  },
+  "oracle": {
+   "n_strips": 72,
+   "n_detected": 72,
+   "token_ser": 0.34924787442773053,
+   "pitch_acc_sow": 0.8281444582814446,
+   "strict_acc": 0.709838107098381,
+   "rhythm_acc": 0.8074608904933814,
+   "n_gt_notes": 803,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 1.1170610211706102,
+   "note_precision": 0.7413600891861761,
+   "note_f1": 0.7823529411764706,
+   "ci95": {
+    "token_ser": [
+     0.3175842096242451,
+     0.3820529801324503
+    ],
+    "pitch_acc_sow": [
+     0.7903589453618838,
+     0.8635249304604143
+    ],
+    "strict_acc": [
+     0.655713300363684,
+     0.7623789510497944
+    ]
+   }
+  },
+  "gate": {
+   "silent_wrong_b_le_a": true,
+   "zero_double_octave_b": true,
+   "sow_gain_ge_20pts": true,
+   "review_le_25pct": true,
+   "pass": true
+  },
+  "b_minus_a_sow": {
+   "point": 0.5828144458281445,
+   "ci95": [
+    0.5051052180024568,
+    0.6559368248040002
+   ]
+  },
+  "stage2_coverage": {
+   "1": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "2": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "3": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "4": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "5": {
+    "expected_staves": 12,
+    "detected": 12,
+    "failure": null
+   },
+   "6": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "7": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "8": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "9": {
+    "expected_staves": 4,
+    "detected": 4,
+    "failure": null
+   }
+  }
+ },
+ "gaano_ko_ikaw_kamahal/baseline": {
+  "a": {
+   "n_strips": 72,
+   "n_detected": 72,
+   "token_ser": 0.7226945716154349,
+   "pitch_acc_sow": 0.09090909090909091,
+   "strict_acc": 0.028642590286425903,
+   "rhythm_acc": 0.49338146811071,
+   "n_gt_notes": 803,
+   "clef_acc": 0.013888888888888888,
+   "key_acc": 0.06944444444444445,
+   "octave_wrong_staves": 3,
+   "silent_wrong_staves": 3,
+   "silent_wrong_rate": 0.041666666666666664,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 71,
+   "silent_key_wrong_staves": 67,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 1.1407222914072228,
+   "note_precision": 0.07969432314410481,
+   "note_f1": 0.08493310063990692,
+   "ci95": {
+    "token_ser": [
+     0.6788453670089009,
+     0.7700476697160589
+    ],
+    "pitch_acc_sow": [
+     0.06411050509482348,
+     0.12221194411144516
+    ],
+    "strict_acc": [
+     0.013991385774991828,
+     0.04613618806245256
+    ]
+   }
+  },
+  "b": {
+   "n_strips": 72,
+   "n_detected": 72,
+   "token_ser": 0.6226291693917593,
+   "pitch_acc_sow": 0.6214196762141968,
+   "strict_acc": 0.37484433374844334,
+   "rhythm_acc": 0.49338146811071,
+   "n_gt_notes": 803,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.1111111111111111,
+   "note_count_ratio": 1.1407222914072228,
+   "note_precision": 0.5447598253275109,
+   "note_f1": 0.5805700988947061,
+   "ci95": {
+    "token_ser": [
+     0.5783767502442201,
+     0.6662247304511008
+    ],
+    "pitch_acc_sow": [
+     0.5685996249406886,
+     0.6771590461130967
+    ],
+    "strict_acc": [
+     0.3092018612370706,
+     0.43871070636094667
+    ]
+   }
+  },
+  "oracle": {
+   "n_strips": 72,
+   "n_detected": 72,
+   "token_ser": 0.6226291693917593,
+   "pitch_acc_sow": 0.6214196762141968,
+   "strict_acc": 0.37484433374844334,
+   "rhythm_acc": 0.49338146811071,
+   "n_gt_notes": 803,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 1.1407222914072228,
+   "note_precision": 0.5447598253275109,
+   "note_f1": 0.5805700988947061,
+   "ci95": {
+    "token_ser": [
+     0.5783767502442201,
+     0.6662247304511008
+    ],
+    "pitch_acc_sow": [
+     0.5685996249406886,
+     0.6771590461130967
+    ],
+    "strict_acc": [
+     0.3092018612370706,
+     0.43871070636094667
+    ]
+   }
+  },
+  "gate": {
+   "silent_wrong_b_le_a": true,
+   "zero_double_octave_b": true,
+   "sow_gain_ge_20pts": true,
+   "review_le_25pct": true,
+   "pass": true
+  },
+  "b_minus_a_sow": {
+   "point": 0.5305105853051059,
+   "ci95": [
+    0.46395812526000735,
+    0.5971086477830045
+   ]
+  },
+  "stage2_coverage": {
+   "1": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "2": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "3": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "4": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "5": {
+    "expected_staves": 12,
+    "detected": 12,
+    "failure": null
+   },
+   "6": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "7": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "8": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "9": {
+    "expected_staves": 4,
+    "detected": 4,
+    "failure": null
+   }
+  }
+ },
+ "handog/seed1": {
+  "a": {
+   "n_strips": 52,
+   "n_detected": 40,
+   "token_ser": 0.5895096921322691,
+   "pitch_acc_sow": 0.09774436090225563,
+   "strict_acc": 0.07017543859649122,
+   "rhythm_acc": 0.6179245283018868,
+   "n_gt_notes": 399,
+   "clef_acc": 0.175,
+   "key_acc": 0.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 33,
+   "silent_key_wrong_staves": 40,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 1.9640287769784173,
+   "note_precision": 0.07142857142857142,
+   "note_f1": 0.08253968253968254,
+   "ci95": {
+    "token_ser": [
+     0.48383724024496266,
+     0.6920606929005966
+    ],
+    "pitch_acc_sow": [
+     0.0375186571123388,
+     0.1739276334986868
+    ],
+    "strict_acc": [
+     0.01937984496124031,
+     0.13835497993228543
+    ]
+   }
+  },
+  "b": {
+   "n_strips": 52,
+   "n_detected": 40,
+   "token_ser": 0.4697833523375142,
+   "pitch_acc_sow": 0.5413533834586466,
+   "strict_acc": 0.506265664160401,
+   "rhythm_acc": 0.6179245283018868,
+   "n_gt_notes": 399,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.15,
+   "note_count_ratio": 1.9640287769784173,
+   "note_precision": 0.3956043956043956,
+   "note_f1": 0.45714285714285713,
+   "ci95": {
+    "token_ser": [
+     0.3545503119363586,
+     0.5848016320893414
+    ],
+    "pitch_acc_sow": [
+     0.3598661889961802,
+     0.7228493758162985
+    ],
+    "strict_acc": [
+     0.3257201075206826,
+     0.6810088047958036
+    ]
+   }
+  },
+  "oracle": {
+   "n_strips": 52,
+   "n_detected": 40,
+   "token_ser": 0.4697833523375142,
+   "pitch_acc_sow": 0.5413533834586466,
+   "strict_acc": 0.506265664160401,
+   "rhythm_acc": 0.6179245283018868,
+   "n_gt_notes": 399,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 1.9640287769784173,
+   "note_precision": 0.3956043956043956,
+   "note_f1": 0.45714285714285713,
+   "ci95": {
+    "token_ser": [
+     0.3545503119363586,
+     0.5848016320893414
+    ],
+    "pitch_acc_sow": [
+     0.3598661889961802,
+     0.7228493758162985
+    ],
+    "strict_acc": [
+     0.3257201075206826,
+     0.6810088047958036
+    ]
+   }
+  },
+  "gate": {
+   "silent_wrong_b_le_a": true,
+   "zero_double_octave_b": true,
+   "sow_gain_ge_20pts": true,
+   "review_le_25pct": true,
+   "pass": true
+  },
+  "b_minus_a_sow": {
+   "point": 0.44360902255639095,
+   "ci95": [
+    0.27594457230533176,
+    0.6093796688247012
+   ]
+  },
+  "stage2_coverage": {
+   "1": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "2": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "3": {
+    "expected_staves": 9,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 3: unsupported_staff_layout \u2014 detected 9 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "4": {
+    "expected_staves": 10,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 4: unsupported_staff_layout \u2014 detected 10 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "5": {
+    "expected_staves": 5,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 5: unsupported_staff_layout \u2014 detected 5 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "6": {
+    "expected_staves": 7,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 6: unsupported_staff_layout \u2014 detected 7 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "7": {
+    "expected_staves": 7,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 7: unsupported_staff_layout \u2014 detected 7 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "8": {
+    "expected_staves": 6,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 8: unsupported_staff_layout \u2014 detected 6 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "9": {
+    "expected_staves": 6,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 9: unsupported_staff_layout \u2014 detected 6 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "10": {
+    "expected_staves": 10,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 10: unsupported_staff_layout \u2014 detected 10 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "11": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "12": {
+    "expected_staves": 9,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 12: unsupported_staff_layout \u2014 detected 9 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "13": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "14": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   }
+  }
+ },
+ "handog/seed2": {
+  "a": {
+   "n_strips": 52,
+   "n_detected": 40,
+   "token_ser": 0.6020524515393386,
+   "pitch_acc_sow": 0.09523809523809523,
+   "strict_acc": 0.07769423558897243,
+   "rhythm_acc": 0.6155660377358491,
+   "n_gt_notes": 399,
+   "clef_acc": 0.3,
+   "key_acc": 0.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 28,
+   "silent_key_wrong_staves": 40,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 1.8920863309352518,
+   "note_precision": 0.07224334600760456,
+   "note_f1": 0.08216216216216216,
+   "ci95": {
+    "token_ser": [
+     0.4993933104426109,
+     0.7020915251916757
+    ],
+    "pitch_acc_sow": [
+     0.03908731168566775,
+     0.16605246690578793
+    ],
+    "strict_acc": [
+     0.027774577572964667,
+     0.14435992951306015
+    ]
+   }
+  },
+  "b": {
+   "n_strips": 52,
+   "n_detected": 40,
+   "token_ser": 0.4960091220068415,
+   "pitch_acc_sow": 0.5463659147869674,
+   "strict_acc": 0.506265664160401,
+   "rhythm_acc": 0.6155660377358491,
+   "n_gt_notes": 399,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.125,
+   "note_count_ratio": 1.8920863309352518,
+   "note_precision": 0.4144486692015209,
+   "note_f1": 0.47135135135135137,
+   "ci95": {
+    "token_ser": [
+     0.38362412881518865,
+     0.6076356670726901
+    ],
+    "pitch_acc_sow": [
+     0.36504314159292034,
+     0.7211334213172449
+    ],
+    "strict_acc": [
+     0.32598747710736026,
+     0.6778866757345954
+    ]
+   }
+  },
+  "oracle": {
+   "n_strips": 52,
+   "n_detected": 40,
+   "token_ser": 0.4960091220068415,
+   "pitch_acc_sow": 0.5463659147869674,
+   "strict_acc": 0.506265664160401,
+   "rhythm_acc": 0.6155660377358491,
+   "n_gt_notes": 399,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 1.8920863309352518,
+   "note_precision": 0.4144486692015209,
+   "note_f1": 0.47135135135135137,
+   "ci95": {
+    "token_ser": [
+     0.38362412881518865,
+     0.6076356670726901
+    ],
+    "pitch_acc_sow": [
+     0.36504314159292034,
+     0.7211334213172449
+    ],
+    "strict_acc": [
+     0.32598747710736026,
+     0.6778866757345954
+    ]
+   }
+  },
+  "gate": {
+   "silent_wrong_b_le_a": true,
+   "zero_double_octave_b": true,
+   "sow_gain_ge_20pts": true,
+   "review_le_25pct": true,
+   "pass": true
+  },
+  "b_minus_a_sow": {
+   "point": 0.45112781954887216,
+   "ci95": [
+    0.2740314502975028,
+    0.6172876872029414
+   ]
+  },
+  "stage2_coverage": {
+   "1": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "2": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "3": {
+    "expected_staves": 9,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 3: unsupported_staff_layout \u2014 detected 9 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "4": {
+    "expected_staves": 10,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 4: unsupported_staff_layout \u2014 detected 10 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "5": {
+    "expected_staves": 5,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 5: unsupported_staff_layout \u2014 detected 5 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "6": {
+    "expected_staves": 7,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 6: unsupported_staff_layout \u2014 detected 7 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "7": {
+    "expected_staves": 7,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 7: unsupported_staff_layout \u2014 detected 7 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "8": {
+    "expected_staves": 6,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 8: unsupported_staff_layout \u2014 detected 6 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "9": {
+    "expected_staves": 6,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 9: unsupported_staff_layout \u2014 detected 6 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "10": {
+    "expected_staves": 10,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 10: unsupported_staff_layout \u2014 detected 10 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "11": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "12": {
+    "expected_staves": 9,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 12: unsupported_staff_layout \u2014 detected 9 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "13": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "14": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   }
+  }
+ },
+ "handog/baseline": {
+  "a": {
+   "n_strips": 52,
+   "n_detected": 40,
+   "token_ser": 0.774230330672748,
+   "pitch_acc_sow": 0.06766917293233082,
+   "strict_acc": 0.03258145363408521,
+   "rhythm_acc": 0.46226415094339623,
+   "n_gt_notes": 399,
+   "clef_acc": 0.1,
+   "key_acc": 0.0,
+   "octave_wrong_staves": 1,
+   "silent_wrong_staves": 1,
+   "silent_wrong_rate": 0.025,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 36,
+   "silent_key_wrong_staves": 40,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 2.183453237410072,
+   "note_precision": 0.044481054365733116,
+   "note_f1": 0.0536779324055666,
+   "ci95": {
+    "token_ser": [
+     0.6827648699219604,
+     0.8641073382344473
+    ],
+    "pitch_acc_sow": [
+     0.0208842074472119,
+     0.12782362631089653
+    ],
+    "strict_acc": [
+     0.006267651426186709,
+     0.06585402365999708
+    ]
+   }
+  },
+  "b": {
+   "n_strips": 52,
+   "n_detected": 40,
+   "token_ser": 0.6556442417331813,
+   "pitch_acc_sow": 0.48120300751879697,
+   "strict_acc": 0.40852130325814534,
+   "rhythm_acc": 0.46226415094339623,
+   "n_gt_notes": 399,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.2,
+   "note_count_ratio": 2.183453237410072,
+   "note_precision": 0.3163097199341021,
+   "note_f1": 0.3817097415506958,
+   "ci95": {
+    "token_ser": [
+     0.5552850378787879,
+     0.7538400999298521
+    ],
+    "pitch_acc_sow": [
+     0.3055459512023825,
+     0.6513250295683027
+    ],
+    "strict_acc": [
+     0.22608493740745725,
+     0.5753094875697615
+    ]
+   }
+  },
+  "oracle": {
+   "n_strips": 52,
+   "n_detected": 40,
+   "token_ser": 0.6556442417331813,
+   "pitch_acc_sow": 0.48120300751879697,
+   "strict_acc": 0.40852130325814534,
+   "rhythm_acc": 0.46226415094339623,
+   "n_gt_notes": 399,
+   "clef_acc": 1.0,
+   "key_acc": 1.0,
+   "octave_wrong_staves": 0,
+   "silent_wrong_staves": 0,
+   "silent_wrong_rate": 0.0,
+   "double_octave_staves": 0,
+   "silent_clef_wrong_staves": 0,
+   "silent_key_wrong_staves": 0,
+   "flagged_and_wrong_staves": 0,
+   "review_needed_rate": 0.0,
+   "note_count_ratio": 2.183453237410072,
+   "note_precision": 0.3163097199341021,
+   "note_f1": 0.3817097415506958,
+   "ci95": {
+    "token_ser": [
+     0.5552850378787879,
+     0.7538400999298521
+    ],
+    "pitch_acc_sow": [
+     0.3055459512023825,
+     0.6513250295683027
+    ],
+    "strict_acc": [
+     0.22608493740745725,
+     0.5753094875697615
+    ]
+   }
+  },
+  "gate": {
+   "silent_wrong_b_le_a": true,
+   "zero_double_octave_b": true,
+   "sow_gain_ge_20pts": true,
+   "review_le_25pct": true,
+   "pass": true
+  },
+  "b_minus_a_sow": {
+   "point": 0.41353383458646614,
+   "ci95": [
+    0.2506782106782107,
+    0.5676163462928167
+   ]
+  },
+  "stage2_coverage": {
+   "1": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "2": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "3": {
+    "expected_staves": 9,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 3: unsupported_staff_layout \u2014 detected 9 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "4": {
+    "expected_staves": 10,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 4: unsupported_staff_layout \u2014 detected 10 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "5": {
+    "expected_staves": 5,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 5: unsupported_staff_layout \u2014 detected 5 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "6": {
+    "expected_staves": 7,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 6: unsupported_staff_layout \u2014 detected 7 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "7": {
+    "expected_staves": 7,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 7: unsupported_staff_layout \u2014 detected 7 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "8": {
+    "expected_staves": 6,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 8: unsupported_staff_layout \u2014 detected 6 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "9": {
+    "expected_staves": 6,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 9: unsupported_staff_layout \u2014 detected 6 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "10": {
+    "expected_staves": 10,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 10: unsupported_staff_layout \u2014 detected 10 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "11": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "12": {
+    "expected_staves": 9,
+    "detected": 0,
+    "failure": "ValueError: [Stage 2] page 12: unsupported_staff_layout \u2014 detected 9 staff region(s) after filtering/dedup, not divisible by 4. Closed-score (2-staff) SATB is not supported (see docs/sow.md Section 3)."
+   },
+   "13": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   },
+   "14": {
+    "expected_staves": 8,
+    "detected": 8,
+    "failure": null
+   }
+  }
+ }
+}

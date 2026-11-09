@@ -1,0 +1,66 @@
+# HAND-MADE / PROVISIONAL / single annotator (agent) / not verified by a musician
+# Notation: clef:G|F key:1b time:4/4 | (barline) ; notes <dur>[.]:<[^_=]?><Pitch><oct>[~][?]  dur in w h q e s ; rests r<dur>[.]
+# [ ... ] = beam group. ~ = tie to next note (same pitch, both heads visible). ~> tie leaves system, <~ tie arrives from previous system (OOV, excluded from token ref)
+# <OOV:desc> = unrepresentable (chord/divisi/grace/etc).  ? = uncertain symbol.  Tenor pitches are WRITTEN (treble); sounding = written-12.
+# #slurs N = count of phrase slurs (non-tie arcs), not in reference
+p1s1 Soprano: clef:G key:1b time:4/4 | rh q:C4 q:F4 | w:G4? | #slurs 1
+p1s1 Alto: clef:G key:1b time:4/4 | w:C4~ | w:C4 |
+p1s1 Tenor: clef:G key:1b time:4/4 e:G4 | e:G4 q:F4 e:F4 [ e:F4 e:A4 e:C5 e:F5 ]? | h:E5? re e:C5? [ e:A4 e:G4~> ] | #slurs 1
+p1s1 Bass: clef:F key:1b time:4/4 | <OOV:chord w F3+F2> | w:A2 | #slurs 1
+p1s2 Soprano: clef:G key:1b | w:A4 | q:B4 [ e:D4 e:A4~ ] e:A4 q:G4? e:G4~ | h:G4 rq [ e:D4 e:E4 ] | #slurs 2
+p1s2 Alto: clef:G key:1b | w:D4 | q:D4 [ e:D4 e:C4~ ] e:C4 q:D4 e:E4~ | h:E4 rq [ e:D4 e:E4 ] | #slurs 1
+p1s2 Tenor: clef:G key:1b | e:G4<~ q.:F4 re [ s:A4 s:G4~ ] [ e:G4 s:G4 s:F4 ] | q:G4 [ e:D4 e:A4~ ] e:A4 q:B4 e:C5~ | h:C5 rq [ e:D5 e:C5 ] | #slurs 2
+p1s2 Bass: clef:F key:1b | w:D3 | q.:G2 e:D3~ q:D3 q:G3 | q.:C3 e:C3~ q:C3 q:C3 |
+p1s3 Soprano: clef:G key:1b | h.:F4 re e:C4 | q:A4 [ e:B4 e:A4~ ] e:A4 q:G4 e:F4~ | q.:F4 e:D4~ q:D4 re e:D4 |
+p1s3 Alto: clef:G key:1b | h.:F4 re e:C4 | q:G4 [ e:G4 e:G4~ ] e:G4 q:G4 e:F4~ | q:F4 q:F4 [ e:G4 e:F4 ] rq |
+p1s3 Tenor: clef:G key:1b | h.:C5 re e:C5 | q:_E5 [ e:E5 e:E5~ ] e:E5 q:E5 e:D5~ | q:D5 q:B4 [ e:C5 e:B4 ] rq |
+p1s3 Bass: clef:F key:1b | w:F3 | q:F3 h.:F3 | w:B2 |
+p2s1 Soprano: clef:G key:1b | [ e:A4 e:A4 e:B4 e:A4~ ] q:A4 re e:G4 | e:^F4 q:G4 e:A4~ q:A4 q:D4 | e:B4 re re e:A4 re e:G4 re e:D4~> |
+p2s1 Alto: clef:G key:1b | q.:D4 e:D4~ h:D4 | h.:D4 q:D4 | e:B4 re re e:A4 re e:G4 re e:B3~> |
+p2s1 Tenor: clef:G key:1b | <OOV:chord q. B4+F4> <OOV:chord e B4+F4 tied> <OOV:chord h B4+F4> | h.:A4 q:D4 | e:B4 re re e:A4 re e:G4 re e:B4~> |
+p2s1 Bass: clef:F key:1b | q.:G2 e:G2~ h:G2 | h.:D3 q:D3 | e:B3 re re e:A3 re e:G3 re e:G3~> |
+p2s2 Soprano: clef:G key:1b | h.:D4<~ rq | e:B4 re re e:A4 re e:G4 [ e:G4 e:G4 ] | [ e:D4 e:D4 e:D4 e:E4~ ] e:E4 q.:F4 |
+p2s2 Alto: clef:G key:1b | q:B3<~ q:B3 q:G4 q:B3 | e:G4 re re e:F4 re e:E4 [ e:G4 e:G4 ] | [ e:D4 e:D4 e:D4 e:C4~ ] e:C4 q.:D4 |
+p2s2 Tenor: clef:G key:1b | h.:B4<~ rq | e:D5 re re e:C5 re e:C5 [ e:G4 e:G4 ] | [ e:B4 e:B4 e:B4 e:C5~ ] e:C5 q.:D5 |
+p2s2 Bass: clef:F key:1b | q.:G3<~ e:G3~ e:G3 q.:G3 | e:G3 re re e:F3 re e:C3 rq | e:G3 q:G3 e:G3~ q:G3 [ e:G3 e:C3~> ] |
+p2s3 Soprano: clef:G key:1b | [ <OOV:chord e G4+C5> <OOV:chord e G4+C5> <OOV:chord e G4+C5> <OOV:chord e A4+C5 tied> ] <OOV:chord e A4+C5> <OOV:chord q. B4+C5> | q:F4 [ e:F4 e:F4 ] e:F4 q.:F4 | [ e:A4 e:A4 e:A4 e:A4~ ] e:A4 q:A4 e:A4~> |
+p2s3 Alto: clef:G key:1b | [ e:E4 e:E4 e:E4 e:F4~ ] e:F4 q.:G4 | q:C4 [ e:C4 e:C4 ] e:C4 q.:C4 | [ e:C4 e:C4 e:C4 e:C4~ ] e:C4 q:E4 e:F4~> |
+p2s3 Tenor: clef:G key:1b | [ e:C5 e:C5~ ] h:C5 [ e:A4 e:A4 ] | [ e:G4 e:F4 ] q:F4 [ e:F4 e:A4 e:C5 e:F5 ] | h:E5?~ [ e:E5 e:C5 e:A4 e:G4~> ] |
+p2s3 Bass: clef:F key:1b | q:C3<~ q:C3 q:C3 q:C3 | <OOV:chord e F2+F3> <OOV:chord q> <OOV:chord e> <OOV:chord e> <OOV:chord q> <OOV:chord e> | e:A2 q:A2 e:A2 e:A2 q:A2 e:A2 |
+p3s1 Soprano: clef:G key:1b | q:A4<~ re e:F4 [ e:A4 e:G4 e:F4 e:G4~ ] | e:G4 q.:G4 e:A4 q:B4 e:C5~ | q:C5 re e:C5 re e:C5 rq | #slurs 0
+p3s1 Alto: clef:G key:1b | [ e:F4<~ e:F4 e:F4 e:F4 ] re q.:F4 | [ <OOV:chord e> <OOV:chord e> ] re <OOV:chord e> re <OOV:chord e> re <OOV:chord e> | re <OOV:chord e> re <OOV:chord e> re <OOV:chord e> rq |
+p3s1 Tenor: <EXCLUDED: two-voice divisi/chord mix, unrepresentable in the single-voice vocabulary>
+p3s1 Bass: clef:F key:1b | e:D3 q:D3 e:D3 e:D3 q:D3 e:D3 | e:G2 q:G2 e:G2 e:G3 q:G3 e:G3 | [ e:C3 e:C3 ] re e:C4 e:C4 re q:C3 |
+p3s2 Soprano: clef:G key:1b | q:F4 [ e:F4 e:F4 ] e:F4 q.:F4 | [ e:A4 e:A4 ] re e:C4 [ e:C5 e:C5 e:C5 e:C5~ ] | e:C5 q.:D5 re e:A4 [ e:G4 e:F4 ] |
+p3s2 Alto: clef:G key:1b | q:C4 [ e:C4 e:C4 ] e:C4 q.:C4 | [ e:C4 e:C4 ] re e:C4 [ e:A4 e:A4 e:A4 e:G4~ ] | e:G4 q.:F4 re e:A4 [ e:G4 e:F4 ] |
+p3s2 Tenor: clef:G key:1b | [ e:G4 e:F4 ] q:F4 re e:C5 [ e:F5 e:E5~ ] | q.:E5 e:C5 [ e:F5 e:F5 e:F5 e:E5~ ] | e:E5 q.:D5 re e:A4 [ e:G4 e:F4 ] |
+p3s2 Bass: clef:F key:1b | <OOV:chord e> <OOV:chord q> <OOV:chord e> <OOV:chord e> <OOV:chord q> <OOV:chord e> | e:A2 q:A2 e:A2 e:A2 q:A2 e:A2 | e:D3 q:D3 e:D3 e:D3 q:D3 e:D3 |
+p3s3 Soprano: clef:G key:1b | e:G4 re re e:A4 rq q:B4 | re q:C5 e:C5 e:D5 <OOV:chord q C5+E5> <OOV:chord e C5+F5 tied> | <OOV:chord h. C5+F5 tied-in> re <OOV:chord e C4+C5> |
+p3s3 Alto: clef:G key:1b | e:G4 re re e:F4 rq q:G4 | re q:G4 e:G4 [ e:F4 e:G4 ] rq | <OOV:chord q.> <OOV:chord e> [ <OOV:chord e> <OOV:chord e> ] re e:C4 |
+p3s3 Tenor: clef:G key:1b | <OOV:chord e> re re <OOV:chord e> rq <OOV:chord q> | re <OOV:chord e> [ <OOV:chord e> <OOV:chord e> ] [ e:D5 <OOV:chord e> ] rq <OOV:voice-2 eighth F5 tied into next bar> | <OOV:voice-1 dotted-half F5 tied-in> q.:C5 e:C5~ [ e:C5 e:C5 ] re <OOV:chord e two-voice> |
+p3s3 Bass: clef:F key:1b | re e:G2 e:G2 re [ e:G3 e:G3 ] rq | q:C3 q:C3 e:C3 q.:C3 | <OOV:chord e F2+F3> <OOV:chord q> <OOV:chord e> <OOV:chord e> <OOV:chord q> <OOV:chord e> |
+p4s1 Soprano: clef:G key:1b | q:A4 [ e:B4 e:A4~ ] e:A4 q:G4 e:F4~ | q.:F4 e:D4~ q:D4 re e:A4 | [ e:A4 e:A4 e:B4 e:A4~ ] [ e:A4 e:G4 e:G4 e:G4 ] |
+p4s1 Alto: clef:G key:1b | q:G4 [ e:G4 e:G4~ ] e:G4 q:G4 e:F4~ | q:F4 [ e:F4 e:F4 ] [ e:G4 e:F4 ] re e:A4 | [ e:F4 e:F4 e:F4 e:F4~ ] [ e:F4 e:F4 e:F4 e:F4 ] |
+p4s1 Tenor: clef:G key:1b | q:_E5 [ e:E5 e:E5~ ] e:E5 q:E5 e:D5~ | q:D5 [ e:B4 e:B4 ] [ e:C5 e:B4 ] re e:A4 | [ <OOV:chord e B4+D5> <OOV:chord e B4+D5> <OOV:chord e B4+D5> <OOV:chord e B4+D5 tied> ] [ <OOV:chord e B4+D5> <OOV:chord e B4+D5> <OOV:chord e B4+D5> <OOV:chord e B4+D5> ] |
+p4s1 Bass: clef:F key:1b | <OOV:chord e F2+F3> <OOV:chord q F2+F3> <OOV:chord e F2+F3 tied> <OOV:chord e F2+F3> <OOV:chord q F2+F3> <OOV:chord e F2+F3> | e:B2 q:B2 e:B2~ e:B2 q:B3? e:A3 | e:G3 q:G3 e:D3 e:G3 q:G3 e:D3 |
+p4s2 Soprano: clef:G key:1b | [ e:^F4 e:F4 e:F4 e:F4 ] [ e:G4 e:A4 ] re e:A4 | h.:G4 re e:G4 | [ e:^F4 e:F4 e:F4 e:F4 ] e:G4 q:A4 e:B4~> | #slurs 1
+p4s2 Alto: clef:G key:1b | [ e:D4 e:D4 ] re e:D4 re e:D4 re e:D4~ | q:D4 [ e:D4 e:D4 ] re q.:D4 | [ e:D4 e:D4 ] re e:D4 re e:D4 re e:D4~> |
+p4s2 Tenor: clef:G key:1b | [ e:A4 e:A4 ] re e:C5 re e:C5 re e:B4~ | q:B4 [ e:B4 e:B4 ] re q.:B4 | [ e:A4 e:A4 ] re e:C5 re e:C5 re e:B4~> |
+p4s2 Bass: clef:F key:1b | e:^F3 q:F3 e:D3 e:F3 q:F3 e:D3 | e:G3 q:G3 e:D3 e:G3 q:G3 e:D3 | e:^F3 q:F3 e:D3 e:F3 q:F3 e:D3 |
+p4s3 Soprano: clef:G key:1b | q.:B4<~ e:B4 [ e:B4 e:A4 e:G4 e:F4 ] | [ <OOV:chord e> <OOV:chord e> <OOV:chord e> <OOV:chord e> ] [ <OOV:chord e> <OOV:chord e> <OOV:chord e> <OOV:chord e> ] | re e:C5 q:C5 e:C5 q.:C5 |
+p4s3 Alto: clef:G key:1b | q:D4<~ [ e:D4 e:D4 ] re e:D4 [ e:D4 e:D4 ] | [ e:F4 e:F4 e:F4 e:F4 ] [ e:F4 e:F4 e:F4 e:G4~> ] | <OOV:voice-1 dotted-half G4 tied-in, then quarter rest> re e:C4 q:C4 e:C4 q.:C4 |
+p4s3 Tenor: clef:G key:1b | q:B4<~ [ e:B4 e:B4 ] re e:B4 [ e:B4 e:B4 ] | [ <OOV:chord e> <OOV:chord e> <OOV:chord e> <OOV:chord e> ] [ <OOV:chord e> <OOV:chord e> <OOV:chord e> <OOV:chord e> ] | re e:C5 [ e:C5 e:C5 ] re e:C5 q:C5 |
+p4s3 Bass: clef:F key:1b | q.:G3 e:G3 re e:G3 [ e:G3 e:G3 ] | q:G2 q:A2 q:B2 [ e:=B2 e:C3 ] | re e:C3 [ e:C3 e:C3 ] re e:C3 q:C3 |
+p5s1 Soprano: clef:G key:1b | e:F4 re re e:G4~ e:G4 q:A4 e:D5~ | q:D5 re e:A4 [ e:A4 e:A4 e:G4 e:F4 ] | q:G4 h:A4? re e:G4 |
+p5s1 Alto: clef:G key:1b | e:C4 re re e:D4~ e:D4 q:E4 e:A4~ | q:A4 [ e:A4 e:A4 ] re e:A4 rq | q.:F4 e:F4 re q.:F4 |
+p5s1 Tenor: clef:G key:1b | e:A4 re re e:B4~ e:B4 q:C5 e:F5~ | q:F5 [ <OOV:chord e> <OOV:chord e> ] re <OOV:chord e> rq | <OOV:chord q.> <OOV:chord e> re <OOV:chord q.> |
+p5s1 Bass: clef:F key:1b | [ <OOV:chord e> <OOV:chord e> ] re e:G2 re e:A2 re e:D3~ | q.:D3 e:A2 e:D3 q:D3 e:D3 | e:G2 q:G2 e:G2 e:G3 q:G3 e:G3 |
+p5s2 Soprano: clef:G key:1b | [ e:A4 e:A4 e:C5 e:A4~ ] h:A4? | e:F4 re re e:G4~ e:G4 q:A4 e:D5~ | q:D5 [ e:D5 e:D5 ] re e:D5 rq |
+p5s2 Alto: clef:G key:1b | [ <OOV:chord e> <OOV:chord e> ] re e:F4 re q.:G4 | e:C4 re re e:D4~ e:D4 q:E4 e:A4~ | q:A4 [ e:A4 e:A4 ] re e:A4 rq |
+p5s2 Tenor: clef:G key:1b | [ e:C5 e:C5 ] re e:D5 re q.:E5 | e:A4 re re e:B4~ e:B4 q:C5 e:F5~ | e:F5 q:F5 e:F5 [ e:A4 e:A4 e:G4 e:F4 ] |
+p5s2 Bass: clef:F key:1b | e:C3 q:C3 e:C3~ [ e:C3 e:C3 e:C3 e:C3 ] | [ <OOV:chord e> <OOV:chord e> ] re e:G2 re e:A2 re e:D3~ | q.:D3 e:A2 e:D3 q:D3 e:D3 |
+p5s3 Soprano: clef:G key:1b | q.:B4 e:B4 re q:B4 e:A4 | [ e:A4 e:A4 e:B4 e:A4~ ] q:A4 q:D4 | e:B4 re re e:A4 re e:G4 re e:D4~> | #slurs 1
+p5s3 Alto: clef:G key:1b | <OOV:chord q.> <OOV:chord e> re <OOV:chord q.> | [ e:^F4 e:F4 ] re e:F4 [ e:F4 e:F4 ] q:F4 | e:G4 re re e:F4 re e:E4 re e:B3~> |
+p5s3 Tenor: clef:G key:1b | q:G4 h:A4 rq | [ e:A4 e:A4 ] re e:C5 [ e:C5 e:C5 ] q:C5 | e:D5 re re e:C5 rq [ <OOV:chord e G4+F5> <OOV:chord e G4+F5> ] |
+p5s3 Bass: clef:F key:1b | e:G2 q:G2 e:G2 e:G3 q:G3 e:G3 | e:^F3 q:F3 e:D3 e:F3 q:F3 e:D3 | e:G3 re re e:F3 re e:C3 re e:G2~> |
+# ---- annotation complete; GT frozen before any CRNN run. Uncertain items marked '?'. Articulations (accent >), dynamics, lyrics, staccato-like dots are ignored (not in reference vocabulary).

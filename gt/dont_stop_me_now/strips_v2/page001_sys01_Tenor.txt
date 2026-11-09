@@ -1,0 +1,17 @@
+# HAND-MADE / PROVISIONAL / single annotator (agent) / not verified by a musician
+# agnostic:
+clef.G-L2 accidental.flat-L3 digit.4-L4 digit.4-L2 note.eighth-L2 barline-L1 note.eighth-L2 note.quarter-S1 note.eighth-S1 note.beamedRight1-S1 note.beamedBoth1-S2 note.beamedBoth1-S3 note.beamedLeft1-L5 barline-L1 note.half-S4 rest.eighth-L3 note.eighth-S3 note.beamedRight1-S2 note.beamedLeft1-L2 <TIEX> barline-L1
+# events (kind pitch_sounding dur measure):
+note 55 240 0 
+note 55 240 1 
+note 53 480 1 
+note 53 240 1 
+note 53 240 1 
+note 57 240 1 
+note 60 240 1 
+note 65 240 1 
+note 64 960 2 
+rest R 240 2 
+note 60 240 2 
+note 57 240 2 
+note 55 240 2 out

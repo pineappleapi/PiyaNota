@@ -1,0 +1,10 @@
+{
+  "_note": "Eye-verified 2026-09-24 from raw photos IMG_1081-1084,1086-1088. Every system on every page is a full 4-voice SATB system (no 3-voice or closed-score systems found). Page order = 1081,1082,1083,1084,1086,1087,1088. staves are listed top-to-bottom; voice order per system is S,A,T,B (labels S./A./T./B. printed at left of each staff).",
+  "page001": {"source": "IMG_1081.JPG", "systems": 3, "staff_count": 12, "voice_order": ["S","A","T","B","S","A","T","B","S","A","T","B"], "notes": "first system has full voice names; page strongly tilted/perspective, staves slope up-right"},
+  "page002": {"source": "IMG_1082.JPG", "systems": 3, "staff_count": 12, "voice_order": ["S","A","T","B","S","A","T","B","S","A","T","B"], "notes": "page curl top-left, staves slope"},
+  "page003": {"source": "IMG_1083.JPG", "systems": 3, "staff_count": 12, "voice_order": ["S","A","T","B","S","A","T","B","S","A","T","B"], "notes": "top-system staves tilted ~3-4 deg, crescendo hairpins/lyric underscores between staves"},
+  "page004": {"source": "IMG_1084.JPG", "systems": 3, "staff_count": 12, "voice_order": ["S","A","T","B","S","A","T","B","S","A","T","B"], "notes": "finger at bottom-right edge"},
+  "page005": {"source": "IMG_1086.JPG", "systems": 3, "staff_count": 12, "voice_order": ["S","A","T","B","S","A","T","B","S","A","T","B"], "notes": "page 6 of score"},
+  "page006": {"source": "IMG_1087.JPG", "systems": 3, "staff_count": 12, "voice_order": ["S","A","T","B","S","A","T","B","S","A","T","B"], "notes": "page 7 of score; finger bottom-right"},
+  "page007": {"source": "IMG_1088.JPG", "systems": 2, "staff_count": 8, "voice_order": ["S","A","T","B","S","A","T","B"], "notes": "page 8 of score; last page, only 2 systems; top system S staff left-clipped and strongly tilted"}
+}

@@ -1,0 +1,26 @@
+# HAND-MADE / PROVISIONAL / single annotator (agent) / not verified by a musician
+# agnostic:
+clef.G-L2 accidental.flat-L3 note.beamedRight1-L2 note.beamedLeft1-S1 note.beamedRight1-L1 note.beamedLeft1-S1 slur.start-S1 slur.end-S1 note.quarter-S1 note.quarter-L1 barline-L1 note.beamedRight1-L1 note.beamedLeft1-S0 accidental.sharp-L0 note.beamedRight1-L0 note.beamedLeft1-S0 slur.start-S0 slur.end-S0 note.quarter-S0 note.beamedRight1-L1 note.beamedLeft1-S1 barline-L1 note.quarter-S2 note.quarter-L2 note.quarter-S1 note.quarter-S0 barline-L1 note.beamedRight1-S1 note.beamedLeft1-L1 accidental.sharp-S0 note.beamedRight1-S0 note.beamedLeft1-L1 slur.start-L1 slur.end-L1 note.half-L1 barline-L1
+# events (kind pitch_sounding dur measure):
+note 67 240 0 
+note 65 240 0 
+note 64 240 0 
+note 65 240 0 in
+note 65 480 0 
+note 64 480 0 
+note 64 240 1 
+note 62 240 1 
+note 61 240 1 
+note 62 240 1 in
+note 62 480 1 
+note 64 240 1 
+note 65 240 1 
+note 69 480 2 
+note 67 480 2 
+note 65 480 2 
+note 62 480 2 
+note 65 240 3 
+note 64 240 3 
+note 63 240 3 
+note 64 240 3 in
+note 64 960 3 

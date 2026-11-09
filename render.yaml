@@ -1,0 +1,50 @@
+# Render Blueprint: one free Docker web service. Secrets are never in this file (sync: false);
+# set them in the Render dashboard. See docs/backend/deploy.md.
+services:
+  - type: web
+    name: piyanota-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    envVars:
+      - key: PIYA_ENV
+        value: prod
+      - key: PIYA_REQUIRE_HTTPS
+        value: "true"
+      # Backends: db stores media in Neon so the Space worker and this API share it (needs the two
+      # sync: false vars below, identical on the Space). Mail is Brevo (live since 2026-11-02);
+      # dashboard-only values for sync: false vars survive a Blueprint sync, plain values do not.
+      # To switch storage to b2, also set the PIYA_B2_* vars below.
+      - key: PIYA_STORAGE_BACKEND
+        value: db
+      - key: PIYA_MEDIA_HMAC_KEY
+        sync: false
+      - key: PIYA_PUBLIC_BASE_URL
+        sync: false
+      - key: PIYA_MAIL_BACKEND
+        value: brevo
+      # Verified Brevo sender (set in the dashboard); sync: false so a Blueprint sync cannot
+      # overwrite it with a placeholder.
+      - key: PIYA_MAIL_FROM
+        sync: false
+      - key: PIYA_BREVO_API_KEY
+        sync: false
+      # One proxy hop (Render's) until the debug-headers check in deploy.md says otherwise.
+      - key: PIYA_TRUSTED_PROXY_COUNT
+        value: "1"
+      # X-Forwarded-For on Render is "client, Cloudflare edge, Render internal": 3 hops measured
+      # 2026-11-03. Re-measure with /api/_debug/headers if the topology changes.
+      - key: PIYA_TRUSTED_PROXY_FOR_COUNT
+        value: "3"
+      # Neon DIRECT (unpooled) connection string, not the -pooler host. Read by the app and by
+      # `python -m backend.migrate` at every boot; DDL migrations need a direct session.
+      - key: DATABASE_URL
+        sync: false
+      - key: PIYA_RESET_CODE_HMAC_KEY
+        sync: false
+      - key: PIYA_LOG_HASH_KEY
+        sync: false
+      # Needed only after switching PIYA_STORAGE_BACKEND to b2:
+      #   PIYA_B2_ENDPOINT, PIYA_B2_BUCKET, PIYA_B2_KEY_ID, PIYA_B2_APP_KEY (all sync: false)

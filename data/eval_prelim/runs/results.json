@@ -1,0 +1,1793 @@
+{
+ "camera/non_nobis_domine": {
+  "gt_status": "verified by the author",
+  "staff": {
+   "base": {
+    "gt_staves": 28,
+    "matched": 8,
+    "recall": 0.2857142857142857,
+    "extra_strips": 0,
+    "failed_pages": [
+     2,
+     3
+    ],
+    "out_of_scope_pages": [
+     4
+    ]
+   },
+   "finetuned": {
+    "gt_staves": 28,
+    "matched": 28,
+    "recall": 1.0,
+    "extra_strips": 0,
+    "failed_pages": [],
+    "out_of_scope_pages": [
+     4
+    ]
+   }
+  },
+  "models": {
+   "Base CRNN, original pipeline": {
+    "n_strips": 28,
+    "n_detected": 8,
+    "token_ser": 0.969758064516129,
+    "pitch_acc_sow": 0.02926829268292683,
+    "strict_acc": 0.004878048780487805,
+    "rhythm_acc": 0.09745762711864407,
+    "n_gt_notes": 205,
+    "clef_acc": 0.0,
+    "key_acc": 0.0,
+    "note_precision": 0.05454545454545454,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.9291313182626365,
+      1.007438464571364
+     ],
+     "pitch_acc_sow": [
+      0.0,
+      0.06773488569991873
+     ]
+    },
+    "tok_err": 481,
+    "n_ref": 496,
+    "sow_ok": 6,
+    "sow_n": 205
+   },
+   "Fine-tuned seed1, no classifier": {
+    "n_strips": 28,
+    "n_detected": 28,
+    "token_ser": 0.4495967741935484,
+    "pitch_acc_sow": 0.1073170731707317,
+    "strict_acc": 0.08292682926829269,
+    "rhythm_acc": 0.8728813559322034,
+    "n_gt_notes": 205,
+    "clef_acc": 0.03571428571428571,
+    "key_acc": 0.5,
+    "note_precision": 0.062146892655367235,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.35209892165492956,
+      0.5637154154114473
+     ],
+     "pitch_acc_sow": [
+      0.04486731843575419,
+      0.18500055066079293
+     ]
+    },
+    "tok_err": 223,
+    "n_ref": 496,
+    "sow_ok": 22,
+    "sow_n": 205
+   },
+   "Fine-tuned seed2, no classifier": {
+    "n_strips": 28,
+    "n_detected": 28,
+    "token_ser": 0.45161290322580644,
+    "pitch_acc_sow": 0.13658536585365855,
+    "strict_acc": 0.1073170731707317,
+    "rhythm_acc": 0.8559322033898306,
+    "n_gt_notes": 205,
+    "clef_acc": 0.07142857142857142,
+    "key_acc": 0.8214285714285714,
+    "note_precision": 0.08045977011494253,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.35768186003683244,
+      0.5625065376569037
+     ],
+     "pitch_acc_sow": [
+      0.052129961920938,
+      0.23966096115865684
+     ]
+    },
+    "tok_err": 224,
+    "n_ref": 496,
+    "sow_ok": 28,
+    "sow_n": 205
+   },
+   "Fine-tuned seed1 + clef/key classifier": {
+    "n_strips": 28,
+    "n_detected": 28,
+    "token_ser": 0.35080645161290325,
+    "pitch_acc_sow": 0.8585365853658536,
+    "strict_acc": 0.775609756097561,
+    "rhythm_acc": 0.8728813559322034,
+    "n_gt_notes": 205,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "note_precision": 0.4971751412429379,
+    "review_needed_rate": 0.07142857142857142,
+    "ci95": {
+     "token_ser": [
+      0.2599583252052705,
+      0.4547817460317459
+     ],
+     "pitch_acc_sow": [
+      0.7881739933604627,
+      0.9160064039408867
+     ]
+    },
+    "tok_err": 174,
+    "n_ref": 496,
+    "sow_ok": 176,
+    "sow_n": 205
+   },
+   "Fine-tuned seed2 + clef/key classifier": {
+    "n_strips": 28,
+    "n_detected": 28,
+    "token_ser": 0.34274193548387094,
+    "pitch_acc_sow": 0.8585365853658536,
+    "strict_acc": 0.7658536585365854,
+    "rhythm_acc": 0.8559322033898306,
+    "n_gt_notes": 205,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "note_precision": 0.5057471264367817,
+    "review_needed_rate": 0.03571428571428571,
+    "ci95": {
+     "token_ser": [
+      0.25792877320419694,
+      0.4430464782915036
+     ],
+     "pitch_acc_sow": [
+      0.7982018599924893,
+      0.9112447896930655
+     ]
+    },
+    "tok_err": 170,
+    "n_ref": 496,
+    "sow_ok": 176,
+    "sow_n": 205
+   }
+  }
+ },
+ "camera/honneur_a_toi": {
+  "gt_status": "verified by the author (2026-09-28)",
+  "staff": {
+   "base": {
+    "gt_staves": 28,
+    "matched": 0,
+    "recall": 0.0,
+    "extra_strips": 0,
+    "failed_pages": [
+     1,
+     2,
+     3
+    ],
+    "out_of_scope_pages": []
+   },
+   "finetuned": {
+    "gt_staves": 28,
+    "matched": 28,
+    "recall": 1.0,
+    "extra_strips": 0,
+    "failed_pages": [],
+    "out_of_scope_pages": []
+   }
+  },
+  "models": {
+   "Base CRNN, original pipeline": {
+    "n_strips": 28,
+    "n_detected": 0,
+    "token_ser": 1.0,
+    "pitch_acc_sow": 0.0,
+    "strict_acc": 0.0,
+    "rhythm_acc": 0.0,
+    "n_gt_notes": 540,
+    "clef_acc": null,
+    "key_acc": null,
+    "note_precision": null,
+    "review_needed_rate": null,
+    "ci95": {
+     "token_ser": [
+      1.0,
+      1.0
+     ],
+     "pitch_acc_sow": [
+      0.0,
+      0.0
+     ]
+    },
+    "tok_err": 922,
+    "n_ref": 922,
+    "sow_ok": 0,
+    "sow_n": 540
+   },
+   "Fine-tuned seed1, no classifier": {
+    "n_strips": 28,
+    "n_detected": 28,
+    "token_ser": 0.4566160520607375,
+    "pitch_acc_sow": 0.10925925925925926,
+    "strict_acc": 0.07407407407407407,
+    "rhythm_acc": 0.7610921501706485,
+    "n_gt_notes": 540,
+    "clef_acc": 0.21428571428571427,
+    "key_acc": 0.03571428571428571,
+    "note_precision": 0.11434108527131782,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.36068855691816964,
+      0.5649647613618697
+     ],
+     "pitch_acc_sow": [
+      0.03508601269711243,
+      0.1986950831141885
+     ]
+    },
+    "tok_err": 421,
+    "n_ref": 922,
+    "sow_ok": 59,
+    "sow_n": 540
+   },
+   "Fine-tuned seed2, no classifier": {
+    "n_strips": 28,
+    "n_detected": 28,
+    "token_ser": 0.47396963123644253,
+    "pitch_acc_sow": 0.1537037037037037,
+    "strict_acc": 0.1111111111111111,
+    "rhythm_acc": 0.7542662116040956,
+    "n_gt_notes": 540,
+    "clef_acc": 0.2857142857142857,
+    "key_acc": 0.10714285714285714,
+    "note_precision": 0.16306483300589392,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.37943369751964456,
+      0.5820993157081487
+     ],
+     "pitch_acc_sow": [
+      0.058698221643895036,
+      0.2738420149719275
+     ]
+    },
+    "tok_err": 437,
+    "n_ref": 922,
+    "sow_ok": 83,
+    "sow_n": 540
+   },
+   "Fine-tuned seed1 + clef/key classifier": {
+    "n_strips": 28,
+    "n_detected": 28,
+    "token_ser": 0.4197396963123644,
+    "pitch_acc_sow": 0.7592592592592593,
+    "strict_acc": 0.6407407407407407,
+    "rhythm_acc": 0.7610921501706485,
+    "n_gt_notes": 540,
+    "clef_acc": 0.9642857142857143,
+    "key_acc": 0.8571428571428571,
+    "note_precision": 0.7945736434108527,
+    "review_needed_rate": 0.39285714285714285,
+    "ci95": {
+     "token_ser": [
+      0.3261059728556872,
+      0.5225448184002396
+     ],
+     "pitch_acc_sow": [
+      0.6352289121862076,
+      0.8573891551224226
+     ]
+    },
+    "tok_err": 387,
+    "n_ref": 922,
+    "sow_ok": 410,
+    "sow_n": 540
+   },
+   "Fine-tuned seed2 + clef/key classifier": {
+    "n_strips": 28,
+    "n_detected": 28,
+    "token_ser": 0.4349240780911063,
+    "pitch_acc_sow": 0.7333333333333333,
+    "strict_acc": 0.6074074074074074,
+    "rhythm_acc": 0.7542662116040956,
+    "n_gt_notes": 540,
+    "clef_acc": 0.9642857142857143,
+    "key_acc": 0.8571428571428571,
+    "note_precision": 0.7779960707269156,
+    "review_needed_rate": 0.39285714285714285,
+    "ci95": {
+     "token_ser": [
+      0.3400531363190472,
+      0.5373951014832162
+     ],
+     "pitch_acc_sow": [
+      0.6061774309959428,
+      0.8384935151313602
+     ]
+    },
+    "tok_err": 401,
+    "n_ref": 922,
+    "sow_ok": 396,
+    "sow_n": 540
+   }
+  }
+ },
+ "camera/gaano_ko_ikaw_kamahal": {
+  "gt_status": "verified by the author (2026-09-28)",
+  "staff": {
+   "base": {
+    "gt_staves": 72,
+    "matched": 48,
+    "recall": 0.6666666666666666,
+    "extra_strips": 0,
+    "failed_pages": [
+     1,
+     6,
+     7
+    ],
+    "out_of_scope_pages": []
+   },
+   "finetuned": {
+    "gt_staves": 72,
+    "matched": 72,
+    "recall": 1.0,
+    "extra_strips": 0,
+    "failed_pages": [],
+    "out_of_scope_pages": []
+   }
+  },
+  "models": {
+   "Base CRNN, original pipeline": {
+    "n_strips": 72,
+    "n_detected": 48,
+    "token_ser": 0.9829954218443427,
+    "pitch_acc_sow": 0.0460772104607721,
+    "strict_acc": 0.0037359900373599006,
+    "rhythm_acc": 0.0914560770156438,
+    "n_gt_notes": 803,
+    "clef_acc": 0.0,
+    "key_acc": 0.041666666666666664,
+    "note_precision": 0.07156673114119923,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.969308448430641,
+      0.9962015958469524
+     ],
+     "pitch_acc_sow": [
+      0.028462095397851474,
+      0.06443506817426004
+     ]
+    },
+    "tok_err": 1503,
+    "n_ref": 1529,
+    "sow_ok": 37,
+    "sow_n": 803
+   },
+   "Fine-tuned seed1, no classifier": {
+    "n_strips": 72,
+    "n_detected": 72,
+    "token_ser": 0.4277305428384565,
+    "pitch_acc_sow": 0.199252801992528,
+    "strict_acc": 0.11457036114570361,
+    "rhythm_acc": 0.802647412755716,
+    "n_gt_notes": 803,
+    "clef_acc": 0.1527777777777778,
+    "key_acc": 0.2222222222222222,
+    "note_precision": 0.17467248908296942,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.3871099938262977,
+      0.4682295443339038
+     ],
+     "pitch_acc_sow": [
+      0.13978363971308744,
+      0.26474367393736364
+     ]
+    },
+    "tok_err": 654,
+    "n_ref": 1529,
+    "sow_ok": 160,
+    "sow_n": 803
+   },
+   "Fine-tuned seed2, no classifier": {
+    "n_strips": 72,
+    "n_detected": 72,
+    "token_ser": 0.4375408763897973,
+    "pitch_acc_sow": 0.24533001245330013,
+    "strict_acc": 0.17434620174346202,
+    "rhythm_acc": 0.8074608904933814,
+    "n_gt_notes": 803,
+    "clef_acc": 0.25,
+    "key_acc": 0.25,
+    "note_precision": 0.21962095875139354,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.4022523403686456,
+      0.4742276333771179
+     ],
+     "pitch_acc_sow": [
+      0.17206235410143084,
+      0.325445623342175
+     ]
+    },
+    "tok_err": 669,
+    "n_ref": 1529,
+    "sow_ok": 197,
+    "sow_n": 803
+   },
+   "Fine-tuned seed1 + clef/key classifier": {
+    "n_strips": 72,
+    "n_detected": 72,
+    "token_ser": 0.33355134074558535,
+    "pitch_acc_sow": 0.8268991282689913,
+    "strict_acc": 0.7023661270236613,
+    "rhythm_acc": 0.802647412755716,
+    "n_gt_notes": 803,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "note_precision": 0.7248908296943232,
+    "review_needed_rate": 0.041666666666666664,
+    "ci95": {
+     "token_ser": [
+      0.2977531245243007,
+      0.3713533752844955
+     ],
+     "pitch_acc_sow": [
+      0.7888550958816303,
+      0.862816559683823
+     ]
+    },
+    "tok_err": 510,
+    "n_ref": 1529,
+    "sow_ok": 664,
+    "sow_n": 803
+   },
+   "Fine-tuned seed2 + clef/key classifier": {
+    "n_strips": 72,
+    "n_detected": 72,
+    "token_ser": 0.34924787442773053,
+    "pitch_acc_sow": 0.8281444582814446,
+    "strict_acc": 0.709838107098381,
+    "rhythm_acc": 0.8074608904933814,
+    "n_gt_notes": 803,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "note_precision": 0.7413600891861761,
+    "review_needed_rate": 0.125,
+    "ci95": {
+     "token_ser": [
+      0.3175842096242451,
+      0.3820529801324503
+     ],
+     "pitch_acc_sow": [
+      0.7903589453618838,
+      0.8635249304604143
+     ]
+    },
+    "tok_err": 534,
+    "n_ref": 1529,
+    "sow_ok": 665,
+    "sow_n": 803
+   }
+  }
+ },
+ "camera/handog": {
+  "gt_status": "verified by the author (2026-09-28)",
+  "staff": {
+   "base": {
+    "gt_staves": 40,
+    "matched": 8,
+    "recall": 0.2,
+    "extra_strips": 0,
+    "failed_pages": [
+     1,
+     2,
+     11,
+     14
+    ],
+    "out_of_scope_pages": [
+     3,
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     12
+    ]
+   },
+   "finetuned": {
+    "gt_staves": 40,
+    "matched": 40,
+    "recall": 1.0,
+    "extra_strips": 0,
+    "failed_pages": [],
+    "out_of_scope_pages": [
+     3,
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     12
+    ]
+   }
+  },
+  "models": {
+   "Base CRNN, original pipeline": {
+    "n_strips": 40,
+    "n_detected": 8,
+    "token_ser": 1.041860465116279,
+    "pitch_acc_sow": 0.014388489208633094,
+    "strict_acc": 0.0,
+    "rhythm_acc": 0.016611295681063124,
+    "n_gt_notes": 278,
+    "clef_acc": 0.0,
+    "key_acc": 0.0,
+    "note_precision": 0.030534351145038167,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      1.0067891774250521,
+      1.084552342531697
+     ],
+     "pitch_acc_sow": [
+      0.0,
+      0.03658984935437587
+     ]
+    },
+    "tok_err": 672,
+    "n_ref": 645,
+    "sow_ok": 4,
+    "sow_n": 278
+   },
+   "Fine-tuned seed1, no classifier": {
+    "n_strips": 40,
+    "n_detected": 40,
+    "token_ser": 0.4418604651162791,
+    "pitch_acc_sow": 0.14028776978417265,
+    "strict_acc": 0.10071942446043165,
+    "rhythm_acc": 0.8704318936877077,
+    "n_gt_notes": 278,
+    "clef_acc": 0.175,
+    "key_acc": 0.0,
+    "note_precision": 0.07142857142857142,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.3787640277607297,
+      0.5184475217206472
+     ],
+     "pitch_acc_sow": [
+      0.058135321873946745,
+      0.2370399648660518
+     ]
+    },
+    "tok_err": 285,
+    "n_ref": 645,
+    "sow_ok": 39,
+    "sow_n": 278
+   },
+   "Fine-tuned seed2, no classifier": {
+    "n_strips": 40,
+    "n_detected": 40,
+    "token_ser": 0.45891472868217054,
+    "pitch_acc_sow": 0.1366906474820144,
+    "strict_acc": 0.11151079136690648,
+    "rhythm_acc": 0.867109634551495,
+    "n_gt_notes": 278,
+    "clef_acc": 0.3,
+    "key_acc": 0.0,
+    "note_precision": 0.07224334600760456,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.3945222329516715,
+      0.5347613724483117
+     ],
+     "pitch_acc_sow": [
+      0.0625,
+      0.231824735159531
+     ]
+    },
+    "tok_err": 296,
+    "n_ref": 645,
+    "sow_ok": 38,
+    "sow_n": 278
+   },
+   "Fine-tuned seed1 + clef/key classifier": {
+    "n_strips": 40,
+    "n_detected": 40,
+    "token_ser": 0.27906976744186046,
+    "pitch_acc_sow": 0.7769784172661871,
+    "strict_acc": 0.7266187050359713,
+    "rhythm_acc": 0.8704318936877077,
+    "n_gt_notes": 278,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "note_precision": 0.3956043956043956,
+    "review_needed_rate": 0.15,
+    "ci95": {
+     "token_ser": [
+      0.21971668159244487,
+      0.34448151800797955
+     ],
+     "pitch_acc_sow": [
+      0.6377573529411764,
+      0.8856252389535201
+     ]
+    },
+    "tok_err": 180,
+    "n_ref": 645,
+    "sow_ok": 216,
+    "sow_n": 278
+   },
+   "Fine-tuned seed2 + clef/key classifier": {
+    "n_strips": 40,
+    "n_detected": 40,
+    "token_ser": 0.3147286821705426,
+    "pitch_acc_sow": 0.7841726618705036,
+    "strict_acc": 0.7266187050359713,
+    "rhythm_acc": 0.867109634551495,
+    "n_gt_notes": 278,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "note_precision": 0.4144486692015209,
+    "review_needed_rate": 0.125,
+    "ci95": {
+     "token_ser": [
+      0.25759152203199187,
+      0.3808850951036138
+     ],
+     "pitch_acc_sow": [
+      0.6550360301342942,
+      0.8796612228780868
+     ]
+    },
+    "tok_err": 203,
+    "n_ref": 645,
+    "sow_ok": 218,
+    "sow_n": 278
+   }
+  }
+ },
+ "camera/dont_stop_me_now": {
+  "gt_status": "verified by the author (2026-09-28; strips_v2, pp.1-5)",
+  "staff": {
+   "base": {
+    "gt_staves": 60,
+    "matched": 36,
+    "recall": 0.6,
+    "extra_strips": 0,
+    "failed_pages": [
+     1,
+     4
+    ],
+    "out_of_scope_pages": []
+   },
+   "finetuned": {
+    "gt_staves": 60,
+    "matched": 60,
+    "recall": 1.0,
+    "extra_strips": 0,
+    "failed_pages": [],
+    "out_of_scope_pages": []
+   }
+  },
+  "models": {
+   "Base CRNN, original pipeline": {
+    "n_strips": 59,
+    "n_detected": 35,
+    "token_ser": 0.9740048740861088,
+    "pitch_acc_sow": 0.042432814710042434,
+    "strict_acc": 0.009900990099009901,
+    "rhythm_acc": 0.16380297823596793,
+    "n_gt_notes": 707,
+    "clef_acc": 0.0,
+    "key_acc": 0.02857142857142857,
+    "note_precision": 0.066815144766147,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.9556443170151835,
+      0.9909392309204684
+     ],
+     "pitch_acc_sow": [
+      0.01989371081504702,
+      0.0701621890547263
+     ]
+    },
+    "tok_err": 1199,
+    "n_ref": 1231,
+    "sow_ok": 30,
+    "sow_n": 707
+   },
+   "Fine-tuned seed1, no classifier": {
+    "n_strips": 59,
+    "n_detected": 59,
+    "token_ser": 0.40373679935012186,
+    "pitch_acc_sow": 0.13437057991513437,
+    "strict_acc": 0.10466760961810467,
+    "rhythm_acc": 0.8602520045819015,
+    "n_gt_notes": 707,
+    "clef_acc": 0.1016949152542373,
+    "key_acc": 0.3050847457627119,
+    "note_precision": 0.11889862327909888,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.35689811172305275,
+      0.4529674644327995
+     ],
+     "pitch_acc_sow": [
+      0.072382356515201,
+      0.20947016613335437
+     ]
+    },
+    "tok_err": 497,
+    "n_ref": 1231,
+    "sow_ok": 95,
+    "sow_n": 707
+   },
+   "Fine-tuned seed2, no classifier": {
+    "n_strips": 59,
+    "n_detected": 59,
+    "token_ser": 0.44516653127538586,
+    "pitch_acc_sow": 0.12871287128712872,
+    "strict_acc": 0.10183875530410184,
+    "rhythm_acc": 0.8339060710194731,
+    "n_gt_notes": 707,
+    "clef_acc": 0.13559322033898305,
+    "key_acc": 0.7288135593220338,
+    "note_precision": 0.11375,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.393935158292187,
+      0.49829131652661063
+     ],
+     "pitch_acc_sow": [
+      0.06487782832396352,
+      0.20232525724593114
+     ]
+    },
+    "tok_err": 548,
+    "n_ref": 1231,
+    "sow_ok": 91,
+    "sow_n": 707
+   },
+   "Fine-tuned seed1 + clef/key classifier": {
+    "n_strips": 59,
+    "n_detected": 59,
+    "token_ser": 0.33549959382615757,
+    "pitch_acc_sow": 0.8557284299858557,
+    "strict_acc": 0.7496463932107497,
+    "rhythm_acc": 0.8602520045819015,
+    "n_gt_notes": 707,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "note_precision": 0.7571964956195244,
+    "review_needed_rate": 0.06779661016949153,
+    "ci95": {
+     "token_ser": [
+      0.28910227248216075,
+      0.3823816152718563
+     ],
+     "pitch_acc_sow": [
+      0.8146988073015057,
+      0.8948938079448879
+     ]
+    },
+    "tok_err": 413,
+    "n_ref": 1231,
+    "sow_ok": 605,
+    "sow_n": 707
+   },
+   "Fine-tuned seed2 + clef/key classifier": {
+    "n_strips": 59,
+    "n_detected": 59,
+    "token_ser": 0.35743298131600326,
+    "pitch_acc_sow": 0.8642149929278642,
+    "strict_acc": 0.7369165487977369,
+    "rhythm_acc": 0.8339060710194731,
+    "n_gt_notes": 707,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "note_precision": 0.76375,
+    "review_needed_rate": 0.06779661016949153,
+    "ci95": {
+     "token_ser": [
+      0.3100197628458498,
+      0.40718248514457484
+     ],
+     "pitch_acc_sow": [
+      0.8282118290552015,
+      0.8977283897295365
+     ]
+    },
+    "tok_err": 440,
+    "n_ref": 1231,
+    "sow_ok": 611,
+    "sow_n": 707
+   }
+  }
+ },
+ "digital/non_nobis_domine": {
+  "gt_status": "verified by the author",
+  "staff": {
+   "base": {
+    "gt_staves": 28,
+    "matched": 20,
+    "recall": 0.7142857142857143,
+    "extra_strips": 0,
+    "failed_pages": [
+     1
+    ],
+    "out_of_scope_pages": [
+     4
+    ]
+   },
+   "finetuned": {
+    "gt_staves": 28,
+    "matched": 28,
+    "recall": 1.0,
+    "extra_strips": 0,
+    "failed_pages": [],
+    "out_of_scope_pages": [
+     4
+    ]
+   }
+  },
+  "models": {
+   "Base CRNN, original pipeline": {
+    "n_strips": 28,
+    "n_detected": 20,
+    "token_ser": 0.9173387096774194,
+    "pitch_acc_sow": 0.05853658536585366,
+    "strict_acc": 0.004878048780487805,
+    "rhythm_acc": 0.1228813559322034,
+    "n_gt_notes": 205,
+    "clef_acc": 0.0,
+    "key_acc": 0.0,
+    "note_precision": 0.06593406593406594,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.8201728332246832,
+      1.0361210609207094
+     ],
+     "pitch_acc_sow": [
+      0.012043430639554265,
+      0.12222422062350119
+     ]
+    },
+    "tok_err": 455,
+    "n_ref": 496,
+    "sow_ok": 12,
+    "sow_n": 205
+   },
+   "Fine-tuned seed1, no classifier": {
+    "n_strips": 28,
+    "n_detected": 28,
+    "token_ser": 0.40725806451612906,
+    "pitch_acc_sow": 0.04878048780487805,
+    "strict_acc": 0.024390243902439025,
+    "rhythm_acc": 0.9322033898305084,
+    "n_gt_notes": 205,
+    "clef_acc": 0.0,
+    "key_acc": 0.7857142857142857,
+    "note_precision": 0.0273972602739726,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.3203745921937031,
+      0.5207123200157255
+     ],
+     "pitch_acc_sow": [
+      0.016042780748663103,
+      0.08465832660747913
+     ]
+    },
+    "tok_err": 202,
+    "n_ref": 496,
+    "sow_ok": 10,
+    "sow_n": 205
+   },
+   "Fine-tuned seed2, no classifier": {
+    "n_strips": 28,
+    "n_detected": 28,
+    "token_ser": 0.38911290322580644,
+    "pitch_acc_sow": 0.05365853658536585,
+    "strict_acc": 0.024390243902439025,
+    "rhythm_acc": 0.9449152542372882,
+    "n_gt_notes": 205,
+    "clef_acc": 0.0,
+    "key_acc": 1.0,
+    "note_precision": 0.03081232492997199,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.30604964863721185,
+      0.49252752124819577
+     ],
+     "pitch_acc_sow": [
+      0.023529411764705882,
+      0.08823824710607134
+     ]
+    },
+    "tok_err": 193,
+    "n_ref": 496,
+    "sow_ok": 11,
+    "sow_n": 205
+   },
+   "Fine-tuned seed1 + clef/key classifier": {
+    "n_strips": 28,
+    "n_detected": 28,
+    "token_ser": 0.2963709677419355,
+    "pitch_acc_sow": 0.8829268292682927,
+    "strict_acc": 0.8341463414634146,
+    "rhythm_acc": 0.9322033898305084,
+    "n_gt_notes": 205,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "note_precision": 0.4958904109589041,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.21494856676911497,
+      0.39920790430818076
+     ],
+     "pitch_acc_sow": [
+      0.826716530348687,
+      0.9319397143292838
+     ]
+    },
+    "tok_err": 147,
+    "n_ref": 496,
+    "sow_ok": 181,
+    "sow_n": 205
+   },
+   "Fine-tuned seed2 + clef/key classifier": {
+    "n_strips": 28,
+    "n_detected": 28,
+    "token_ser": 0.2762096774193548,
+    "pitch_acc_sow": 0.9170731707317074,
+    "strict_acc": 0.8731707317073171,
+    "rhythm_acc": 0.9449152542372882,
+    "n_gt_notes": 205,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "note_precision": 0.5266106442577031,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.20075029467766797,
+      0.3670863517820918
+     ],
+     "pitch_acc_sow": [
+      0.8645789194915254,
+      0.9627708825847123
+     ]
+    },
+    "tok_err": 137,
+    "n_ref": 496,
+    "sow_ok": 188,
+    "sow_n": 205
+   }
+  }
+ },
+ "digital/dont_stop_me_now": {
+  "gt_status": "verified by the author (2026-09-28; strips_v2, pp.1-5)",
+  "staff": {
+   "base": {
+    "gt_staves": 60,
+    "matched": 32,
+    "recall": 0.5333333333333333,
+    "extra_strips": 0,
+    "failed_pages": [
+     1,
+     4
+    ],
+    "out_of_scope_pages": []
+   },
+   "finetuned": {
+    "gt_staves": 60,
+    "matched": 60,
+    "recall": 1.0,
+    "extra_strips": 0,
+    "failed_pages": [],
+    "out_of_scope_pages": []
+   }
+  },
+  "models": {
+   "Base CRNN, original pipeline": {
+    "n_strips": 59,
+    "n_detected": 31,
+    "token_ser": 1.1575954508529651,
+    "pitch_acc_sow": 0.042432814710042434,
+    "strict_acc": 0.02263083451202263,
+    "rhythm_acc": 0.2623138602520046,
+    "n_gt_notes": 707,
+    "clef_acc": 0.0,
+    "key_acc": 0.0,
+    "note_precision": 0.06315789473684211,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      1.1025575447570333,
+      1.2140645899482956
+     ],
+     "pitch_acc_sow": [
+      0.02208191650620673,
+      0.06852321700229212
+     ]
+    },
+    "tok_err": 1425,
+    "n_ref": 1231,
+    "sow_ok": 30,
+    "sow_n": 707
+   },
+   "Fine-tuned seed1, no classifier": {
+    "n_strips": 59,
+    "n_detected": 59,
+    "token_ser": 0.24776604386677498,
+    "pitch_acc_sow": 0.04667609618104668,
+    "strict_acc": 0.02545968882602546,
+    "rhythm_acc": 0.9667812142038946,
+    "n_gt_notes": 707,
+    "clef_acc": 0.0,
+    "key_acc": 0.5084745762711864,
+    "note_precision": 0.040740740740740744,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.2204917484670706,
+      0.2786128632271281
+     ],
+     "pitch_acc_sow": [
+      0.023385248836376656,
+      0.07577919161531745
+     ]
+    },
+    "tok_err": 305,
+    "n_ref": 1231,
+    "sow_ok": 33,
+    "sow_n": 707
+   },
+   "Fine-tuned seed2, no classifier": {
+    "n_strips": 59,
+    "n_detected": 59,
+    "token_ser": 0.2770105605199025,
+    "pitch_acc_sow": 0.04809052333804809,
+    "strict_acc": 0.026874115983026876,
+    "rhythm_acc": 0.9679266895761741,
+    "n_gt_notes": 707,
+    "clef_acc": 0.01694915254237288,
+    "key_acc": 1.0,
+    "note_precision": 0.04192355117139334,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.24778725233778798,
+      0.30677047856243583
+     ],
+     "pitch_acc_sow": [
+      0.024933278380465985,
+      0.07640038073189505
+     ]
+    },
+    "tok_err": 341,
+    "n_ref": 1231,
+    "sow_ok": 34,
+    "sow_n": 707
+   },
+   "Fine-tuned seed1 + clef/key classifier": {
+    "n_strips": 59,
+    "n_detected": 59,
+    "token_ser": 0.17221770917952883,
+    "pitch_acc_sow": 0.9377652050919377,
+    "strict_acc": 0.9066478076379066,
+    "rhythm_acc": 0.9667812142038946,
+    "n_gt_notes": 707,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "note_precision": 0.8185185185185185,
+    "review_needed_rate": 0.06779661016949153,
+    "ci95": {
+     "token_ser": [
+      0.145290854978355,
+      0.2019507849541044
+     ],
+     "pitch_acc_sow": [
+      0.9062025406287701,
+      0.9641886048929998
+     ]
+    },
+    "tok_err": 212,
+    "n_ref": 1231,
+    "sow_ok": 663,
+    "sow_n": 707
+   },
+   "Fine-tuned seed2 + clef/key classifier": {
+    "n_strips": 59,
+    "n_detected": 59,
+    "token_ser": 0.1852152721364744,
+    "pitch_acc_sow": 0.9363507779349364,
+    "strict_acc": 0.9094766619519095,
+    "rhythm_acc": 0.9679266895761741,
+    "n_gt_notes": 707,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "note_precision": 0.8162762022194822,
+    "review_needed_rate": 0.06779661016949153,
+    "ci95": {
+     "token_ser": [
+      0.15840921683409218,
+      0.2133042541834252
+     ],
+     "pitch_acc_sow": [
+      0.9040357973832075,
+      0.9628137434955617
+     ]
+    },
+    "tok_err": 228,
+    "n_ref": 1231,
+    "sow_ok": 662,
+    "sow_n": 707
+   }
+  }
+ },
+ "digital/gaano_ko_ikaw_kamahal": {
+  "gt_status": "verified by the author (2026-09-28)",
+  "staff": {
+   "base": {
+    "gt_staves": 72,
+    "matched": 64,
+    "recall": 0.8888888888888888,
+    "extra_strips": 0,
+    "failed_pages": [
+     6
+    ],
+    "out_of_scope_pages": []
+   },
+   "finetuned": {
+    "gt_staves": 72,
+    "matched": 72,
+    "recall": 1.0,
+    "extra_strips": 0,
+    "failed_pages": [],
+    "out_of_scope_pages": []
+   }
+  },
+  "models": {
+   "Base CRNN, original pipeline": {
+    "n_strips": 72,
+    "n_detected": 64,
+    "token_ser": 0.9587965990843689,
+    "pitch_acc_sow": 0.0460772104607721,
+    "strict_acc": 0.009962640099626401,
+    "rhythm_acc": 0.19855595667870035,
+    "n_gt_notes": 803,
+    "clef_acc": 0.0,
+    "key_acc": 0.0,
+    "note_precision": 0.04683544303797468,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.9344428921858756,
+      0.9862385816179691
+     ],
+     "pitch_acc_sow": [
+      0.028146643842645126,
+      0.06715529495380242
+     ]
+    },
+    "tok_err": 1466,
+    "n_ref": 1529,
+    "sow_ok": 37,
+    "sow_n": 803
+   },
+   "Fine-tuned seed1, no classifier": {
+    "n_strips": 72,
+    "n_detected": 72,
+    "token_ser": 0.3211249182472204,
+    "pitch_acc_sow": 0.12577833125778332,
+    "strict_acc": 0.033623910336239106,
+    "rhythm_acc": 0.9434416365824309,
+    "n_gt_notes": 803,
+    "clef_acc": 0.0,
+    "key_acc": 0.2916666666666667,
+    "note_precision": 0.10553814002089865,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.2980337173021119,
+      0.3462368691479367
+     ],
+     "pitch_acc_sow": [
+      0.08866559135097432,
+      0.1644198590061034
+     ]
+    },
+    "tok_err": 491,
+    "n_ref": 1529,
+    "sow_ok": 101,
+    "sow_n": 803
+   },
+   "Fine-tuned seed2, no classifier": {
+    "n_strips": 72,
+    "n_detected": 72,
+    "token_ser": 0.34466971877043817,
+    "pitch_acc_sow": 0.1320049813200498,
+    "strict_acc": 0.039850560398505604,
+    "rhythm_acc": 0.941034897713598,
+    "n_gt_notes": 803,
+    "clef_acc": 0.0,
+    "key_acc": 0.3888888888888889,
+    "note_precision": 0.11205073995771671,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.3206381172984227,
+      0.3714118824797746
+     ],
+     "pitch_acc_sow": [
+      0.09401709401709402,
+      0.17233974203190877
+     ]
+    },
+    "tok_err": 527,
+    "n_ref": 1529,
+    "sow_ok": 106,
+    "sow_n": 803
+   },
+   "Fine-tuned seed1 + clef/key classifier": {
+    "n_strips": 72,
+    "n_detected": 72,
+    "token_ser": 0.23479398299542184,
+    "pitch_acc_sow": 0.887920298879203,
+    "strict_acc": 0.8480697384806973,
+    "rhythm_acc": 0.9434416365824309,
+    "n_gt_notes": 803,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "note_precision": 0.7450365726227796,
+    "review_needed_rate": 0.041666666666666664,
+    "ci95": {
+     "token_ser": [
+      0.2139226765219817,
+      0.25761711443172935
+     ],
+     "pitch_acc_sow": [
+      0.8618181818181818,
+      0.914321534402393
+     ]
+    },
+    "tok_err": 359,
+    "n_ref": 1529,
+    "sow_ok": 713,
+    "sow_n": 803
+   },
+   "Fine-tuned seed2 + clef/key classifier": {
+    "n_strips": 72,
+    "n_detected": 72,
+    "token_ser": 0.2485284499672989,
+    "pitch_acc_sow": 0.8841843088418431,
+    "strict_acc": 0.8430884184308842,
+    "rhythm_acc": 0.941034897713598,
+    "n_gt_notes": 803,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "note_precision": 0.7505285412262156,
+    "review_needed_rate": 0.06944444444444445,
+    "ci95": {
+     "token_ser": [
+      0.22505885921171614,
+      0.2743370216335645
+     ],
+     "pitch_acc_sow": [
+      0.8575030737704917,
+      0.9090991436100131
+     ]
+    },
+    "tok_err": 380,
+    "n_ref": 1529,
+    "sow_ok": 710,
+    "sow_n": 803
+   }
+  }
+ },
+ "camera/both_sides_now": {
+  "gt_status": "staff counts only (eye-verified); no note GT",
+  "base": {
+   "gt_staves": 80,
+   "matched": 12,
+   "recall": 0.15,
+   "extra_strips": 0,
+   "failed_pages": [
+    1,
+    2,
+    3,
+    6,
+    7,
+    8
+   ]
+  },
+  "finetuned": {
+   "gt_staves": 80,
+   "matched": 80,
+   "recall": 1.0,
+   "extra_strips": 0,
+   "failed_pages": []
+  }
+ },
+ "digital/both_sides_now": {
+  "gt_status": "staff counts only (eye-verified); no note GT",
+  "base": {
+   "gt_staves": 80,
+   "matched": 72,
+   "recall": 0.9,
+   "extra_strips": 0,
+   "failed_pages": [
+    8
+   ]
+  },
+  "base_all9": {
+   "gt_staves": 100,
+   "matched": 84,
+   "recall": 0.84,
+   "extra_strips": 0,
+   "failed_pages": [
+    8,
+    9
+   ]
+  },
+  "finetuned": {
+   "gt_staves": 80,
+   "matched": 80,
+   "recall": 1.0,
+   "extra_strips": 0,
+   "failed_pages": []
+  },
+  "finetuned_all9": {
+   "gt_staves": 100,
+   "matched": 100,
+   "recall": 1.0,
+   "extra_strips": 0,
+   "failed_pages": []
+  }
+ },
+ "pooled": {
+  "camera_all5": {
+   "Base CRNN, original pipeline": {
+    "n_strips": 227,
+    "n_detected": 99,
+    "token_ser": 0.9904623678208584,
+    "pitch_acc_sow": 0.030398736675878404,
+    "strict_acc": 0.0043426766679826295,
+    "rhythm_acc": 0.08737177219667493,
+    "n_gt_notes": 2533,
+    "clef_acc": 0.0,
+    "key_acc": 0.030303030303030304,
+    "note_precision": 0.06379453189726594,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.9812921599833777,
+      1.0000050241157556
+     ],
+     "pitch_acc_sow": [
+      0.02085568232707731,
+      0.041410558755861304
+     ]
+    },
+    "tok_err": 4777,
+    "n_ref": 4823,
+    "sow_ok": 77,
+    "sow_n": 2533
+   },
+   "Fine-tuned seed1, no classifier": {
+    "n_strips": 227,
+    "n_detected": 227,
+    "token_ser": 0.431266846361186,
+    "pitch_acc_sow": 0.14804579549940783,
+    "strict_acc": 0.09909198578760363,
+    "rhythm_acc": 0.8249027237354085,
+    "n_gt_notes": 2533,
+    "clef_acc": 0.13656387665198239,
+    "key_acc": 0.21585903083700442,
+    "note_precision": 0.11977004152028106,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.4005644921300892,
+      0.46417712691086227
+     ],
+     "pitch_acc_sow": [
+      0.11437349295464752,
+      0.18344931075181145
+     ]
+    },
+    "tok_err": 2080,
+    "n_ref": 4823,
+    "sow_ok": 375,
+    "sow_n": 2533
+   },
+   "Fine-tuned seed2, no classifier": {
+    "n_strips": 227,
+    "n_detected": 227,
+    "token_ser": 0.4507567903794319,
+    "pitch_acc_sow": 0.17252270035530992,
+    "strict_acc": 0.12830635609948676,
+    "rhythm_acc": 0.8149982313406438,
+    "n_gt_notes": 2533,
+    "clef_acc": 0.21145374449339208,
+    "key_acc": 0.3832599118942731,
+    "note_precision": 0.1418831168831169,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.4211973792685391,
+      0.4831513038794715
+     ],
+     "pitch_acc_sow": [
+      0.13373856470379253,
+      0.2130022138003777
+     ]
+    },
+    "tok_err": 2174,
+    "n_ref": 4823,
+    "sow_ok": 437,
+    "sow_n": 2533
+   },
+   "Fine-tuned seed1 + clef/key classifier": {
+    "n_strips": 227,
+    "n_detected": 227,
+    "token_ser": 0.3450134770889488,
+    "pitch_acc_sow": 0.8176075799447295,
+    "strict_acc": 0.711014607185156,
+    "rhythm_acc": 0.8249027237354085,
+    "n_gt_notes": 2533,
+    "clef_acc": 0.9955947136563876,
+    "key_acc": 0.9823788546255506,
+    "note_precision": 0.6614500159693388,
+    "review_needed_rate": 0.1145374449339207,
+    "ci95": {
+     "token_ser": [
+      0.3162285623636191,
+      0.37669408488026856
+     ],
+     "pitch_acc_sow": [
+      0.7834200716573432,
+      0.8485242165695174
+     ]
+    },
+    "tok_err": 1664,
+    "n_ref": 4823,
+    "sow_ok": 2071,
+    "sow_n": 2533
+   },
+   "Fine-tuned seed2 + clef/key classifier": {
+    "n_strips": 227,
+    "n_detected": 227,
+    "token_ser": 0.3624300228073813,
+    "pitch_acc_sow": 0.8156336360047375,
+    "strict_acc": 0.7019344650611923,
+    "rhythm_acc": 0.8149982313406438,
+    "n_gt_notes": 2533,
+    "clef_acc": 0.9955947136563876,
+    "key_acc": 0.9823788546255506,
+    "note_precision": 0.6707792207792208,
+    "review_needed_rate": 0.13215859030837004,
+    "ci95": {
+     "token_ser": [
+      0.33430403200830106,
+      0.3928637370753323
+     ],
+     "pitch_acc_sow": [
+      0.7806001520486556,
+      0.8465416016387046
+     ]
+    },
+    "tok_err": 1748,
+    "n_ref": 4823,
+    "sow_ok": 2066,
+    "sow_n": 2533
+   }
+  },
+  "camera_main": {
+   "Base CRNN, original pipeline": {
+    "n_strips": 100,
+    "n_detected": 56,
+    "token_ser": 0.9797530864197531,
+    "pitch_acc_sow": 0.04265873015873016,
+    "strict_acc": 0.003968253968253968,
+    "rhythm_acc": 0.09278350515463918,
+    "n_gt_notes": 1008,
+    "clef_acc": 0.0,
+    "key_acc": 0.03571428571428571,
+    "note_precision": 0.0685805422647528,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.9650745583316138,
+      0.9933098331287722
+     ],
+     "pitch_acc_sow": [
+      0.026625457875457875,
+      0.058511626987265676
+     ]
+    },
+    "tok_err": 1984,
+    "n_ref": 2025,
+    "sow_ok": 43,
+    "sow_n": 1008
+   },
+   "Fine-tuned seed1, no classifier": {
+    "n_strips": 100,
+    "n_detected": 100,
+    "token_ser": 0.4330864197530864,
+    "pitch_acc_sow": 0.18055555555555555,
+    "strict_acc": 0.10813492063492064,
+    "rhythm_acc": 0.8181818181818182,
+    "n_gt_notes": 1008,
+    "clef_acc": 0.12,
+    "key_acc": 0.3,
+    "note_precision": 0.14330708661417324,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.3963135801695104,
+      0.4740991179080328
+     ],
+     "pitch_acc_sow": [
+      0.1322333976833977,
+      0.23426502096127957
+     ]
+    },
+    "tok_err": 877,
+    "n_ref": 2025,
+    "sow_ok": 182,
+    "sow_n": 1008
+   },
+   "Fine-tuned seed2, no classifier": {
+    "n_strips": 100,
+    "n_detected": 100,
+    "token_ser": 0.44098765432098763,
+    "pitch_acc_sow": 0.22321428571428573,
+    "strict_acc": 0.16071428571428573,
+    "rhythm_acc": 0.8181818181818182,
+    "n_gt_notes": 1008,
+    "clef_acc": 0.2,
+    "key_acc": 0.41,
+    "note_precision": 0.18072289156626506,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.4059580016667146,
+      0.47949253713348766
+     ],
+     "pitch_acc_sow": [
+      0.16547378783448707,
+      0.28997670045314977
+     ]
+    },
+    "tok_err": 893,
+    "n_ref": 2025,
+    "sow_ok": 225,
+    "sow_n": 1008
+   },
+   "Fine-tuned seed1 + clef/key classifier": {
+    "n_strips": 100,
+    "n_detected": 100,
+    "token_ser": 0.3377777777777778,
+    "pitch_acc_sow": 0.8333333333333334,
+    "strict_acc": 0.7172619047619048,
+    "rhythm_acc": 0.8181818181818182,
+    "n_gt_notes": 1008,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "note_precision": 0.6614173228346457,
+    "review_needed_rate": 0.05,
+    "ci95": {
+     "token_ser": [
+      0.3036000739662067,
+      0.3761516002401051
+     ],
+     "pitch_acc_sow": [
+      0.7983005127511498,
+      0.8659812261505703
+     ]
+    },
+    "tok_err": 684,
+    "n_ref": 2025,
+    "sow_ok": 840,
+    "sow_n": 1008
+   },
+   "Fine-tuned seed2 + clef/key classifier": {
+    "n_strips": 100,
+    "n_detected": 100,
+    "token_ser": 0.3476543209876543,
+    "pitch_acc_sow": 0.8343253968253969,
+    "strict_acc": 0.7212301587301587,
+    "rhythm_acc": 0.8181818181818182,
+    "n_gt_notes": 1008,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "note_precision": 0.6755020080321286,
+    "review_needed_rate": 0.1,
+    "ci95": {
+     "token_ser": [
+      0.31648582267359154,
+      0.38387307231663137
+     ],
+     "pitch_acc_sow": [
+      0.8027888446215139,
+      0.8650140455156129
+     ]
+    },
+    "tok_err": 704,
+    "n_ref": 2025,
+    "sow_ok": 841,
+    "sow_n": 1008
+   }
+  },
+  "digital_main": {
+   "Base CRNN, original pipeline": {
+    "n_strips": 100,
+    "n_detected": 84,
+    "token_ser": 0.948641975308642,
+    "pitch_acc_sow": 0.04861111111111111,
+    "strict_acc": 0.008928571428571428,
+    "rhythm_acc": 0.18181818181818182,
+    "n_gt_notes": 1008,
+    "clef_acc": 0.0,
+    "key_acc": 0.0,
+    "note_precision": 0.050411522633744855,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.9175687485894972,
+      0.9828415330094838
+     ],
+     "pitch_acc_sow": [
+      0.030496332984010128,
+      0.06882591093117409
+     ]
+    },
+    "tok_err": 1921,
+    "n_ref": 2025,
+    "sow_ok": 49,
+    "sow_n": 1008
+   },
+   "Fine-tuned seed1, no classifier": {
+    "n_strips": 100,
+    "n_detected": 100,
+    "token_ser": 0.3422222222222222,
+    "pitch_acc_sow": 0.11011904761904762,
+    "strict_acc": 0.031746031746031744,
+    "rhythm_acc": 0.9409559512652296,
+    "n_gt_notes": 1008,
+    "clef_acc": 0.0,
+    "key_acc": 0.43,
+    "note_precision": 0.08396369137670197,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.3149525012678403,
+      0.3728857469043646
+     ],
+     "pitch_acc_sow": [
+      0.08222990378058943,
+      0.14242704826038158
+     ]
+    },
+    "tok_err": 693,
+    "n_ref": 2025,
+    "sow_ok": 111,
+    "sow_n": 1008
+   },
+   "Fine-tuned seed2, no classifier": {
+    "n_strips": 100,
+    "n_detected": 100,
+    "token_ser": 0.35555555555555557,
+    "pitch_acc_sow": 0.11607142857142858,
+    "strict_acc": 0.03670634920634921,
+    "rhythm_acc": 0.9418931583880038,
+    "n_gt_notes": 1008,
+    "clef_acc": 0.0,
+    "key_acc": 0.56,
+    "note_precision": 0.08979278587874137,
+    "review_needed_rate": 0.0,
+    "ci95": {
+     "token_ser": [
+      0.3292248572756609,
+      0.3857325716019963
+     ],
+     "pitch_acc_sow": [
+      0.0864755548953022,
+      0.14996413157925179
+     ]
+    },
+    "tok_err": 720,
+    "n_ref": 2025,
+    "sow_ok": 117,
+    "sow_n": 1008
+   },
+   "Fine-tuned seed1 + clef/key classifier": {
+    "n_strips": 100,
+    "n_detected": 100,
+    "token_ser": 0.24987654320987654,
+    "pitch_acc_sow": 0.8869047619047619,
+    "strict_acc": 0.8452380952380952,
+    "rhythm_acc": 0.9409559512652296,
+    "n_gt_notes": 1008,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "note_precision": 0.6762481089258698,
+    "review_needed_rate": 0.03,
+    "ci95": {
+     "token_ser": [
+      0.22515718910379628,
+      0.2782271182472795
+     ],
+     "pitch_acc_sow": [
+      0.8632375106984902,
+      0.9110403454367525
+     ]
+    },
+    "tok_err": 506,
+    "n_ref": 2025,
+    "sow_ok": 894,
+    "sow_n": 1008
+   },
+   "Fine-tuned seed2 + clef/key classifier": {
+    "n_strips": 100,
+    "n_detected": 100,
+    "token_ser": 0.2553086419753086,
+    "pitch_acc_sow": 0.8908730158730159,
+    "strict_acc": 0.8492063492063492,
+    "rhythm_acc": 0.9418931583880038,
+    "n_gt_notes": 1008,
+    "clef_acc": 1.0,
+    "key_acc": 1.0,
+    "note_precision": 0.6891788181120491,
+    "review_needed_rate": 0.05,
+    "ci95": {
+     "token_ser": [
+      0.23034962256840108,
+      0.2840082485361964
+     ],
+     "pitch_acc_sow": [
+      0.8668125960734645,
+      0.9137005484887385
+     ]
+    },
+    "tok_err": 517,
+    "n_ref": 2025,
+    "sow_ok": 898,
+    "sow_n": 1008
+   }
+  }
+ }
+}
