@@ -90,11 +90,9 @@ class ScanBell extends ConsumerWidget {
               // 48 dp box; the button's 48 dp minimum tap target remains.
               padding: EdgeInsets.zero,
               color: Colors.white,
-              icon: Icon(
-                active || unread > 0
-                    ? Icons.notifications_rounded
-                    : Icons.notifications_none_rounded,
-              ),
+              // Filled in every state: the Home reference draws the idle bell
+              // filled white (colour sampled 255,255,255).
+              icon: const Icon(Icons.notifications_rounded),
             ),
             if (unread > 0)
               Positioned(

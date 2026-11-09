@@ -49,10 +49,11 @@ Future<void> _choose(WidgetTester tester, String tile, String option) async {
 }
 
 void main() {
-  testWidgets('title is required, autofocused, and gates Next', (tester) async {
+  testWidgets('title is required, not autofocused, and gates Next', (tester) async {
     await pumpCapture(tester, CaptureHarness(), startOnDetails: true);
     expect(find.text(CaptureMessages.detailsTitle), findsOneWidget);
-    expect(tester.widget<TextField>(_titleField).autofocus, isTrue);
+    expect(tester.widget<TextField>(_titleField).autofocus, isFalse);
+    expect(find.textContaining('Step 1'), findsNothing);
     expect(_next(tester).onPressed, isNull);
 
     await tester.enterText(_titleField, '   ');

@@ -240,6 +240,10 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
   /// chip stays disabled for as long as the screen is open.
   void _onAlertState(PlaybackState state) {
     if (state.phase != PlaybackPhase.ready) return;
+    if (!_noticeChecked) {
+      _noticeChecked = true;
+      unawaited(_showNoticeOnce());
+    }
     if (!_offerChecked) {
       _offerChecked = true;
       final result = state.result;
@@ -287,8 +291,17 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
     }
   }
 
-  /// The general notice was closed; lasts as long as this screen visit.
-  bool _noticeDismissed = false;
+  /// The general notice shows only the first time this score opens after
+  /// its conversion: hidden until the per-score flag says it is unseen, and
+  /// the flag is set at once so closing the app or leaving also ends it.
+  bool _noticeDismissed = true;
+  bool _noticeChecked = false;
+
+  Future<void> _showNoticeOnce() async {
+    if (await PlaybackPrefs.disclaimerSeen(widget.scoreId)) return;
+    await PlaybackPrefs.markDisclaimerSeen(widget.scoreId);
+    if (mounted) setState(() => _noticeDismissed = false);
+  }
 
   /// One prompt per flagged voice; Retake stops the rest.
   Future<void> _promptUnreadableVoices(ScoreResult result) async {
@@ -513,6 +526,9 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
                     message: PlaybackMessages.accuracyNotice,
                     dismissTooltip: PlaybackMessages.dismissNotice,
                     onDismiss: () => setState(() => _noticeDismissed = true),
+                    fill: AppTheme.playbackNoticeFill,
+                    ink: AppTheme.playbackNoticeText,
+                    padding: const EdgeInsets.fromLTRB(16, 10, 4, 10),
                   ),
                 if (state.showReviewBanner) ...[
                   if (!_noticeDismissed) const SizedBox(height: 8),
@@ -1012,44 +1028,44 @@ class _ReviewBanner extends StatelessWidget {
     required this.message,
     required this.dismissTooltip,
     required this.onDismiss,
+    this.fill = AppTheme.playbackReviewFill,
+    this.ink = AppTheme.playbackReviewText,
+    this.padding = const EdgeInsets.only(left: 12),
   });
 
   final String message;
   final String dismissTooltip;
   final VoidCallback onDismiss;
+  final Color fill;
+  final Color ink;
+  final EdgeInsets padding;
 
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: AppTheme.playbackReviewFill,
+      color: fill,
       elevation: 2,
       borderRadius: BorderRadius.circular(12),
       child: Padding(
-        padding: const EdgeInsets.only(left: 12),
+        padding: padding,
         child: Row(
           children: [
-            const Icon(
-              Icons.info_outline_rounded,
-              size: 20,
-              color: AppTheme.playbackReviewText,
-            ),
+            Icon(Icons.info_outline_rounded, size: 20, color: ink),
             const SizedBox(width: 8),
             Expanded(
               child: Semantics(
                 liveRegion: true,
                 child: Text(
                   message,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    fontSize: 13,
-                    color: AppTheme.playbackReviewText,
-                  ),
+                  style: Theme.of(context).textTheme.bodySmall
+                      ?.copyWith(fontSize: 13, color: ink),
                 ),
               ),
             ),
             IconButton(
               tooltip: dismissTooltip,
               onPressed: onDismiss,
-              color: AppTheme.playbackReviewText,
+              color: ink,
               icon: const Icon(Icons.close_rounded, size: 20),
             ),
           ],

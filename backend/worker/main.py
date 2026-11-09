@@ -32,7 +32,7 @@ LOG = logging.getLogger(__name__)
 UNEXPECTED_FAILURE_REASON = "conversion failed"  # fixed text: reasons reach clients, details go to the log
 NO_PLAYBACK_FAILURE_REASON = "no playable audio could be built"  # distinct from a transient crash
 HEARTBEAT_JOIN_TIMEOUT_S = 10.0
-PROGRESS_WRITE_INTERVAL_S = 2.0
+PROGRESS_WRITE_INTERVAL_S = 1.0  # was 2.0: coarser writes made the bar trail the log lines
 EMPTY_TIMING: dict[str, Any] = {"events": []}
 
 Runner = Callable[..., PipelineResult]

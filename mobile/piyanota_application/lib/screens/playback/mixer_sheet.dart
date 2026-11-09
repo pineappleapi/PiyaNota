@@ -9,10 +9,10 @@ import 'playback_messages.dart';
 import 'sheet_parts.dart';
 
 /// Voice Mixer (PIYA-209): per row a checkbox, the voice (or the Metronome
-/// Click), a volume slider and a Mute pill. A voice's checkbox is the same
+/// Click), a volume slider whose end icons jump to 0 / full. A voice's checkbox is the same
 /// state as its Playback chip; the Metronome row's is the Speed sheet's. Reads and writes the
-/// Playback controller, so its settings last for the Playback session and
-/// reset when the score is reopened (AC6).
+/// Playback controller, so its mix and speed persist per score (user
+/// decision 2026-11-09, supersedes 209 AC6).
 class VoiceMixerSheet extends ConsumerWidget {
   const VoiceMixerSheet({
     super.key,
@@ -40,9 +40,6 @@ class VoiceMixerSheet extends ConsumerWidget {
     final state = ref.watch(provider);
     final controller = ref.read(provider.notifier);
     final clickUsable = state.clickStatus != ClickStatus.unavailable;
-    // Off: the row's checkbox still works (it is the Speed sheet's toggle,
-    // user decision 2026-10-21); level and Mute are locked until it is on.
-    final clickOff = clickUsable && !state.metronomeOn;
     final unavailableNote = state.clickNeedsTempo
         ? PlaybackMessages.metronomeNeedsTempo
         : PlaybackMessages.metronomeUnavailable;
@@ -70,7 +67,6 @@ class VoiceMixerSheet extends ConsumerWidget {
             volume:
                 state.volumes[voice] ?? PlaybackController.defaultVoiceVolume,
             onChecked: (_) => controller.toggleVoice(voice),
-            onMute: (on) => controller.setVoiceMuted(voice, muted: on),
             onVolume: (level) => controller.setVoiceVolume(voice, level),
             onDisabledTap: unreadable
                 ? () => _offerRetake(context, voice)
@@ -85,31 +81,21 @@ class VoiceMixerSheet extends ConsumerWidget {
         name: PlaybackMessages.metronomeClick,
         label: Text(
           PlaybackMessages.metronomeClick,
-          // Same style on or off (PIYA-209-V2.1): only the controls dim.
+          // Same style on or off (PIYA-209-V2.1).
           style: Theme.of(context).textTheme.bodyMedium
               ?.copyWith(color: AppTheme.sheetText),
         ),
         enabled: clickUsable,
-        inactive: clickOff,
-        locked: clickOff,
         disabledNote: unavailableNote,
         checked: state.metronomeOn,
         muted: state.clickMuted,
         volume: state.clickVolume,
         onChecked: (on) => controller.setMetronomeOn(on: on),
-        onMute: (on) => controller.setClickMuted(muted: on),
         onVolume: controller.setClickVolume,
       ),
     );
     if (!clickUsable) {
       rows.add(SheetNote(unavailableNote));
-    } else if (clickOff) {
-      rows.add(
-        const SheetNote(
-          PlaybackMessages.metronomeOff,
-          key: ValueKey('mixer-metronome-off'),
-        ),
-      );
     }
     return SheetFrame(
       key: const ValueKey('mixer-sheet'),
@@ -142,10 +128,7 @@ class _MixerRow extends StatelessWidget {
     required this.muted,
     required this.volume,
     required this.onChecked,
-    required this.onMute,
     required this.onVolume,
-    this.inactive = false,
-    this.locked = false,
     this.onDisabledTap,
   });
 
@@ -161,23 +144,13 @@ class _MixerRow extends StatelessWidget {
   final bool muted;
   final double volume;
   final ValueChanged<bool> onChecked;
-  final ValueChanged<bool> onMute;
   final ValueChanged<double> onVolume;
-
-  /// Usable, but not sounding for now (the metronome with the Speed toggle
-  /// off): the slider is drawn faded. Icon and text stay fully opaque.
-  final bool inactive;
-
-  /// Slider and Mute are disabled but the row (and its checkbox) is not
-  /// faded or blocked.
-  final bool locked;
 
   /// Fixed so every row's slider starts at the same x, as in the mockup.
   static const double labelWidth = 112;
 
   @override
   Widget build(BuildContext context) {
-    final usable = enabled && !locked;
     final check = SheetCheckbox(
       value: checked,
       label: PlaybackMessages.playLabel(name),
@@ -185,11 +158,15 @@ class _MixerRow extends StatelessWidget {
     );
     final slider = Opacity(
       key: const ValueKey('mixer-slider-fade'),
-      // A muted row dims like a switched-off metronome (PIYA-209-V2.4).
-      opacity: inactive || muted ? 0.45 : 1,
+      // A muted row (default mix) is dimmed (PIYA-209-V2.4).
+      opacity: muted ? 0.45 : 1,
       child: Row(
         children: [
-          const SpeakerGlyph(muted: true),
+          _GlyphButton(
+            muted: true,
+            label: PlaybackMessages.minVolumeLabel(name),
+            onTap: enabled ? () => onVolume(0) : null,
+          ),
           Expanded(
             // Merged so the slider node carries the row's name.
             child: MergeSemantics(
@@ -202,20 +179,19 @@ class _MixerRow extends StatelessWidget {
                     value: volume,
                     semanticFormatterCallback: PlaybackMessages.volumeValue,
                     // On every change, not on change-end: AC3's 100 ms.
-                    onChanged: usable ? onVolume : null,
+                    onChanged: enabled ? onVolume : null,
                   ),
                 ),
               ),
             ),
           ),
-          const SpeakerGlyph(muted: false),
+          _GlyphButton(
+            muted: false,
+            label: PlaybackMessages.maxVolumeLabel(name),
+            onTap: enabled ? () => onVolume(1) : null,
+          ),
         ],
       ),
-    );
-    final mute = _MutePill(
-      muted: muted,
-      label: PlaybackMessages.muteLabel(name),
-      onChanged: usable ? onMute : null,
     );
     final row = LayoutBuilder(
       builder: (context, constraints) {
@@ -228,7 +204,6 @@ class _MixerRow extends StatelessWidget {
                   Expanded(
                     child: Align(alignment: Alignment.centerLeft, child: label),
                   ),
-                  mute,
                 ],
               ),
               Padding(
@@ -246,7 +221,6 @@ class _MixerRow extends StatelessWidget {
               child: Align(alignment: Alignment.centerLeft, child: label),
             ),
             Expanded(child: slider),
-            mute,
           ],
         );
       },
@@ -269,55 +243,36 @@ class _MixerRow extends StatelessWidget {
   }
 }
 
-/// "Mute": light blue when off, red when on. A toggle, with a 48 dp target
-/// around the small pill.
-class _MutePill extends StatelessWidget {
-  const _MutePill({
+/// Speaker icon at a slider end: tap jumps the volume to that end. 48 dp
+/// target around the small glyph.
+class _GlyphButton extends StatelessWidget {
+  const _GlyphButton({
     required this.muted,
     required this.label,
-    required this.onChanged,
+    required this.onTap,
   });
 
   final bool muted;
   final String label;
-  final ValueChanged<bool>? onChanged;
+  final VoidCallback? onTap;
 
   @override
-  Widget build(BuildContext context) {
-    final onChanged = this.onChanged;
-    return Semantics(
-      container: true,
-      button: true,
-      toggled: muted,
-      enabled: onChanged != null,
-      label: label,
-      excludeSemantics: true,
-      child: InkResponse(
-        onTap: onChanged == null ? null : () => onChanged(!muted),
-        radius: 28,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(
-            minWidth: 60,
-            minHeight: kMinInteractiveDimension,
-          ),
-          child: Center(
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 120),
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-              decoration: BoxDecoration(
-                color: muted ? AppTheme.mixerMuteOn : AppTheme.mixerMuteFill,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                PlaybackMessages.mute,
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color: muted ? Colors.white : AppTheme.mixerMuteText,
-                ),
-              ),
-            ),
-          ),
+  Widget build(BuildContext context) => Semantics(
+    container: true,
+    button: true,
+    enabled: onTap != null,
+    label: label,
+    excludeSemantics: true,
+    child: InkResponse(
+      onTap: onTap,
+      radius: 24,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(
+          minWidth: kMinInteractiveDimension,
+          minHeight: kMinInteractiveDimension,
         ),
+        child: Center(child: SpeakerGlyph(muted: muted)),
       ),
-    );
-  }
+    ),
+  );
 }

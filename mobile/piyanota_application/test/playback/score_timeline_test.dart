@@ -267,7 +267,10 @@ void main() {
     test('before the first onset it waits there; after the last it stays', () {
       final timeline = ScoreTimeline(testTiming());
       expect(timeline.positionAt(Duration.zero)!.x, 100);
-      expect(timeline.positionAt(const Duration(seconds: 60))!.x, 100); // bar 3 downbeat
+      expect(
+        timeline.positionAt(const Duration(seconds: 60))!.x,
+        100,
+      ); // bar 3 downbeat
     });
 
     test('derives systems and band from x jumps and y spread', () {

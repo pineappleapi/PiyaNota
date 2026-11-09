@@ -859,13 +859,7 @@ void main() {
         'state, and the sheet starts from it', (tester) async {
       final service = FakeExportService();
       await pumpPlayback(tester, harness(service));
-      final mixerOffNote = find.byKey(const ValueKey('mixer-metronome-off'));
-
-      await tester.tap(find.bySemanticsLabel(PlaybackMessages.voiceMixer));
-      await settle(tester);
-      expect(mixerOffNote, findsOneWidget);
-      await tester.tap(find.byTooltip(PlaybackMessages.close));
-      await settle(tester);
+      expect(playback(tester).metronomeOn, isFalse);
 
       await tester.tap(find.bySemanticsLabel(PlaybackMessages.speed));
       await settle(tester);
@@ -874,12 +868,6 @@ void main() {
       await tester.tap(find.byTooltip(PlaybackMessages.close));
       await settle(tester);
       expect(playback(tester).metronomeOn, isTrue);
-
-      await tester.tap(find.bySemanticsLabel(PlaybackMessages.voiceMixer));
-      await settle(tester);
-      expect(mixerOffNote, findsNothing);
-      await tester.tap(find.byTooltip(PlaybackMessages.close));
-      await settle(tester);
 
       await openExport(tester, clear: false);
       expect(isChecked(tester, ExportMessages.clickBox), isTrue);

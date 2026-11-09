@@ -298,7 +298,8 @@ void main() {
         await tester.pump();
         await ok(tester);
         expect(mutedAlert, findsNothing);
-        expect(store.writes, 1);
+        // The disclaimer-seen flag is written too.
+        expect(store.writes, greaterThanOrEqualTo(1));
         expect(
           printed,
           contains(startsWith('Playback: muted-alert preference not saved')),

@@ -271,21 +271,7 @@ class _CaptureButton extends StatelessWidget {
                   onTap: onTap,
                   splashFactory: NoSplash.splashFactory,
                   highlightColor: AppTheme.darken(Colors.white),
-                  child: const Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      Icon(
-                        Icons.crop_free_rounded,
-                        size: LibraryBottomNav._captureFrameSize,
-                        color: AppTheme.libraryCardTitle,
-                      ),
-                      Icon(
-                        Icons.music_note_rounded,
-                        size: LibraryBottomNav._captureNoteSize,
-                        color: AppTheme.libraryCardTitle,
-                      ),
-                    ],
-                  ),
+                  child: const CaptureGlyph(),
                 ),
               ),
             ),
@@ -327,6 +313,46 @@ class _NavLabel extends StatelessWidget {
           softWrap: false,
           style: style,
         ),
+      ),
+    );
+  }
+}
+
+/// The Capture button's frame-and-note glyph, filled with the mockup's
+/// vertical blue-to-teal gradient (sampled from "Home Page - capture button
+/// change.png": top edge #148FC7, bottom edge #0AB7C1).
+class CaptureGlyph extends StatelessWidget {
+  const CaptureGlyph({super.key});
+
+  static const Color gradientTop = Color(0xFF148FC7);
+  static const Color gradientBottom = Color(0xFF0AB7C1);
+  static const LinearGradient gradient = LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [gradientTop, gradientBottom],
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    // srcIn recolours the white glyph, so the gradient only shows through
+    // the icon strokes.
+    return ShaderMask(
+      blendMode: BlendMode.srcIn,
+      shaderCallback: (bounds) => gradient.createShader(bounds),
+      child: const Stack(
+        alignment: Alignment.center,
+        children: [
+          Icon(
+            Icons.crop_free_rounded,
+            size: LibraryBottomNav._captureFrameSize,
+            color: Colors.white,
+          ),
+          Icon(
+            Icons.music_note_rounded,
+            size: LibraryBottomNav._captureNoteSize,
+            color: Colors.white,
+          ),
+        ],
       ),
     );
   }

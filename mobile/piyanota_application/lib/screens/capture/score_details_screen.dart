@@ -130,7 +130,6 @@ class _ScoreDetailsScreenState extends State<ScoreDetailsScreen> {
           controller: _title,
           hint: CaptureMessages.titleHint,
           icon: Icons.music_note_rounded,
-          autofocus: !_editing,
           textInputAction: TextInputAction.next,
         ),
       ),
@@ -259,34 +258,41 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
-    return DecoratedBox(
-      decoration: const BoxDecoration(gradient: AppTheme.libraryHeaderGradient),
+    // Sampled from the "Add Score Details" mockup: white header, #272960
+    // disc (= playbackNavy), #272727 title (= onboardingHeadingDark).
+    return ColoredBox(
+      color: Colors.white,
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Row(
             children: [
-              Semantics(
-                header: true,
-                child: Text(
-                  editing
-                      ? CaptureMessages.editDetailsTitle
-                      : CaptureMessages.detailsTitle,
-                  style: textTheme.headlineSmall?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
+              IconButton.filled(
+                tooltip: 'Back',
+                style: IconButton.styleFrom(
+                  backgroundColor: AppTheme.playbackNavy,
+                  foregroundColor: Colors.white,
+                ),
+                icon: const Icon(Icons.arrow_back_rounded),
+                onPressed: () => Navigator.of(context).maybePop(),
+              ),
+              Expanded(
+                child: Semantics(
+                  header: true,
+                  child: Text(
+                    editing
+                        ? CaptureMessages.editDetailsTitle
+                        : CaptureMessages.detailsTitle,
+                    textAlign: TextAlign.center,
+                    style: textTheme.headlineSmall?.copyWith(
+                      color: AppTheme.onboardingHeadingDark,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ),
-              if (!editing) ...[
-                const SizedBox(height: 4),
-                Text(
-                  CaptureMessages.detailsStep,
-                  style: textTheme.bodyMedium?.copyWith(color: Colors.white),
-                ),
-              ],
+              const SizedBox(width: 48), // balances the back button
             ],
           ),
         ),
@@ -352,7 +358,6 @@ class _DetailsTextField extends StatelessWidget {
     required this.controller,
     required this.hint,
     required this.icon,
-    this.autofocus = false,
     this.textInputAction,
     this.onSubmitted,
   });
@@ -360,7 +365,6 @@ class _DetailsTextField extends StatelessWidget {
   final TextEditingController controller;
   final String hint;
   final IconData icon;
-  final bool autofocus;
   final TextInputAction? textInputAction;
   final ValueChanged<String>? onSubmitted;
 
@@ -374,7 +378,6 @@ class _DetailsTextField extends StatelessWidget {
   Widget build(BuildContext context) {
     return TextField(
       controller: controller,
-      autofocus: autofocus,
       textInputAction: textInputAction,
       textCapitalization: TextCapitalization.words,
       onSubmitted: onSubmitted,

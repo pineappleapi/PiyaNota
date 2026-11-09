@@ -8,8 +8,8 @@ import 'package:piyanota_application/screens/playback/playback_messages.dart';
 import 'playback_fakes.dart';
 
 const _notice =
-    "PiyaNota's conversion is not fully accurate yet. Please review the "
-    'playback against your score before relying on it.';
+    'PiyaNota’s conversion may contain errors, so check the playback '
+    'against your original score before relying on it.';
 
 String _prompt(String voice, String pages) =>
     'Voice $voice could not be read. Do you want to continue with playback '

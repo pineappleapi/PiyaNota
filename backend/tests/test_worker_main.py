@@ -439,7 +439,7 @@ def test_runner_progress_is_stored_and_job_completes_at_100(
 
     from backend.worker import main as worker_main
 
-    # Frozen clock: the second on_progress call is always inside the 2 s throttle window.
+    # Frozen clock: the second on_progress call is always inside the 1 s throttle window.
     monkeypatch.setattr(worker_main, "make_progress_writer",
                         functools.partial(worker_main.make_progress_writer, clock=lambda: 0.0))
     storage = MemoryStorage()
@@ -452,7 +452,7 @@ def test_runner_progress_is_stored_and_job_completes_at_100(
         on_progress(17)
         seen.append(_job(job_id)["percent_complete"])
         on_stage("detecting_staff", 25)
-        on_progress(99)  # callback itself is throttled; this one is inside 2 s so dropped
+        on_progress(99)  # callback itself is throttled; this one is inside 1 s so dropped
         seen.append(_job(job_id)["percent_complete"])
         return _result()
 

@@ -92,7 +92,7 @@ def test_in_stage_progress_rises_between_bands_and_stays_below_100(tmp_path: Pat
     values = [p for _, p in seen]
     assert values == sorted(values) and max(values) < 100
     assert seen[:4] == [("preprocessing", 5), ("p", 14), ("p", 24), ("detecting_staff", 25)]
-    assert ("p", 40) in seen and ("p", 80) in seen and ("p", 85) not in seen
+    assert ("p", 40) in seen and ("p", 84) in seen and ("p", 85) not in seen
 
 
 def test_detect_reports_progress_per_page(tmp_path: Path) -> None:
@@ -105,7 +105,7 @@ def test_detect_reports_progress_per_page(tmp_path: Path) -> None:
         return {}
 
     _run(tmp_path, replace(_fake_stages(), detect=det), on_progress=seen.append)
-    assert 25 in seen and 32 in seen and max(seen) < 40
+    assert 25 in seen and 32 in seen and max(p for p in seen if p < 40) == 32
 
 
 def test_progress_hooks_default_to_none() -> None:
@@ -278,3 +278,10 @@ def test_moonriver_page1_end_to_end(tmp_path: Path) -> None:
 def test_served_jpeg_prefers_the_lyrics_kept_page() -> None:
     assert CleanPage(b"masked", 10, 20, b"display").served_jpeg == b"display"
     assert CleanPage(b"masked", 10, 20).served_jpeg == b"masked"  # no native page: fall back
+
+
+def test_stage_end_milestones_are_reported_monotonically(tmp_path: Path) -> None:
+    seen: list[tuple[str, int]] = []
+    _run(tmp_path, _fake_stages(), lambda s, p: seen.append((s, p)), on_progress=lambda p: seen.append(("p", p)))
+    values = [p for _, p in seen]
+    assert values == sorted(values) and max(values) < 100

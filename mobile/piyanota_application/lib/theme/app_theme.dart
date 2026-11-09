@@ -269,6 +269,10 @@ class AppTheme {
   // amber, 8.4:1, so it reads as a caution, not an error (errorRed).
   static const Color playbackReviewFill = Color(0xFFFFF4D6);
   static const Color playbackReviewText = Color(0xFF5C4400);
+  // Accuracy disclaimer. Fill sampled #7ECEDD from Playback_Disclaimer_Change.png;
+  // text is derived dark teal (about 8:1 on the fill).
+  static const Color playbackNoticeFill = Color(0xFF7ECEDD);
+  static const Color playbackNoticeText = Color(0xFF0B3340);
 
   // Voice Mixer (PIYA-209) and Speed (PIYA-210) sheets, dropper-sampled
   // from references/PIYA209_VoiceMixerModal_UI.png and

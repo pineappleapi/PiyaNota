@@ -34,7 +34,7 @@ STAGE_PERCENT = (("preprocessing", 5), ("detecting_staff", 25), ("transcribing",
 # start (25 / 85) so a stage never reports the next band before it ends; 100 is written only by complete_job.
 PREPROCESS_BAND = (5, 24)
 DETECT_BAND = (25, 39)  # Stage 2, reported per page so a cancel is noticed between pages
-TRANSCRIBE_BAND = (40, 80)  # Stage 3 Pass 1 (CRNN forward) only; Pass 2 and the system checks are fast
+TRANSCRIBE_BAND = (40, 84)  # Stage 3 Pass 1 (CRNN forward, ~90%) then Pass 2, weighted inside Stage 3
 
 ProgressFn = Callable[[int, int], None]
 

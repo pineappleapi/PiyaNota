@@ -40,14 +40,28 @@ void main() {
       find.descendant(of: row, matching: find.byType(Slider));
   Finder checkIn(Finder row) =>
       find.descendant(of: row, matching: find.byType(SheetCheckbox));
-  Finder muteIn(Finder row) =>
-      find.descendant(of: row, matching: find.text(PlaybackMessages.mute));
   double sliderValue(WidgetTester tester, Finder row) =>
       tester.widget<Slider>(sliderIn(row)).value;
   String positionText(WidgetTester tester) =>
       tester.widget<Text>(find.byKey(const ValueKey('time-position'))).data!;
   PlaybackController controller(WidgetTester tester) =>
       appContainer(tester).read(playbackControllerProvider(kScoreId).notifier);
+
+  // The Mute pill is gone (UI batch 2026-11-09); mute state is still set
+  // through the controller (default mix), so tests toggle it there.
+  Future<void> toggleMute(WidgetTester tester, Finder row) async {
+    final name = (tester.widget(row).key! as ValueKey<String>).value.substring(
+      'mixer-row-'.length,
+    );
+    final c = controller(tester);
+    if (name == 'metronome') {
+      c.setClickMuted(muted: !c.state.clickMuted);
+    } else {
+      final v = VoicePart.values.byName(name);
+      c.setVoiceMuted(v, muted: !c.state.muted.contains(v));
+    }
+    await tester.pump();
+  }
 
   Future<void> openMixer(WidgetTester tester) async {
     await tester.tap(find.bySemanticsLabel(PlaybackMessages.voiceMixer));
@@ -213,7 +227,7 @@ void main() {
       await pumpPlayback(tester, ready(), defaultVoice: VoicePart.alto);
       await openMixer(tester);
       final soprano = voiceRow(VoicePart.soprano);
-      await tapIn(tester, muteIn(soprano));
+      await toggleMute(tester, soprano);
 
       expect(controller(tester).state.selected, contains(VoicePart.soprano));
       final fade = tester.widget<Opacity>(
@@ -248,7 +262,7 @@ void main() {
 
   group('rows and defaults (AC1, AC2, AC5)', () {
     testWidgets('a row per voice plus Metronome Click, each with a slider, '
-        'a Solo box and a Mute toggle; all unmuted at full volume', (
+        'a Solo box and no Mute button; all unmuted at full volume', (
       tester,
     ) async {
       final harness = ready();
@@ -264,7 +278,7 @@ void main() {
         expect(r, findsOneWidget);
         expect(sliderIn(r), findsOneWidget);
         expect(checkIn(r), findsOneWidget);
-        expect(muteIn(r), findsOneWidget);
+        expect(find.text(PlaybackMessages.mute), findsNothing);
         expect(sliderValue(tester, r), r == metronomeRow ? 0.5 : 0.8);
       }
       for (final voice in VoicePart.values) {
@@ -299,10 +313,12 @@ void main() {
           find.bySemanticsLabel(PlaybackMessages.playLabel(name)),
           findsOneWidget,
         );
-        expect(
-          find.bySemanticsLabel(PlaybackMessages.muteLabel(name)),
-          findsOneWidget,
-        );
+        for (final l in [
+          PlaybackMessages.minVolumeLabel(name),
+          PlaybackMessages.maxVolumeLabel(name),
+        ]) {
+          expect(find.bySemanticsLabel(l), findsOneWidget);
+        }
         expect(
           find.bySemanticsLabel(PlaybackMessages.volumeLabel(name)),
           findsOneWidget,
@@ -359,11 +375,11 @@ void main() {
             ),
           )
           .opacity;
-      if (fade() < 1) await tapIn(tester, muteIn(alto)); // start unmuted
+      if (fade() < 1) await toggleMute(tester, alto); // start unmuted
       expect(fade(), 1);
-      await tapIn(tester, muteIn(alto));
+      await toggleMute(tester, alto);
       expect(fade(), lessThan(1));
-      await tapIn(tester, muteIn(alto));
+      await toggleMute(tester, alto);
       expect(fade(), 1);
     });
 
@@ -377,7 +393,7 @@ void main() {
 
       await setSlider(tester, tenor, 0.5);
       final level = sliderValue(tester, tenor);
-      await tapIn(tester, muteIn(tenor));
+      await toggleMute(tester, tenor);
       expect(harness.engine.volumes[VoicePart.tenor], 0);
       expect(sliderValue(tester, tenor), level);
 
@@ -386,7 +402,7 @@ void main() {
       final moved = sliderValue(tester, tenor);
       expect(harness.engine.volumes[VoicePart.tenor], 0);
 
-      await tapIn(tester, muteIn(tenor));
+      await toggleMute(tester, tenor);
       expect(harness.engine.volumes[VoicePart.tenor], moved);
     });
 
@@ -396,7 +412,7 @@ void main() {
       await pumpPlayback(tester, ready());
       await openMixer(tester);
       final bass = voiceRow(VoicePart.bass);
-      await tapIn(tester, muteIn(bass));
+      await toggleMute(tester, bass);
       await setSlider(tester, bass, 0);
       expect(
         controller(tester).state.muted,
@@ -417,7 +433,7 @@ void main() {
       await setSlider(tester, alto, 0.5);
       expect(harness.engine.volumes[VoicePart.alto], closeTo(0.5, 0.05));
 
-      await tapIn(tester, muteIn(alto));
+      await toggleMute(tester, alto);
       await setSlider(tester, alto, 0);
       await setSlider(tester, alto, 0.6);
       expect(controller(tester).state.muted, contains(VoicePart.alto));
@@ -432,16 +448,16 @@ void main() {
       final tenor = voiceRow(VoicePart.tenor);
       await setSlider(tester, tenor, 0.4);
       final level = controller(tester).state.volumes[VoicePart.tenor]!;
-      await tapIn(tester, muteIn(tenor));
+      await toggleMute(tester, tenor);
       expect(controller(tester).state.volumes[VoicePart.tenor], level);
       expect(harness.engine.volumes[VoicePart.tenor], 0);
-      await tapIn(tester, muteIn(tenor));
+      await toggleMute(tester, tenor);
       expect(controller(tester).state.volumes[VoicePart.tenor], level);
       expect(harness.engine.volumes[VoicePart.tenor], closeTo(level, 1e-9));
 
       await setSlider(tester, tenor, 0);
-      await tapIn(tester, muteIn(tenor));
-      await tapIn(tester, muteIn(tenor));
+      await toggleMute(tester, tenor);
+      await toggleMute(tester, tenor);
       expect(controller(tester).state.muted, isNot(contains(VoicePart.tenor)));
       expect(controller(tester).state.volumes[VoicePart.tenor], 0);
       expect(harness.engine.volumes[VoicePart.tenor], 0);
@@ -511,7 +527,7 @@ void main() {
     testWidgets('muting keeps the voice selected and checked', (tester) async {
       await pumpPlayback(tester, ready());
       await openMixer(tester);
-      await tapIn(tester, muteIn(voiceRow(VoicePart.alto)));
+      await toggleMute(tester, voiceRow(VoicePart.alto));
       expect(controller(tester).state.muted, {VoicePart.alto});
       expect(controller(tester).state.selected, contains(VoicePart.alto));
       expect(boxOn(tester, VoicePart.alto), isTrue);
@@ -549,10 +565,10 @@ void main() {
       final level = sliderValue(tester, metronomeRow);
       expect(engine.clickVolume, level);
 
-      await tapIn(tester, muteIn(metronomeRow));
+      await toggleMute(tester, metronomeRow);
       expect(engine.clickVolume, 0);
       expect(sliderValue(tester, metronomeRow), level);
-      await tapIn(tester, muteIn(metronomeRow));
+      await toggleMute(tester, metronomeRow);
       expect(engine.clickVolume, level);
 
       // Unchecking a voice leaves the click alone.
@@ -586,14 +602,12 @@ void main() {
       );
     });
 
-    testWidgets('off: the row looks inactive with a hint, its level and Mute '
-        'are locked, and its checkbox turns it on (user decision '
-        '2026-10-21)', (tester) async {
+    testWidgets('off: no hint, slider not dimmed or locked, checkbox turns it '
+        'on (UI batch 2026-11-09)', (tester) async {
       final harness = ready();
       await pumpPlayback(tester, harness);
       await openMixer(tester);
       final engine = harness.engine;
-      final hint = find.byKey(const ValueKey('mixer-metronome-off'));
       final toggle = checkIn(metronomeRow);
       double fade() => tester
           .widget<Opacity>(
@@ -604,24 +618,17 @@ void main() {
           )
           .opacity;
 
-      expect(hint, findsOneWidget);
-      expect(find.text(PlaybackMessages.metronomeOff), findsOneWidget);
-      expect(fade(), lessThan(1));
-      expect(tester.widget<SheetCheckbox>(toggle).value, isFalse);
-      expect(tester.widget<SheetCheckbox>(toggle).onChanged, isNotNull);
-      expect(tester.widget<Slider>(sliderIn(metronomeRow)).onChanged, isNull);
-      await tapIn(tester, muteIn(metronomeRow));
-      expect(controller(tester).state.clickMuted, isFalse);
-
-      await tester.tap(toggle);
-      await tester.pump();
-      expect(controller(tester).state.metronomeOn, isTrue);
-      expect(hint, findsNothing);
+      expect(find.text(PlaybackMessages.metronomeOff), findsNothing);
       expect(fade(), 1);
+      expect(tester.widget<SheetCheckbox>(toggle).value, isFalse);
       expect(
         tester.widget<Slider>(sliderIn(metronomeRow)).onChanged,
         isNotNull,
       );
+
+      await tester.tap(toggle);
+      await tester.pump();
+      expect(controller(tester).state.metronomeOn, isTrue);
       expect(engine.volumes.values.every((v) => v == 0.8), isTrue);
 
       // Off again from the checkbox: voices unchanged, click silent.
@@ -630,6 +637,22 @@ void main() {
       expect(controller(tester).state.metronomeOn, isFalse);
       expect(engine.volumes.values.every((v) => v == 0.8), isTrue);
       expect(engine.clickVolume, 0);
+    });
+
+    testWidgets('slider-end icons set volume to 0 / full through the '
+        'controller (UI batch 2026-11-09)', (tester) async {
+      final harness = ready();
+      await pumpPlayback(tester, harness);
+      await openMixer(tester);
+      final alto = voiceRow(VoicePart.alto);
+      Finder glyph(String label) =>
+          find.descendant(of: alto, matching: find.bySemanticsLabel(label));
+      await tapIn(tester, glyph(PlaybackMessages.minVolumeLabel('Alto')));
+      expect(sliderValue(tester, alto), 0);
+      expect(harness.engine.volumes[VoicePart.alto], 0);
+      await tapIn(tester, glyph(PlaybackMessages.maxVolumeLabel('Alto')));
+      expect(sliderValue(tester, alto), 1);
+      expect(harness.engine.volumes[VoicePart.alto], 1);
     });
 
     testWidgets('the Mixer checkbox and the Speed checkbox are one state, '
@@ -767,9 +790,17 @@ void main() {
       ),
       findsOneWidget,
     );
-    await tester.tap(muteIn(alto), warnIfMissed: false);
+    await tester.tap(
+      find.descendant(
+        of: alto,
+        matching: find.bySemanticsLabel(
+          PlaybackMessages.minVolumeLabel('Alto'),
+        ),
+      ),
+      warnIfMissed: false,
+    );
     await tester.pump();
-    expect(controller(tester).state.muted, isEmpty);
+    expect(controller(tester).state.volumes[VoicePart.alto], isNot(0));
     expect(
       tester.widget<Slider>(sliderIn(voiceRow(VoicePart.soprano))).onChanged,
       isNotNull,
@@ -800,47 +831,46 @@ void main() {
       expect(find.text(kTitle), findsOneWidget);
     });
 
-    testWidgets('settings last while Playback is open, reset on reopen', (
-      tester,
-    ) async {
-      final harness = ready();
-      await pumpPlayback(tester, harness);
-      await openMixer(tester);
-      await setSlider(tester, voiceRow(VoicePart.soprano), 0.3);
-      await tapIn(tester, muteIn(voiceRow(VoicePart.bass)));
-      await tapIn(tester, checkIn(voiceRow(VoicePart.alto)));
-      final level = sliderValue(tester, voiceRow(VoicePart.soprano));
-      await tester.tap(find.byTooltip(PlaybackMessages.close));
-      await settle(tester);
+    testWidgets(
+      'settings last while Playback is open and are restored on reopen',
+      (tester) async {
+        final harness = ready();
+        await pumpPlayback(tester, harness);
+        await openMixer(tester);
+        await setSlider(tester, voiceRow(VoicePart.soprano), 0.3);
+        await toggleMute(tester, voiceRow(VoicePart.bass));
+        await tapIn(tester, checkIn(voiceRow(VoicePart.alto)));
+        final level = sliderValue(tester, voiceRow(VoicePart.soprano));
+        await tester.tap(find.byTooltip(PlaybackMessages.close));
+        await settle(tester);
 
-      // Same session: reopening the sheet shows the same settings.
-      await openMixer(tester);
-      expect(sliderValue(tester, voiceRow(VoicePart.soprano)), level);
-      expect(
-        tester.widget<SheetCheckbox>(checkIn(voiceRow(VoicePart.alto))).value,
-        isFalse,
-      );
-      await tester.tap(find.byTooltip(PlaybackMessages.close));
-      await settle(tester);
-
-      // Leave the score and open it again: defaults.
-      await tester.tap(find.byTooltip(PlaybackMessages.back));
-      await settle(tester);
-      await tester.pump(const Duration(seconds: 1));
-      expect(harness.engines.single.disposed, isTrue);
-      await reopenPlayback(tester);
-      expect(harness.engines, hasLength(2));
-      expect(harness.engine.volumes.values.every((v) => v == 0.8), isTrue);
-      await openMixer(tester);
-      for (final voice in VoicePart.values) {
-        expect(sliderValue(tester, voiceRow(voice)), 0.8);
+        // Same session: reopening the sheet shows the same settings.
+        await openMixer(tester);
+        expect(sliderValue(tester, voiceRow(VoicePart.soprano)), level);
         expect(
-          tester.widget<SheetCheckbox>(checkIn(voiceRow(voice))).value,
-          isTrue,
+          tester.widget<SheetCheckbox>(checkIn(voiceRow(VoicePart.alto))).value,
+          isFalse,
         );
-      }
-      expect(controller(tester).state.muted, isEmpty);
-    });
+        await tester.tap(find.byTooltip(PlaybackMessages.close));
+        await settle(tester);
+
+        // Leave the score and open it again: restored (saved per score).
+        await tester.tap(find.byTooltip(PlaybackMessages.back));
+        await settle(tester);
+        await tester.pump(const Duration(seconds: 1));
+        expect(harness.engines.single.disposed, isTrue);
+        await reopenPlayback(tester);
+        expect(harness.engines, hasLength(2));
+        expect(harness.engine.volumes[VoicePart.soprano], closeTo(0.3, 0.01));
+        await openMixer(tester);
+        expect(sliderValue(tester, voiceRow(VoicePart.soprano)), level);
+        expect(
+          tester.widget<SheetCheckbox>(checkIn(voiceRow(VoicePart.alto))).value,
+          isFalse,
+        );
+        expect(controller(tester).state.muted, contains(VoicePart.bass));
+      },
+    );
   });
 
   group('layout and accessibility', () {

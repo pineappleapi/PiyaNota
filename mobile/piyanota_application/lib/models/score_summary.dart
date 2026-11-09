@@ -54,6 +54,16 @@ class ScoreSummary {
         pageCount: pageCount,
       );
 
+  /// Same keys [ScoreSummary.fromJson] reads, so the offline cache round-trips.
+  Map<String, dynamic> toJson() => {
+    'scoreId': scoreId,
+    'title': title,
+    'lastAccessedAt': lastActivityAt?.toUtc().toIso8601String(),
+    'thumbnailUrl': thumbnailUrl,
+    'arranger': arranger,
+    'pageCount': pageCount,
+  };
+
   /// Throws [FormatException] only for a missing or invalid `scoreId` — the
   /// caller skips that entry and keeps the rest. Any other broken field is
   /// dropped to null.

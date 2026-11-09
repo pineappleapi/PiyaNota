@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/api_config.dart';
 import '../models/score_summary.dart';
@@ -40,25 +42,106 @@ final scoreLibraryProvider =
     >(ScoreLibraryController.new, retry: (_, _) => null);
 
 class ScoreLibraryController extends AsyncNotifier<List<ScoreSummary>> {
+  static const String _cachePrefix = 'score_library_cache_';
+
+  /// Cache-first: a stored list renders at once (works with no network) and
+  /// the server copy is fetched in the background. A failed background
+  /// fetch never replaces the list. Only with nothing stored does a failed
+  /// fetch surface as the error/Retry state.
   @override
-  Future<List<ScoreSummary>> build() =>
-      ref.watch(scoreLibraryApiProvider).fetchLibrary();
+  Future<List<ScoreSummary>> build() async {
+    final api = ref.watch(scoreLibraryApiProvider);
+    final cached = await _readCache();
+    if (cached != null) {
+      Future.microtask(() => _refresh(api));
+      return cached;
+    }
+    final fresh = await api.fetchLibrary();
+    unawaited(_writeCache(fresh));
+    return fresh;
+  }
+
+  // Bumped by local delete/rename/open so an older in-flight refresh can't
+  // overwrite them with a stale server copy.
+  int _localEpoch = 0;
+
+  Future<void> _refresh(ScoreLibraryApi api) async {
+    final epoch = _localEpoch;
+    try {
+      final fresh = await api.fetchLibrary();
+      if (!ref.mounted || epoch != _localEpoch) return;
+      state = AsyncData(fresh);
+      await _writeCache(fresh);
+    } on SessionExpiredException catch (e, st) {
+      // Retry can't fix a rejected token; the screen offers the login way out.
+      if (ref.mounted) state = AsyncError(e, st);
+    } on Object catch (e) {
+      // Offline or server down: keep showing the stored list.
+      if (kDebugMode) debugPrint('Library background refresh failed: $e');
+    }
+  }
+
+  // Keyed by account email so a different login never sees another user's
+  // scores. shortcut: stale entries of old accounts are never pruned; upgrade
+  // if cache size matters.
+  Future<String?> _cacheKey() async {
+    final email = await ref.read(sessionStorageProvider).readEmail();
+    return email == null ? null : '$_cachePrefix${email.toLowerCase()}';
+  }
+
+  Future<List<ScoreSummary>?> _readCache() async {
+    try {
+      final key = await _cacheKey();
+      if (key == null) return null;
+      final raw = (await SharedPreferences.getInstance()).getString(key);
+      if (raw == null) return null;
+      return [
+        for (final item in jsonDecode(raw) as List<dynamic>)
+          ScoreSummary.fromJson(item as Map<String, dynamic>),
+      ];
+    } on Object catch (e) {
+      // A bad or unreadable cache must only cost the fast path.
+      if (kDebugMode) debugPrint('Library cache unreadable: $e');
+      return null;
+    }
+  }
+
+  Future<void> _writeCache(List<ScoreSummary> scores) async {
+    try {
+      final key = await _cacheKey();
+      if (key == null) return;
+      await (await SharedPreferences.getInstance()).setString(
+        key,
+        jsonEncode([for (final s in scores) s.toJson()]),
+      );
+    } on Object catch (e) {
+      if (kDebugMode) debugPrint('Library cache not written: $e');
+    }
+  }
+
+  void _set(List<ScoreSummary> scores) {
+    _localEpoch++;
+    state = AsyncData(scores);
+    unawaited(_writeCache(scores));
+  }
 
   Future<void>? _reloading;
 
-  /// AC6 retry. Resets to a plain loading state (no stale error kept
-  /// alongside) so the screen shows the loading view, not the old error.
-  /// A second call while one is running joins it instead of fetching twice.
+  /// AC6 retry. With nothing on screen it resets to a plain loading state;
+  /// with a list already shown it refreshes quietly instead, so a failure
+  /// keeps the list. A second call while one is running joins it.
   Future<void> reload() => _reloading ??= _reload().whenComplete(() {
     _reloading = null;
   });
 
   Future<void> _reload() async {
+    final api = ref.read(scoreLibraryApiProvider);
+    if (state.value != null) return _refresh(api);
     state = const AsyncLoading();
-    final result = await AsyncValue.guard(
-      () => ref.read(scoreLibraryApiProvider).fetchLibrary(),
-    );
-    if (ref.mounted) state = result;
+    final result = await AsyncValue.guard(api.fetchLibrary);
+    if (!ref.mounted) return;
+    state = result;
+    if (result.value case final fresh?) unawaited(_writeCache(fresh));
   }
 
   /// Deletes [scoreId] on the server only. Callers remove the row with
@@ -86,7 +169,7 @@ class ScoreLibraryController extends AsyncNotifier<List<ScoreSummary>> {
     // user-triggerable mid-edit (today it is only the error-state Retry).
     final current = state.value;
     if (current == null) return;
-    state = AsyncData([
+    _set([
       for (final score in current)
         if (score.scoreId == scoreId)
           score.withDetails(
@@ -116,7 +199,7 @@ class ScoreLibraryController extends AsyncNotifier<List<ScoreSummary>> {
     );
     final current = state.value;
     if (current == null) return;
-    state = AsyncData([
+    _set([
       for (final score in current)
         if (score.scoreId == scoreId)
           score.copyWith(lastActivityAt: now)
@@ -131,7 +214,7 @@ class ScoreLibraryController extends AsyncNotifier<List<ScoreSummary>> {
     if (!ref.mounted) return;
     final current = state.value;
     if (current == null) return;
-    state = AsyncData([
+    _set([
       for (final score in current)
         if (score.scoreId != scoreId) score,
     ]);

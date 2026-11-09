@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/api_config.dart';
 import '../models/measure_table.dart';
@@ -383,6 +385,62 @@ class PlaybackState {
 final playbackControllerProvider = NotifierProvider.autoDispose
     .family<PlaybackController, PlaybackState, int>(PlaybackController.new);
 
+/// Per-score Playback memory kept on the device, keyed by score id: the
+/// disclaimer-seen flag and the last mixer / speed. A storage failure reads
+/// as "nothing saved" and a failed save is only logged.
+class PlaybackPrefs {
+  const PlaybackPrefs._();
+
+  static const String disclaimerPrefix = 'playback_disclaimer_seen_';
+  static const String mixPrefix = 'playback_mix_';
+
+  @visibleForTesting
+  static String disclaimerKey(int scoreId) => '$disclaimerPrefix$scoreId';
+  @visibleForTesting
+  static String mixKey(int scoreId) => '$mixPrefix$scoreId';
+
+  static Future<bool> disclaimerSeen(int scoreId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getBool(disclaimerKey(scoreId)) ?? false;
+    } on Object catch (e) {
+      debugPrint('Playback: disclaimer flag unread: $e');
+      return false;
+    }
+  }
+
+  static Future<void> markDisclaimerSeen(int scoreId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(disclaimerKey(scoreId), true);
+    } on Object catch (e) {
+      debugPrint('Playback: disclaimer flag not saved: $e');
+    }
+  }
+
+  static Future<Map<String, dynamic>?> loadMix(int scoreId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final text = prefs.getString(mixKey(scoreId));
+      if (text == null) return null;
+      final data = jsonDecode(text);
+      return data is Map<String, dynamic> ? data : null;
+    } on Object catch (e) {
+      debugPrint('Playback: saved mix unread: $e');
+      return null;
+    }
+  }
+
+  static Future<void> saveMix(int scoreId, Map<String, dynamic> mix) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(mixKey(scoreId), jsonEncode(mix));
+    } on Object catch (e) {
+      debugPrint('Playback: mix not saved: $e');
+    }
+  }
+}
+
 class PlaybackController extends Notifier<PlaybackState> {
   PlaybackController(this.scoreId);
 
@@ -559,7 +617,8 @@ class PlaybackController extends Notifier<PlaybackState> {
     // metronome off, speed at the score's tempo; the voices the
     // default selection left out start muted so the Mixer shows what is
     // heard. A fresh controller (autoDispose) means a reopened score starts
-    // here again (209 AC6).
+    // here until a saved mix is restored (mix/speed persist per score, user
+    // decision 2026-11-09, supersedes 209 AC6).
     _mixMuted = playable.difference(selected);
     final volumes = {
       for (final voice in result.playableVoices) voice: defaultVoiceVolume,
@@ -585,7 +644,19 @@ class PlaybackController extends Notifier<PlaybackState> {
           ? (clickAttached ? ClickStatus.ready : ClickStatus.unavailable)
           : ClickStatus.preparing,
     );
+    final savedMix = await PlaybackPrefs.loadMix(scoreId);
+    if (!current()) {
+      await _disposeQuietly(engine);
+      return;
+    }
+    _restoreMix(savedMix, playable);
+
+    /// Sends every gain that changed, all started at once (never one
+    /// awaited after another), so a slider change reaches the engine in the
+    /// same frame.
     _applyGains();
+    // Speed must reach the engine too, not only the slider (MIDI re-renders).
+    if (state.chosenBpm != result.tempoBpm) commitBpm();
     // The MIDI path's click is a rendered WAV, already attached; the
     // generated click only serves the time-stretched MP3 path.
     if (result.tempoKnown && source == PlaybackSource.mp3) {
@@ -616,9 +687,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       final live = await ref.read(liveFileMakerProvider)(result, bars, bpm);
       if (live == null) return null;
       engine = ref.read(liveEngineFactoryProvider)(live);
-      await engine.load({
-        for (final v in result.playableVoices) v: live.midi,
-      });
+      await engine.load({for (final v in result.playableVoices) v: live.midi});
       if (bars.isNotEmpty) await engine.attachClick(live.midi);
       return engine;
     } on Object catch (e) {
@@ -954,6 +1023,7 @@ class PlaybackController extends Notifier<PlaybackState> {
   void commitBpm() {
     final engine = _engine;
     if (engine == null || state.phase != PlaybackPhase.ready) return;
+    _saveMix();
     if (state.source == PlaybackSource.midi) {
       unawaited(_rerender());
       return;
@@ -1247,6 +1317,7 @@ class PlaybackController extends Notifier<PlaybackState> {
     }
     state = state.copyWith(selected: selected);
     _applyGains();
+    _saveMix();
     return true;
   }
 
@@ -1260,6 +1331,7 @@ class PlaybackController extends Notifier<PlaybackState> {
     final level = volume.clamp(0.0, fullVolume).toDouble();
     state = state.copyWith(volumes: {...state.volumes, voice: level});
     _applyGains();
+    _saveMix();
   }
 
   /// PIYA-209 AC2/AC4: muting leaves the slider exactly where it is, and
@@ -1276,6 +1348,7 @@ class PlaybackController extends Notifier<PlaybackState> {
       selected: liftChip ? {...state.selected, voice} : state.selected,
     );
     _applyGains();
+    _saveMix();
   }
 
   /// The click row follows the voices' rule: level and Mute independent.
@@ -1284,12 +1357,14 @@ class PlaybackController extends Notifier<PlaybackState> {
     final level = volume.clamp(0.0, fullVolume).toDouble();
     state = state.copyWith(clickVolume: level);
     _applyGains();
+    _saveMix();
   }
 
   void setClickMuted({required bool muted}) {
     if (state.clickStatus == ClickStatus.unavailable) return;
     state = state.copyWith(clickMuted: muted);
     _applyGains();
+    _saveMix();
   }
 
   /// PIYA-210 AC3: the Speed modal's Metronome Click checkbox.
@@ -1297,6 +1372,7 @@ class PlaybackController extends Notifier<PlaybackState> {
     if (state.clickStatus == ClickStatus.unavailable) return;
     state = state.copyWith(metronomeOn: on);
     _applyGains();
+    _saveMix();
   }
 
   /// PIYA-210: the Speed slider, in whole BPM from 30 to 180. Moves the
@@ -1313,9 +1389,67 @@ class PlaybackController extends Notifier<PlaybackState> {
 
   void dismissReview() => state = state.copyWith(reviewDismissed: true);
 
-  /// Sends every gain that changed, all started at once (never one
-  /// awaited after another), so a slider change reaches the engine in the
-  /// same frame.
+  /// Applies the last saved mixer and speed over the defaults; anything
+  /// unusable (voice gone, bad type) keeps its default.
+  void _restoreMix(Map<String, dynamic>? saved, Set<VoicePart> playable) {
+    if (saved == null) return;
+    Set<VoicePart> voices(Object? raw) => {
+      if (raw is List)
+        for (final name in raw)
+          if (parseVoicePart(name) case final v? when playable.contains(v)) v,
+    };
+    double? level(Object? v) => v is num ? v.toDouble().clamp(0.0, 1.0) : null;
+    final selected = voices(saved['selected']);
+    final volumes = {...state.volumes};
+    final rawVolumes = saved['volumes'];
+    if (rawVolumes is Map) {
+      rawVolumes.forEach((name, v) {
+        final voice = parseVoicePart(name);
+        final l = level(v);
+        if (voice != null && l != null && volumes.containsKey(voice)) {
+          volumes[voice] = l;
+        }
+      });
+    }
+    final bpm = saved['bpm'];
+    final clickOk = state.clickStatus != ClickStatus.unavailable;
+    // Mutes only apply with the selection they were saved against, else a
+    // fallback selection could end up fully muted.
+    final muted = selected.isNotEmpty && saved['muted'] is List
+        ? voices(saved['muted'])
+        : state.muted;
+    // Restored mutes stay liftable by the chip (the Mute pill may be gone).
+    _mixMuted = {...muted};
+    state = state.copyWith(
+      selected: selected.isEmpty ? state.selected : selected,
+      muted: muted,
+      volumes: volumes,
+      clickVolume: clickOk ? level(saved['clickVolume']) : null,
+      clickMuted: clickOk && saved['clickMuted'] == true,
+      metronomeOn: clickOk && saved['metronomeOn'] == true,
+      bpm: bpm is int
+          ? bpm.clamp(ScoreDetails.minTempo, ScoreDetails.maxTempo)
+          : null,
+    );
+  }
+
+  /// Fire-and-forget; slider drags write every change (a small JSON string,
+  /// shortcut: debounce if this ever shows in profiling).
+  void _saveMix() {
+    if (state.phase != PlaybackPhase.ready) return;
+    unawaited(
+      PlaybackPrefs.saveMix(scoreId, {
+        'selected': [for (final v in state.selected) v.name],
+        'muted': [for (final v in state.muted) v.name],
+        'volumes': {for (final e in state.volumes.entries) e.key.name: e.value},
+        'clickVolume': state.clickVolume,
+        'clickMuted': state.clickMuted,
+        'metronomeOn': state.metronomeOn,
+        'bpm': state.chosenBpm,
+      }),
+    );
+  }
+
   void _applyGains() {
     final engine = _engine;
     if (engine == null) return;

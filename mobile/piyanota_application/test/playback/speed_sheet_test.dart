@@ -317,7 +317,7 @@ void main() {
       expect(find.text(kTitle), findsOneWidget);
     });
 
-    testWidgets('settings last for the session, reset on reopen', (
+    testWidgets('settings last for the session and are restored on reopen', (
       tester,
     ) async {
       final harness = ready();
@@ -337,11 +337,10 @@ void main() {
       await settle(tester);
       await tester.pump(const Duration(seconds: 1));
       await reopenPlayback(tester);
-      expect(harness.engine.speed, 1);
-      expect(harness.engine.clickVolume, 0);
+      expect(harness.engine.speed, 150 / 90);
       await openSpeed(tester);
-      expect(sliderValue(tester), 90);
-      expect(tester.widget<SheetCheckbox>(toggle).value, isFalse);
+      expect(sliderValue(tester), bpm);
+      expect(tester.widget<SheetCheckbox>(toggle).value, isTrue);
     });
   });
 

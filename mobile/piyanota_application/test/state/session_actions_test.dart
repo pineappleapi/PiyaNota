@@ -166,6 +166,7 @@ void main() {
   testWidgets('logout (wipeResults) wipes the results and forgets the owner', (
     tester,
   ) async {
+    SharedPreferences.setMockInitialValues({});
     await pump(tester, owner: testSession().userId);
     container.read(signedInProvider.notifier).set(true);
     await endLocalSession(ref, wipeResults: true);
@@ -177,11 +178,18 @@ void main() {
   testWidgets('wipeAccountLocalData (delete account) wipes the results', (
     tester,
   ) async {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({
+      'score_library_cache_a@b.c': '[]',
+      'playback_mix_1': '{}',
+      'playback_disclaimer_seen_1': true,
+      'onboarding_completed': true,
+    });
     await pump(tester, owner: testSession().userId);
     await wipeAccountLocalData(ref);
     expect(results.deleteAllCalls, 1);
     expect(owners.owner, isNull);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getKeys(), {'onboarding_completed'});
   });
 
   testWidgets('expiry then the same account logging in keeps the results', (

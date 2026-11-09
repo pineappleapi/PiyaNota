@@ -94,6 +94,8 @@ class PlaybackMessages {
   /// Screen-reader labels; the row's name is not repeated on screen.
   static String playLabel(String row) => 'Play $row';
   static String muteLabel(String row) => 'Mute $row';
+  static String minVolumeLabel(String row) => 'Set $row volume to zero';
+  static String maxVolumeLabel(String row) => 'Set $row volume to full';
   static String volumeLabel(String row) => '$row volume';
   static String volumeValue(double level) => '${(level * 100).round()}%';
   static String rowUnavailable(String row) => '$row audio unavailable';
@@ -129,10 +131,10 @@ class PlaybackMessages {
       'Automatic transcription — some notes may be wrong. Listen critically.';
   static const String dismissReview = 'Dismiss';
 
-  /// General notice, shown once per result screen visit.
+  /// General notice, shown once per score, the first time it opens after conversion.
   static const String accuracyNotice =
-      "PiyaNota's conversion is not fully accurate yet. Please review the "
-      'playback against your score before relying on it.';
+      'PiyaNota’s conversion may contain errors, so check the playback '
+      'against your original score before relying on it.';
   static const String dismissNotice = 'Dismiss notice';
 
   // Unreadable-voice prompt (backend `voice_unreadable` review item).

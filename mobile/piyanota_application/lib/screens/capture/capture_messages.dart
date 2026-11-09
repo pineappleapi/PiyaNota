@@ -9,8 +9,7 @@ class CaptureMessages {
   CaptureMessages._();
 
   // Details (step 1).
-  static const String detailsTitle = 'Add a score';
-  static const String detailsStep = 'Step 1 of 2 · About the song';
+  static const String detailsTitle = 'Score Details';
   static const String titleLabel = 'Song title';
   static const String titleHint = 'e.g. Bituin Walang Ningning';
   static const String arrangerLabel = 'Arranger (optional)';

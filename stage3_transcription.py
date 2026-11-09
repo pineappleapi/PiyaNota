@@ -3078,6 +3078,10 @@ def _events_for_symbols(
  
 # ── Batch processing (Stage 2 → Stage 3) ─────────────────────────────────────
  
+PASS1_PROGRESS_UNITS = 9  # CRNN forward per strip
+PASS2_PROGRESS_UNITS = 1  # pitch inference per strip: fast, but still a visible step
+
+
 def transcribe_voice_sequences(
     voice_sequences: dict,
     model_weights:   str = r"D:\PiyaNota (Code)\music_symbol_detection\crnn_cameraprimus_transcription.pt",
@@ -3121,7 +3125,9 @@ def transcribe_voice_sequences(
           strip-pixel x of that strip's barlines. None (default) leaves events byte-identical.
 
         progress: Called as progress(strips_done, strips_total) once before Pass 1 and after each
-          decoded strip (Pass 1 only, the CRNN forward). Not called when there are no strips. Must
+          decoded strip (Pass 1, the CRNN forward) and after each Pass 2 strip;
+          the counts are weighted units (Pass 1 = 9 per strip, Pass 2 = 1),
+          not strips. Not called when there are no strips. Must
           not raise; the stage does not catch callback exceptions.
 
     Raises:
@@ -3143,9 +3149,10 @@ def transcribe_voice_sequences(
  
     # Pass 1: decode every strip. The header filter needs all voices of a system at once (quorum).
     decoded: dict[str, dict[str, Any]] = {}
-    total_strips = sum(len(s) for s in voice_sequences.values())
+    n_strips = sum(len(s) for s in voice_sequences.values())
+    total_strips = n_strips * (PASS1_PROGRESS_UNITS + PASS2_PROGRESS_UNITS)  # weighted: the CRNN forward dominates
     done_strips = 0
-    if progress is not None and total_strips > 0:
+    if progress is not None and n_strips > 0:
         progress(0, total_strips)
     for voice, strips in voice_sequences.items():
         for strip, page_index, sys_idx, voice_label, v_idx in strips:
@@ -3162,7 +3169,7 @@ def transcribe_voice_sequences(
                                      voice_label=voice_label, v_idx=v_idx, decision=decision,
                                      symbols=[s for s, _ in scored], confs=[c for _, c in scored],
                                      spans=spans, header_flags=[])
-            done_strips += 1
+            done_strips += PASS1_PROGRESS_UNITS
             if progress is not None:
                 progress(done_strips, total_strips)
 
@@ -3217,6 +3224,9 @@ def transcribe_voice_sequences(
                     e["mid_change_flags"] = list(d["mid_change_flags"])
                     e["review_needed"] = True
             all_events.extend(events)
+            done_strips += PASS2_PROGRESS_UNITS
+            if progress is not None:
+                progress(done_strips, total_strips)
         all_events.sort(key=lambda e: (e["page_index"], e["sys_idx"], e["tick_onset"]))
         results[voice] = all_events
         print(f"[Stage 3] {voice}: {len(all_events)} total events")

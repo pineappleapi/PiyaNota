@@ -235,10 +235,10 @@ Finder _row(String jobId) => find.byKey(ValueKey('scan-row-$jobId'));
 
 void main() {
   group('AC5/AC9 bell', () {
-    testWidgets('idle: plain bell, no ring, no badge', (tester) async {
+    testWidgets('idle: filled bell, no ring, no badge', (tester) async {
       final app = _App();
       await app.pump(tester, _bellHome);
-      expect(find.byIcon(Icons.notifications_none_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.notifications_rounded), findsOneWidget);
       expect(_ring, findsNothing);
       expect(_badge, findsNothing);
       await app.end();

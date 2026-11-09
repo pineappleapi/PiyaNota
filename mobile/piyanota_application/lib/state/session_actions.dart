@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/auth_session.dart';
 import 'auth_providers.dart';
@@ -59,11 +60,29 @@ Future<void> endLocalSession(WidgetRef ref, {bool wipeResults = false}) async {
     // native stops above, logging out must not wait on file IO.
     unawaited(results.deleteAll());
     await owners.clear();
+    await _clearAccountPrefs();
   }
   try {
     await storage.clear();
   } catch (e) {
     debugPrint('Session clear failed: $e');
+  }
+}
+
+/// Per-score caches and mixer/disclaimer flags are keyed by score id or
+/// email only, so the next account on this device must not inherit them.
+Future<void> _clearAccountPrefs() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    for (final key in prefs.getKeys().toList()) {
+      if (key.startsWith('score_library_cache_') ||
+          key.startsWith(PlaybackPrefs.mixPrefix) ||
+          key.startsWith(PlaybackPrefs.disclaimerPrefix)) {
+        await prefs.remove(key);
+      }
+    }
+  } on Object catch (e) {
+    debugPrint('Account prefs not cleared: $e');
   }
 }
 

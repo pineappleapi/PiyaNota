@@ -118,6 +118,8 @@ void main() {
   Future<void> expectNoDemoScoreUntilLoaded(
     WidgetTester tester, {
     void Function(Duration t)? eachFrame,
+    // False when this account's own list is cached: it shows at once.
+    bool expectLoading = true,
   }) async {
     var sawLoading = false;
     final end = FakeScoreLibraryApi.defaultLatency + settle;
@@ -139,7 +141,11 @@ void main() {
         sawLoading = true;
       }
     }
-    expect(sawLoading, isTrue, reason: 'the loading state never showed');
+    expect(
+      sawLoading || !expectLoading,
+      isTrue,
+      reason: 'the loading state never showed',
+    );
   }
 
   testWidgets('sign-up after a demo logout goes from loading straight to the '
@@ -187,7 +193,7 @@ void main() {
     await logOut(tester);
 
     await fillAndTap(tester, [newEmail, newPassword], 'Log In');
-    await expectNoDemoScoreUntilLoaded(tester);
+    await expectNoDemoScoreUntilLoaded(tester, expectLoading: false);
     expect(find.text(LibraryMessages.emptySubtitle), findsOneWidget);
   });
 
