@@ -1,6 +1,10 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../../../models/library_entry.dart';
+import '../../../services/thumbnail_cache.dart';
 import '../../../theme/app_theme.dart';
 import '../../../state/processing_providers.dart';
 import '../../scan_status/scan_status_messages.dart';
@@ -359,7 +363,10 @@ class ScoreCard extends StatelessWidget {
         enabled: !isDeleting,
         child: _CardRow(
           tileColor: Colors.white,
-          tile: ScoreThumbnail(url: score.thumbnailUrl),
+          tile: ScoreThumbnail(
+            scoreId: '${score.scoreId}',
+            url: score.thumbnailUrl,
+          ),
           text: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
@@ -433,11 +440,13 @@ class ScanningScoreCard extends StatelessWidget {
     required this.onLongPress,
     required this.onRetry,
     this.thumbnailUrl,
+    this.thumbnailScoreId,
   });
 
   final String title;
   final TrackedJob job;
   final String? thumbnailUrl;
+  final String? thumbnailScoreId;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
   final VoidCallback onRetry;
@@ -478,7 +487,10 @@ class ScanningScoreCard extends StatelessWidget {
             tile: Opacity(
               key: const ValueKey('scanning-thumbnail'),
               opacity: _thumbnailOpacity,
-              child: ScoreThumbnail(url: thumbnailUrl),
+              child: ScoreThumbnail(
+                scoreId: thumbnailScoreId,
+                url: thumbnailUrl,
+              ),
             ),
             text: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -538,13 +550,17 @@ class ScanningScoreCard extends StatelessWidget {
   }
 }
 
-/// The score's thumbnail when the API supplies one and it loads; otherwise
-/// (no URL, still loading, or a failed load) the mockup's music-note glyph,
-/// so a broken image never leaves an empty tile.
-class ScoreThumbnail extends StatelessWidget {
-  const ScoreThumbnail({super.key, required this.url});
+/// The score's thumbnail: the copy saved on disk when there is one, else the
+/// API's URL (which is then saved for next launch); otherwise (no image,
+/// still loading, or a failed load) the mockup's music-note glyph, so a
+/// broken image never leaves an empty tile.
+class ScoreThumbnail extends StatefulWidget {
+  const ScoreThumbnail({super.key, required this.url, this.scoreId});
 
   final String? url;
+
+  /// Key of the on-disk copy; without it the image is network-only.
+  final String? scoreId;
 
   static const double _noteIconSize = 38;
 
@@ -556,27 +572,76 @@ class ScoreThumbnail extends StatelessWidget {
   );
 
   @override
+  State<ScoreThumbnail> createState() => _ScoreThumbnailState();
+}
+
+class _ScoreThumbnailState extends State<ScoreThumbnail> {
+  File? _saved;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolve();
+  }
+
+  @override
+  void didUpdateWidget(ScoreThumbnail old) {
+    super.didUpdateWidget(old);
+    if (old.scoreId != widget.scoreId) {
+      _saved = null;
+      _resolve();
+    }
+  }
+
+  Future<void> _resolve() async {
+    final id = widget.scoreId;
+    if (id == null) return;
+    final saved = await ThumbnailCache.cached(id);
+    if (!mounted || id != widget.scoreId) return;
+    if (saved != null) {
+      setState(() => _saved = saved);
+      return;
+    }
+    final url = widget.url;
+    if (url != null) unawaited(ThumbnailCache.fetch(id, url));
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final url = this.url;
-    if (url == null) return _fallback;
+    final saved = _saved;
+    final url = widget.url;
+    if (saved == null && url == null) return ScoreThumbnail._fallback;
     final cacheSize =
         (_CardMetrics.tileSize * MediaQuery.devicePixelRatioOf(context))
             .round();
+    // Decode at tile size, not the source resolution, so a long library
+    // of page-sized thumbnails doesn't balloon memory.
+    final image = saved != null
+        ? Image.file(
+            saved,
+            width: _CardMetrics.tileSize,
+            height: _CardMetrics.tileSize,
+            fit: BoxFit.cover,
+            cacheWidth: cacheSize,
+            excludeFromSemantics: true,
+            errorBuilder: (context, error, stackTrace) =>
+                ScoreThumbnail._fallback,
+          )
+        : Image.network(
+            url!,
+            width: _CardMetrics.tileSize,
+            height: _CardMetrics.tileSize,
+            fit: BoxFit.cover,
+            cacheWidth: cacheSize,
+            excludeFromSemantics: true,
+            loadingBuilder: (context, child, progress) =>
+                progress == null ? child : ScoreThumbnail._fallback,
+            errorBuilder: (context, error, stackTrace) =>
+                ScoreThumbnail._fallback,
+          );
     return ClipRRect(
       borderRadius: BorderRadius.circular(_CardMetrics.tileRadius),
-      child: Image.network(
-        url,
-        width: _CardMetrics.tileSize,
-        height: _CardMetrics.tileSize,
-        fit: BoxFit.cover,
-        // Decode at tile size, not the source resolution, so a long library
-        // of page-sized thumbnails doesn't balloon memory.
-        cacheWidth: cacheSize,
-        excludeFromSemantics: true,
-        loadingBuilder: (context, child, progress) =>
-            progress == null ? child : _fallback,
-        errorBuilder: (context, error, stackTrace) => _fallback,
-      ),
+      child: image,
     );
   }
 }

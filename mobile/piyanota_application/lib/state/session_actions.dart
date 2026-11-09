@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/auth_session.dart';
+import '../services/thumbnail_cache.dart';
 import 'auth_providers.dart';
 import 'export_jobs.dart';
 import 'export_providers.dart';
@@ -72,6 +73,7 @@ Future<void> endLocalSession(WidgetRef ref, {bool wipeResults = false}) async {
 /// Per-score caches and mixer/disclaimer flags are keyed by score id or
 /// email only, so the next account on this device must not inherit them.
 Future<void> _clearAccountPrefs() async {
+  unawaited(ThumbnailCache.clearAll());
   try {
     final prefs = await SharedPreferences.getInstance();
     for (final key in prefs.getKeys().toList()) {

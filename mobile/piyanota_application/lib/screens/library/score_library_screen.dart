@@ -506,17 +506,21 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
     ];
   }
 
-  Widget _scanningCard(TrackedJob job, String title, {String? thumbnailUrl}) =>
-      ScanningScoreCard(
-        key: ValueKey('scanning-${job.jobId}'),
-        title: title,
-        job: job,
-        thumbnailUrl: thumbnailUrl,
-        onTap: () => _openJob(job, title),
-        onLongPress: () => _cancelScan(job),
-        onRetry: () =>
-            ref.read(processingJobsProvider.notifier).retry(job.jobId),
-      );
+  Widget _scanningCard(
+    TrackedJob job,
+    String title, {
+    String? thumbnailUrl,
+    String? thumbnailScoreId,
+  }) => ScanningScoreCard(
+    key: ValueKey('scanning-${job.jobId}'),
+    title: title,
+    job: job,
+    thumbnailUrl: thumbnailUrl,
+    thumbnailScoreId: thumbnailScoreId,
+    onTap: () => _openJob(job, title),
+    onLongPress: () => _cancelScan(job),
+    onRetry: () => ref.read(processingJobsProvider.notifier).retry(job.jobId),
+  );
 
   List<Widget> _buildStateContent(
     AsyncValue<List<ScoreSummary>> library,
@@ -595,6 +599,7 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
           job,
           entry.displayTitle,
           thumbnailUrl: entry.score.thumbnailUrl,
+          thumbnailScoreId: '${entry.score.scoreId}',
         ),
       );
     }
