@@ -587,7 +587,6 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
                 arranger: state.arranger,
                 onBack: () => unawaited(_back()),
                 onDownload: ready ? _openExport : null,
-                onPiano: ready ? () => unawaited(_openPiano()) : null,
               ),
               if (ready)
                 _VoiceChips(
@@ -627,6 +626,7 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
                 onSeekEnd: (value) => unawaited(_onSeekEnd(value)),
                 onMixer: _openMixer,
                 onSpeed: _openSpeed,
+                onPiano: () => unawaited(_openPiano()),
               )
             : null,
       ),
@@ -640,14 +640,12 @@ class _Header extends StatelessWidget {
     required this.arranger,
     required this.onBack,
     required this.onDownload,
-    required this.onPiano,
   });
 
   final String title;
   final String? arranger;
   final VoidCallback onBack;
   final VoidCallback? onDownload;
-  final VoidCallback? onPiano;
 
   @override
   Widget build(BuildContext context) {
@@ -703,21 +701,10 @@ class _Header extends StatelessWidget {
           // Kept in the layout while loading so the title stays centred.
           Visibility.maintain(
             visible: onDownload != null,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _NavyDisc(
-                  icon: Icons.piano_rounded,
-                  tooltip: PianoMessages.openButton,
-                  onPressed: onPiano,
-                ),
-                const SizedBox(width: 8),
-                _NavyDisc(
-                  icon: Icons.download_rounded,
-                  tooltip: PlaybackMessages.download,
-                  onPressed: onDownload,
-                ),
-              ],
+            child: _NavyDisc(
+              icon: Icons.download_rounded,
+              tooltip: PlaybackMessages.download,
+              onPressed: onDownload,
             ),
           ),
         ],
@@ -1586,6 +1573,7 @@ class _ControlPanel extends StatelessWidget {
     required this.onSeekEnd,
     required this.onMixer,
     required this.onSpeed,
+    required this.onPiano,
   });
 
   final ValueListenable<Duration> display;
@@ -1600,6 +1588,7 @@ class _ControlPanel extends StatelessWidget {
   final ValueChanged<Duration> onSeekEnd;
   final VoidCallback onMixer;
   final VoidCallback onSpeed;
+  final VoidCallback onPiano;
 
   static const double _radius = 24;
   static const double _playSize = 56;
@@ -1608,6 +1597,14 @@ class _ControlPanel extends StatelessWidget {
   /// The Slider insets its track by the overlay radius, so the time labels
   /// are inset by the same amount to sit under the real track ends.
   static const double _overlayRadius = 24;
+
+  /// The Slider's 48 dp hit box; the action row starts this far above its
+  /// bottom edge, level with the time labels (mockup).
+  static const double _sliderBox = 48;
+  static const double _actionsOverlap = 17;
+
+  /// Equal width per action so the middle one sits on the panel's centre line.
+  static const double _actionSlot = 96;
 
   /// Track bottom to the time labels' text box, from the playback mockup:
   /// 14 dp to the digit tops (412 px image = 412 dp, scale 1, pixel-read),
@@ -1688,45 +1685,109 @@ class _ControlPanel extends StatelessWidget {
                 Stack(
                   clipBehavior: Clip.none,
                   children: [
-                    SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
-                        activeTrackColor: Colors.white,
-                        // Not in the mockup (its track is all white at 0:00):
-                        // a dimmer unplayed part shows progress at a glance.
-                        inactiveTrackColor: Colors.white.withValues(
-                          alpha: 0.45,
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: SliderTheme(
+                        data: SliderTheme.of(context).copyWith(
+                          activeTrackColor: Colors.white,
+                          // Not in the mockup (its track is all white at 0:00):
+                          // a dimmer unplayed part shows progress at a glance.
+                          inactiveTrackColor: Colors.white.withValues(
+                            alpha: 0.45,
+                          ),
+                          thumbColor: Colors.white,
+                          overlayColor: Colors.white.withValues(alpha: 0.2),
+                          trackHeight: _trackHeight,
+                          thumbShape: const RoundSliderThumbShape(
+                            enabledThumbRadius: 9,
+                          ),
+                          overlayShape: const RoundSliderOverlayShape(
+                            overlayRadius: _overlayRadius,
+                          ),
+                          trackShape: const RoundedRectSliderTrackShape(),
+                          showValueIndicator: ShowValueIndicator.never,
                         ),
-                        thumbColor: Colors.white,
-                        overlayColor: Colors.white.withValues(alpha: 0.2),
-                        trackHeight: _trackHeight,
-                        thumbShape: const RoundSliderThumbShape(
-                          enabledThumbRadius: 9,
+                        child: ValueListenableBuilder<Duration>(
+                          valueListenable: display,
+                          builder: (context, value, _) => Slider(
+                            key: const ValueKey('seek-bar'),
+                            value: value.inMilliseconds
+                                .clamp(0, maxMs)
+                                .toDouble(),
+                            max: maxMs.toDouble(),
+                            semanticFormatterCallback: (ms) =>
+                                PlaybackMessages.time(
+                                  Duration(milliseconds: ms.round()),
+                                ),
+                            label: PlaybackMessages.seek,
+                            onChanged: (ms) => onSeekChanged(
+                              Duration(milliseconds: ms.round()),
+                            ),
+                            onChangeEnd: (ms) =>
+                                onSeekEnd(Duration(milliseconds: ms.round())),
+                          ),
                         ),
-                        overlayShape: const RoundSliderOverlayShape(
-                          overlayRadius: _overlayRadius,
-                        ),
-                        trackShape: const RoundedRectSliderTrackShape(),
-                        showValueIndicator: ShowValueIndicator.never,
                       ),
-                      child: ValueListenableBuilder<Duration>(
-                        valueListenable: display,
-                        builder: (context, value, _) => Slider(
-                          key: const ValueKey('seek-bar'),
-                          value: value.inMilliseconds
-                              .clamp(0, maxMs)
-                              .toDouble(),
-                          max: maxMs.toDouble(),
-                          semanticFormatterCallback: (ms) =>
-                              PlaybackMessages.time(
-                                Duration(milliseconds: ms.round()),
+                    ),
+                    // Mockup: the actions share the time labels' row, Voice
+                    // Mixer on the centre line. Drawn above the slider's lower
+                    // box (below its track) so they stay tappable.
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(height: _sliderBox - _actionsOverlap),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Flexible(
+                              child: SizedBox(
+                                width: _actionSlot,
+                                child: _PanelAction(
+                                  icon: const CustomPaint(
+                                    size: Size.square(28),
+                                    painter: _MetronomePainter(),
+                                  ),
+                                  label: PlaybackMessages.speed,
+                                  onPressed: onSpeed,
+                                ),
                               ),
-                          label: PlaybackMessages.seek,
-                          onChanged: (ms) =>
-                              onSeekChanged(Duration(milliseconds: ms.round())),
-                          onChangeEnd: (ms) =>
-                              onSeekEnd(Duration(milliseconds: ms.round())),
+                            ),
+                            Flexible(
+                              child: SizedBox(
+                                width: _actionSlot,
+                                child: _PanelAction(
+                                  icon: const RotatedBox(
+                                    quarterTurns: 1,
+                                    child: Icon(
+                                      Icons.tune_rounded,
+                                      color: Colors.white,
+                                      size: 28,
+                                    ),
+                                  ),
+                                  label: PlaybackMessages.voiceMixer,
+                                  onPressed: onMixer,
+                                ),
+                              ),
+                            ),
+                            Flexible(
+                              child: SizedBox(
+                                width: _actionSlot,
+                                child: _PanelAction(
+                                  icon: const Icon(
+                                    Icons.piano_rounded,
+                                    color: Colors.white,
+                                    size: 28,
+                                  ),
+                                  label: PianoMessages.openButton,
+                                  onPressed: onPiano,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
+                      ],
                     ),
                     Positioned(
                       left: _overlayRadius,
@@ -1753,36 +1814,6 @@ class _ControlPanel extends StatelessWidget {
                             ),
                           ],
                         ),
-                      ),
-                    ),
-                  ],
-                ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Flexible(
-                      child: _PanelAction(
-                        icon: const RotatedBox(
-                          quarterTurns: 1,
-                          child: Icon(
-                            Icons.tune_rounded,
-                            color: Colors.white,
-                            size: 28,
-                          ),
-                        ),
-                        label: PlaybackMessages.voiceMixer,
-                        onPressed: onMixer,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Flexible(
-                      child: _PanelAction(
-                        icon: const CustomPaint(
-                          size: Size.square(28),
-                          painter: _MetronomePainter(),
-                        ),
-                        label: PlaybackMessages.speed,
-                        onPressed: onSpeed,
                       ),
                     ),
                   ],

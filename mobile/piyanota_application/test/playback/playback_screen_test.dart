@@ -217,9 +217,11 @@ void main() {
         await pumpPlayback(tester, harness);
         final rect = tester.getRect(find.byKey(const ValueKey('seek-bar')));
         expect(rect.height, greaterThanOrEqualTo(48));
-        // 20 dp below the track centre: where the time labels now sit.
+        // 20 dp below the track centre: where the time labels now sit. At the
+        // bar's left end, clear of the centred action row that overlaps the
+        // box's lower edge (mockup layout).
         await tester.tapAt(
-          Offset(rect.left + rect.width * 0.75, rect.center.dy + 20),
+          Offset(rect.left + rect.width * 0.05, rect.center.dy + 20),
         );
         await tester.pump();
         expect(harness.engine.seeks, hasLength(1));
