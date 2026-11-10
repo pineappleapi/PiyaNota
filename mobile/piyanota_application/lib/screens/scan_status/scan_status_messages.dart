@@ -95,4 +95,11 @@ class ScanStatusMessages {
 
   // Failure view Delete (AC3).
   static const String deleteScan = 'Delete';
+
+  // A tapped result notification: shown while the app checks the server.
+  static const String openingFromNotification = 'Opening your score…';
+  static String notificationFailed(String title) =>
+      '$title couldn\'t be converted. You can scan it again from the Library.';
+  static const String notificationGone =
+      'We couldn\'t find that score. It may have been deleted.';
 }

@@ -37,6 +37,8 @@ class PdfxPageRenderer implements PdfPageRenderer {
   }
 }
 
+const String _pageBackground = '#FFFFFF';
+
 class _PdfxDocument implements PdfPreviewDocument {
   _PdfxDocument(this._doc);
   final pdfx.PdfDocument _doc;
@@ -52,6 +54,9 @@ class _PdfxDocument implements PdfPreviewDocument {
         width: width,
         height: width * page.height / page.width,
         format: pdfx.PdfPageImageFormat.png,
+        // Without this the PNG keeps a transparent page, and the dark
+        // preview backdrop shows through the black notation (dark gray).
+        backgroundColor: _pageBackground,
       );
       if (image == null) throw const PdfUnreadableException(PdfProblem.corrupt);
       return image.bytes;

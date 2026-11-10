@@ -36,7 +36,7 @@ def test_status_queued_shape(client: FlaskClient, headers: dict[str, str]) -> No
     data = body["data"]
     assert set(data) == {
         "jobId", "status", "totalPages", "percentComplete", "failureReason", "failedVoices",
-        "failedVoiceCauses", "title", "tempoBpm",
+        "failedVoiceCauses", "title", "tempoBpm", "clientSubmissionId", "createdAt",
     }
     assert (data["jobId"], data["status"], data["totalPages"]) == (ref, "queued", 2)
     assert data["failureReason"] is None and data["failedVoices"] is None
@@ -157,3 +157,76 @@ def test_cancel_job_with_score_locks_score_then_job(client: FlaskClient, headers
     assert res.status_code == 200
     with db.transaction() as conn:
         assert conn.execute("SELECT status FROM jobs").fetchone()["status"] == "cancelled"
+
+
+LIST_CSID = "11111111-2222-4333-8444-555555555555"
+
+
+def _list(client: FlaskClient, headers: dict[str, str]) -> list[dict[str, object]]:
+    res = client.get("/api/jobs", headers=headers)
+    assert res.status_code == 200
+    return list(res.get_json()["data"]["jobs"])
+
+
+def test_list_requires_auth(client: FlaskClient) -> None:
+    assert client.get("/api/jobs").status_code == 401
+
+
+def test_list_scoped_ordered_and_echoes_fields(client: FlaskClient, headers: dict[str, str]) -> None:
+    first = _post(client, headers, pages=[_img("JPEG")], title="One", clientSubmissionId=LIST_CSID)
+    second = _submit(client, headers)
+    other = _signup(client, "b@example.com")
+    _post(client, other, pages=[_img("JPEG")], title="Theirs")
+    items = _list(client, headers)
+    assert [i["jobId"] for i in items] == [second, first.get_json()["data"]["jobId"]]
+    assert items[1]["clientSubmissionId"] == LIST_CSID and items[0]["clientSubmissionId"] is None
+    assert {"title", "status", "percentComplete", "failureReason", "failedVoices", "createdAt"} <= set(items[0])
+    assert len(_list(client, other)) == 1
+
+
+def test_list_window_and_cap(client: FlaskClient, headers: dict[str, str]) -> None:
+    from backend import routes_jobs
+
+    for _ in range(3):
+        _submit(client, headers)
+    with db.transaction() as conn:
+        conn.execute("UPDATE jobs SET status='failed', failure_reason='x', created_at = now() - interval '8 days'"
+                     " WHERE id = (SELECT min(id) FROM jobs)")
+        conn.execute("UPDATE jobs SET created_at = now() - interval '30 days'"
+                     " WHERE id = (SELECT max(id) FROM jobs)")  # still queued: active stays listed
+    assert len(_list(client, headers)) == 2
+    routes_jobs.LIST_MAX_ITEMS, saved = 1, routes_jobs.LIST_MAX_ITEMS
+    try:
+        assert len(_list(client, headers)) == 1
+    finally:
+        routes_jobs.LIST_MAX_ITEMS = saved
+
+
+def test_list_rate_limited(make_app: Callable[..., FlaskClient]) -> None:
+    client = make_app(list_reads_per_minute=READ_LIMIT)
+    headers = _signup(client)
+    for _ in range(READ_LIMIT):
+        assert client.get("/api/jobs", headers=headers).status_code == 200
+    assert client.get("/api/jobs", headers=headers).status_code == 429
+
+
+def test_list_and_status_polling_use_separate_buckets(make_app: Callable[..., FlaskClient]) -> None:
+    client = make_app(list_reads_per_minute=READ_LIMIT, status_reads_per_minute=READ_LIMIT)
+    headers = _signup(client)
+    ref = _submit(client, headers)
+    for _ in range(READ_LIMIT):
+        assert client.get("/api/jobs", headers=headers).status_code == 200
+    assert client.get("/api/jobs", headers=headers).status_code == 429
+    assert client.get(f"/api/jobs/{ref}", headers=headers).status_code == 200  # list did not eat the poll budget
+
+
+def test_list_omits_deleted_score_and_superseded_job(client: FlaskClient, headers: dict[str, str]) -> None:
+    kept, deleted, replaced = _submit(client, headers), _submit(client, headers), _submit(client, headers)
+    with db.transaction() as conn:
+        uid = conn.execute("SELECT id FROM users").fetchone()["id"]
+        score = conn.execute(
+            "INSERT INTO scores (user_id, title, page_count, tempo_source, review, deleted_at) "
+            "VALUES (%s, 'Gone', 2, 'default', '{}', now()) RETURNING id", (uid,)).fetchone()
+        conn.execute("UPDATE jobs SET status='complete', score_id=%s WHERE id=%s", (score["id"], _id(deleted)))
+        conn.execute("UPDATE jobs SET superseded_by_job_id=%s WHERE id=%s", (_id(kept), _id(replaced)))
+    assert [i["jobId"] for i in _list(client, headers)] == [kept]

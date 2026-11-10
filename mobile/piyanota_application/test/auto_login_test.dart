@@ -17,6 +17,7 @@ import 'package:piyanota_application/screens/library/score_library_screen.dart';
 import 'package:piyanota_application/screens/onboarding/widgets/splash_overlay.dart';
 import 'package:piyanota_application/screens/playback/playback_screen.dart';
 import 'package:piyanota_application/screens/processing/processing_screen.dart';
+import 'package:piyanota_application/screens/scan_status/scan_status_messages.dart';
 import 'package:piyanota_application/screens/settings/settings_messages.dart';
 import 'package:piyanota_application/screens/settings/settings_screen.dart';
 import 'package:piyanota_application/services/demo/playback_demo.dart';
@@ -265,6 +266,9 @@ void main() {
       ],
     );
 
+    // The landing screen asks the server first (reconcile), then replaces
+    // itself with the score.
+    await tester.pumpAndSettle();
     final playback = tester.widget<PlaybackScreen>(find.byType(PlaybackScreen));
     expect(playback.scoreId, 102);
     expect(find.byType(LoginScreen), findsNothing);
@@ -272,6 +276,23 @@ void main() {
     final navigator = tester.state<NavigatorState>(find.byType(Navigator));
     expect(navigator.canPop(), isTrue);
     expect(device.launchJob, isNull, reason: 'taken, so it opens once');
+  });
+
+  testWidgets('a cold start from a notification with a malformed payload '
+      'opens the Library', (tester) async {
+    FlutterSecureStorage.setMockInitialValues(storedSession());
+    final device = FakeScanTrackingService()..launchJob = 'https://x.test/?t=1';
+    await launch(
+      tester,
+      overrides: [
+        scanTrackingServiceProvider.overrideWithValue(device),
+        scanJobStoreProvider.overrideWithValue(MemoryScanJobStore()),
+      ],
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(ScoreLibraryScreen), findsOneWidget);
+    expect(find.text(ScanStatusMessages.openingFromNotification), findsNothing);
+    expect(find.byType(ProcessingScreen), findsNothing);
   });
 
   testWidgets('a session check that throws opens Login, not a blank '
@@ -285,8 +306,8 @@ void main() {
     expect(find.byType(LoginScreen), findsOneWidget);
   });
 
-  testWidgets('a launch job missing from the restored scans is dropped, '
-      'not opened later', (tester) async {
+  testWidgets('a launch job missing everywhere lands on the Library with a '
+      'message, and is not opened later', (tester) async {
     FlutterSecureStorage.setMockInitialValues(storedSession());
     final device = FakeScanTrackingService()..launchJob = 'job-x';
     await launch(
@@ -296,7 +317,10 @@ void main() {
         scanJobStoreProvider.overrideWithValue(MemoryScanJobStore()),
       ],
     );
+    // Not on the phone or the server: the Library, said in words.
+    await tester.pumpAndSettle();
     expect(find.byType(ScoreLibraryScreen), findsOneWidget);
+    expect(find.text(ScanStatusMessages.notificationGone), findsOneWidget);
 
     // The same job turns up later, e.g. a new scan reusing the id.
     appContainer(tester).read(processingJobsProvider.notifier).track('job-x');

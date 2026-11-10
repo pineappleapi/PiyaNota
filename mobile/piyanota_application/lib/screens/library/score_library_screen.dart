@@ -6,12 +6,15 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/library_entry.dart';
+import '../../models/local_submission.dart';
 import '../../models/score_summary.dart';
 import '../../routes/app_routes.dart';
 import '../../services/score_library_api.dart';
+import '../../state/local_submission_providers.dart';
 import '../../state/playback_providers.dart';
 import '../../state/processing_providers.dart';
 import '../../state/score_library_providers.dart';
+import '../../state/submission_reconcile_providers.dart';
 import '../../state/session_actions.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/primary_pill_button.dart';
@@ -32,6 +35,26 @@ import 'widgets/score_cards.dart';
 /// the stack: Android back exits the app rather than returning to Login.
 class ScoreLibraryScreen extends ConsumerStatefulWidget {
   const ScoreLibraryScreen({super.key});
+
+  /// Rows a retake stands in for: the failed row of the job being retaken,
+  /// and every attempt at that retake but the newest. The piece then shows
+  /// one card whatever the retake's state (sending, refused, converting);
+  /// if the retake row is dismissed the failed one comes back. [rows] is
+  /// newest first.
+  @visibleForTesting
+  static Set<String> supersededRows(List<LocalSubmission> rows) {
+    final newest = <String>{};
+    final hidden = <String>{};
+    for (final r in rows) {
+      final old = r.replacesJobId;
+      if (old == null) continue;
+      if (!newest.add(old)) hidden.add(r.clientSubmissionId);
+      for (final target in rows) {
+        if (target.jobId == old) hidden.add(target.clientSubmissionId);
+      }
+    }
+    return hidden;
+  }
 
   @override
   ConsumerState<ScoreLibraryScreen> createState() => _ScoreLibraryScreenState();
@@ -61,6 +84,7 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
 
   /// Jobs whose long-press cancel dialog or request is in progress.
   final Set<String> _cancellingJobs = {};
+  final Set<String> _cancellingSubmissions = {};
 
   // Mockup: 32 dp side margins at 412 dp wide, header content at 26 dp,
   // first card 32 dp under the header, 18 dp between cards. Margins scale
@@ -81,8 +105,46 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
   static const Duration _swipeMoveDuration = Duration(milliseconds: 200);
   static const Duration _swipeResizeDuration = Duration(milliseconds: 220);
 
+  /// How often the open Library re-checks rows nobody is polling (a job
+  /// adopted from the server, or one whose tracker was lost). One list call
+  /// covers them all, so this costs 4 of the 120 status reads a minute.
+  static const Duration _reconcileEvery = Duration(seconds: 15);
+  Timer? _reconcileTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    // Library open is also where a cold start lands after login.
+    unawaited(ref.read(reconcileSubmissionsProvider)());
+    _reconcileTimer = Timer.periodic(_reconcileEvery, (_) {
+      if (_needsPolling()) unawaited(ref.read(reconcileSubmissionsProvider)());
+    });
+  }
+
+  /// Only a RUNNING tracker job draws its own card; one that failed or
+  /// finished must not hide the persisted row (the score would vanish).
+  static bool _trackerRuns(LocalSubmission row, Map<String, TrackedJob> jobs) =>
+      row.jobId != null && (jobs[row.jobId]?.isRunning ?? false);
+
+  /// Whether [row] gets a card of its own.
+  static bool _rowShown(LocalSubmission row, Map<String, TrackedJob> jobs) =>
+      row.status != SubmissionStatus.ready && !_trackerRuns(row, jobs);
+
+  bool _needsPolling() {
+    final jobs = ref.read(processingJobsProvider);
+    return ref
+        .read(localSubmissionsProvider)
+        .any(
+          (r) =>
+              r.status == SubmissionStatus.processing &&
+              // Also when the tracker holds the job but has stopped polling.
+              !_trackerRuns(r, jobs),
+        );
+  }
+
   @override
   void dispose() {
+    _reconcileTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -104,6 +166,18 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
       return job;
     }
     return null;
+  }
+
+  /// A failed row opens the same failure view as a failed tracked job
+  /// (FR-14), where Retake replaces it.
+  void _openFailedRow(LocalSubmission row) {
+    if (_openingScore) return;
+    unawaited(
+      Navigator.of(context).pushNamed(
+        AppRoutes.processing,
+        arguments: ProcessingArguments(jobId: row.jobId!, title: row.title),
+      ),
+    );
   }
 
   /// AC3 for a card whose scan is running or failed.
@@ -131,6 +205,19 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
       switch (outcome) {
         case CancelOutcome.cancelled:
           _showSnackBar(ProcessingMessages.scanCancelled);
+          // The tracker forgot the job; its persisted row must go too, or
+          // it would reappear as a converting card until the next reconcile.
+          final row = ref
+              .read(localSubmissionsProvider)
+              .where((r) => r.jobId == job.jobId)
+              .firstOrNull;
+          if (row != null) {
+            unawaited(
+              ref
+                  .read(localSubmissionsProvider.notifier)
+                  .dismiss(row.clientSubmissionId),
+            );
+          }
         case CancelOutcome.notFound:
           break;
         case CancelOutcome.sessionExpired:
@@ -142,6 +229,35 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
       }
     } finally {
       _cancellingJobs.remove(job.jobId);
+    }
+  }
+
+  /// Task 7: Cancel on a persisted converting row, same dialog and copy as
+  /// [_cancelScan]. The controller owns the API call and the tombstone.
+  Future<void> _cancelSubmission(LocalSubmission row) async {
+    final id = row.clientSubmissionId;
+    if (_cancellingSubmissions.contains(id)) return;
+    _cancellingSubmissions.add(id);
+    try {
+      if (!await confirmCancelScan(context) || !mounted) return;
+      final outcome = await ref
+          .read(localSubmissionsProvider.notifier)
+          .cancel(id);
+      if (!mounted) return;
+      switch (outcome) {
+        case CancelOutcome.cancelled:
+          _showSnackBar(ProcessingMessages.scanCancelled);
+        case CancelOutcome.notFound:
+          break;
+        case CancelOutcome.sessionExpired:
+          await _returnToLogin();
+        case CancelOutcome.failed:
+          _showSnackBar(ProcessingMessages.cancelFailed);
+        case CancelOutcome.alreadyFinished:
+          _showSnackBar(ProcessingMessages.alreadyFinished);
+      }
+    } finally {
+      _cancellingSubmissions.remove(id);
     }
   }
 
@@ -397,6 +513,7 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
     ref.listen(processingJobsProvider, _onJobsChanged);
     final library = ref.watch(scoreLibraryProvider);
     final jobs = ref.watch(processingJobsProvider);
+    final submissions = ref.watch(localSubmissionsProvider);
     final width = MediaQuery.sizeOf(context).width;
     final cardMargin = (width * _cardMarginFraction)
         .clamp(_minCardMargin, _maxCardMargin)
@@ -454,6 +571,7 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
                     ),
                     children: [
                       if (showAddCard) AddScoreCard(onTap: _openCapture),
+                      ..._submissionCards(submissions, jobs),
                       ..._buildStateContent(library, jobs),
                     ],
                   ),
@@ -475,6 +593,46 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
         ),
       ),
     );
+  }
+
+  /// Scores sent from this phone that are not done: upload in flight,
+  /// refused, or (Task 4) converting/failed on the server after the app was
+  /// closed. A row whose job the in-memory tracker follows is skipped: the
+  /// tracker's card shows it, with live progress, so there is no duplicate.
+  /// Shown in every list state, so a score never vanishes while the list
+  /// loads or is offline.
+  List<Widget> _submissionCards(
+    List<LocalSubmission> rows,
+    Map<String, TrackedJob> jobs,
+  ) {
+    final needle = _query.trim().toLowerCase();
+    final superseded = ScoreLibraryScreen.supersededRows(rows);
+    return [
+      for (final row in rows)
+        if (_rowShown(row, jobs) &&
+            !superseded.contains(row.clientSubmissionId) &&
+            (needle.isEmpty || row.title.toLowerCase().contains(needle)))
+          Padding(
+            key: ValueKey('submission-${row.clientSubmissionId}'),
+            padding: const EdgeInsets.only(top: _cardGap),
+            child: LocalSubmissionCard(
+              title: row.title,
+              failed: row.status == SubmissionStatus.failed,
+              failureCode: row.failureCode,
+              hasJob: row.jobId != null,
+              percentComplete: row.percentComplete,
+              onCancel: () => _cancelSubmission(row),
+              onOpen: row.status == SubmissionStatus.failed && row.jobId != null
+                  ? () => _openFailedRow(row)
+                  : null,
+              onDismiss: () => unawaited(
+                ref
+                    .read(localSubmissionsProvider.notifier)
+                    .dismiss(row.clientSubmissionId),
+              ),
+            ),
+          ),
+    ];
   }
 
   /// PIYA-218 AC2: a scan whose score the list doesn't show yet (the
@@ -527,10 +685,21 @@ class _ScoreLibraryScreenState extends ConsumerState<ScoreLibraryScreen> {
     Map<String, TrackedJob> jobs,
   ) {
     switch (library) {
-      case AsyncData(:final value):
+      case AsyncData(value: final listedScores):
         final unlisted = _unlistedScanCards(jobs, {
-          for (final score in value) score.scoreId,
+          for (final score in listedScores) score.scoreId,
         });
+        // The 202 made a placeholder score on the server; the row card
+        // already stands for it, so the list entry would be a duplicate
+        // that opens a score with no result.
+        final rowScoreIds = {
+          for (final r in ref.watch(localSubmissionsProvider))
+            if (_rowShown(r, jobs) && r.scoreId != null) r.scoreId,
+        };
+        final value = [
+          for (final s in listedScores)
+            if (!rowScoreIds.contains(s.scoreId)) s,
+        ];
         // AC4: zero scores shows only the Add Score card, as in the mockup;
         // the header subtitle carries the empty-state message.
         if (value.isEmpty) return unlisted;

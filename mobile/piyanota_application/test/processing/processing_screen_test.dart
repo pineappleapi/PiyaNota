@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:piyanota_application/models/processing_status.dart';
 import 'package:piyanota_application/screens/processing/processing_messages.dart';
 import 'package:piyanota_application/screens/processing/processing_screen.dart';
+import 'package:piyanota_application/screens/retake/rephotograph.dart';
 import 'package:piyanota_application/screens/scan_status/scan_status_messages.dart';
 import 'package:piyanota_application/services/processing_api.dart';
 import 'package:piyanota_application/state/processing_providers.dart';
@@ -298,7 +299,7 @@ void main() {
       await tester.tap(find.text(ProcessingMessages.confirmCancel));
       await _settleNavigation(tester);
       expect(find.text(ProcessingMessages.failedHeading), findsOneWidget);
-      expect(find.text('Retake page 2'), findsOneWidget);
+      expect(find.text(RephotographMessages.rephotograph), findsOneWidget);
     });
 
     testWidgets('a failed cancel request stays and says so', (tester) async {
@@ -448,7 +449,7 @@ void main() {
   });
 
   group('failure views (AC5–AC7)', () {
-    testWidgets('no staff on page 2: reason, tips, retake that page', (
+    testWidgets('no staff on page 2: reason, tips, whole-score replace', (
       tester,
     ) async {
       final h = ProcessingHarness(
@@ -463,7 +464,8 @@ void main() {
       expect(find.text(ProcessingMessages.failedHeading), findsOneWidget);
       expect(
         find.text(
-          'No staff lines detected on page 2 — please retake this page.',
+          'No staff lines detected on page 2. Re-photograph the score with every '
+          'page fully in view.',
         ),
         findsOneWidget,
       );
@@ -472,9 +474,14 @@ void main() {
       expect(find.text(ProcessingMessages.cancelScan), findsNothing);
       expect(find.text(ProcessingMessages.backToLibrary), findsOneWidget);
 
-      await tester.tap(find.text('Retake page 2'));
+      // No per-page resubmit exists on the server: the page failure takes
+      // the whole-score replace flow (new submission replacing this job).
+      await tester.tap(find.text(RephotographMessages.rephotograph));
       await _settleNavigation(tester);
-      expect(find.text(retakeMarker(kJob, 1)), findsOneWidget);
+      expect(
+        find.textContaining('ROUTE:whole-retake $kJob $kTitle'),
+        findsOneWidget,
+      );
     });
 
     testWidgets('2-staff layout: exact AC6 copy, no retake, library only', (
@@ -505,6 +512,45 @@ void main() {
       expect(find.text(kLibrary), findsOneWidget);
     });
 
+    // The server maps worker text to these codes and adds the raw text as
+    // `failureDetail` (no pageIndex): the screen must act on the code.
+    for (final (code, retake) in [
+      ('no_staff_detected', true),
+      ('preprocessing_error', true),
+      ('incomplete_voice_sequence', true),
+      ('stage_timeout', false),
+      ('server_restart', false),
+      ('synthesis_failed', false),
+      ('internal_error', false),
+    ]) {
+      testWidgets('server code $code: Re-photograph shown is $retake', (
+        tester,
+      ) async {
+        final status = ProcessingStatus.fromJson({
+          'status': 'failed',
+          'failureReason': code,
+          'failureDetail': 'raw worker text the app ignores',
+        });
+        expect(status.failureReason!.apiValue, code);
+        final h = ProcessingHarness(ScriptedProcessingApi([status]));
+        await pumpProcessing(tester, h);
+        expect(find.text(ProcessingMessages.failedHeading), findsOneWidget);
+        expect(
+          find.text(RephotographMessages.rephotograph),
+          retake ? findsOneWidget : findsNothing,
+        );
+      });
+    }
+
+    test('an unmapped raw-text failureReason parses as unknown, no crash', () {
+      final status = ProcessingStatus.fromJson({
+        'status': 'failed',
+        'failureReason': 'some worker sentence nobody mapped',
+        'failureDetail': 'some worker sentence nobody mapped',
+      });
+      expect(status.failureReason, FailureReason.unknown);
+    });
+
     testWidgets('a whole-score failure has no retake', (tester) async {
       final h = ProcessingHarness(
         ScriptedProcessingApi([failed(FailureReason.stageTimeout)]),
@@ -521,14 +567,33 @@ void main() {
       expect(find.text(ProcessingMessages.backToLibrary), findsOneWidget);
     });
 
-    testWidgets('a retakeable reason without a page offers no retake', (
-      tester,
-    ) async {
+    test('retakeable failure copy names Re-photograph, not a page retake', () {
+      for (final r in [
+        FailureReason.noStaffDetected,
+        FailureReason.ambiguousStaffCount,
+        FailureReason.preprocessingError,
+      ]) {
+        for (final page in [null, 2]) {
+          final text = ProcessingMessages.failureBody(r, page);
+          expect(text, isNot(contains('retake')), reason: '$r');
+          expect(text, contains('score'), reason: '$r');
+          expect(text.toLowerCase(), contains('re-photograph'), reason: '$r');
+        }
+      }
+      expect(
+        ProcessingMessages.failureBody(FailureReason.noStaffDetected, 3),
+        contains('page 3'),
+      );
+    });
+
+    testWidgets('a retakeable reason without a page still offers the '
+        'whole-score replace', (tester) async {
       final h = ProcessingHarness(
         ScriptedProcessingApi([failed(FailureReason.noStaffDetected)]),
       );
       await pumpProcessing(tester, h);
       expect(find.textContaining('on one of the pages'), findsOneWidget);
+      expect(find.text(RephotographMessages.rephotograph), findsOneWidget);
       expect(find.textContaining('Retake page'), findsNothing);
     });
 

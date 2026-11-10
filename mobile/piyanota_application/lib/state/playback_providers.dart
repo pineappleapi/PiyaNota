@@ -27,6 +27,7 @@ import 'auth_providers.dart';
 import 'onboarding_providers.dart';
 import 'processing_providers.dart';
 import 'score_library_providers.dart';
+import 'work_owner.dart';
 
 /// F10: where converted results are kept. Application support, not the temp
 /// folder, which the system may clear; excluded from backup by
@@ -61,6 +62,9 @@ final scoreResultApiProvider = Provider<ScoreResultApi>((ref) {
   return LocalFirstScoreResultApi(
     HttpScoreResultApi(ref.watch(dioProvider), sessionStorage),
     ref.watch(localResultsStoreProvider),
+    onSessionExpired: () {
+      if (ref.mounted) ref.read(sessionExpiredFlagProvider.notifier).set(true);
+    },
   );
 });
 

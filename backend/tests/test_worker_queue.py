@@ -212,3 +212,52 @@ def test_claim_reclaim_claim_reaches_attempt_two(app: Flask) -> None:
         queue.reclaim_stale(conn, timeout_s=60, max_attempts=2)
         again = queue.claim_next_job(conn)
         assert again is not None and again["attempts"] == 2
+
+
+def test_claim_sets_started_at(app: Flask) -> None:
+    with db.transaction() as conn:
+        job_id = _job(conn, _user(conn))
+        assert _row(conn, job_id)["started_at"] is None
+        queue.claim_next_job(conn)
+        assert _row(conn, job_id)["started_at"] is not None
+
+
+def test_fail_overrun_fails_running_job_even_with_fresh_heartbeat(app: Flask) -> None:
+    with db.transaction() as conn:
+        job_id = _job(conn, _user(conn))
+        queue.claim_next_job(conn)
+        conn.execute("UPDATE jobs SET started_at = now() - interval '1 hour' WHERE id = %s", (job_id,))
+        queue.touch(conn, job_id)
+        assert queue.fail_overrun(conn, max_runtime_s=1800) == [job_id]
+        row = _row(conn, job_id)
+        assert (row["status"], row["failure_reason"]) == ("failed", queue.MAX_RUNTIME_FAILURE_REASON)
+        assert queue.set_progress(conn, job_id, 50) is False  # the stuck worker is told to stop
+
+
+def test_fail_overrun_leaves_young_queued_and_finished_jobs_alone(app: Flask) -> None:
+    with db.transaction() as conn:
+        user = _user(conn)
+        young = _job(conn, user)
+        queue.claim_next_job(conn)
+        queued = _job(conn, user)
+        done = _job(conn, user, "complete")
+        conn.execute("UPDATE jobs SET started_at = now() - interval '1 hour' WHERE id = ANY(%s)", ([queued, done],))
+        assert queue.fail_overrun(conn, max_runtime_s=1800) == []
+        assert [_row(conn, j)["status"] for j in (queued, done)] == ["queued", "complete"]
+        assert _row(conn, young)["status"] == "preprocessing"
+
+
+def test_overrun_failed_job_stays_failed_if_its_worker_finishes_late(app: Flask) -> None:
+    from backend import completion
+
+    with db.transaction() as conn:
+        job_id = _job(conn, _user(conn))
+        queue.claim_next_job(conn)
+        conn.execute("UPDATE jobs SET started_at = now() - interval '1 hour' WHERE id = %s", (job_id,))
+        assert queue.fail_job_if_overrun(conn, job_id, max_runtime_s=1800) is True
+        assert queue.fail_job_if_overrun(conn, job_id, max_runtime_s=1800) is False  # already failed
+        assert completion.fail_job(conn, job_id, "conversion failed", None) is False
+        assert completion.complete_job(
+            conn, job_id, audio_keys={}, timing_key="t", failed_voices=[], failed_voice_causes={},
+            review={}, muted_measures=[], thumbnail_key=None) is None
+        assert _row(conn, job_id)["status"] == "failed"

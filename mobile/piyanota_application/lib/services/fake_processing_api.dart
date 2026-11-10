@@ -136,7 +136,6 @@ class FakeProcessingApi implements ProcessingApi {
   final DateTime Function() _clock;
   final Map<String, _FakeJob> _jobs = {};
   final Map<String, int> _jobsByAccount = {};
-  int _nextReplacement = 1;
 
   /// Called by the fake upload when a submit succeeds, as the real submit
   /// creates the job row. [keepsScore] marks a whole-score retake of a
@@ -288,45 +287,6 @@ class FakeProcessingApi implements ProcessingApi {
     if (!job.keepsScore) {
       _library.removeSubmittedScore(account: job.account, scoreId: job.scoreId);
     }
-  }
-
-  /// The job side of PIYA-116, called by the fake upload once it has the
-  /// account. Throws the same [UploadRejectedException]s the real endpoint
-  /// maps to.
-  ResubmittedJob resubmit({
-    required String account,
-    required String jobId,
-    required int pageIndex,
-  }) {
-    final job = _jobFor(account, jobId);
-    if (job == null) {
-      throw const UploadRejectedException(
-        statusCode: 404,
-        code: jobNotFoundCode,
-      );
-    }
-    final status = _statusAt(job, _stepOf(job));
-    if (!(status.failureReason?.isRetakeable ?? false) ||
-        status.failedPageIndex != pageIndex) {
-      throw const UploadRejectedException(
-        statusCode: 409,
-        code: pageNotRetakeableCode,
-      );
-    }
-    final replacementId = '$jobId-r${_nextReplacement++}';
-    _jobs[replacementId] = _FakeJob(
-      account: account,
-      scoreId: job.scoreId,
-      pages: job.pages,
-      outcome: FakeJobOutcome.success,
-      startedAt: _clock(),
-      details: job.details,
-    );
-    return ResubmittedJob(
-      originalJobId: jobId,
-      replacementJobId: replacementId,
-      pageIndex: pageIndex,
-    );
   }
 
   /// The fake PIYA-103's 409: [account] has a job for [scoreId] still

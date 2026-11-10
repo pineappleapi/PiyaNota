@@ -9,6 +9,7 @@ import '../services/thumbnail_cache.dart';
 import 'auth_providers.dart';
 import 'export_jobs.dart';
 import 'export_providers.dart';
+import 'local_submission_providers.dart';
 import 'playback_providers.dart';
 import 'processing_providers.dart';
 import 'work_owner.dart';
@@ -24,13 +25,22 @@ import 'work_owner.dart';
 /// Reads every provider now and returns the clean-up, so a caller can
 /// run it after an await without touching [ref] again (review L1): the
 /// screen that owns [ref] may be gone by then.
-void Function() _accountWorkForgetter(WidgetRef ref) {
+///
+/// [wipeSubmissions] is false on a plain session expiry (401): the persisted
+/// submission rows, tombstones and background job survive, so a score the
+/// user submitted is still there after logging back in.
+void Function() _accountWorkForgetter(
+  WidgetRef ref, {
+  required bool wipeSubmissions,
+}) {
   final scans = ref.read(processingJobsProvider.notifier);
+  final submissions = ref.read(localSubmissionsProvider.notifier);
   final exports = ref.read(exportJobsProvider.notifier);
   final exportDevice = ref.read(exportServiceProvider);
   final scanDevice = ref.read(scanTrackingServiceProvider);
   return () {
     scans.forgetAll();
+    if (wipeSubmissions) submissions.forgetAll();
     exports.cancelAndForgetAll();
     // Never awaited and never throws: logging out can't wait on, or fail
     // because of, the native side.
@@ -51,7 +61,8 @@ void Function() _accountWorkForgetter(WidgetRef ref) {
 /// files and a different one is caught by [startSession].
 Future<void> endLocalSession(WidgetRef ref, {bool wipeResults = false}) async {
   ref.read(signedInProvider.notifier).set(false);
-  _accountWorkForgetter(ref)();
+  ref.read(sessionExpiredFlagProvider.notifier).set(false);
+  _accountWorkForgetter(ref, wipeSubmissions: wipeResults)();
   final results = ref.read(localResultsStoreProvider);
   final owners = ref.read(workOwnerStoreProvider);
   final storage = ref.read(sessionStorageProvider);
@@ -114,7 +125,7 @@ Future<void> startSession(WidgetRef ref, AuthSession session) async {
   final owners = ref.read(workOwnerStoreProvider);
   final storage = ref.read(sessionStorageProvider);
   final signedIn = ref.read(signedInProvider.notifier);
-  final forgetAccountWork = _accountWorkForgetter(ref);
+  final forgetAccountWork = _accountWorkForgetter(ref, wipeSubmissions: true);
   final owner = await owners.load();
   // shortcut: trusts the server never to reuse a user id, so a DB reset or
   // a switch between fake and real builds can inherit another account's

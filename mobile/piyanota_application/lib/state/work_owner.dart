@@ -64,6 +64,22 @@ final workOwnerStoreProvider = Provider<WorkOwnerStore>(
 /// keeps it, and a new process sets it again from the stored session.
 final signedInProvider = NotifierProvider<SignedIn, bool>(SignedIn.new);
 
+/// A background call (a local-first score refresh) got a 401. Set by it,
+/// consumed by the foreground on its next resume (or at once if already
+/// on screen), which then re-checks the session through the Library. Never
+/// signs out by itself.
+final sessionExpiredFlagProvider = NotifierProvider<SessionExpiredFlag, bool>(
+  SessionExpiredFlag.new,
+);
+
+class SessionExpiredFlag extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  // ignore: use_setters_to_change_properties
+  void set(bool value) => state = value;
+}
+
 class SignedIn extends Notifier<bool> {
   @override
   bool build() => false;

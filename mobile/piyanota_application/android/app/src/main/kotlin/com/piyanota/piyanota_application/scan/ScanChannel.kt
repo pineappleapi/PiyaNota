@@ -2,6 +2,7 @@ package com.piyanota.piyanota_application.scan
 
 import android.content.Context
 import android.content.Intent
+import com.piyanota.piyanota_application.AppVisibility
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
 
@@ -18,8 +19,8 @@ import io.flutter.plugin.common.MethodChannel
  *  - notifyResult({jobId, title, text, ok}) -> null. A scan finished while
  *    the app was not on screen; tapping it opens that scan.
  *  - clearResult({jobId}) -> null. Seen in the app, or forgotten.
- *  - stopAll() -> null. Logout: the service and every conversion
- *    notification go.
+ *  - stopAll() -> null. Logout or session expiry: the service and every
+ *    conversion notification go (not the closed-app job, see below).
  *  - takeLaunchJob() -> String?. The job of the notification whose tap
  *    started a fresh engine ([holdLaunch]), once; null after that.
  * Native -> Dart: open({jobId}), a result notification was tapped;
@@ -36,6 +37,9 @@ internal class ScanChannel(
     private val app = context.applicationContext
     private val channel = MethodChannel(messenger, CHANNEL)
 
+    /** Task 6: Dart asks to schedule or cancel the closed-app job. */
+    private val backgroundChannel = MethodChannel(messenger, BackgroundCompletionJob.CHANNEL)
+
     private val stoppedCallback: () -> Unit = { channel.invokeMethod("stopped", null) }
 
     /** A cold start's tapped notification, kept until Dart asks for it. */
@@ -44,6 +48,19 @@ internal class ScanChannel(
     init {
         // The newest channel (this Activity's) answers; the engine is the same.
         ScanTrackingService.onStoppedByItself = stoppedCallback
+        backgroundChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "schedule" -> BackgroundCompletionJob.schedule(app)
+                "cancel" -> BackgroundCompletionJob.cancel(app)
+                // The gallery/PDF picker is over the app: counts as visible.
+                "pickerOpen" -> AppVisibility.ownPickerOpen = call.argument<Boolean>("open") ?: false
+                else -> {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+            }
+            result.success(null)
+        }
         channel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "show" -> {
@@ -88,6 +105,8 @@ internal class ScanChannel(
                 "stopAll" -> {
                     ScanTrackingService.stop(app)
                     ScanNotifications.cancelAll(app)
+                    // Not the background job: a plain 401 keeps the rows, so
+                    // the job stays. Logout cancels it via forgetAll().
                     onIdle()
                     result.success(null)
                 }

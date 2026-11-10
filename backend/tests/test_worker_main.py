@@ -518,3 +518,141 @@ def test_midi_only_result_completes_with_null_file_keys(app: Flask, settings: Se
     with db.transaction() as conn:
         rows = conn.execute("SELECT file_key, midi_key FROM audio_tracks").fetchall()
     assert len(rows) == 4 and all(r["file_key"] is None and r["midi_key"] for r in rows)
+
+
+def test_overrun_job_is_failed_and_its_pages_queued_for_deletion(app: Flask, settings: Settings) -> None:
+    storage = MemoryStorage()
+    job_id, old_keys = _seed_job(storage)
+    with db.transaction() as conn:
+        conn.execute("UPDATE jobs SET status = 'transcribing', started_at = now() - interval '2 hours' WHERE id = %s",
+                     (job_id,))
+    assert process_one(storage=storage, runner=_runner(), settings=settings) is False  # nothing else queued
+    job = _job(job_id)
+    assert (job["status"], job["failure_reason"]) == ("failed", "max_runtime_exceeded")
+    with db.transaction() as conn:
+        queued = {r["object_key"] for r in conn.execute("SELECT object_key FROM storage_deletions").fetchall()}
+    assert queued == set(old_keys)
+
+
+def test_heartbeat_fails_overrunning_job_and_stops_the_pipeline(app: Flask, settings: Settings) -> None:
+    import time
+    from dataclasses import replace
+
+    storage = MemoryStorage()
+    job_id, old_keys = _seed_job(storage)
+    stopped_by_cancel: list[bool] = []
+
+    def hung(page_jpegs: list[bytes], *, tempo_bpm: int, work_dir: Path, on_stage: Any, timing: bool, on_progress: Any = None) -> PipelineResult:
+        on_stage("preprocessing", 5)
+        with db.transaction() as conn:  # pretend the attempt started long ago
+            conn.execute("UPDATE jobs SET started_at = now() - interval '1 hour' WHERE id = %s", (job_id,))
+        time.sleep(HEARTBEAT_TEST_RUN_S)  # the heartbeat fails the job in the meantime
+        try:
+            on_stage("detecting_staff", 25)
+        except worker_main._Cancelled:
+            stopped_by_cancel.append(True)
+            raise
+        raise AssertionError("pipeline must stop once the heartbeat failed the job")
+
+    process_one(storage=storage, runner=hung, settings=replace(settings, job_max_runtime_s=60),
+                heartbeat_interval_s=HEARTBEAT_TEST_INTERVAL_S)
+    job = _job(job_id)
+    assert (job["status"], job["failure_reason"]) == ("failed", "max_runtime_exceeded")
+    assert stopped_by_cancel == [True] and _count("scores") == 0
+    with db.transaction() as conn:
+        queued = {r["object_key"] for r in conn.execute("SELECT object_key FROM storage_deletions").fetchall()}
+    assert queued == set(old_keys)
+
+
+def test_heartbeat_exits_worker_when_pipeline_stays_hung_after_overrun(app: Flask) -> None:
+    import threading
+
+    storage = MemoryStorage()
+    job_id, _ = _seed_job(storage)
+    with db.transaction() as conn:
+        conn.execute("UPDATE jobs SET status = 'transcribing', started_at = now() - interval '2 hours' WHERE id = %s",
+                     (job_id,))
+
+    class FakeConn:
+        def execute(self, *args: Any) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    codes: list[int] = []
+    stop = threading.Event()  # never set: the pipeline thread is "hung"
+    thread = threading.Thread(target=worker_main._heartbeat, args=("x", job_id, 0.01, stop, lambda *a, **k: FakeConn()),
+                              kwargs={"max_runtime_s": 60, "exit_grace_s": 0.05, "exit_fn": codes.append})
+    thread.start()
+    thread.join(10)
+    assert codes == [worker_main.HUNG_WORKER_EXIT_CODE] and _job(job_id)["status"] == "failed"
+
+
+def test_heartbeat_does_not_exit_when_pipeline_finishes_within_grace(app: Flask) -> None:
+    import threading
+
+    storage = MemoryStorage()
+    job_id, _ = _seed_job(storage)
+    with db.transaction() as conn:
+        conn.execute("UPDATE jobs SET status = 'transcribing', started_at = now() - interval '2 hours' WHERE id = %s",
+                     (job_id,))
+
+    class FakeConn:
+        def execute(self, *args: Any) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    codes: list[int] = []
+    stop = threading.Event()
+    threading.Timer(0.2, stop.set).start()  # the pipeline notices the failed status and returns
+    thread = threading.Thread(target=worker_main._heartbeat, args=("x", job_id, 0.01, stop, lambda *a, **k: FakeConn()),
+                              kwargs={"max_runtime_s": 60, "exit_grace_s": 5, "exit_fn": codes.append})
+    thread.start()
+    thread.join(10)
+    assert codes == [] and not thread.is_alive()
+
+
+def test_heartbeat_overrun_fail_and_page_queue_are_atomic_and_survive_errors(
+    app: Flask, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    import psycopg
+
+    storage = MemoryStorage()
+    job_id, old_keys = _seed_job(storage)
+    with db.transaction() as conn:
+        conn.execute("UPDATE jobs SET status = 'transcribing', started_at = now() - interval '2 hours' WHERE id = %s",
+                     (job_id,))
+    real = worker_main._queue_page_deletions
+    errors: list[Exception] = [psycopg.OperationalError("cutoff"), RuntimeError("boom")]
+    statuses: list[str] = []
+
+    def flaky(conn: Any, ids: Any) -> None:
+        if errors:
+            statuses.append(_job(job_id)["status"])  # other connection: fail must not be visible yet
+            raise errors.pop(0)
+        real(conn, ids)
+
+    class FakeConn:
+        def execute(self, *args: Any) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(worker_main, "_queue_page_deletions", flaky)
+    stop = threading.Event()
+    thread = threading.Thread(target=worker_main._heartbeat, args=("x", job_id, 0.01, stop, lambda *a, **k: FakeConn()),
+                              kwargs={"max_runtime_s": 60, "exit_grace_s": 0.01, "exit_fn": lambda code: None})
+    thread.start()
+    thread.join(10)  # exits on its own once the third tick fails the job and queues the pages
+    stop.set()
+    assert not thread.is_alive() and errors == [] and statuses == ["transcribing", "transcribing"]
+    assert _job(job_id)["status"] == "failed"
+    with db.transaction() as conn:
+        queued = {r["object_key"] for r in conn.execute("SELECT object_key FROM storage_deletions").fetchall()}
+    assert queued == set(old_keys)

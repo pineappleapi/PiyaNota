@@ -550,6 +550,191 @@ class ScanningScoreCard extends StatelessWidget {
   }
 }
 
+/// A score the phone has recorded but no job exists for yet (Task 3): being
+/// sent (indeterminate bar, same look as [ScanningScoreCard]) or refused
+/// (red reason and a Dismiss button). Not tappable: there is nothing to open
+/// until the 202 gives a job, after which the tracker's own card takes over.
+class LocalSubmissionCard extends StatelessWidget {
+  const LocalSubmissionCard({
+    super.key,
+    required this.title,
+    required this.failureCode,
+    required this.failed,
+    required this.onDismiss,
+    this.onCancel,
+    this.onOpen,
+    this.hasJob = false,
+    this.percentComplete,
+  });
+
+  final String title;
+  final bool failed;
+
+  /// Explicit cancel of a converting row (Task 7); null hides the button.
+  final VoidCallback? onCancel;
+
+  /// Opens the failure view; set only for a failed row that has a job.
+  final VoidCallback? onOpen;
+
+  /// The server has the job (reconciled or just sent): the label then says
+  /// "Converting" with the last known percent instead of "Sending".
+  final bool hasJob;
+  final int? percentComplete;
+  final String? failureCode;
+  final VoidCallback onDismiss;
+
+  static const double _titleSize = 18;
+  static const double _titleLineHeight = 1.15;
+  static const double _labelSize = 12;
+  static const double _labelLineHeight = 1.3;
+  static const int _titleMaxLines = 2;
+  static const int _labelMaxLines = 3;
+  // Android's minimum touch target for the Cancel / Dismiss buttons.
+  static const Size _buttonMinSize = Size(48, 48);
+  // The card's paper white: tile and empty progress track.
+  static const Color _paper = Colors.white;
+  static const double _barHeight = 4;
+  static const double _barGap = 6;
+  static const double _thumbnailOpacity = 0.4;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final reason = LibraryMessages.submissionFailed(
+      failureCode,
+      hasJob: hasJob,
+    );
+    final progress = percentComplete;
+    final working = hasJob
+        ? ScanStatusMessages.converting(progress ?? 0)
+        : LibraryMessages.uploading;
+    return Semantics(
+      container: true,
+      label: failed ? '$title. $reason' : '$title. $working',
+      child: _CardShell(
+        fill: AppTheme.libraryScoreCardFill,
+        onTap: failed ? onOpen : null,
+        child: _CardRow(
+          tileColor: _paper,
+          tile: Opacity(
+            opacity: _thumbnailOpacity,
+            child: const ScoreThumbnail(url: null),
+          ),
+          text: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // The texts are already in the label above; only the
+              // buttons below must stay reachable (TalkBack).
+              ExcludeSemantics(
+                excluding: !failed,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: _titleMaxLines,
+                      overflow: TextOverflow.ellipsis,
+                      style: textTheme.titleMedium?.copyWith(
+                        fontSize: _titleSize,
+                        fontWeight: FontWeight.w700,
+                        height: _titleLineHeight,
+                        color: AppTheme.libraryCardTitle,
+                      ),
+                    ),
+                    const SizedBox(height: _barGap),
+                    if (!failed)
+                      LinearProgressIndicator(
+                        // Determinate only once the server reported progress.
+                        value: hasJob && progress != null
+                            ? progress / 100
+                            : null,
+                        minHeight: _barHeight,
+                        color: AppTheme.processingSecondary,
+                        backgroundColor: _paper,
+                        borderRadius: BorderRadius.circular(_barHeight / 2),
+                      ),
+                    if (!failed) const SizedBox(height: _barGap),
+                    Text(
+                      failed ? reason : working,
+                      key: const ValueKey('submission-label'),
+                      maxLines: _labelMaxLines,
+                      overflow: TextOverflow.ellipsis,
+                      style: textTheme.bodySmall?.copyWith(
+                        fontSize: _labelSize,
+                        height: _labelLineHeight,
+                        color: failed
+                            ? AppTheme.errorRed
+                            : AppTheme.libraryScoreSubtitle,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (!failed && onCancel != null)
+                Semantics(
+                  label: LibraryMessages.cancelSubmissionSemantics(title),
+                  button: true,
+                  // excludeSemantics drops the button's own tap action.
+                  onTap: onCancel,
+                  excludeSemantics: true,
+                  child: TextButton.icon(
+                    key: const ValueKey('submission-cancel'),
+                    onPressed: onCancel,
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppTheme.errorRed,
+                      minimumSize: _buttonMinSize,
+                      padding: EdgeInsets.zero,
+                    ),
+                    icon: const Icon(Icons.close_rounded),
+                    label: const Text(LibraryMessages.cancelSubmission),
+                  ),
+                ),
+              if (failed && onOpen != null)
+                Semantics(
+                  label: LibraryMessages.openFailedSubmissionSemantics(title),
+                  button: true,
+                  onTap: onOpen,
+                  excludeSemantics: true,
+                  child: TextButton.icon(
+                    key: const ValueKey('submission-open'),
+                    onPressed: onOpen,
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppTheme.processingSecondary,
+                      minimumSize: _buttonMinSize,
+                      padding: EdgeInsets.zero,
+                    ),
+                    icon: const Icon(Icons.info_outline_rounded),
+                    label: const Text(LibraryMessages.openFailedSubmission),
+                  ),
+                ),
+              if (failed)
+                Semantics(
+                  label: LibraryMessages.dismissSubmissionSemantics(title),
+                  button: true,
+                  onTap: onDismiss,
+                  excludeSemantics: true,
+                  child: TextButton.icon(
+                    key: const ValueKey('submission-dismiss'),
+                    onPressed: onDismiss,
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppTheme.libraryCardTitle,
+                      minimumSize: _buttonMinSize,
+                      padding: EdgeInsets.zero,
+                    ),
+                    icon: const Icon(Icons.close_rounded),
+                    label: const Text(LibraryMessages.dismissSubmission),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// The score's thumbnail: the copy saved on disk when there is one, else the
 /// API's URL (which is then saved for next launch); otherwise (no image,
 /// still loading, or a failed load) the mockup's music-note glyph, so a

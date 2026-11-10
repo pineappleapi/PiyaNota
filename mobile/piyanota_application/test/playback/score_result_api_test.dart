@@ -114,6 +114,39 @@ void main() {
     await _demoDir.parent.delete(recursive: true);
   });
 
+  test('revalidate sends touch=false and version; unchanged is null', () async {
+    final adapter = _StubAdapter(
+      body: {
+        'data': {'unchanged': true, 'version': 'v1'},
+      },
+    );
+    expect(await _http(adapter).revalidate(7, knownVersion: 'v1'), isNull);
+    final query = adapter.lastRequest!.queryParameters;
+    expect(query, {'touch': 'false', 'version': 'v1'});
+    await _http(adapter).revalidate(7).catchError((_) => null);
+    expect(adapter.lastRequest!.queryParameters, {'touch': 'false'});
+  });
+
+  test('touch=false is on the wire URL for a revalidate and absent for a '
+      'normal open (a real open must still reorder the library)', () async {
+    final adapter = _StubAdapter(
+      body: {
+        'data': {'unchanged': true},
+      },
+    );
+    await _http(adapter).revalidate(7, knownVersion: 'v1');
+    expect(adapter.lastRequest!.uri.queryParameters['touch'], 'false');
+    expect(adapter.lastRequest!.uri.queryParameters['version'], 'v1');
+    await _http(adapter)
+        .fetchResult(7)
+        .catchError((_) => throw 'x')
+        .then((_) {}, onError: (_) {});
+    expect(
+      adapter.lastRequest!.uri.queryParameters.containsKey('touch'),
+      false,
+    );
+  });
+
   group('FakeScoreResultApi', () {
     test(
       'a demo score plays the generated demo through the real parser',

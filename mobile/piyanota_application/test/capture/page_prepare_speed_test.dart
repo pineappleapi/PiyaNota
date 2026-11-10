@@ -135,7 +135,11 @@ void main() {
         for (var i = 0; i < 4; i++)
           (File('${dir.path}/r$i.jpg')..writeAsBytesSync(rotated)).path,
       ];
-      final processor = IsolatePageImageProcessor(() async => dir);
+      // No native plugin on the desktop VM: null sends it to the Dart decoder.
+      final processor = IsolatePageImageProcessor(
+        () async => dir,
+        compress: (_, _) async => null,
+      );
       final sw = Stopwatch()..start();
       await prepareInParallel(processor, paths, workers: 1);
       final one = sw.elapsedMilliseconds;

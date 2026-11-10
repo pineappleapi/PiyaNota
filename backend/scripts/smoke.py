@@ -20,6 +20,7 @@ from typing import Any
 TIMEOUT_S = 120  # Render free cold start can take a minute or more
 JOB_REF = re.compile(r"^job_[0-9]+$")
 ISO_Z = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$")
+MAX_CAP_PROBES = 6  # server default cap is 2; stop well past it
 PASSWORD = "smoke-pass-1"
 NEW_PASSWORD = "smoke-pass-2"
 # 240x160 grayscale staff-line JPEG (a real image: the server decodes and re-encodes it).
@@ -138,7 +139,7 @@ def error(reply: Reply, status: int, code: str) -> None:
     check(reply.body.get("error", {}).get("code") == code, f"error code != {code}: {reply.body}")
 
 
-def run(base: str) -> int:
+def run(base: str, check_cap: bool = False) -> int:
     email = f"smoke-{uuid.uuid4().hex[:12]}@example.com"
     state: dict[str, Any] = {"password": PASSWORD}
 
@@ -178,10 +179,38 @@ def run(base: str) -> int:
         check(data["totalPages"] == 1, f"totalPages {data['totalPages']}")
         check(isinstance(data["percentComplete"], int), "percentComplete is not an int")
 
+    def job_list() -> None:
+        data = envelope(call(base, "GET", "/api/jobs", token=state["token"]), 200)
+        check(any(j["jobId"] == state["job"] for j in data["jobs"]), "submitted job not in list")
+
     def cancel() -> None:
         data = envelope(call(base, "POST", f"/api/jobs/{state['job']}/cancel",
                              token=state["token"]), 200)
         check(data == {"jobId": state["job"], "status": "cancelled"}, f"cancel data {data}")
+
+    def cancel_submission() -> None:
+        csid = str(uuid.uuid4())
+        data = envelope(call(base, "POST", f"/api/jobs/by-submission/{csid}/cancel", token=state["token"]), 200)
+        check(data == {"clientSubmissionId": csid, "jobId": None, "status": "cancelled"}, f"cancel data {data}")
+        body, ctype = multipart({"title": "Smoke test", "clientSubmissionId": csid}, base64.b64decode(JPEG_B64))
+        error(call(base, "POST", "/api/jobs", token=state["token"], data=body, content_type=ctype),
+              409, "submission_cancelled")
+
+    def active_cap() -> None:
+        """Opt-in (--check-active-cap): queues up to MAX_CAP_PROBES real jobs, always cancels them."""
+        made: list[str] = []
+        try:
+            for _ in range(MAX_CAP_PROBES):
+                body, ctype = multipart({"title": "Smoke cap"}, base64.b64decode(JPEG_B64))
+                reply = call(base, "POST", "/api/jobs", token=state["token"], data=body, content_type=ctype)
+                if reply.status == 429:
+                    error(reply, 429, "too_many_active_jobs")
+                    return
+                made.append(envelope(reply, 202)["jobId"])
+            raise AssertionError(f"no too_many_active_jobs after {MAX_CAP_PROBES} submits")
+        finally:
+            for ref in made:
+                call(base, "POST", f"/api/jobs/{ref}/cancel", token=state["token"])
 
     def library() -> None:
         data = envelope(call(base, "GET", "/api/scores", token=state["token"]), 200)
@@ -212,9 +241,12 @@ def run(base: str) -> int:
 
     steps: list[tuple[str, Callable[[], None]]] = [
         ("signup", signup), ("account", account), ("login", login), ("submit", submit),
-        ("status", status), ("cancel", cancel), ("library", library),
+        ("status", status), ("job_list", job_list), ("cancel", cancel),
+        ("cancel submission", cancel_submission), ("library", library),
         ("change password", change_password), ("logout", logout), ("delete account", delete_account),
     ]
+    if check_cap:
+        steps.insert(steps.index(("library", library)), ("active cap", active_cap))
     failed = 0
     for name, step in steps:
         try:
@@ -229,6 +261,7 @@ def run(base: str) -> int:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        raise SystemExit("usage: python -m backend.scripts.smoke <base_url>")
-    sys.exit(run(sys.argv[1].rstrip("/")))
+    args = [a for a in sys.argv[1:] if a != "--check-active-cap"]
+    if len(args) != 1:
+        raise SystemExit("usage: python -m backend.scripts.smoke <base_url> [--check-active-cap]")
+    sys.exit(run(args[0].rstrip("/"), "--check-active-cap" in sys.argv))

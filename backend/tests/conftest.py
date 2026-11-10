@@ -37,6 +37,8 @@ def settings() -> Settings:
             "PIYA_MAIL_BACKEND": "memory",
             "PIYA_ARGON2_TIME_COST": "1",
             "PIYA_ARGON2_MEMORY_KIB": "8",
+            # Neutral for the suite: tests submit many unfinished jobs for one user; cap tests override it.
+            "PIYA_MAX_ACTIVE_JOBS_PER_USER": "1000",
         }
     )
 

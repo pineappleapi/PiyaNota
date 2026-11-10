@@ -71,6 +71,85 @@ class LibraryMessages {
 
   static String deleteSemantics(String title) => 'Delete $title';
 
+  /// Library card for a score that is still being sent (no job yet).
+  static const String uploading = 'Sending…';
+  static const String dismissSubmission = 'Dismiss';
+  static const String cancelSubmission = 'Cancel';
+  static String cancelSubmissionSemantics(String title) =>
+      'Cancel converting $title';
+  static String dismissSubmissionSemantics(String title) =>
+      'Dismiss failed score $title';
+
+  /// Opens the failure view (what went wrong, Retake).
+  static const String openFailedSubmission = 'See what happened';
+  static String openFailedSubmissionSemantics(String title) =>
+      'See what went wrong with $title';
+
+  /// Why a send failed, in plain words and with the next step. Unknown
+  /// server codes (any other 409/429 included) get [submissionFailedGeneric].
+  ///
+  /// [hasJob]: the server has a job for this card, so it opens the failure
+  /// view and the only fix is its Re-photograph (which replaces this card).
+  /// "Add it again" there would make a second card beside the failed one.
+  static String submissionFailed(String? code, {bool hasJob = false}) {
+    if (hasJob && !_beforeJobCodes.contains(code)) {
+      return switch (code) {
+        'unsupported_staff_layout' => _unsupportedLayout,
+        'no_staff_detected' ||
+        'ambiguous_staff_count' ||
+        'preprocessing_error' =>
+          "We couldn't read the staves. Tap See what happened to "
+              're-photograph the score with every staff in view.',
+        'incomplete_voice_sequence' =>
+          "We couldn't find all four voices. Tap See what happened to "
+              're-photograph the whole score.',
+        _ =>
+          "Couldn't finish this score. Tap See what happened to "
+              'see what to do.',
+      };
+    }
+    return _submissionFailedNoJob(code);
+  }
+
+  // Refused or lost before any job existed: only a new Add Score helps.
+  static const Set<String?> _beforeJobCodes = {
+    'queue_full',
+    'score_limit_reached',
+    'too_many_active_jobs',
+    'network',
+    'session_expired',
+    'file_missing',
+  };
+
+  static const String _unsupportedLayout =
+      'This looks like a piano-style score. PiyaNota reads scores with one '
+      'staff per voice.';
+
+  static String _submissionFailedNoJob(String? code) => switch (code) {
+    'queue_full' => 'PiyaNota is busy. Add this score again in a few minutes.',
+    'score_limit_reached' =>
+      'Your library is full. Delete a score, then add this one again.',
+    'too_many_active_jobs' =>
+      'Too many scores converting. Add this one again when one finishes.',
+    'network' => "Couldn't send — check your connection and add it again.",
+    'session_expired' => 'Your session expired. Log in and add it again.',
+    'file_missing' => 'The photos are gone. Add this score again.',
+    // Found by reconcile after the app was closed (conversion failed or the
+    // upload never arrived).
+    'interrupted' =>
+      'This score never finished sending. Add it again when you are online.',
+    'no_staff_detected' || 'ambiguous_staff_count' || 'preprocessing_error' =>
+      "We couldn't read the staves. Retake the photo with every staff in "
+          'view and add it again.',
+    'unsupported_staff_layout' => _unsupportedLayout,
+    'incomplete_voice_sequence' =>
+      "We couldn't find all four voices. Add the whole score again.",
+    _ => submissionFailedGeneric,
+  };
+
+  static const String submissionFailedGeneric =
+      "Couldn't send this score. Add it again.";
+
   /// Read out for the trash/swipe spinner while the delete is in flight.
   static const String deleting = 'Deleting…';
 

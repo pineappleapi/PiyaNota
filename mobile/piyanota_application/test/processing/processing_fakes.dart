@@ -20,6 +20,20 @@ import 'package:piyanota_application/state/work_owner.dart';
 import '../auth/auth_test_harness.dart';
 import '../export/export_fakes.dart' show FakeNotificationPermission;
 
+/// Records cancel-by-submission calls; [answer] (or [error]) is the reply.
+class ScriptedSubmissionCancelApi implements SubmissionCancelApi {
+  final List<String> ids = [];
+  SubmissionCancelResult answer = (jobId: null, status: 'cancelled');
+  ProcessingException? error;
+
+  @override
+  Future<SubmissionCancelResult> cancelBySubmission(String id) async {
+    ids.add(id);
+    if (error != null) throw error!;
+    return answer;
+  }
+}
+
 /// [ProcessingApi] that answers polls from a script: each entry is a
 /// [ProcessingStatus] or a [ProcessingException] to throw. Once the script
 /// runs out the last entry repeats, like a server that stopped changing.
@@ -211,9 +225,6 @@ String wholeRetakeMarker(WholeRetakeArguments args) =>
     'ROUTE:whole-retake ${args.replacesJobId} ${args.details.title} '
     '${args.details.tempoBpm} ${args.retakeOfScoreId}';
 
-String retakeMarker(String jobId, int pageIndex) =>
-    'ROUTE:retake $jobId $pageIndex';
-
 class ProcessingHarness {
   ProcessingHarness(this.api);
 
@@ -276,14 +287,6 @@ Future<void> pumpProcessing(
                     as PlaybackArguments;
             return Scaffold(
               body: Text('ROUTE:playback ${args.scoreId} ${args.title}'),
-            );
-          },
-          AppRoutes.captureRetake: (context) {
-            final args =
-                ModalRoute.of(context)!.settings.arguments!
-                    as CaptureRetakeArguments;
-            return Scaffold(
-              body: Text(retakeMarker(args.jobId, args.pageIndex)),
             );
           },
           AppRoutes.capture: (context) {

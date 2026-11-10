@@ -163,52 +163,5 @@ void main() {
     },
   );
 
-  test('resubmitting the failed page starts a job that succeeds', () async {
-    final b = _Backend(_flaky);
-    final noStaff = await b.submitPastUploadErrors();
-    b.at(5);
-    await expectLater(
-      b.upload.resubmitPage(jobId: noStaff, pageIndex: 0, imagePath: 'x.jpg'),
-      throwsA(
-        isA<UploadRejectedException>().having(
-          (e) => e.code,
-          'code',
-          pageNotRetakeableCode,
-        ),
-      ),
-      reason: 'only the page that failed can be replaced',
-    );
-    final retake = await b.upload.resubmitPage(
-      jobId: noStaff,
-      pageIndex: 1,
-      imagePath: 'x.jpg',
-    );
-    expect(retake.originalJobId, noStaff);
-    b.at(5 + 12);
-    final s = await b.jobs.fetchStatus(retake.replacementJobId);
-    expect(s.stage, ProcessingStage.complete);
-    expect(s.scoreId, isNotNull);
 
-    final unsupported = await b.submitPastUploadErrors();
-    b.at(5 + 12 + 5);
-    await expectLater(
-      b.upload.resubmitPage(
-        jobId: unsupported,
-        pageIndex: 0,
-        imagePath: 'x.jpg',
-      ),
-      throwsA(isA<UploadRejectedException>()),
-      reason: 'a layout problem cannot be fixed by retaking',
-    );
-    await expectLater(
-      b.upload.resubmitPage(jobId: 'nope', pageIndex: 0, imagePath: 'x.jpg'),
-      throwsA(
-        isA<UploadRejectedException>().having(
-          (e) => e.code,
-          'code',
-          jobNotFoundCode,
-        ),
-      ),
-    );
-  });
 }

@@ -101,7 +101,15 @@ erDiagram
         text version PK
         timestamptz applied_at
     }
+    cancelled_submissions {
+        bigint user_id PK
+        uuid client_submission_id PK
+        timestamptz created_at
+    }
 ```
+
+`cancelled_submissions` (migration 0009) records "the app cancelled this clientSubmissionId before its upload
+arrived"; `user_id` references `users` with ON DELETE CASCADE, rows are pruned after 7 days.
 
 `throttle_*`, `storage_deletions`, `purge_log` and `schema_migrations` have no foreign keys.
 That is on purpose: they must outlive the rows they refer to and must hold no PII.

@@ -44,6 +44,8 @@ class FakeScoreUploadApi implements ScoreUploadApi {
     CancelToken? cancelToken,
     String? replacesJobId,
     int? fallbackTempoBpm,
+    // The fake has no idempotency table; the real server dedupes on this.
+    String? clientSubmissionId,
   }) => _submit(
     details,
     imagePaths.length,
@@ -59,30 +61,11 @@ class FakeScoreUploadApi implements ScoreUploadApi {
     CancelToken? cancelToken,
     String? replacesJobId,
     int? fallbackTempoBpm,
+    String? clientSubmissionId,
   }) =>
       // The real PIYA-310 counts the pages itself; the fake has no PDF
       // parser, so the library card shows no page count.
       _submit(details, null, cancelToken, replacesJobId, fallbackTempoBpm);
-
-  /// Retakes never fail on the flaky accounts: the job they replace has
-  /// already demoed a failure.
-  @override
-  Future<ResubmittedJob> resubmitPage({
-    required String jobId,
-    required int pageIndex,
-    required String imagePath,
-    CancelToken? cancelToken,
-  }) async {
-    final account = await _accountAfterLatency(cancelToken);
-    final jobs = _jobs;
-    if (jobs == null) {
-      throw const UploadRejectedException(
-        statusCode: 404,
-        code: jobNotFoundCode,
-      );
-    }
-    return jobs.resubmit(account: account, jobId: jobId, pageIndex: pageIndex);
-  }
 
   Future<String> _accountAfterLatency(CancelToken? cancelToken) async {
     await Future.any<void>([

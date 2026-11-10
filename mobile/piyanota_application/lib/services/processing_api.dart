@@ -58,7 +58,39 @@ abstract interface class ProcessingApi {
   Future<void> cancelJob(String jobId);
 }
 
-class HttpProcessingApi implements ProcessingApi {
+/// One item of `GET /api/jobs`: the status payload plus the id the phone
+/// sent and when the job was made.
+typedef ListedJob = ({
+  String jobId,
+  String? clientSubmissionId,
+  String? title,
+  DateTime? createdAt,
+  ProcessingStatus status,
+});
+
+/// `GET /api/jobs` (job-lifecycle Task 1): the caller's active jobs and
+/// those of the last 7 days, newest first, in one request. A separate
+/// interface so the many [ProcessingApi] fakes stay as they are.
+abstract interface class JobListApi {
+  /// Throws the same [ProcessingException]s as [ProcessingApi.fetchStatus].
+  Future<List<ListedJob>> listJobs();
+}
+
+/// `POST /api/jobs/by-submission/<id>/cancel`: [jobId] is null when the
+/// server never got the job (it then remembers the cancel for 7 days and
+/// refuses a later send of that id with 409 `submission_cancelled`).
+/// [status] is `cancelled`, or the job's own terminal status when it had
+/// already finished (`complete`/`failed`, left alone by the server).
+typedef SubmissionCancelResult = ({String? jobId, String status});
+
+/// Separate from [ProcessingApi] so the many fakes of that stay as they are.
+abstract interface class SubmissionCancelApi {
+  /// Throws the same [ProcessingException]s as [ProcessingApi.cancelJob].
+  Future<SubmissionCancelResult> cancelBySubmission(String clientSubmissionId);
+}
+
+class HttpProcessingApi
+    implements ProcessingApi, JobListApi, SubmissionCancelApi {
   HttpProcessingApi(this._dio, this._sessionStorage);
 
   final Dio _dio;
@@ -91,6 +123,75 @@ class HttpProcessingApi implements ProcessingApi {
         options: options,
       ),
     );
+  }
+
+  @override
+  Future<SubmissionCancelResult> cancelBySubmission(
+    String clientSubmissionId,
+  ) async {
+    final response = await _send(
+      (options) => _dio.post<dynamic>(
+        ApiConfig.cancelSubmissionPath(clientSubmissionId),
+        options: options,
+      ),
+    );
+    return parseSubmissionCancel(response.data);
+  }
+
+  @visibleForTesting
+  static SubmissionCancelResult parseSubmissionCancel(Object? body) {
+    final data = body is Map<String, dynamic> ? body['data'] : null;
+    final status = data is Map<String, dynamic> ? data['status'] : null;
+    if (data is! Map<String, dynamic> || status is! String) {
+      throw const ProcessingServerException();
+    }
+    final jobId = data['jobId'];
+    return (
+      jobId: jobId is String && jobId.isNotEmpty ? jobId : null,
+      status: status,
+    );
+  }
+
+  @override
+  Future<List<ListedJob>> listJobs() async {
+    final response = await _send(
+      (options) =>
+          _dio.get<dynamic>(ApiConfig.submitImagesPath, options: options),
+    );
+    return parseJobList(response.data);
+  }
+
+  /// Items that don't parse are skipped: one odd job must not hide the rest.
+  @visibleForTesting
+  static List<ListedJob> parseJobList(Object? body) {
+    final data = body is Map<String, dynamic> ? body['data'] : null;
+    final jobs = data is Map<String, dynamic> ? data['jobs'] : null;
+    if (jobs is! List) throw const ProcessingServerException();
+    final out = <ListedJob>[];
+    for (final item in jobs) {
+      if (item is! Map<String, dynamic>) continue;
+      final jobId = item['jobId'];
+      if (jobId is! String || jobId.isEmpty) continue;
+      final ProcessingStatus status;
+      try {
+        status = ProcessingStatus.fromJson(item);
+      } on FormatException {
+        continue;
+      }
+      final client = item['clientSubmissionId'];
+      final title = item['title'];
+      final created = item['createdAt'];
+      out.add((
+        jobId: jobId,
+        clientSubmissionId: client is String && client.isNotEmpty
+            ? client
+            : null,
+        title: title is String ? title : null,
+        createdAt: created is String ? DateTime.tryParse(created) : null,
+        status: status,
+      ));
+    }
+    return out;
   }
 
   /// Reads `data` from a PIYA-102 response.

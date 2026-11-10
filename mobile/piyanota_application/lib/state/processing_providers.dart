@@ -12,6 +12,7 @@ import '../services/fake_score_library_api.dart';
 import '../services/processing_api.dart';
 import '../services/scan_tracking_service.dart';
 import 'auth_providers.dart';
+import 'playback_providers.dart';
 import 'scan_job_store.dart';
 import 'score_library_providers.dart';
 import 'work_owner.dart';
@@ -619,7 +620,14 @@ class ProcessingJobsController extends Notifier<Map<String, TrackedJob>> {
       next = next.copyWith(finishedAt: now, failingSince: next.failingSince);
     }
     _put(next);
-    if (justFinished) _prune();
+    if (justFinished) {
+      _prune();
+      final replaced = next.libraryScoreId;
+      if (next.phase == TrackedPhase.complete && replaced != null) {
+        // A retake/re-run fills an existing score: its saved copy is stale.
+        unawaited(ref.read(localResultsStoreProvider).invalidate(replaced));
+      }
+    }
     if (next.phase == TrackedPhase.paused) _listenForNetwork();
     if (next.phase.isFinal || next.phase == TrackedPhase.paused) return;
     // Belt and braces with the generation check: whatever timer is there

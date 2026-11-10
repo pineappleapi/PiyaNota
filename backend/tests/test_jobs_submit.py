@@ -383,6 +383,16 @@ def test_retake_rules(client: FlaskClient, headers: dict[str, str]) -> None:
     _err(_post(client, headers, replacesJobId=f"job_{failed}", **kw), 409, "retake_in_progress")
 
 
+def test_retake_any_failure_reason_supersedes(client: FlaskClient, headers: dict[str, str]) -> None:
+    failed = _insert_job(_user_id(), "failed", failure_reason="processing_timeout")
+    res = _post(client, headers, pages=[_img("JPEG")], title="t", replacesJobId=f"job_{failed}")
+    assert res.status_code == 202
+    new_id = int(res.get_json()["data"]["jobId"].removeprefix("job_"))
+    assert {j["id"]: j["superseded_by_job_id"] for j in _jobs()}[failed] == new_id
+    listed = client.get("/api/jobs", headers=headers).get_json()["data"]
+    assert f"job_{failed}" not in str(listed)
+
+
 def test_retake_completed_job_with_unreadable_voice(client: FlaskClient, headers: dict[str, str]) -> None:
     done = _insert_job(_user_id(), "complete", failed_voice_causes=json.dumps({"tenor": "unreadable"}))
     clean = _insert_job(_user_id(), "complete")
@@ -475,3 +485,39 @@ def test_client_submission_id_other_user_not_shared(client: FlaskClient, headers
     assert b.status_code == 202
     assert b.get_json()["data"]["jobId"] != a
     assert len(_jobs()) == 2
+
+
+def test_active_job_cap_rejects_third_concurrent_job(make_app: Callable[..., FlaskClient]) -> None:
+    client = make_app(max_active_jobs_per_user=2)
+    headers = _signup(client)
+    uid = _user_id()
+    _insert_job(uid, "queued")
+    _insert_job(uid, "transcribing")
+    _insert_job(uid, "failed")  # finished jobs never count
+    res = _post(client, headers, pages=[_img("JPEG")], title="t")
+    error = _err(res, 429, "too_many_active_jobs")
+    assert error["limit"] == 2
+    assert res.headers["Retry-After"] == "60"
+    assert len(_jobs()) == 3
+
+
+def test_active_job_cap_counts_only_own_jobs(make_app: Callable[..., FlaskClient]) -> None:
+    client = make_app(max_active_jobs_per_user=1)
+    headers = _signup(client)
+    _signup(client, "b@example.com")
+    _insert_job(_user_id("b@example.com"), "queued")
+    assert _post(client, headers, pages=[_img("JPEG")], title="t").status_code == 202
+
+
+def test_active_job_cap_replay_with_same_client_submission_id_is_not_rejected(
+    make_app: Callable[..., FlaskClient],
+) -> None:
+    client = make_app(max_active_jobs_per_user=1)
+    headers = _signup(client)
+    kw: dict[str, Any] = {"pages": [_img("JPEG")], "title": "t", "clientSubmissionId": CSID}
+    first = _post(client, headers, **kw)
+    second = _post(client, headers, **kw)  # at the cap now, but it is the same job
+    assert (first.status_code, second.status_code) == (202, 202)
+    assert second.get_json()["data"] == first.get_json()["data"]
+    assert len(_jobs()) == 1
+    _err(_post(client, headers, pages=[_img("JPEG")], title="t2"), 429, "too_many_active_jobs")

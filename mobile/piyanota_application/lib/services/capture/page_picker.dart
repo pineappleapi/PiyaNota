@@ -20,12 +20,37 @@ class NotAPdfException implements Exception {
 /// Gallery and document pickers for Capture.
 abstract interface class PagePicker {
   /// Photos chosen in the gallery, in the order the picker returns them.
-  /// Empty when the user backs out. [single] opens the one-photo picker
-  /// (a retake replaces exactly one page).
-  Future<List<String>> pickGalleryImages({bool single = false});
+  /// Empty when the user backs out.
+  Future<List<String>> pickGalleryImages();
 
   /// Null when the user backs out. Throws [NotAPdfException].
   Future<PickedPdf?> pickPdf();
+}
+
+/// Tells the device a system picker is open over the app. The picker pauses
+/// the Activity, which looks like "the user left" to the closed-app job; it
+/// must not start writing the rows the user is submitting into.
+class SignalingPagePicker implements PagePicker {
+  const SignalingPagePicker(this._inner, this._pickerOpen);
+
+  final PagePicker _inner;
+  final Future<void> Function(bool open) _pickerOpen;
+
+  Future<T> _around<T>(Future<T> Function() pick) async {
+    await _pickerOpen(true);
+    try {
+      return await pick();
+    } finally {
+      await _pickerOpen(false);
+    }
+  }
+
+  @override
+  Future<List<String>> pickGalleryImages() =>
+      _around(_inner.pickGalleryImages);
+
+  @override
+  Future<PickedPdf?> pickPdf() => _around(_inner.pickPdf);
 }
 
 /// Every PDF starts with this signature (ISO 32000-1 §7.5.2). Checked on
@@ -54,9 +79,6 @@ bool looksLikePdf(List<int> bytes) {
   return false;
 }
 
-const double _pickMaxSide = 4032; // = maxLongSide in page_image_processor
-const int _pickQuality = 90;
-
 class PluginPagePicker implements PagePicker {
   PluginPagePicker(this._outputDir, {ImagePicker? imagePicker})
     : _imagePicker = imagePicker ?? ImagePicker();
@@ -65,27 +87,13 @@ class PluginPagePicker implements PagePicker {
   final ImagePicker _imagePicker;
 
   @override
-  Future<List<String>> pickGalleryImages({bool single = false}) async {
-    if (single) {
-      final file = await _imagePicker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: _pickMaxSide,
-        maxHeight: _pickMaxSide,
-        imageQuality: _pickQuality,
-        requestFullMetadata: false,
-      );
-      return [if (file != null) file.path];
-    }
+  Future<List<String>> pickGalleryImages() async {
     // Full metadata off: on Android 13+ this keeps the permission-less
     // system photo picker (AC3); orientation is still read from the file.
-    // Native downscale of oversize photos (cheap); the plugin keeps EXIF
-    // tags incl. GPS on resize, so the app still strips them in prepare.
-    final files = await _imagePicker.pickMultiImage(
-      maxWidth: _pickMaxSide,
-      maxHeight: _pickMaxSide,
-      imageQuality: _pickQuality,
-      requestFullMetadata: false,
-    );
+    // No resize/quality here: that made the plugin decode and re-encode every
+    // photo, then prepare() did it again. The originals (JPEG, PNG, WebP,
+    // HEIC) go to prepare(), which converts once, natively.
+    final files = await _imagePicker.pickMultiImage(requestFullMetadata: false);
     return [for (final file in files) file.path];
   }
 

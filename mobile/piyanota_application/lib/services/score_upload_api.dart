@@ -26,21 +26,6 @@ class SubmittedJob {
   final int? scoreId;
 }
 
-/// The replacement job PIYA-116 created for a retaken page. Processing
-/// polls [replacementJobId]; the failed job is not polled again.
-@immutable
-class ResubmittedJob {
-  const ResubmittedJob({
-    required this.originalJobId,
-    required this.replacementJobId,
-    required this.pageIndex,
-  });
-
-  final String originalJobId;
-  final String replacementJobId;
-  final int pageIndex;
-}
-
 /// J8: most scores one account may hold; the server's 409 and the app's
 /// pre-check both use it.
 const int maxScoresPerUser = 20;
@@ -106,39 +91,33 @@ abstract interface class ScoreUploadApi {
   /// [cancelToken] aborts the request; the future then fails with
   /// [UploadCancelledException]. [replacesJobId] makes it a whole-score
   /// retake of that job (PIYA-101 AC12, PIYA-207 AC12).
+  /// [clientSubmissionId] is the phone-made UUID of the local library row;
+  /// the server returns the existing job for a repeat of it, so a retry
+  /// after a lost 202 never makes a second score.
   Future<SubmittedJob> submitImages({
     required ScoreDetails details,
     required List<String> imagePaths,
     CancelToken? cancelToken,
     String? replacesJobId,
     int? fallbackTempoBpm,
+    String? clientSubmissionId,
   });
 
-  /// PIYA-310: one PDF, rasterised by the server. [replacesJobId] as for
-  /// [submitImages].
+  /// PIYA-310: one PDF, rasterised by the server. [replacesJobId] and
+  /// [clientSubmissionId] as for [submitImages].
   Future<SubmittedJob> submitPdf({
     required ScoreDetails details,
     required String pdfPath,
     CancelToken? cancelToken,
     String? replacesJobId,
     int? fallbackTempoBpm,
+    String? clientSubmissionId,
   });
 
-  /// PIYA-116: replaces page [pageIndex] (0-based) of the failed job
-  /// [jobId] with [imagePath] and starts a new job. A bare 404 comes back
-  /// as code [jobNotFoundCode], a bare 409 (the job didn't fail on a page)
-  /// as [pageNotRetakeableCode].
-  Future<ResubmittedJob> resubmitPage({
-    required String jobId,
-    required int pageIndex,
-    required String imagePath,
-    CancelToken? cancelToken,
-  });
 }
 
-/// Codes the client gives PIYA-116's 404/409 when the body names none.
+/// Code the client gives a bare 404 on a retaken job.
 const String jobNotFoundCode = 'job_not_found';
-const String pageNotRetakeableCode = 'page_not_retakeable';
 
 /// PIYA-101 AC12's 409 codes for a whole-score retake: the old job can't be
 /// retaken (or already was), or a retake of it is already running.
@@ -147,6 +126,9 @@ const String retakeInProgressCode = 'retake_in_progress';
 
 /// PIYA-101 AC12's 410 code: the old job was already replaced by a retake.
 const String jobSupersededCode = 'job_superseded';
+
+/// 409 for an id the phone cancelled while its upload was in flight.
+const String submissionCancelledCode = 'submission_cancelled';
 
 /// The PIYA-101 AC8 text parts. Optional fields are left out when unset —
 /// never sent empty or as "null" — and "Other" time also leaves its field
@@ -159,10 +141,13 @@ List<MapEntry<String, String>> scoreFormFields(
   ScoreDetails details, {
   String? replacesJobId,
   int? fallbackTempoBpm,
+  String? clientSubmissionId,
 }) {
   final arranger = details.arranger.trim();
   return [
     if (replacesJobId != null) MapEntry('replacesJobId', replacesJobId),
+    if (clientSubmissionId != null)
+      MapEntry('clientSubmissionId', clientSubmissionId),
     MapEntry('title', details.title.trim()),
     if (arranger.isNotEmpty) MapEntry('arranger', arranger),
     if (details.tempoBpm case final tempo?)
@@ -197,6 +182,7 @@ class HttpScoreUploadApi implements ScoreUploadApi {
     CancelToken? cancelToken,
     String? replacesJobId,
     int? fallbackTempoBpm,
+    String? clientSubmissionId,
   }) async {
     // Part order is page order (PIYA-101 context note).
     final form = FormData()
@@ -205,6 +191,7 @@ class HttpScoreUploadApi implements ScoreUploadApi {
           details,
           replacesJobId: replacesJobId,
           fallbackTempoBpm: fallbackTempoBpm,
+          clientSubmissionId: clientSubmissionId,
         ),
       );
     for (var i = 0; i < imagePaths.length; i++) {
@@ -277,6 +264,7 @@ class HttpScoreUploadApi implements ScoreUploadApi {
     CancelToken? cancelToken,
     String? replacesJobId,
     int? fallbackTempoBpm,
+    String? clientSubmissionId,
   }) async {
     final form = FormData()
       ..fields.addAll(
@@ -284,6 +272,7 @@ class HttpScoreUploadApi implements ScoreUploadApi {
           details,
           replacesJobId: replacesJobId,
           fallbackTempoBpm: fallbackTempoBpm,
+          clientSubmissionId: clientSubmissionId,
         ),
       )
       ..files.add(
@@ -300,79 +289,6 @@ class HttpScoreUploadApi implements ScoreUploadApi {
         cancelToken: cancelToken,
       ),
       replacesJobId: replacesJobId,
-    );
-  }
-
-  @override
-  Future<ResubmittedJob> resubmitPage({
-    required String jobId,
-    required int pageIndex,
-    required String imagePath,
-    CancelToken? cancelToken,
-  }) async {
-    final form = FormData()
-      ..fields.add(MapEntry('pageIndex', pageIndex.toString()))
-      ..files.add(
-        MapEntry(
-          'page',
-          await _readFile(
-            imagePath,
-            filename: 'page-${pageIndex + 1}.jpg',
-            contentType: _jpeg,
-            pageIndex: pageIndex,
-          ),
-        ),
-      );
-    final Response<dynamic> response;
-    try {
-      response = await _postRaw(
-        ApiConfig.resubmitPagePath(jobId),
-        form,
-        cancelToken: cancelToken,
-      );
-    } on UploadRejectedException catch (e) {
-      throw resubmitRejection(e);
-    }
-    return parseResubmittedJob(response.data, jobId, pageIndex);
-  }
-
-  /// PIYA-116 names 404 and 409 without an error code; give them one so
-  /// Capture can word them.
-  @visibleForTesting
-  static UploadRejectedException resubmitRejection(UploadRejectedException e) {
-    if (e.code != null) return e;
-    final code = switch (e.statusCode) {
-      _notFound => jobNotFoundCode,
-      _conflict => pageNotRetakeableCode,
-      _ => null,
-    };
-    return UploadRejectedException(
-      statusCode: e.statusCode,
-      code: code,
-      field: e.field,
-      pageIndex: e.pageIndex,
-      retryAfter: e.retryAfter,
-    );
-  }
-
-  /// Reads `data.replacementJobId` from the PIYA-116 202 response.
-  @visibleForTesting
-  static ResubmittedJob parseResubmittedJob(
-    Object? body,
-    String jobId,
-    int pageIndex,
-  ) {
-    final data = body is Map<String, dynamic> ? body['data'] : null;
-    final replacement = data is Map<String, dynamic>
-        ? data['replacementJobId']
-        : null;
-    if (replacement is! String || replacement.isEmpty) {
-      throw const UploadRejectedException(statusCode: null);
-    }
-    return ResubmittedJob(
-      originalJobId: jobId,
-      replacementJobId: replacement,
-      pageIndex: pageIndex,
     );
   }
 

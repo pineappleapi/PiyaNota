@@ -9,6 +9,7 @@ import pytest
 from flask import Flask
 
 from backend import db
+from backend.worker import main as worker_main
 from backend.app import create_app
 from backend.config import Settings
 from backend.tests.test_jobs_submit import _signup
@@ -17,6 +18,12 @@ from backend.worker.main import process_one
 
 BASE = "https://piya.test"
 PAGE_COUNT = 2
+
+
+@pytest.fixture(autouse=True)
+def _stub_combined_midi(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The fake pipeline result carries no bars; without a stub the job fails with no playable audio."""
+    monkeypatch.setattr(worker_main, "_combined_midi", lambda result, timing: b"MThd-stub")
 
 
 @pytest.fixture

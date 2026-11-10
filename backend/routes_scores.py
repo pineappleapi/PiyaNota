@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from collections.abc import Mapping
 from typing import Any, cast
@@ -21,6 +23,7 @@ LOG = logging.getLogger(__name__)
 scores_bp = Blueprint("scores", __name__, url_prefix="/api/scores")
 
 MAX_SEARCH_LENGTH = 100
+VERSION_HEX_LENGTH = 32  # 128 bits of the sha256: collisions are not a concern for a cache key
 # Mirror of stage5_synthesis.CLIENT_REVIEW_CODES: the API venv cannot import stage5 (cv2/torch).
 CLIENT_REVIEW_CODES = frozenset({"voice_unreadable", "voice_dropped"})
 _FINISHED = ("complete", "failed", "cancelled")
@@ -97,6 +100,25 @@ def result(score_id: int) -> tuple[Response, int]:
             "SELECT object_key, width, height FROM job_pages WHERE job_id = %s ORDER BY page_index",
             (job_id,),
         ).fetchall()
+    # Fingerprint of every file the client downloads. Object keys are random per publish and never
+    # rewritten (J4), so this changes exactly when a file is replaced. scores.updated_at is unusable:
+    # its trigger also fires on the last_accessed_at touch. Sizes/URLs are excluded (storage HEAD, signing).
+    keys = sorted(
+        [f"audio:{t['voice']}:{t['file_key']}" for t in tracks if t["file_key"]]
+        + [f"midi:{t['voice']}:{t['midi_key']}" for t in tracks if t["midi_key"]]
+        + [f"page:{p['object_key']}" for p in pages]
+        + ([f"midiCombined:{score['midi_combined_key']}"] if score["midi_combined_key"] else [])
+        + ([f"timing:{timing['metadata_key']}"] if timing else [])
+    )
+    # Also the non-file fields /result displays or plays from, so a PATCH or re-review invalidates it.
+    fields = json.dumps([score["title"], score["arranger"], score["tempo_bpm"], score["review"],
+                         score["muted_measures"], score["failed_voices"], score["failed_voice_causes"]],
+                        sort_keys=True, default=str)
+    version = hashlib.sha256("\n".join([*keys, fields]).encode()).hexdigest()[:VERSION_HEX_LENGTH]
+    if request.args.get("version") == version:
+        _touch(score_id)
+        return ok({"unchanged": True, "version": version}, 200, "Processed score result unchanged")
+
     def file(key: str) -> dict[str, Any]:
         # fileId is the object key: keys are random per publish and never rewritten (J4).
         try:
@@ -131,8 +153,17 @@ def result(score_id: int) -> tuple[Response, int]:
         "failedVoices": score["failed_voices"],
         "failedVoiceCauses": score["failed_voice_causes"],
     }
+    data["version"] = version
     if score["arranger"] is not None:
         data["arranger"] = score["arranger"]
+    _touch(score_id)
+    return ok(data, 200, "Processed score result retrieved")
+
+
+def _touch(score_id: int) -> None:
+    """Bump last_accessed_at unless ?touch=false (background revalidation must not reorder the library)."""
+    if request.args.get("touch", "true").lower() == "false":
+        return
     try:
         with db.transaction() as conn:
             conn.execute(
@@ -141,7 +172,6 @@ def result(score_id: int) -> tuple[Response, int]:
             )
     except psycopg.Error:  # AC8: a failed touch must never fail the read
         LOG.warning("last_accessed_at update failed score_id=%s", score_id, exc_info=True)
-    return ok(data, 200, "Processed score result retrieved")
 
 
 def _lock_score_and_jobs(conn: Conn, score_id: int) -> tuple[dict[str, Any], list[int]]:

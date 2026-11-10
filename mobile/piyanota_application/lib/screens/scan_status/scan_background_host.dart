@@ -4,11 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/library_entry.dart';
+import '../../services/background_completion.dart';
 import '../../services/scan_tracking_service.dart';
 import '../../state/processing_providers.dart';
+import '../../state/score_library_providers.dart';
+import '../../state/submission_reconcile_providers.dart';
 import '../../state/work_owner.dart';
 import '../library/library_messages.dart';
-import 'scan_navigation.dart';
+import 'notification_landing_screen.dart';
 import 'scan_status_messages.dart';
 
 /// PIYA-218, background half (user decision 2026-10-22): keeps scans
@@ -71,11 +74,28 @@ class _ScanBackgroundHostState extends ConsumerState<ScanBackgroundHost>
       _stoppedByDevice = true;
     });
     WidgetsBinding.instance.addObserver(this);
+    // Flag raised while the app is on screen is handled now; one raised
+    // while it is away waits for the next resume.
+    ref.listenManual(sessionExpiredFlagProvider, (_, raised) {
+      if (raised && _inForeground()) _consumeSessionExpired();
+    });
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _resync();
+    if (state == AppLifecycleState.resumed) {
+      _resync();
+      unawaited(ref.read(reconcileSubmissionsProvider)(fresh: true));
+      if (ref.read(sessionExpiredFlagProvider)) _consumeSessionExpired();
+    }
+  }
+
+  /// A background refresh saw a 401. The Library re-asks the server and
+  /// shows its own Login prompt if the token is really dead; a stray 401
+  /// costs one list call. Local data is untouched.
+  void _consumeSessionExpired() {
+    ref.read(sessionExpiredFlagProvider.notifier).set(false);
+    if (ref.read(signedInProvider)) ref.invalidate(scoreLibraryProvider);
   }
 
   @override
@@ -151,6 +171,8 @@ class _ScanBackgroundHostState extends ConsumerState<ScanBackgroundHost>
   Future<void> _notify(TrackedJob job) {
     final title = job.title ?? untitledScoreLabel;
     final ready = job.phase == TrackedPhase.complete;
+    // So the background run (Task 6) doesn't announce the same job again.
+    unawaited(const NotifiedJobsStore().add(job.jobId));
     return _device.notifyResult(
       jobId: job.jobId,
       title: ready
@@ -167,13 +189,14 @@ class _ScanBackgroundHostState extends ConsumerState<ScanBackgroundHost>
     );
   }
 
-  /// A tapped notification. A job no longer followed (logged out since,
-  /// or deleted) opens nothing: the app just comes to the front.
-  void _open(String jobId) {
-    final job = ref.read(processingJobsProvider)[jobId];
+  /// A tapped notification (warm start). The in-memory tracker may not know
+  /// the job (the app was killed and relaunched, or the job came from the
+  /// server list), so the landing screen asks the server first. Signed out:
+  /// the app just comes to the front on Login.
+  void _open(String payload) {
     final navigator = widget.navigatorKey.currentState;
-    if (job == null || navigator == null) return;
-    unawaited(openScanJob(navigator, ref, job));
+    if (navigator == null || !ref.read(signedInProvider)) return;
+    unawaited(openScanNotification(navigator, payload));
   }
 
   @override

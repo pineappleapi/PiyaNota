@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'models/score_details.dart';
 import 'routes/app_routes.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/password_reset_screen.dart';
@@ -16,7 +15,7 @@ import 'screens/playback/playback_screen.dart';
 import 'screens/processing/processing_screen.dart';
 import 'screens/scan_status/scan_background_host.dart';
 import 'screens/scan_status/scan_toast_host.dart';
-import 'screens/scan_status/scan_navigation.dart';
+import 'screens/scan_status/notification_landing_screen.dart';
 import 'screens/settings/settings_screen.dart';
 import 'services/score_library_api.dart';
 import 'splash_gate.dart';
@@ -115,17 +114,6 @@ class _PiyaNotaAppState extends State<PiyaNotaApp> {
               title: arguments.title,
             );
           },
-          AppRoutes.captureRetake: (context) {
-            final arguments = ModalRoute.of(context)?.settings.arguments;
-            if (arguments is! CaptureRetakeArguments) {
-              // Only reachable from Processing, which always passes these.
-              return const ScoreLibraryScreen();
-            }
-            return CaptureScreen(
-              details: ScoreDetails(title: arguments.title),
-              retake: arguments,
-            );
-          },
           // PIYA-212 AC5: the gate sends an expired session to Login.
           AppRoutes.settings: (_) => const SettingsGate(),
         },
@@ -184,12 +172,11 @@ class _AppEntryPointState extends ConsumerState<_AppEntryPoint> {
   /// looked up once, after the restore: a job missing then is gone, and a
   /// later scan reusing its id must not open by surprise.
   Future<void> _takeLaunchJob() async {
-    final jobId = await ref.read(scanTrackingServiceProvider).takeLaunchJob();
-    if (jobId == null || !mounted) return;
-    await ref.read(processingJobsProvider.notifier).restored;
-    final job = mounted ? ref.read(processingJobsProvider)[jobId] : null;
-    if (job == null || !mounted) return;
-    unawaited(openScanJob(Navigator.of(context), ref, job));
+    final payload = await ref.read(scanTrackingServiceProvider).takeLaunchJob();
+    if (payload == null || !mounted) return;
+    // The landing screen restores, reconciles with the server (the scan may
+    // have finished while the app was dead) and then picks the destination.
+    unawaited(openScanNotification(Navigator.of(context), payload));
   }
 
   /// AC2 (backend note B2): the first PIYA-306 load is the server's check

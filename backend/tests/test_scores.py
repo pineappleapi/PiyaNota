@@ -158,6 +158,67 @@ def test_result_shape_and_touch(client: FlaskClient, headers: dict[str, str]) ->
     assert row["last_accessed_at"] is not None
 
 
+def _last_accessed(sid: int) -> Any:
+    with db.transaction() as conn:
+        return conn.execute("SELECT last_accessed_at FROM scores WHERE id = %s", (sid,)).fetchone()["last_accessed_at"]
+
+
+def test_result_touch_false_skips_last_accessed(client: FlaskClient, headers: dict[str, str]) -> None:
+    sid, _ = _score(_uid())
+    res = client.get(f"/api/scores/{sid}/result?touch=false", headers=headers)
+    assert res.status_code == 200 and "audioFiles" in res.get_json()["data"]
+    assert _last_accessed(sid) is None
+
+
+def test_result_version_stable_and_changes_with_files(client: FlaskClient, headers: dict[str, str]) -> None:
+    sid, _ = _score(_uid(), tag="v")
+    url = f"/api/scores/{sid}/result"
+    v1 = client.get(url, headers=headers).get_json()["data"]["version"]
+    assert client.get(url, headers=headers).get_json()["data"]["version"] == v1  # new signatures, same version
+    with db.transaction() as conn:
+        conn.execute("UPDATE scores SET title = 'Renamed' WHERE id = %s", (sid,))
+    v2 = client.get(url, headers=headers).get_json()["data"]["version"]
+    assert v2 != v1  # displayed non-file fields change it, so ?version= cannot return a stale title
+    with db.transaction() as conn:
+        conn.execute("UPDATE scores SET arranger = 'A', tempo_bpm = tempo_bpm + 1 WHERE id = %s", (sid,))
+    v3 = client.get(url, headers=headers).get_json()["data"]["version"]
+    assert v3 not in (v1, v2)
+    assert client.get(f"{url}?version={v2}", headers=headers).get_json()["data"].get("unchanged") is None
+    with db.transaction() as conn:
+        conn.execute("UPDATE audio_tracks SET file_key = 'audio/vnew.mp3' WHERE score_id = %s AND voice = 'alto'", (sid,))
+    assert client.get(url, headers=headers).get_json()["data"]["version"] != v3
+
+
+def test_result_unchanged_skips_storage_work(
+    client: FlaskClient, headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sid, _ = _score(_uid(), tag="u")
+    url = f"/api/scores/{sid}/result"
+    version = client.get(url, headers=headers).get_json()["data"]["version"]
+    storage = _storage(client.application)
+
+    def boom(*a: Any, **k: Any) -> Any:
+        raise AssertionError("storage touched")
+
+    monkeypatch.setattr(storage, "size", boom)
+    monkeypatch.setattr(storage, "signed_url", boom)
+    res = client.get(f"{url}?version={version}&touch=false", headers=headers)
+    assert res.status_code == 200 and res.get_json()["data"] == {"unchanged": True, "version": version}
+
+
+def test_result_stale_version_returns_full_payload(client: FlaskClient, headers: dict[str, str]) -> None:
+    sid, _ = _score(_uid())
+    data = client.get(f"/api/scores/{sid}/result?version=stale", headers=headers).get_json()["data"]
+    assert "unchanged" not in data and "audioFiles" in data and data["version"] != "stale"
+
+
+def test_result_unchanged_other_user_404(client: FlaskClient, headers: dict[str, str]) -> None:
+    sid, _ = _score(_uid())
+    version = client.get(f"/api/scores/{sid}/result", headers=headers).get_json()["data"]["version"]
+    other = _signup(client, "b@example.com")
+    _err(client.get(f"/api/scores/{sid}/result?version={version}", headers=other), 404, "score_not_found")
+
+
 def test_result_lists_file_ids_sizes_and_midi(client: FlaskClient, headers: dict[str, str]) -> None:
     sid, _ = _score(_uid(), tag="m", midi=True)
     storage = _storage(client.application)

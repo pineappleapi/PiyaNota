@@ -11,7 +11,9 @@ import 'package:piyanota_application/services/local_results_store.dart';
 import 'package:piyanota_application/services/session_storage.dart';
 import 'package:piyanota_application/state/auth_providers.dart';
 import 'package:piyanota_application/state/export_jobs.dart';
+import 'package:piyanota_application/services/local_submission_store.dart';
 import 'package:piyanota_application/state/export_providers.dart';
+import 'package:piyanota_application/state/local_submission_providers.dart';
 import 'package:piyanota_application/state/playback_providers.dart';
 import 'package:piyanota_application/state/processing_providers.dart';
 import 'package:piyanota_application/state/session_actions.dart';
@@ -161,6 +163,28 @@ void main() {
     expect(container.read(signedInProvider), isFalse);
     expect(results.deleteAllCalls, 0);
     expect(owners.owner, testSession().userId);
+  });
+
+  testWidgets('expiry keeps the persisted submission rows and tombstones; '
+      'logout wipes them (I1)', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await pump(tester, owner: testSession().userId);
+    final subs = container.read(localSubmissionsProvider.notifier);
+    await subs.begin(clientSubmissionId: 'row-1', title: 'Ave');
+    await subs.begin(clientSubmissionId: 'row-2', title: 'Gone');
+    await subs.dismiss('row-2');
+    await endLocalSession(ref);
+    expect(container.read(localSubmissionsProvider), hasLength(1));
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString(LocalSubmissionStore.storageKey), contains('row-1'));
+    expect(
+      prefs.getString(LocalSubmissionStore.dismissedKey),
+      contains('row-2'),
+    );
+
+    await endLocalSession(ref, wipeResults: true);
+    expect(container.read(localSubmissionsProvider), isEmpty);
+    expect(prefs.getString(LocalSubmissionStore.storageKey), isNull);
   });
 
   testWidgets('logout (wipeResults) wipes the results and forgets the owner', (

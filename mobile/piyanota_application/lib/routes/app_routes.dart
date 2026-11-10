@@ -21,24 +21,6 @@ class AppRoutes {
   // pages, then hands the job to Processing (PIYA-207).
   static const capturePages = '/capture/pages';
   static const processing = '/processing';
-
-  // PIYA-207 AC7: Capture limited to the one page a failed job names.
-  static const captureRetake = '/capture/retake';
-}
-
-/// Arguments for [AppRoutes.captureRetake]. [pageIndex] counts from 0, as
-/// PIYA-116 expects it; [title] carries over to the replacement job's
-/// Processing screen.
-class CaptureRetakeArguments {
-  const CaptureRetakeArguments({
-    required this.jobId,
-    required this.pageIndex,
-    required this.title,
-  });
-
-  final String jobId;
-  final int pageIndex;
-  final String title;
 }
 
 /// Arguments for [AppRoutes.capture] when it starts a whole-score retake

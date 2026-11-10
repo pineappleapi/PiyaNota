@@ -50,7 +50,16 @@ abstract interface class ScoreResultApi {
   Future<TimingFile> fetchTiming(Uri url);
 }
 
-class HttpScoreResultApi implements ScoreResultApi {
+/// Background revalidation of a score that is already on the phone. Separate
+/// from [ScoreResultApi] so existing fakes keep compiling.
+abstract interface class ScoreRevalidator {
+  /// `/result?touch=false[&version=...]`: touch=false so a mere local open
+  /// never reorders the library by last access. Returns null when the server
+  /// says [knownVersion] is still current (no files or URLs sent).
+  Future<ScoreResult?> revalidate(int scoreId, {String? knownVersion});
+}
+
+class HttpScoreResultApi implements ScoreResultApi, ScoreRevalidator {
   HttpScoreResultApi(this._dio, this._sessionStorage);
 
   final Dio _dio;
@@ -66,20 +75,39 @@ class HttpScoreResultApi implements ScoreResultApi {
 
   @override
   Future<ScoreResult> fetchResult(int scoreId) async {
+    final response = await _get(scoreId, null);
+    return parseResult(response.data);
+  }
+
+  @override
+  Future<ScoreResult?> revalidate(int scoreId, {String? knownVersion}) async {
+    final response = await _get(scoreId, {
+      'touch': 'false',
+      'version': ?knownVersion,
+    });
+    final body = response.data;
+    final data = body is Map<String, dynamic> ? body['data'] : null;
+    if (data is Map<String, dynamic> && data['unchanged'] == true) return null;
+    return parseResult(body);
+  }
+
+  Future<Response<dynamic>> _get(
+    int scoreId,
+    Map<String, String>? query,
+  ) async {
     final token = await _sessionStorage.readToken();
     if (token == null || token.isEmpty) {
       throw const ScoreResultSessionExpiredException();
     }
-    final Response<dynamic> response;
     try {
-      response = await _dio.get<dynamic>(
+      return await _dio.get<dynamic>(
         ApiConfig.scoreResultPath(scoreId),
+        queryParameters: query,
         options: Options(headers: {'Authorization': 'Bearer $token'}),
       );
     } on DioException catch (e) {
       throw mapDioError(e);
     }
-    return parseResult(response.data);
   }
 
   /// The timing file is fetched from its own URL with no Authorization

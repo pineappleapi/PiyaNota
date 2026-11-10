@@ -57,6 +57,16 @@ Secrets go in the Render dashboard, never in files.
 
 Deploy the API first (its container runs migrations at boot), then restart the PC worker. The
 worker refuses to start on a schema older than its code (exit 1, unapplied versions in the log).
+Migrations 0008 (`jobs.started_at`) and 0009 (`cancelled_submissions`) are additive and have down files; the
+API must be live (migrated) before the worker, and the backend (API, then worker) before the new app: an app
+newer than the API gets no `GET /api/jobs` and cannot reconcile. The worker must run under a supervisor
+that restarts it (it exits with code 3 when a pipeline hangs past the runtime cap).
+
+## One-time effects of this release
+
+- `/api/scores/<id>/result` `version` now also hashes title, arranger, tempo and review fields, so the first
+  `?version=` revalidation after deploy differs once and every score is re-fetched one time per device.
+- `failureReason` is now a mapped code (see backend/README.md); `failureDetail` carries the old raw text.
 
 ## Proxy / client IP check (temporary)
 

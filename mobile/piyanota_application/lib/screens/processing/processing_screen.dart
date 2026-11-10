@@ -394,17 +394,6 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
     _backToLibrary();
   }
 
-  void _retake(int pageIndex) {
-    Navigator.of(context).pushNamed(
-      AppRoutes.captureRetake,
-      arguments: CaptureRetakeArguments(
-        jobId: widget.jobId,
-        pageIndex: pageIndex,
-        title: widget.title,
-      ),
-    );
-  }
-
   void _snack(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -435,7 +424,6 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
             ? ProcessingMessages.unsupportedHeading
             : ProcessingMessages.failedHeading,
         status: job!.status,
-        onRetake: _retake,
         onRetakeWhole: _retakeWhole,
         onBack: _backToLibrary,
         onDelete: _deletableScoreId == null ? null : _deleteScan,
@@ -811,7 +799,6 @@ class _FailureView extends StatelessWidget {
     required this.onBack,
     this.status,
     this.body,
-    this.onRetake,
     this.onRetakeWhole,
     this.onDelete,
     this.deleting = false,
@@ -823,9 +810,9 @@ class _FailureView extends StatelessWidget {
   /// Fixed copy for the non-pipeline cases (gone, cancelled); otherwise
   /// worded from [status].
   final String? body;
-  final ValueChanged<int>? onRetake;
 
-  /// AC7/AC12: re-photograph the whole score.
+  /// AC7/AC12: re-photograph the whole score. Page-specific failures use
+  /// this too: there is no per-page resubmit route (planned PIYA-116).
   final VoidCallback? onRetakeWhole;
   final VoidCallback onBack;
 
@@ -843,13 +830,10 @@ class _FailureView extends StatelessWidget {
     // (open contract question, PIYA-216); people count from 1.
     final pageIndex = status?.failedPageIndex;
     final page = pageIndex == null ? null : pageIndex + 1;
-    final canRetake =
-        body == null &&
-        reason.isRetakeable &&
-        pageIndex != null &&
-        onRetake != null;
     final canRetakeWhole =
-        body == null && reason.isWholeRetakeable && onRetakeWhole != null;
+        body == null &&
+        (reason.isRetakeable || reason.isWholeRetakeable) &&
+        onRetakeWhole != null;
     final unsupported = reason == FailureReason.unsupportedStaffLayout;
 
     return Column(
@@ -900,7 +884,7 @@ class _FailureView extends StatelessWidget {
             ),
           ),
         ],
-        if (canRetake || canRetakeWhole) ...[
+        if (canRetakeWhole) ...[
           const SizedBox(height: 16),
           Text(
             ProcessingMessages.retakeTipsTitle,
@@ -938,12 +922,10 @@ class _FailureView extends StatelessWidget {
         ],
         const Spacer(flex: 4),
         const SizedBox(height: 16),
-        if (canRetake || canRetakeWhole) ...[
+        if (canRetakeWhole) ...[
           PrimaryPillButton(
-            label: canRetake
-                ? ProcessingMessages.retakePage(page!)
-                : RephotographMessages.rephotograph,
-            onPressed: canRetake ? () => onRetake!(pageIndex) : onRetakeWhole,
+            label: RephotographMessages.rephotograph,
+            onPressed: onRetakeWhole,
             // White on the brand blue is 4.3:1; this blue passes 4.5:1.
             backgroundColor: AppTheme.processingSecondary,
           ),

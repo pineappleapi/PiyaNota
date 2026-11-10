@@ -28,10 +28,11 @@ import 'package:piyanota_application/services/settings_prefs_service.dart';
 import 'package:piyanota_application/state/auth_providers.dart';
 import 'package:piyanota_application/state/capture_providers.dart';
 import 'package:piyanota_application/state/processing_providers.dart';
+import 'package:piyanota_application/state/submission_reconcile_providers.dart';
 
 import '../auth/auth_test_harness.dart';
 import '../processing/processing_fakes.dart'
-    show ScriptedProcessingApi, running;
+    show ScriptedProcessingApi, ScriptedSubmissionCancelApi, running;
 
 /// A real 1x1 PNG, so thumbnails decode without touching disk.
 final Uint8List kTinyPng = img.encodePng(img.Image(width: 1, height: 1));
@@ -120,13 +121,7 @@ class FakePagePicker implements PagePicker {
   bool notAPdf = false;
 
   @override
-  Future<List<String>> pickGalleryImages({bool single = false}) async {
-    singlePicks += single ? 1 : 0;
-    return gallery;
-  }
-
-  /// How many times the one-photo picker (retake) was used.
-  int singlePicks = 0;
+  Future<List<String>> pickGalleryImages() async => gallery;
 
   /// How many times the PDF picker was opened.
   int pdfPicks = 0;
@@ -247,6 +242,9 @@ class ScriptedScoreUploadApi implements ScoreUploadApi {
   /// `replacesJobId` per submit, in call order (PIYA-207 AC12).
   final List<String?> replacesSent = [];
 
+  /// `clientSubmissionId` per submit, in call order (Task 3).
+  final List<String?> clientIdsSent = [];
+
   /// The token passed with the latest submit.
   CancelToken? lastCancelToken;
 
@@ -270,10 +268,12 @@ class ScriptedScoreUploadApi implements ScoreUploadApi {
     CancelToken? cancelToken,
     String? replacesJobId,
     int? fallbackTempoBpm,
+    String? clientSubmissionId,
   }) {
     detailsSent.add(details);
     fallbackTemposSent.add(fallbackTempoBpm);
     replacesSent.add(replacesJobId);
+    clientIdsSent.add(clientSubmissionId);
     imageCalls.add(imagePaths);
     return _answer(cancelToken);
   }
@@ -285,35 +285,14 @@ class ScriptedScoreUploadApi implements ScoreUploadApi {
     CancelToken? cancelToken,
     String? replacesJobId,
     int? fallbackTempoBpm,
+    String? clientSubmissionId,
   }) {
     detailsSent.add(details);
     fallbackTemposSent.add(fallbackTempoBpm);
     replacesSent.add(replacesJobId);
+    clientIdsSent.add(clientSubmissionId);
     pdfCalls.add(pdfPath);
     return _answer(cancelToken);
-  }
-
-  /// PIYA-116 calls as (jobId, pageIndex, imagePath).
-  final List<(String, int, String)> resubmitCalls = [];
-  Future<ResubmittedJob> Function()? onResubmit;
-
-  @override
-  Future<ResubmittedJob> resubmitPage({
-    required String jobId,
-    required int pageIndex,
-    required String imagePath,
-    CancelToken? cancelToken,
-  }) {
-    lastCancelToken = cancelToken;
-    resubmitCalls.add((jobId, pageIndex, imagePath));
-    return onResubmit?.call() ??
-        Future.value(
-          ResubmittedJob(
-            originalJobId: jobId,
-            replacementJobId: '$jobId-retake',
-            pageIndex: pageIndex,
-          ),
-        );
   }
 }
 
@@ -338,6 +317,7 @@ class CaptureHarness {
   final pdfRenderer = FakePdfPageRenderer();
   final processor = FakePageImageProcessor();
   final upload = ScriptedScoreUploadApi();
+  final cancelApi = ScriptedSubmissionCancelApi();
 
   /// Answers polls for jobs a test seeds into the tracker.
   final processing = ScriptedProcessingApi([running(10)]);
@@ -362,6 +342,7 @@ class CaptureHarness {
     }),
     scoreUploadApiProvider.overrideWithValue(upload),
     processingApiProvider.overrideWithValue(processing),
+    submissionCancelApiProvider.overrideWithValue(cancelApi),
     captureFileStoreProvider.overrideWithValue(files),
     sessionStorageProvider.overrideWithValue(SessionStorage(secureStorage)),
   ];
@@ -380,7 +361,6 @@ Future<void> pumpCapture(
   Size size = const Size(400, 800),
   double textScale = 1,
   bool startOnDetails = false,
-  CaptureRetakeArguments? retake,
   WholeRetakeArguments? wholeRetake,
 }) async {
   tester.view.physicalSize = size;
@@ -415,15 +395,6 @@ Future<void> pumpCapture(
               wholeRetake: args.wholeRetake,
             );
           },
-          AppRoutes.captureRetake: (context) {
-            final args =
-                ModalRoute.of(context)!.settings.arguments!
-                    as CaptureRetakeArguments;
-            return CaptureScreen(
-              details: ScoreDetails(title: args.title),
-              retake: args,
-            );
-          },
           AppRoutes.processing: (context) {
             final args =
                 ModalRoute.of(context)!.settings.arguments!
@@ -437,9 +408,7 @@ Future<void> pumpCapture(
     ),
   );
   final navigator = tester.state<NavigatorState>(find.byType(Navigator));
-  if (retake != null) {
-    navigator.pushNamed(AppRoutes.captureRetake, arguments: retake);
-  } else if (wholeRetake != null) {
+  if (wholeRetake != null) {
     navigator.pushNamed(AppRoutes.capture, arguments: wholeRetake);
   } else if (startOnDetails) {
     navigator.pushNamed(AppRoutes.capture);

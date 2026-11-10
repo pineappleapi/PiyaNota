@@ -58,10 +58,10 @@ class ApiConfig {
       '$submitImagesPath/${Uri.encodeComponent(jobId)}';
   static String cancelJobPath(String jobId) => '${jobStatusPath(jobId)}/cancel';
 
-  /// PIYA-116: multipart with a `pageIndex` field (0-based, as PIYA-101)
-  /// and one `page` JPEG part — part names assumed too.
-  static String resubmitPagePath(String jobId) =>
-      '${jobStatusPath(jobId)}/resubmit';
+  /// Cancels by the phone-made id, for a row whose 202 never arrived (the
+  /// server may or may not have the job yet).
+  static String cancelSubmissionPath(String clientSubmissionId) =>
+      '$submitImagesPath/by-submission/${Uri.encodeComponent(clientSubmissionId)}/cancel';
 
   /// PIYA-103 (Playback's result: audio, page images, timing, review).
   /// Assumed path, reconcile in PIYA-216. PIYA-103 is written per job, but

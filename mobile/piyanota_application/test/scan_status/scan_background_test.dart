@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:piyanota_application/models/processing_status.dart';
 import 'package:piyanota_application/routes/app_routes.dart';
@@ -70,6 +71,7 @@ void main() {
   late FakeNetwork network;
 
   Future<void> pump(WidgetTester tester, {bool signedIn = true}) async {
+    SharedPreferences.setMockInitialValues({});
     api = _JobsApi();
     device = FakeScanTrackingService();
     network = FakeNetwork();
@@ -98,6 +100,8 @@ void main() {
             },
           ),
           routes: {
+            AppRoutes.scoreLibrary: (_) =>
+                const Scaffold(body: Text('ROUTE:library-landed')),
             AppRoutes.playback: (context) {
               final args =
                   ModalRoute.of(context)!.settings.arguments!
@@ -287,27 +291,28 @@ void main() {
     await end(tester);
   });
 
-  testWidgets('failed while away: the failure words, opening Processing', (
-    tester,
-  ) async {
-    await pump(tester);
-    api.script('a', [running(10), failed(FailureReason.noStaffDetected)]);
-    tracker().track('a', title: 'Paraiso');
-    await tester.pump();
-    toBackground(tester);
-    await poll(tester);
+  testWidgets(
+    'failed while away: the failure words, a tap opens the failure view',
+    (tester) async {
+      await pump(tester);
+      api.script('a', [running(10), failed(FailureReason.noStaffDetected)]);
+      tracker().track('a', title: 'Paraiso');
+      await tester.pump();
+      toBackground(tester);
+      await poll(tester);
 
-    final result = device.results.single;
-    expect(result.title, ScanStatusMessages.failedToast('Paraiso'));
-    expect(result.text, ScanStatusMessages.failedRowHint);
-    expect(result.ok, isFalse);
+      final result = device.results.single;
+      expect(result.title, ScanStatusMessages.failedToast('Paraiso'));
+      expect(result.text, ScanStatusMessages.failedRowHint);
+      expect(result.ok, isFalse);
 
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-    device.tap('a');
-    await tester.pumpAndSettle();
-    expect(find.text('ROUTE:processing a'), findsOneWidget);
-    await end(tester);
-  });
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      device.tap('a');
+      await tester.pumpAndSettle();
+      expect(find.text('ROUTE:processing a'), findsOneWidget);
+      await end(tester);
+    },
+  );
 
   testWidgets('a failed retake says the earlier version is kept', (
     tester,
@@ -337,8 +342,8 @@ void main() {
     await end(tester);
   });
 
-  testWidgets('a forgotten job takes its notification away, and a tap on a '
-      'job no longer followed opens nothing', (tester) async {
+  testWidgets('a forgotten job takes its notification away (a tap on it is '
+      'covered by notification_landing_test)', (tester) async {
     await pump(tester);
     api.script('a', [running(10), done(scoreId: 7)]);
     tracker().track('a', title: 'Paraiso');
@@ -348,11 +353,6 @@ void main() {
     tracker().forget('a');
     await tester.pump();
     expect(device.cleared, ['a']);
-
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-    device.tap('a');
-    await tester.pumpAndSettle();
-    expect(find.text('ROUTE:library'), findsOneWidget);
     await end(tester);
   });
 }

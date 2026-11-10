@@ -32,6 +32,8 @@ LOG = logging.getLogger(__name__)
 UNEXPECTED_FAILURE_REASON = "conversion failed"  # fixed text: reasons reach clients, details go to the log
 NO_PLAYBACK_FAILURE_REASON = "no playable audio could be built"  # distinct from a transient crash
 HEARTBEAT_JOIN_TIMEOUT_S = 10.0
+HUNG_EXIT_GRACE_S = 120.0  # after the overrun fail, how long a pipeline may take to notice before the worker exits
+HUNG_WORKER_EXIT_CODE = 3
 PROGRESS_WRITE_INTERVAL_S = 1.0  # was 2.0: coarser writes made the bar trail the log lines
 EMPTY_TIMING: dict[str, Any] = {"events": []}
 
@@ -69,9 +71,23 @@ def make_progress_writer(write: Callable[[int], None], *, clock: Callable[[], fl
     return report
 
 
+def _queue_page_deletions(conn: Any, job_ids: Sequence[int]) -> None:
+    """Queue the page objects of ``job_ids`` for deletion, as cancel does."""
+    for job_id in job_ids:
+        background.queue_deletion(conn, [r["object_key"] for r in conn.execute(
+            "SELECT object_key FROM job_pages WHERE job_id = %s", (job_id,)).fetchall()])
+
+
 def _heartbeat(url: str, job_id: int, interval_s: float, stop: threading.Event,
-               connect: Callable[..., Any] = psycopg.connect) -> None:
+               connect: Callable[..., Any] = psycopg.connect, max_runtime_s: int | None = None,
+               exit_grace_s: float = HUNG_EXIT_GRACE_S, exit_fn: Callable[[int], Any] = os._exit) -> None:
     """Touch the job until ``stop`` is set, on a private autocommit connection.
+
+    With ``max_runtime_s`` it also fails the job once past that wall-clock limit and stops: the
+    pipeline thread may be hung, so only this thread can enforce the cap in a one-worker deployment.
+    The failed status makes the pipeline's next set_stage/set_progress raise _Cancelled. A pipeline
+    thread that never reports again cannot be interrupted, so after ``exit_grace_s`` more seconds this
+    thread ends the process with ``exit_fn`` (os._exit: nothing else can stop a hung thread).
 
     Its own connection keeps the heartbeat visible while the main thread holds long transactions;
     prepare_threshold=None keeps it safe behind Neon's pooled (PgBouncer) endpoint.
@@ -83,10 +99,27 @@ def _heartbeat(url: str, job_id: int, interval_s: float, stop: threading.Event,
                 conn = connect(url, autocommit=True, prepare_threshold=None)
             conn.execute("UPDATE jobs SET heartbeat_at = clock_timestamp(), "
                          "updated_at = clock_timestamp() WHERE id = %s", (job_id,))
+            if max_runtime_s is not None:
+                with db.transaction() as pooled:  # fail + queue deletions commit together, or neither (retried next tick)
+                    overrun = queue.fail_job_if_overrun(pooled, job_id, max_runtime_s=max_runtime_s)
+                    if overrun:
+                        _queue_page_deletions(pooled, [job_id])
+                if overrun:
+                    LOG.warning("job past max runtime, failed job_id=%s", job_id)
+                    # A hung pipeline cannot be interrupted in-process: if it has not returned after the
+                    # grace period, exit so the supervisor (restart: always / NSSM) gives a fresh worker.
+                    if not stop.wait(exit_grace_s):
+                        LOG.critical("pipeline still hung %ss after max runtime job_id=%s; exiting worker",
+                                     exit_grace_s, job_id)
+                        logging.shutdown()
+                        exit_fn(HUNG_WORKER_EXIT_CODE)
+                    break
         except psycopg.Error as exc:  # transient (Neon idle cutoff, restart): reconnect next tick, never exit
             LOG.warning("heartbeat failed job_id=%s: %s", job_id, type(exc).__name__)
             _close_quietly(conn)
             conn = None
+        except Exception as exc:  # noqa: BLE001 - a dead heartbeat thread would silently disable the stale/overrun guards
+            LOG.error("heartbeat error job_id=%s: %s", job_id, describe_exception(exc))
     _close_quietly(conn)
 
 
@@ -242,11 +275,15 @@ def process_one(*, storage: Storage, runner: Runner, settings: Settings,
     """
     with db.transaction() as conn:
         requeued, failed = queue.reclaim_stale(conn, timeout_s=queue.STALE_TIMEOUT_S, max_attempts=queue.MAX_ATTEMPTS)
+        overrun = queue.fail_overrun(conn, max_runtime_s=settings.job_max_runtime_s)
+        _queue_page_deletions(conn, overrun)  # same cleanup as a user cancel: the pages are no longer needed
         job = queue.claim_next_job(conn)
         pages = [] if job is None else conn.execute(
             "SELECT object_key FROM job_pages WHERE job_id = %s ORDER BY page_index", (job["id"],)).fetchall()
     if requeued or failed:
         LOG.warning("reclaimed stale jobs requeued=%s failed=%s", requeued, failed)
+    if overrun:
+        LOG.warning("failed jobs past max runtime job_ids=%s", overrun)
     if job is None:
         return False
     job_id: int = job["id"]
@@ -257,7 +294,8 @@ def process_one(*, storage: Storage, runner: Runner, settings: Settings,
     stop = threading.Event()
     beat = threading.Thread(
         target=_heartbeat, name=f"piya-heartbeat-{job_id}", daemon=True,
-        args=(settings.database_url, job_id, heartbeat_interval_s or settings.worker_heartbeat_interval_s, stop))
+        args=(settings.database_url, job_id, heartbeat_interval_s or settings.worker_heartbeat_interval_s, stop),
+        kwargs={"max_runtime_s": settings.job_max_runtime_s})
     beat.start()
     uploaded: list[str] = []
     failure: tuple[str, int | None] | None = None

@@ -220,6 +220,36 @@ void main() {
       expect(adapter.lastRequest!.uri.path, endsWith('/job-1/cancel'));
     });
 
+    test('cancel by submission POSTs the client id, no body', () async {
+      final adapter = _StubAdapter(
+        body: _envelope({
+          'clientSubmissionId': 'c-1',
+          'jobId': null,
+          'status': 'cancelled',
+        }),
+      );
+      final result = await _api(adapter).cancelBySubmission('c-1');
+      expect(result, (jobId: null, status: 'cancelled'));
+      expect(adapter.lastRequest!.method, 'POST');
+      expect(
+        adapter.lastRequest!.uri.path,
+        endsWith('/jobs/by-submission/c-1/cancel'),
+      );
+    });
+
+    test('cancel by submission reads a finished job as its own status', () {
+      expect(
+        HttpProcessingApi.parseSubmissionCancel({
+          'data': {'jobId': 'j1', 'status': 'complete'},
+        }),
+        (jobId: 'j1', status: 'complete'),
+      );
+      expect(
+        () => HttpProcessingApi.parseSubmissionCancel({'data': {}}),
+        throwsA(isA<ProcessingServerException>()),
+      );
+    });
+
     test('no token is a session expiry without a request', () async {
       final adapter = _StubAdapter(body: _envelope({'status': 'queued'}));
       await expectLater(

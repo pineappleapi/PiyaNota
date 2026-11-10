@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../config/api_config.dart';
+import '../services/background_completion.dart';
 import '../services/capture/capture_camera.dart';
 import '../services/capture/capture_files.dart';
 import '../services/capture/capture_permissions.dart';
@@ -37,7 +38,10 @@ final capturePermissionsProvider = Provider<CapturePermissions>(
 );
 
 final pagePickerProvider = Provider<PagePicker>(
-  (ref) => PluginPagePicker(captureWorkingDirectory),
+  (ref) => SignalingPagePicker(
+    PluginPagePicker(captureWorkingDirectory),
+    BackgroundCompletionScheduler().pickerOpen,
+  ),
 );
 
 final pageImageProcessorProvider = Provider<PageImageProcessor>(

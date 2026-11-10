@@ -113,7 +113,6 @@ class ProcessingMessages {
       'Bass) on its own staff line.';
 
   static String foundOnPage(int page) => 'Found on page $page.';
-  static String retakePage(int page) => 'Retake page $page';
 
   static const String retakeTipsTitle = 'For a clearer photo:';
 
@@ -131,13 +130,14 @@ class ProcessingMessages {
     final onPage = page == null ? 'on one of the pages' : 'on page $page';
     return switch (reason) {
       FailureReason.noStaffDetected =>
-        'No staff lines detected $onPage — please retake '
-            '${page == null ? 'that page' : 'this page'}.',
+        'No staff lines detected $onPage. Re-photograph the score with every '
+            'page fully in view.',
       FailureReason.ambiguousStaffCount =>
-        'We couldn\'t tell the four voice parts apart $onPage. Make sure '
-            'the whole page is in the photo, then retake it.',
+        "We couldn't tell the four voice parts apart $onPage. Make sure "
+            'the whole page is in the photo, then re-photograph the score.',
       FailureReason.preprocessingError =>
-        'The photo $onPage was too unclear to read. Please retake it.',
+        'The photo $onPage was too unclear to read. Re-photograph the '
+            'score in good light.',
       FailureReason.unsupportedStaffLayout => unsupportedLayout,
       FailureReason.incompleteVoiceSequence =>
         'We couldn\'t find all four voice parts (Soprano, Alto, Tenor, Bass) '

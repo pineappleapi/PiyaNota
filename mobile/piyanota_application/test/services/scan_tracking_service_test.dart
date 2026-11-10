@@ -87,6 +87,8 @@ void main() {
     await send({'nope': 1});
     await send(null);
     await Future<void>.delayed(Duration.zero);
-    expect(opened, ['a']);
+    // A tap without a usable id still arrives (as ''), so the router can open
+    // the Library instead of ignoring the tap.
+    expect(opened, ['a', '', '']);
   });
 }

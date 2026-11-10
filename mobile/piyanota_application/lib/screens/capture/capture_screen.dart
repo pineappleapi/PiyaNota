@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/capture_page.dart';
 import '../../models/capture_session.dart';
+import '../../models/library_entry.dart';
+import '../../models/local_submission.dart';
 import '../../models/score_details.dart';
 import '../../routes/app_routes.dart';
 import '../../services/capture/capture_camera.dart';
@@ -17,6 +19,7 @@ import '../../services/capture/page_image_processor.dart';
 import '../../services/capture/page_picker.dart';
 import '../../services/score_upload_api.dart';
 import '../../state/capture_providers.dart';
+import '../../state/local_submission_providers.dart';
 import '../../state/processing_providers.dart';
 import '../../state/score_library_providers.dart';
 import '../../state/session_actions.dart';
@@ -34,20 +37,12 @@ import 'widgets/page_strip.dart';
 /// gallery or a PDF, arrange them, and send. Capture-then-process only —
 /// nothing is recognised live (SOW §4).
 ///
-/// With [retake] set (PIYA-207 AC7) it replaces one page of a failed job
-/// instead: one photo at most, no PDF, and the page goes to PIYA-116.
+/// With [wholeRetake] set (PIYA-207 AC12) it re-photographs every page of a
+/// failed score and sends them as a new score.
 class CaptureScreen extends ConsumerStatefulWidget {
-  const CaptureScreen({
-    super.key,
-    required this.details,
-    this.retake,
-    this.wholeRetake,
-  });
+  const CaptureScreen({super.key, required this.details, this.wholeRetake});
 
   final ScoreDetails details;
-
-  /// PIYA-207 AC7 page retake: one page of a failed job.
-  final CaptureRetakeArguments? retake;
 
   /// PIYA-207 AC12 whole-score retake: every page, sent as a new score
   /// with `replacesJobId`.
@@ -80,9 +75,22 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
 
   /// Pages being prepared or a photo being taken.
   int _busy = 0;
+
+  /// Gallery import progress for the busy overlay (0 total = no count).
+  int _prepDone = 0;
+  int _prepTotal = 0;
   bool _submitting = false;
   CancelToken? _cancelToken;
   ScoreUploadException? _uploadError;
+
+  /// Id of the local library row for the send in progress. Kept across a
+  /// retry after an ambiguous failure, so the server dedupes the resend;
+  /// dropped when the pages or details are edited, so the edit is sent.
+  String? _clientSubmissionId;
+
+  /// Whole-retake attempts the server refused for good. Each left a failed
+  /// row of its own; they go once a later attempt is accepted.
+  final List<String> _refusedAttempts = [];
 
   /// What will be sent: step 1's answers, possibly fixed here after the
   /// server rejected a field.
@@ -231,10 +239,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
 
   bool get _canAct => _busy == 0 && !_submitting;
 
-  /// A retake replaces exactly one page.
-  int get _photoRoom => widget.retake == null
-      ? _session.photoRoom
-      : (1 - _session.pageCount).clamp(0, 1);
+  int get _photoRoom => _session.photoRoom;
 
   /// Decides whether photos can be added: offers to replace a PDF, refuses
   /// when full. Changes nothing yet: a PDF is only replaced once photos
@@ -250,11 +255,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
       return replace && mounted ? _PhotoRoom.replacePdf : _PhotoRoom.none;
     }
     if (_photoRoom <= 0) {
-      _snack(
-        widget.retake == null
-            ? CaptureMessages.scoreFull
-            : CaptureMessages.retakeFull,
-      );
+      _snack(CaptureMessages.scoreFull);
       return _PhotoRoom.none;
     }
     return _PhotoRoom.add;
@@ -302,21 +303,26 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
       await _explainGalleryDenied();
       return;
     }
-    final picked = await ref
-        .read(pagePickerProvider)
-        .pickGalleryImages(single: widget.retake != null);
+    final picked = await ref.read(pagePickerProvider).pickGalleryImages();
     if (!mounted || picked.isEmpty) return;
-    setState(() => _busy++);
     final prepared = <String>[];
     var unreadable = 0;
     final replacePdf = room == _PhotoRoom.replacePdf;
     final photoRoom = replacePdf ? CaptureSession.maxPages : _photoRoom;
     final take = picked.take(photoRoom).toList();
     final skipped = picked.length - take.length;
+    setState(() {
+      _busy++;
+      _prepDone = 0;
+      _prepTotal = take.length;
+    });
     try {
       final results = await prepareInParallel(
         ref.read(pageImageProcessorProvider),
         take,
+        onProgress: (done, _) {
+          if (mounted) setState(() => _prepDone = done);
+        },
       );
       for (final result in results) {
         if (result == null) {
@@ -328,7 +334,12 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     } finally {
       // image_picker hands over cache copies; ours is the prepared JPEG.
       picked.forEach(_store.delete);
-      if (mounted) setState(() => _busy--);
+      if (mounted) {
+        setState(() {
+          _busy--;
+          _prepTotal = 0;
+        });
+      }
     }
     if (!mounted) {
       prepared.forEach(_store.delete);
@@ -454,12 +465,11 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                 Icons.photo_library_outlined,
                 CaptureMessages.gallery,
               ),
-              if (widget.retake == null)
-                (
-                  PageSource.pdf,
-                  Icons.picture_as_pdf_outlined,
-                  CaptureMessages.pdf,
-                ),
+              (
+                PageSource.pdf,
+                Icons.picture_as_pdf_outlined,
+                CaptureMessages.pdf,
+              ),
             ])
               ListTile(
                 leading: Icon(icon, color: AppTheme.captureInk),
@@ -523,6 +533,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   }
 
   void _applySession(CaptureSession next, {int? flash, int? focus}) {
+    // An edited page set is a different submission: replaying the old id
+    // after an ambiguous failure would hand back the OLD job (idempotent).
+    _clientSubmissionId = null;
     setState(() {
       _session = next;
       _flashId = flash;
@@ -652,6 +665,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
       MaterialPageRoute(builder: (_) => ScoreDetailsScreen(initial: _details)),
     );
     if (edited == null || !mounted) return;
+    _clientSubmissionId = null; // same reason as in _applySession
     setState(() {
       _details = edited;
       _uploadError = null;
@@ -663,8 +677,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   /// offers this same retake again, so go past it to the library. The
   /// library reloads to show where the scan really stands.
   void _abandonRetake() {
-    final retakeJobId =
-        widget.retake?.jobId ?? widget.wholeRetake?.replacesJobId;
+    final retakeJobId = widget.wholeRetake?.replacesJobId;
     if (retakeJobId == null || _submitting) return;
     _pendingUndo = null;
     _files.deleteAll();
@@ -721,8 +734,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   Future<void> _submit() async {
     if (_submitting || _session.isEmpty || _busy > 0) return;
     // J8 pre-check; unknown count (Library not loaded) is left to the 409.
-    if (widget.retake == null &&
-        widget.wholeRetake == null &&
+    if (widget.wholeRetake == null &&
         // exists: reading would start a fetch when nothing has loaded it.
         ref.exists(scoreLibraryProvider) &&
         (ref.read(scoreLibraryProvider).value?.length ?? 0) >=
@@ -738,43 +750,21 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     });
     final details = _details;
     var sent = false;
+    // Read now: the controller is app-lifetime, so it still works if this
+    // screen is gone when the 202 arrives (ref would not).
+    final submissions = ref.read(localSubmissionsProvider.notifier);
+    final clientId = _clientSubmissionId ??= newClientSubmissionId();
     try {
       final api = ref.read(scoreUploadApiProvider);
-      if (widget.retake case final retake?) {
-        final replaced = await api.resubmitPage(
-          jobId: retake.jobId,
-          pageIndex: retake.pageIndex,
-          imagePath: _session.photos.first.path,
-          cancelToken: cancelToken,
-        );
-        if (!mounted) return;
-        sent = true;
-        _pendingUndo = null;
-        _files.deleteAll();
-        // The failed job is finished with; only the replacement is polled.
-        // It fills the same library card (PIYA-218 AC4), so it is tracked
-        // here with that card's id before the old job is forgotten.
-        final jobs = ref.read(processingJobsProvider.notifier);
-        final old = ref.read(processingJobsProvider)[retake.jobId];
-        jobs
-          ..track(
-            replaced.replacementJobId,
-            title: retake.title,
-            retakeOfScoreId: old?.retakeOfScoreId,
-            scoreId: old?.libraryScoreId,
-          )
-          ..forget(retake.jobId);
-        Navigator.of(context).pushNamedAndRemoveUntil(
-          AppRoutes.processing,
-          (route) =>
-              route.settings.name == AppRoutes.scoreLibrary || route.isFirst,
-          arguments: ProcessingArguments(
-            jobId: replaced.replacementJobId,
-            title: retake.title,
-          ),
-        );
-        return;
-      }
+      // Before the upload, so closing the app mid-send keeps the score in
+      // the library.
+      await submissions.begin(
+        clientSubmissionId: clientId,
+        title: details.title.trim().isEmpty
+            ? untitledScoreLabel
+            : details.title.trim(),
+        replacesJobId: widget.wholeRetake?.replacesJobId,
+      );
       // AC8: a PDF goes to PIYA-310, camera/gallery photos to PIYA-101.
       final pdf = _session.pdf;
       final wholeRetake = widget.wholeRetake;
@@ -790,6 +780,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
               cancelToken: cancelToken,
               replacesJobId: wholeRetake?.replacesJobId,
               fallbackTempoBpm: fallbackTempoBpm,
+              clientSubmissionId: clientId,
             )
           : await api.submitImages(
               details: details,
@@ -797,9 +788,25 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
               cancelToken: cancelToken,
               replacesJobId: wholeRetake?.replacesJobId,
               fallbackTempoBpm: fallbackTempoBpm,
+              clientSubmissionId: clientId,
             );
+      await submissions.attachJob(
+        clientSubmissionId: clientId,
+        jobId: job.jobId,
+        scoreId: job.scoreId,
+      );
+      if (wholeRetake != null) {
+        // Accepted: only now does the failed scan (and any refused earlier
+        // attempt at this retake) leave the Library.
+        await submissions.replaceFailedJob(wholeRetake.replacesJobId);
+        for (final id in _refusedAttempts) {
+          await submissions.dismiss(id);
+        }
+        _refusedAttempts.clear();
+      }
       if (!mounted) return;
       sent = true;
+      _clientSubmissionId = null;
       // The server has its own copies now.
       _pendingUndo = null;
       _files.deleteAll();
@@ -825,8 +832,28 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
         arguments: ProcessingArguments(jobId: job.jobId, title: details.title),
       );
     } on UploadCancelledException {
+      // The id is spent: the server now holds a cancel for it (a reused id
+      // would get 409 submission_cancelled), so a second send makes a new
+      // one. The row goes: the user chose not to send it. The server is told
+      // so a request that landed after the abort makes no job (or loses it).
+      _clientSubmissionId = null;
+      unawaited(submissions.cancel(clientId, dismissOnFailure: true));
       _snack(CaptureMessages.uploadCancelled);
     } on UploadRejectedException catch (e) {
+      if (e.code == submissionCancelledCode) {
+        // The server holds our cancel for this id: not an error, and the id
+        // is spent, so a later send must make a new one.
+        _clientSubmissionId = null;
+        unawaited(submissions.dismiss(clientId));
+        _snack(CaptureMessages.uploadCancelled);
+        return;
+      }
+      await _recordFailure(
+        submissions,
+        clientId,
+        e.code,
+        definite: e.statusCode != null,
+      );
       if (!mounted) return;
       if (e.isScoreLimit) {
         unawaited(_showScoreLimit());
@@ -834,11 +861,26 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
         setState(() => _uploadError = e);
       }
     } on ScoreUploadException catch (e) {
+      final (code, definite) = switch (e) {
+        UploadSessionExpiredException() => (
+          SubmissionFailure.sessionExpired,
+          true,
+        ),
+        UploadFileMissingException() => (SubmissionFailure.fileMissing, true),
+        _ => (SubmissionFailure.network, false),
+      };
+      await _recordFailure(submissions, clientId, code, definite: definite);
       if (mounted) setState(() => _uploadError = e);
     } catch (e, stack) {
       // Anything unforeseen must still give the screen back, never leave
       // the button spinning forever.
       debugPrint('Score upload failed unexpectedly: $e\n$stack');
+      await _recordFailure(
+        submissions,
+        clientId,
+        SubmissionFailure.unknown,
+        definite: false,
+      );
       if (mounted) {
         setState(
           () => _uploadError = const UploadRejectedException(statusCode: null),
@@ -852,6 +894,26 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
         });
       }
     }
+  }
+
+  /// Marks the library row failed. A [definite] answer (the server said no,
+  /// or the request never left) frees the id, so edited pages sent next are
+  /// a new submission; an ambiguous one (network drop, no status) keeps it,
+  /// because the server may already have the job and a resend must return it.
+  Future<void> _recordFailure(
+    LocalSubmissionsController submissions,
+    String clientId,
+    String? code, {
+    required bool definite,
+  }) async {
+    if (definite) {
+      _clientSubmissionId = null;
+      if (widget.wholeRetake != null) _refusedAttempts.add(clientId);
+    }
+    await submissions.fail(
+      clientSubmissionId: clientId,
+      code: code ?? SubmissionFailure.unknown,
+    );
   }
 
   Future<void> _returnToLogin() async {
@@ -949,11 +1011,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         _TopBar(
-                          title: widget.retake == null
-                              ? CaptureMessages.alignInFrame
-                              : CaptureMessages.retakeTitle(
-                                  widget.retake!.pageIndex + 1,
-                                ),
+                          title: CaptureMessages.alignInFrame,
                           onClose: _submitting ? null : _close,
                           torchOn: _torchOn,
                           onTorch: _camera == null ? null : _toggleTorch,
@@ -967,7 +1025,19 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                               camera: _camera,
                               onAllowCamera: () => _startCamera(ask: true),
                               onOpenSettings: _openSettings,
-                              overlay: _busy > 0 ? const _BusyOverlay() : null,
+                              overlay: _busy > 0
+                                  ? _BusyOverlay(
+                                      label: _prepTotal > 1
+                                          ? CaptureMessages.preparingPages(
+                                              (_prepDone + 1).clamp(
+                                                1,
+                                                _prepTotal,
+                                              ),
+                                              _prepTotal,
+                                            )
+                                          : CaptureMessages.preparingPage,
+                                    )
+                                  : null,
                             ),
                           ),
                         ),
@@ -976,15 +1046,10 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                           // A retake picks one photo (single picker), and
                           // _pickGallery caps at the one page of room.
                           onGallery: _canAct ? _pickGallery : null,
-                          onShutter:
-                              _camera != null &&
-                                  _canAct &&
-                                  (widget.retake == null || _photoRoom > 0)
+                          onShutter: _camera != null && _canAct
                               ? _takePhoto
                               : null,
-                          onPdf: _canAct && widget.retake == null
-                              ? _pickPdf
-                              : null,
+                          onPdf: _canAct ? _pickPdf : null,
                           pdfLimitReached: _session.hasPdf,
                         ),
                         const SizedBox(height: 12),
@@ -1000,9 +1065,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                           onOpen: _open,
                           onEdit: _edit,
                           onRemove: _remove,
-                          onAdd: _session.hasPdf || widget.retake != null
-                              ? null
-                              : _showAddSheet,
+                          onAdd: _session.hasPdf ? null : _showAddSheet,
                         ),
                         if (_uploadError case final error?) ...[
                           const SizedBox(height: 8),
@@ -1017,10 +1080,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                                 CaptureMessages.logIn,
                                 _returnToLogin,
                               ),
-                              _
-                                  when widget.retake != null &&
-                                      CaptureMessages.isDeadRetake(error) =>
-                                (CaptureMessages.backToLibrary, _abandonRetake),
                               _
                                   when widget.wholeRetake != null &&
                                       CaptureMessages.isDeadWholeRetake(
@@ -1037,13 +1096,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                         ],
                         const SizedBox(height: 12),
                         PrimaryPillButton(
-                          label: switch (widget.retake) {
-                            final retake? => CaptureMessages.sendRetake(
-                              retake.pageIndex + 1,
-                            ),
-                            null when count == 0 => CaptureMessages.createScore,
-                            null => CaptureMessages.createScoreWith(count),
-                          },
+                          label: count == 0
+                              ? CaptureMessages.createScore
+                              : CaptureMessages.createScoreWith(count),
                           onPressed: count == 0 || _busy > 0 ? null : _submit,
                           isLoading: _submitting,
                           backgroundColor: AppTheme.captureAccent,
@@ -1185,7 +1240,9 @@ class _TopBar extends StatelessWidget {
 }
 
 class _BusyOverlay extends StatelessWidget {
-  const _BusyOverlay();
+  const _BusyOverlay({required this.label});
+
+  final String label;
 
   @override
   Widget build(BuildContext context) {
@@ -1200,7 +1257,7 @@ class _BusyOverlay extends StatelessWidget {
               const CircularProgressIndicator(color: AppTheme.captureAccent),
               const SizedBox(height: 12),
               Text(
-                CaptureMessages.preparingPage,
+                label,
                 style: Theme.of(context).textTheme.bodyMedium
                     ?.copyWith(color: Colors.white),
               ),

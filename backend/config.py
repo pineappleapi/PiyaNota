@@ -78,6 +78,7 @@ class Settings:
     pdf_render_dpi: int = 200
     submit_limit_per_hour: int = 10
     status_reads_per_minute: int = 120
+    list_reads_per_minute: int = 30  # own bucket: the app's list refresh must not starve per-job polling
     login_ip_limit: int = 30
     login_ip_window_s: int = 900
     # A choir signs up together from one venue Wi-Fi (one public IP) and typos count as attempts.
@@ -97,6 +98,10 @@ class Settings:
     # Conversion worker: heartbeat must stay well under the queue's stale timeout (1200 s).
     worker_heartbeat_interval_s: int = 60
     worker_poll_interval_s: int = 5
+    # Wall-clock cap per attempt: the heartbeat keeps a wedged-but-alive worker looking healthy, so staleness alone never ends it.
+    job_max_runtime_s: int = 1800
+    # Queued + running jobs one user may hold; a closed app must not let one user flood the queue.
+    max_active_jobs_per_user: int = 2
     timing_enabled: bool = True
 
 
@@ -258,6 +263,7 @@ def load_settings(env: Mapping[str, str] = os.environ) -> Settings:
         pdf_render_dpi=_read_int(env, "pdf_render_dpi"),
         submit_limit_per_hour=_read_int(env, "submit_limit_per_hour"),
         status_reads_per_minute=_read_int(env, "status_reads_per_minute"),
+        list_reads_per_minute=_read_int(env, "list_reads_per_minute"),
         login_ip_limit=_read_int(env, "login_ip_limit"),
         login_ip_window_s=_read_int(env, "login_ip_window_s"),
         signup_ip_limit=_read_int(env, "signup_ip_limit"),
@@ -274,5 +280,7 @@ def load_settings(env: Mapping[str, str] = os.environ) -> Settings:
         db_prepare_threshold=_read_optional_int(env, "db_prepare_threshold"),
         worker_heartbeat_interval_s=_read_int(env, "worker_heartbeat_interval_s"),
         worker_poll_interval_s=_read_int(env, "worker_poll_interval_s"),
+        job_max_runtime_s=_read_int(env, "job_max_runtime_s"),
+        max_active_jobs_per_user=_read_int(env, "max_active_jobs_per_user"),
         timing_enabled=_read_bool(env, "timing_enabled"),
     )

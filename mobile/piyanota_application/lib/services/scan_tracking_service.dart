@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'scan_notification_payload.dart';
+
 /// The device half of following conversions in the background (PIYA-218,
 /// user decision 2026-10-22). While [show] is in force a foreground
 /// service keeps the app alive with a "Scanning <title>…" notification,
@@ -64,7 +66,9 @@ class MethodChannelScanTrackingService implements ScanTrackingService {
     if (call.method != 'open') return;
     final arguments = call.arguments;
     final jobId = arguments is Map ? arguments['jobId'] : null;
-    if (jobId is String) _opened.add(jobId);
+    // Raw on purpose: the router parses it, so a malformed payload still
+    // brings the user to the Library instead of doing nothing.
+    _opened.add(jobId is String ? jobId : '');
   }
 
   @override
@@ -85,12 +89,19 @@ class MethodChannelScanTrackingService implements ScanTrackingService {
     required String title,
     required String text,
     required bool ok,
-  }) => _quietly('notifyResult', {
-    'jobId': jobId,
-    'title': title,
-    'text': text,
-    'ok': ok,
-  });
+  }) {
+    final payload = ScanNotificationPayload.build(jobId);
+    if (payload == null) {
+      debugPrint('Scan tracking: not notifying, unusable job id');
+      return Future.value();
+    }
+    return _quietly('notifyResult', {
+      'jobId': payload,
+      'title': title,
+      'text': text,
+      'ok': ok,
+    });
+  }
 
   @override
   Future<void> clearResult(String jobId) =>

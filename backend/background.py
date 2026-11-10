@@ -25,6 +25,7 @@ THROTTLE_HIT_MAX_AGE_S = 3600
 STALE_ROW_GRACE_S = 86400
 BACKOFF_IDLE_S = 86400
 FAILED_JOB_PAGE_RETENTION_S = 7 * 24 * 3600
+CANCELLED_SUBMISSION_RETENTION_S = 7 * 24 * 3600  # a queued upload retry never outlives this
 SOFT_DELETE_RETENTION_S = 7 * 24 * 3600
 SOFT_DELETE_PURGE_BATCH = 50
 Conn = psycopg.Connection[dict[str, Any]]
@@ -177,6 +178,8 @@ def run_prune(conn: Conn, hit_max_age_s: int = THROTTLE_HIT_MAX_AGE_S) -> int:
          "OR used_at < now() - make_interval(secs => %(s)s)", grace),
         ("DELETE FROM throttle_backoff WHERE last_failure_at < now() - make_interval(secs => %(s)s)",
          BACKOFF_IDLE_S),
+        ("DELETE FROM cancelled_submissions WHERE created_at < now() - make_interval(secs => %(s)s)",
+         CANCELLED_SUBMISSION_RETENTION_S),
     )
     return sum(conn.execute(sql, {"s": secs}).rowcount for sql, secs in statements)
 

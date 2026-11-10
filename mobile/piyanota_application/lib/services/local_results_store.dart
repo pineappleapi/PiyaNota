@@ -58,7 +58,36 @@ class LocalResultsStore {
   final FileDownloader _downloader;
   final Map<int, Future<void>> _running = {};
 
+  /// Bumped by [invalidate]. A sync or refresh that started under an older
+  /// number must not write its (stale) manifest or check time.
+  final Map<int, int> _generation = {};
+  final Map<int, int> _runningGeneration = {};
+
+  int generation(int scoreId) => _generation[scoreId] ?? 0;
+
+  /// Serialises every write to a score's manifest and check time with
+  /// [invalidate]'s delete, so a stale sync can never put a manifest back
+  /// after an invalidate removed it: each writer re-checks the generation
+  /// inside the lock.
+  final Map<int, Future<void>> _manifestLocks = {};
+
+  Future<T> _withManifestLock<T>(int scoreId, Future<T> Function() body) {
+    final previous = _manifestLocks[scoreId] ?? Future<void>.value();
+    final run = previous.then((_) => body());
+    final tail = run.then<void>((_) {}, onError: (Object _) {});
+    _manifestLocks[scoreId] = tail;
+    unawaited(
+      tail.whenComplete(() {
+        if (identical(_manifestLocks[scoreId], tail)) {
+          _manifestLocks.remove(scoreId);
+        }
+      }),
+    );
+    return run;
+  }
+
   static const String _manifestName = 'manifest.json';
+  static const String _checkedName = 'last_checked';
   static const String _partSuffix = '.part';
   static final RegExp _unsafeNameChars = RegExp(r'[^A-Za-z0-9._-]');
 
@@ -195,6 +224,65 @@ class LocalResultsStore {
     }
   }
 
+  /// The server `version` of the saved manifest, or null (no manifest, or a
+  /// server that sends none).
+  Future<String?> storedVersion(int scoreId) async {
+    try {
+      final manifest = File(_path(await _dir(scoreId), _manifestName));
+      final data = jsonDecode(await manifest.readAsString());
+      final v = data is Map ? data['version'] : null;
+      return v is String && v.isNotEmpty ? v : null;
+    } on Object {
+      return null;
+    }
+  }
+
+  /// When the server last answered a background revalidation of [scoreId].
+  /// Kept in the score folder so it survives restarts and dies with the score.
+  Future<DateTime?> lastChecked(int scoreId) async {
+    try {
+      final text = await File(_path(await _dir(scoreId), _checkedName))
+          .readAsString();
+      final ms = int.tryParse(text);
+      return ms == null ? null : DateTime.fromMillisecondsSinceEpoch(ms);
+    } on Object {
+      return null;
+    }
+  }
+
+  /// Never throws; no folder (score never downloaded) means nothing to mark.
+  Future<void> markChecked(int scoreId, DateTime at, {int? generation}) async {
+    try {
+      await _withManifestLock(scoreId, () async {
+        // A check that began before invalidate() answered about the old
+        // files.
+        if (generation != null && generation != this.generation(scoreId)) {
+          return;
+        }
+        final dir = await _dir(scoreId);
+        if (!await dir.exists()) return;
+        await File(_path(dir, _checkedName))
+            .writeAsString('${at.millisecondsSinceEpoch}');
+      });
+    } on Object catch (e) {
+      debugPrint('Local results: could not save check time for $scoreId: $e');
+    }
+  }
+
+  /// Forgets only the check time, so the next open revalidates at once. For
+  /// a score the server is known to have changed whose files could not be
+  /// fetched yet; the saved copy stays playable. Never throws.
+  Future<void> resetThrottle(int scoreId) async {
+    try {
+      await _withManifestLock(scoreId, () async {
+        final file = File(_path(await _dir(scoreId), _checkedName));
+        if (await file.exists()) await file.delete();
+      });
+    } on Object catch (e) {
+      debugPrint('Local results: throttle reset of $scoreId failed: $e');
+    }
+  }
+
   /// Downloads whatever [data] names that is not local yet, then saves the
   /// manifest and prunes files an older fileId left behind. Never throws.
   /// On an expired URL, [refetch] gets fresh `/result` data once and the
@@ -203,14 +291,32 @@ class LocalResultsStore {
     int scoreId,
     Map<String, dynamic> data, {
     required Future<Map<String, dynamic>?> Function() refetch,
-  }) => _running[scoreId] ??= _sync(scoreId, data, refetch).whenComplete(() {
-    _running.remove(scoreId);
-  });
+  }) {
+    final gen = generation(scoreId);
+    final running = _running[scoreId];
+    if (running != null && _runningGeneration[scoreId] == gen) return running;
+    // A sync begun before an invalidate carries the old files: let it end
+    // (it writes no manifest), then run this one, never two at once on the
+    // same .part files.
+    late final Future<void> tracked;
+    tracked = (running ?? Future<void>.value())
+        .then((_) => _sync(scoreId, data, refetch, gen))
+        .whenComplete(() {
+          if (identical(_running[scoreId], tracked)) {
+            _running.remove(scoreId);
+            _runningGeneration.remove(scoreId);
+          }
+        });
+    _running[scoreId] = tracked;
+    _runningGeneration[scoreId] = gen;
+    return tracked;
+  }
 
   Future<void> _sync(
     int scoreId,
     Map<String, dynamic> data,
     Future<Map<String, dynamic>?> Function() refetch,
+    int gen,
   ) async {
     try {
       final dir = await (await _dir(scoreId)).create(recursive: true);
@@ -223,11 +329,20 @@ class LocalResultsStore {
         current = fresh;
         await _fill(dir, current);
       }
-      final part = File(_path(dir, '$_manifestName$_partSuffix'));
-      await part.writeAsString(jsonEncode(current));
-      await part.rename(_path(dir, _manifestName));
+      // invalidate() ran while this downloaded: its data is the old copy.
+      // Checked again inside the lock, where nothing can slip in between the
+      // check and the rename.
+      final committed = await _withManifestLock(scoreId, () async {
+        if (gen != generation(scoreId)) return false;
+        final part = File(_path(dir, '$_manifestName$_partSuffix'));
+        await part.writeAsString(jsonEncode(current));
+        await part.rename(_path(dir, _manifestName));
+        return true;
+      });
+      if (!committed) return;
       final keep = {
         _manifestName,
+        _checkedName,
         for (final MapEntry(:key, :value) in _entries(current).entries)
           _fileName(key, value),
       };
@@ -259,6 +374,27 @@ class LocalResultsStore {
         if (await part.exists()) await part.delete();
         rethrow;
       }
+    }
+  }
+
+  /// The files of [scoreId] changed on the server (a re-run replaced them):
+  /// forget the manifest and check time, so the next open fetches `/result`
+  /// instead of playing the old audio. The old files are pruned by the next
+  /// sync. Never throws.
+  Future<void> invalidate(int scoreId) async {
+    // Bumped before the lock is taken: a writer already inside finishes
+    // first and is then deleted; any later one sees the new number.
+    _generation[scoreId] = generation(scoreId) + 1;
+    try {
+      await _withManifestLock(scoreId, () async {
+        final dir = await _dir(scoreId);
+        for (final name in [_manifestName, _checkedName]) {
+          final file = File(_path(dir, name));
+          if (await file.exists()) await file.delete();
+        }
+      });
+    } on Object catch (e) {
+      debugPrint('Local results: invalidate of $scoreId failed: $e');
     }
   }
 
@@ -302,13 +438,40 @@ class LocalResultsStore {
 /// local copy where it exists, downloaded in the background where it does
 /// not, and opened from the saved manifest when there is no connection.
 class LocalFirstScoreResultApi implements ScoreResultApi {
-  LocalFirstScoreResultApi(this._inner, this._store);
+  LocalFirstScoreResultApi(
+    this._inner,
+    this._store, {
+    this._clock = DateTime.now,
+    this.onSessionExpired,
+  });
 
   final ScoreResultApi _inner;
   final LocalResultsStore _store;
+  final DateTime Function() _clock;
+
+  /// Told when a background refresh got a 401. It only raises a flag: local
+  /// copies and rows stay, and nothing is paused.
+  final void Function()? onSessionExpired;
+
+  /// At most one background revalidation per score per window. A score with
+  /// no recorded check (first open after download) is revalidated at once.
+  static const Duration refreshInterval = Duration(hours: 6);
+
+  /// The latest background refresh, so tests can wait for it.
+  @visibleForTesting
+  Future<void> refreshIdle = Future.value();
 
   @override
   Future<ScoreResult> fetchResult(int scoreId) async {
+    // A fully downloaded score opens at once from the phone, wifi or not;
+    // the server is only asked afterwards. Waiting on it first made every
+    // open depend on the connection and sent the audio over the network
+    // whenever a download had not finished at open time.
+    final cached = await _store.loadOffline(scoreId);
+    if (cached != null) {
+      refreshIdle = _refreshInBackground(scoreId);
+      return cached;
+    }
     final ScoreResult remote;
     try {
       remote = await _inner.fetchResult(scoreId);
@@ -332,6 +495,61 @@ class LocalFirstScoreResultApi implements ScoreResultApi {
     } on Object catch (e) {
       debugPrint('Local results: using server copy: $e');
       return remote;
+    }
+  }
+
+  /// `/result` without a last-access touch when the inner API can.
+  Future<ScoreResult?> _revalidate(int scoreId, {String? knownVersion}) {
+    final Object inner = _inner;
+    return inner is ScoreRevalidator
+        ? inner.revalidate(scoreId, knownVersion: knownVersion)
+        : _inner.fetchResult(scoreId);
+  }
+
+  /// Asks the server for the current `/result` after a local open and
+  /// downloads whatever changed (a new fileId), so the NEXT open is current.
+  /// This open keeps the copy it already has. Never throws: no connection,
+  /// an expired session or a deleted score just leaves the local copy as is.
+  ///
+  /// Throttled to [refreshInterval] per score; only an answered check resets
+  /// it. Sends the stored `version`, so "unchanged" skips signing and file
+  /// work. The server's version ignores title/arranger edits (the library
+  /// list carries those) and review/mutedMeasures/failedVoices edits; those
+  /// three are written by the pipeline together with the files, so a re-run
+  /// changes the version anyway. Old servers send no version: full payload,
+  /// same as before.
+  ///
+  /// A 401 is reported through [onSessionExpired] (the foreground shows the
+  /// Login prompt) but never signs the app out here: a stray 401 must not
+  /// pause reconcile or touch the local copy.
+  Future<void> _refreshInBackground(int scoreId) async {
+    final gen = _store.generation(scoreId);
+    try {
+      final last = await _store.lastChecked(scoreId);
+      if (last != null && _clock().difference(last) < refreshInterval) return;
+      final remote = await _revalidate(
+        scoreId,
+        knownVersion: await _store.storedVersion(scoreId),
+      );
+      if (remote == null) {
+        await _store.markChecked(scoreId, _clock(), generation: gen);
+        return;
+      }
+      final data = remote.rawJson;
+      if (data == null || !_store.hasFiles(data)) return;
+      await _store.sync(
+        scoreId,
+        data,
+        refetch: () async => (await _revalidate(scoreId))?.rawJson,
+      );
+      // A sync that failed part-way keeps the old manifest: stay unthrottled.
+      if (await _store.storedVersion(scoreId) == data['version']) {
+        await _store.markChecked(scoreId, _clock(), generation: gen);
+      }
+    } on ScoreResultSessionExpiredException {
+      onSessionExpired?.call();
+    } on Object catch (e) {
+      debugPrint('Local results: background refresh for $scoreId skipped: $e');
     }
   }
 
