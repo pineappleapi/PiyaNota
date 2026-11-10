@@ -79,6 +79,7 @@ class Settings:
     submit_limit_per_hour: int = 10
     status_reads_per_minute: int = 120
     list_reads_per_minute: int = 30  # own bucket: the app's list refresh must not starve per-job polling
+    piano_settings_per_minute: int = 60  # GET+PUT share one per-user bucket; PUTs are debounced client-side
     login_ip_limit: int = 30
     login_ip_window_s: int = 900
     # A choir signs up together from one venue Wi-Fi (one public IP) and typos count as attempts.
@@ -264,6 +265,7 @@ def load_settings(env: Mapping[str, str] = os.environ) -> Settings:
         submit_limit_per_hour=_read_int(env, "submit_limit_per_hour"),
         status_reads_per_minute=_read_int(env, "status_reads_per_minute"),
         list_reads_per_minute=_read_int(env, "list_reads_per_minute"),
+        piano_settings_per_minute=_read_int(env, "piano_settings_per_minute"),
         login_ip_limit=_read_int(env, "login_ip_limit"),
         login_ip_window_s=_read_int(env, "login_ip_window_s"),
         signup_ip_limit=_read_int(env, "signup_ip_limit"),

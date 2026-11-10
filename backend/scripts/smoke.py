@@ -156,6 +156,15 @@ def run(base: str, check_cap: bool = False) -> int:
         check(data["email"] == email, "account email mismatch")
         check(ISO_Z.match(data["accountCreatedAt"]) is not None, "accountCreatedAt not Z")
 
+    def piano_settings() -> None:
+        url = "/api/users/me/piano-settings"
+        data = envelope(call(base, "GET", url + "?voice=tenor", token=state["token"]), 200)
+        check(data == {"octave": 3, "updatedAt": None, "isDefault": True}, f"piano default: {data}")
+        data = envelope(call(base, "PUT", url, token=state["token"], json_body={"octave": 5}), 200)
+        check(data["octave"] == 5 and data["isDefault"] is False, f"piano put: {data}")
+        error(call(base, "PUT", url, token=state["token"], json_body={"octave": 9}), 400, "octave_out_of_range")
+        error(call(base, "GET", url), 401, "unauthorized")
+
     def login() -> None:
         data = envelope(call(base, "POST", "/api/auth/login", json_body={
             "email": email, "password": PASSWORD}), 200)
@@ -240,7 +249,7 @@ def run(base: str, check_cap: bool = False) -> int:
             "email": email, "password": state["password"]}), 401, "invalid_credentials")
 
     steps: list[tuple[str, Callable[[], None]]] = [
-        ("signup", signup), ("account", account), ("login", login), ("submit", submit),
+        ("signup", signup), ("account", account), ("piano settings", piano_settings), ("login", login), ("submit", submit),
         ("status", status), ("job_list", job_list), ("cancel", cancel),
         ("cancel submission", cancel_submission), ("library", library),
         ("change password", change_password), ("logout", logout), ("delete account", delete_account),

@@ -468,6 +468,7 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
     final store = PianoOctaveStore();
     final octave = await store.load(voice);
     if (!mounted) return;
+    final sync = ref.read(pianoSyncServiceProvider)..voice = voice;
     final sound = ref
         .read(playbackControllerProvider(widget.scoreId).notifier)
         .pianoSound;
@@ -476,6 +477,7 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
       initialOctave: octave,
       sound: sound,
       store: store,
+      sync: sync,
     );
   }
 

@@ -34,6 +34,7 @@ ERD_TABLES = {
     "blobs",
     "purge_log",
     "cancelled_submissions",
+    "piano_settings",
     "schema_migrations",
 }
 

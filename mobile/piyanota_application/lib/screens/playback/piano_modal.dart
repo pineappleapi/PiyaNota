@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../services/piano_octave.dart';
 import '../../services/piano_octave_store.dart';
 import '../../services/piano_sound.dart';
+import '../../services/piano_sync_service.dart';
 import '../../theme/app_theme.dart';
 import 'piano_messages.dart';
 
@@ -43,6 +46,7 @@ Future<void> showPianoModal(
   required int initialOctave,
   required PianoSound? sound,
   PianoOctaveStore? store,
+  PianoSyncService? sync,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -54,6 +58,7 @@ Future<void> showPianoModal(
       initialOctave: initialOctave,
       sound: sound,
       store: store ?? PianoOctaveStore(),
+      sync: sync,
     ),
   );
 }
@@ -64,11 +69,15 @@ class PianoModal extends StatefulWidget {
     required this.initialOctave,
     required this.sound,
     required this.store,
+    this.sync,
   });
 
   final int initialOctave;
   final PianoSound? sound;
   final PianoOctaveStore store;
+
+  /// Server sync (AC 40-48); null keeps the piano purely local.
+  final PianoSyncService? sync;
 
   @override
   State<PianoModal> createState() => _PianoModalState();
@@ -79,39 +88,79 @@ class _PianoModalState extends State<PianoModal> with WidgetsBindingObserver {
   int _direction = 1;
   bool _chartOpen = false;
   bool _soundMissing = false;
+  bool _touched = false;
+
+  /// True once the open-time reconcile has finished (or there is none); until
+  /// then a close must not stamp a fresh timestamp over an unseen server value.
+  late bool _reconciled = widget.sync == null;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _soundMissing = widget.sound == null;
+    unawaited(_reconcile());
+  }
+
+  /// AC 40-42: already drawn from the local octave; a server value shows
+  /// now only if the user hasn't touched the octave, else next open.
+  Future<void> _reconcile() async {
+    int? adopted;
+    try {
+      adopted = await widget.sync?.reconcile();
+    } finally {
+      _reconciled = true;
+    }
+    final value = adopted;
+    if (value == null || _touched || !mounted || value == _octave) return;
+    widget.sound?.releaseAll();
+    setState(() => _octave = value);
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.sound?.releaseAll();
-    // AC 28: closing saves the octave shown, even if never changed.
-    widget.store.save(_octave);
+    unawaited(_saveOnClose(_octave));
     super.dispose();
+  }
+
+  /// AC 28 + AC 44. A changed octave was already saved by [_step]; an
+  /// untouched one is saved only as the first-ever value, and only once
+  /// reconcile has run, so a close never re-stamps an existing value or beats
+  /// a server value still on its way.
+  Future<void> _saveOnClose(int octave) async {
+    final sync = widget.sync;
+    if (!_touched && _reconciled && await widget.store.loadSaved() == null) {
+      await widget.store.save(octave);
+      await sync?.flush(force: true);
+      return;
+    }
+    await sync?.flush();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) unawaited(_flushSync());
     if (state == AppLifecycleState.paused && mounted) {
       Navigator.of(context).maybePop(); // AC 35: chart goes with the sheet.
     }
   }
 
+  Future<void> _flushSync() async => widget.sync?.flush();
+
   void _step(int delta) {
     final next = _octave + delta;
     if (!isValidOctave(next)) return;
     widget.sound?.releaseAll(); // AC 22
+    _touched = true;
     setState(() {
       _direction = delta;
       _octave = next;
     });
-    widget.store.save(next);
+    unawaited(
+      widget.store.save(next).whenComplete(() => widget.sync?.localChanged()),
+    );
   }
 
   @override
@@ -470,7 +519,8 @@ class _KeyboardState extends State<_Keyboard> {
     final sound = widget.sound;
     if (sound == null) {
       widget.onSoundMissing(); // keys still show pressed (AC 15)
-    } else {
+    } else if (!_held.containsValue(semitone)) {
+      // A second finger on a held key adds no note-on.
       sound.noteOn(midiForC(widget.octave) + semitone, kPianoNoteVelocity);
     }
     setState(() => _held[pointer] = semitone);
@@ -479,8 +529,11 @@ class _KeyboardState extends State<_Keyboard> {
   void _release(int pointer) {
     final semitone = _held[pointer];
     if (semitone == null) return;
-    widget.sound?.noteOff(midiForC(widget.octave) + semitone);
     setState(() => _held.remove(pointer));
+    // Only the last finger on the key ends the note.
+    if (!_held.containsValue(semitone)) {
+      widget.sound?.noteOff(midiForC(widget.octave) + semitone);
+    }
   }
 
   void _move(PointerMoveEvent e) {
@@ -493,7 +546,7 @@ class _KeyboardState extends State<_Keyboard> {
 
   @override
   void dispose() {
-    for (final s in _held.values) {
+    for (final s in _held.values.toSet()) {
       widget.sound?.noteOff(midiForC(widget.octave) + s);
     }
     super.dispose();

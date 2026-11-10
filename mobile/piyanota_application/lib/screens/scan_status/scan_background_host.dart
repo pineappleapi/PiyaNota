@@ -5,7 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/library_entry.dart';
 import '../../services/background_completion.dart';
+import '../../services/piano_sync_service.dart';
 import '../../services/scan_tracking_service.dart';
+import '../../state/playback_providers.dart';
 import '../../state/processing_providers.dart';
 import '../../state/score_library_providers.dart';
 import '../../state/submission_reconcile_providers.dart';
@@ -79,12 +81,43 @@ class _ScanBackgroundHostState extends ConsumerState<ScanBackgroundHost>
     ref.listenManual(sessionExpiredFlagProvider, (_, raised) {
       if (raised && _inForeground()) _consumeSessionExpired();
     });
+    // Piano octave: reconcile once the session is ready (AC 40), and retry a
+    // pending PUT when the network returns or the app resumes (AC 47).
+    ref.listenManual(signedInProvider, (_, signedIn) {
+      if (signedIn) _pianoSync((s) => s.reconcile());
+    }, fireImmediately: true);
+    try {
+      _online = ref.read(networkAvailabilityProvider).listen((online) {
+        if (online && _wasOffline) _pianoSync((s) => s.flush());
+        _wasOffline = !online;
+      }, onError: (Object e) => debugPrint('Piano: connectivity: $e'));
+    } on Object catch (e) {
+      debugPrint('Piano: connectivity unavailable: $e');
+    }
+  }
+
+  StreamSubscription<bool>? _online;
+  bool _wasOffline = false;
+
+  void _pianoSync(Future<Object?> Function(PianoSyncService) run) {
+    if (!ref.read(signedInProvider)) return;
+    try {
+      unawaited(
+        run(ref.read(pianoSyncServiceProvider)).catchError((Object e) {
+          debugPrint('Piano: sync failed: $e');
+          return null;
+        }),
+      );
+    } on Object catch (e) {
+      debugPrint('Piano: sync unavailable: $e');
+    }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _resync();
+      _pianoSync((s) => s.flush());
       unawaited(ref.read(reconcileSubmissionsProvider)(fresh: true));
       if (ref.read(sessionExpiredFlagProvider)) _consumeSessionExpired();
     }
@@ -101,6 +134,7 @@ class _ScanBackgroundHostState extends ConsumerState<ScanBackgroundHost>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    unawaited(_online?.cancel());
     unawaited(_stopped?.cancel());
     unawaited(_opened?.cancel());
     super.dispose();

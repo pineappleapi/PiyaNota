@@ -18,6 +18,7 @@ from backend.routes_account import account_bp
 from backend.routes_auth import auth_bp
 from backend.routes_jobs import jobs_bp
 from backend.routes_media import media_bp
+from backend.routes_piano import piano_bp
 from backend.routes_scores import scores_bp
 from backend.storage import build_storage
 
@@ -101,6 +102,7 @@ def create_app(settings: Settings | None = None) -> Flask:
     app.extensions["storage"] = build_storage(cfg)
     app.register_blueprint(auth_bp)
     app.register_blueprint(account_bp)
+    app.register_blueprint(piano_bp)
     app.register_blueprint(jobs_bp)
     app.register_blueprint(scores_bp)
     if cfg.storage_backend == "db":  # keeps the dev HMAC key unreachable when /media is unused

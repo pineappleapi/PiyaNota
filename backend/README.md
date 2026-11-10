@@ -25,6 +25,10 @@ Run from the repository root:
 backend/.venv/Scripts/python -m pytest backend/tests -v
 ```
 
+## Piano settings (PIYA-321)
+
+`GET`/`PUT /api/users/me/piano-settings` (auth required; no `/api/v1` prefix, matching every other route). One saved octave per user (2-6). GET takes an optional `?voice=<VoicePart name>`: tenor/bass default to 3, anything else 4, used only until the first save (`isDefault: true`, `updatedAt: null`). PUT takes `octave` and optional `clientUpdatedAt` (UTC ISO 8601); an older `clientUpdatedAt` keeps the stored value and returns it. A `clientUpdatedAt` up to 5 minutes ahead is stored clamped to server now (`min(clientUpdatedAt, now)`) and the response returns that stored `updatedAt`; more than 5 minutes ahead is 400 `client_updated_at_invalid`. Validation codes (`octave_missing`, `octave_invalid`, `octave_out_of_range`, `client_updated_at_invalid`) are in `message` and `error.code`. Rate limit `PIYA_PIANO_SETTINGS_PER_MINUTE` (default 60, GET and PUT share it). Migration 0010.
+
 ## Job list endpoint
 
 `GET /api/jobs` (no trailing slash; `/api/jobs/` is not routed) (auth required) returns `{"data": {"jobs": [...]}}`: the caller's jobs that are still

@@ -21,7 +21,10 @@ import '../services/metronome_click.dart';
 import '../services/midi_render_cache.dart';
 import '../services/live_synth_engine.dart';
 import '../services/midi_synth.dart' show ensureSoundfont;
+import '../services/piano_octave_store.dart';
+import '../services/piano_settings_api.dart';
 import '../services/piano_sound.dart';
+import '../services/piano_sync_service.dart';
 import '../services/playback_engine.dart';
 import '../services/score_result_api.dart';
 import 'auth_providers.dart';
@@ -67,6 +70,29 @@ final scoreResultApiProvider = Provider<ScoreResultApi>((ref) {
       if (ref.mounted) ref.read(sessionExpiredFlagProvider.notifier).set(true);
     },
   );
+});
+
+/// PIYA-321 octave sync (PIYA-218 AC 40-48). App-wide so a retry outlives
+/// the modal. Fake under the same flag as the other fakes.
+final pianoSyncServiceProvider = Provider<PianoSyncService>((ref) {
+  final PianoSettingsApi api;
+  if (ApiConfig.useFakeAuth) {
+    api = FakePianoSettingsApi();
+  } else {
+    api = HttpPianoSettingsApi(
+      ref.watch(dioProvider),
+      ref.watch(sessionStorageProvider),
+    );
+  }
+  final service = PianoSyncService(
+    api: api,
+    store: PianoOctaveStore(),
+    onSessionExpired: () {
+      if (ref.mounted) ref.read(sessionExpiredFlagProvider.notifier).set(true);
+    },
+  );
+  ref.onDispose(service.dispose);
+  return service;
 });
 
 /// Makes a fresh engine per opened score; tests override it with a fake.

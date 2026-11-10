@@ -41,6 +41,9 @@ class ApiConfig {
 
   // PIYA-308/309 define methods and schemas but not paths or the search
   // parameter name — all three are assumed; reconcile in PIYA-215.
+  /// PIYA-321 (the backend serves it under /api, not the spec's /api/v1).
+  static const String pianoSettingsPath = '/api/users/me/piano-settings';
+
   static const String scoreLibraryPath = '/api/scores';
   static const String scoreLibrarySearchParam = 'search';
   static String scorePath(int scoreId) => '$scoreLibraryPath/$scoreId';

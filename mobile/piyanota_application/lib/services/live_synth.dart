@@ -101,10 +101,15 @@ class LiveSynth {
   void setLevel(int channel, int level) => _level(_h, channel, level);
 
   /// [velocity] 0 is note-off.
-  void note(int channel, int key, int velocity) =>
-      _note(_h, channel, key, velocity);
+  void note(int channel, int key, int velocity) {
+    if (_closed) return; // the handle is freed by close()
+    _note(_h, channel, key, velocity);
+  }
 
-  void allNotesOff(int channel) => _notesOff(_h, channel, 0, 0);
+  void allNotesOff(int channel) {
+    if (_closed) return;
+    _notesOff(_h, channel, 0, 0);
+  }
 
   void close() {
     if (_closed) return;
