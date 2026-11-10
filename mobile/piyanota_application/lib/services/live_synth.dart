@@ -18,7 +18,9 @@ typedef _SeekC = Int32 Function(Pointer<Void>, Int32);
 typedef _Seek = int Function(Pointer<Void>, int);
 typedef _LevelC = Void Function(Pointer<Void>, Int32, Int32);
 typedef _Level = void Function(Pointer<Void>, int, int);
-typedef _CloseC = Void Function(Pointer<Void>);
+typedef _NoteC = Void Function(Pointer<Void>, Int32, Int32, Int32);
+typedef _Note = void Function(Pointer<Void>, int, int, int);
+typedef _CloseC =Void Function(Pointer<Void>);
 typedef _Close = void Function(Pointer<Void>);
 
 DynamicLibrary _openLib() {
@@ -46,12 +48,15 @@ class LiveSynth {
         'piya_live_is_playing',
       ),
       _level = lib.lookupFunction<_LevelC, _Level>('piya_live_set_level'),
+      _note = lib.lookupFunction<_NoteC, _Note>('piya_live_note'),
+      _notesOff = lib.lookupFunction<_NoteC, _Note>('piya_live_notes_off'),
       _close = lib.lookupFunction<_CloseC, _Close>('piya_live_close');
 
   final Pointer<Void> _h;
   final _HandleInt _play, _pause, _reset, _tick, _total, _isPlaying;
   final _Seek _seek;
   final _Level _level;
+  final _Note _note, _notesOff;
   final _Close _close;
   bool _closed = false;
 
@@ -94,6 +99,12 @@ class LiveSynth {
 
   /// [level] 0..127 on MIDI [channel].
   void setLevel(int channel, int level) => _level(_h, channel, level);
+
+  /// [velocity] 0 is note-off.
+  void note(int channel, int key, int velocity) =>
+      _note(_h, channel, key, velocity);
+
+  void allNotesOff(int channel) => _notesOff(_h, channel, 0, 0);
 
   void close() {
     if (_closed) return;

@@ -434,4 +434,15 @@ class AppTheme {
       ),
     );
   }
+
+  // Virtual piano modal (PIYA-218), sampled from docs/design/piano/.
+  static const Color pianoBlackKey = Color(0xFF212135);
+  static const Color pianoBlackKeyPressed = Color(0xFF17596F);
+  static const Color pianoWhiteKeyPressed = Color(0xFFCFF3EF);
+  static const Color pianoWhiteKeyBorder = Color(0xFFE3E3E3);
+  static const Color pianoLabel = Color(0xFF7A7A7A);
+  static const Color pianoMiddleC = Color(0xFF0B8FA0);
+  static const Color pianoDotInactive = Color(0xFFD5D5D5);
+  static const Color pianoChevronDisabled = Color(0xFFB8B8C4);
+  static const Color pianoInfo = Color(0xFF16A5BC);
 }

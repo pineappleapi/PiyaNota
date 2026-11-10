@@ -21,6 +21,7 @@ import '../services/metronome_click.dart';
 import '../services/midi_render_cache.dart';
 import '../services/live_synth_engine.dart';
 import '../services/midi_synth.dart' show ensureSoundfont;
+import '../services/piano_sound.dart';
 import '../services/playback_engine.dart';
 import '../services/score_result_api.dart';
 import 'auth_providers.dart';
@@ -503,6 +504,13 @@ class PlaybackController extends Notifier<PlaybackState> {
     });
     Future.microtask(_load);
     return const PlaybackState();
+  }
+
+  /// Piano sound over the live synth; null on the MP3 fallback (no synth).
+  PianoSound? get pianoSound {
+    final engine = _engine;
+    final synth = engine is LiveSynthPlaybackEngine ? engine.liveSynth : null;
+    return synth == null ? null : LiveSynthPianoSound(synth);
   }
 
   /// The audio position, read every frame by the screen's ticker. Zero

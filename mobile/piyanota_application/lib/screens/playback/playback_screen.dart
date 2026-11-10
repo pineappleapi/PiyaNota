@@ -19,6 +19,10 @@ import '../../widgets/primary_pill_button.dart';
 import '../retake/rephotograph.dart';
 import 'export_sheet.dart';
 import 'mixer_sheet.dart';
+import '../../services/onboarding_prefs_service.dart';
+import '../../services/piano_octave_store.dart';
+import 'piano_messages.dart';
+import 'piano_modal.dart';
 import 'playback_alerts.dart';
 import 'playback_messages.dart';
 import 'sheet_parts.dart';
@@ -457,6 +461,24 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
     openExportAudio(context, ref, scoreId: widget.scoreId, title: widget.title),
   );
 
+  /// Sound is the live synth's, null on the MP3 fallback (keys then show a
+  /// "sound unavailable" note).
+  Future<void> _openPiano() async {
+    final voice = await OnboardingPrefsService().getDefaultVoicePart();
+    final store = PianoOctaveStore();
+    final octave = await store.load(voice);
+    if (!mounted) return;
+    final sound = ref
+        .read(playbackControllerProvider(widget.scoreId).notifier)
+        .pianoSound;
+    await showPianoModal(
+      context,
+      initialOctave: octave,
+      sound: sound,
+      store: store,
+    );
+  }
+
   void _openMixer() => unawaited(
     showPlaybackSheet(
       context,
@@ -563,6 +585,7 @@ class _PlaybackScreenState extends ConsumerState<PlaybackScreen>
                 arranger: state.arranger,
                 onBack: () => unawaited(_back()),
                 onDownload: ready ? _openExport : null,
+                onPiano: ready ? () => unawaited(_openPiano()) : null,
               ),
               if (ready)
                 _VoiceChips(
@@ -615,12 +638,14 @@ class _Header extends StatelessWidget {
     required this.arranger,
     required this.onBack,
     required this.onDownload,
+    required this.onPiano,
   });
 
   final String title;
   final String? arranger;
   final VoidCallback onBack;
   final VoidCallback? onDownload;
+  final VoidCallback? onPiano;
 
   @override
   Widget build(BuildContext context) {
@@ -676,10 +701,21 @@ class _Header extends StatelessWidget {
           // Kept in the layout while loading so the title stays centred.
           Visibility.maintain(
             visible: onDownload != null,
-            child: _NavyDisc(
-              icon: Icons.download_rounded,
-              tooltip: PlaybackMessages.download,
-              onPressed: onDownload,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _NavyDisc(
+                  icon: Icons.piano_rounded,
+                  tooltip: PianoMessages.openButton,
+                  onPressed: onPiano,
+                ),
+                const SizedBox(width: 8),
+                _NavyDisc(
+                  icon: Icons.download_rounded,
+                  tooltip: PlaybackMessages.download,
+                  onPressed: onDownload,
+                ),
+              ],
             ),
           ),
         ],

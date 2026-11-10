@@ -91,6 +91,7 @@ flutter:
   assets:
     - assets/branding/
     - assets/soundfont/piano.sf2
+    - assets/piano/notes_chart.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:

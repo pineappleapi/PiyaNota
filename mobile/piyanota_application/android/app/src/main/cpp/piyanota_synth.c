@@ -209,6 +209,24 @@ int piya_live_is_playing(piya_live *h) {
     return playing;
 }
 
+/* Virtual piano: key on/off on a free channel, Acoustic Grand (program 0).
+ * velocity 0 is note-off. The score player never uses this channel. */
+void piya_live_note(piya_live *h, int channel, int key, int velocity) {
+    if (key < 0 || key > 127) return;
+    if (velocity > 0) {
+        fluid_synth_program_change(h->synth, channel, 0);
+        fluid_synth_noteon(h->synth, channel, key, velocity);
+    } else {
+        fluid_synth_noteoff(h->synth, channel, key);
+    }
+}
+
+void piya_live_notes_off(piya_live *h, int channel, int unused1, int unused2) {
+    (void)unused1;
+    (void)unused2;
+    fluid_synth_all_notes_off(h->synth, channel);
+}
+
 /* Level 0..127 on one channel; CC7 is squared by the synth, the caller maps. */
 void piya_live_set_level(piya_live *h, int channel, int level) {
     if (level < 0) level = 0;

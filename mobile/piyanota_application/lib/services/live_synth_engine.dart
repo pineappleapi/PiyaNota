@@ -50,6 +50,9 @@ class LiveSynthPlaybackEngine implements PlaybackEngine {
   Timer? _poll;
   bool _wantPlaying = false;
   bool _disposed = false;
+
+  /// The open synth, for the virtual piano; null before load / after dispose.
+  LiveSynth? get liveSynth => _synth;
   bool _finished = false;
   // False between play() and the native player really starting: until then
   // synth.tick is stale, so position and pause use _resumeTick.
