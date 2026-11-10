@@ -38,6 +38,21 @@ void main() {
       expect((a.width, a.height), (4032, 3024));
     });
 
+    test('stripped file decodes to the same pixels (one scan header)', () {
+      final out = stripJpegMetadata(upright)!;
+      final a = img.decodeJpg(upright)!;
+      final b = img.decodeJpg(out)!;
+      for (final (x, y) in [(0, 0), (2000, 1500), (4031, 3023), (123, 2900)]) {
+        expect(b.getPixel(x, y), a.getPixel(x, y));
+      }
+      // A doubled SOS header made decoders paint flat gray (1.6.0 bug).
+      var sosCount = 0;
+      for (var i = 0; i + 1 < 600; i++) {
+        if (out[i] == 0xFF && out[i + 1] == 0xDA) sosCount++;
+      }
+      expect(sosCount, lessThanOrEqualTo(1));
+    });
+
     test('COM, APP3-APP12 and bytes after the first EOI are dropped', () {
       List<int> seg(int marker, List<int> body) => [
         0xFF,

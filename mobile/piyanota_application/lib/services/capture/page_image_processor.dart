@@ -278,7 +278,8 @@ Uint8List? stripJpegMetadata(Uint8List bytes) {
     if (length < 2 || end > bytes.length) return null;
     if (marker == _markerApp1) {
       if (_exifOrientation(bytes, pos + 4, end) > 1) return null;
-    } else if (marker != _markerApp13 &&
+    } else if (marker != _markerSos && // copied whole with its scan below
+        marker != _markerApp13 &&
         marker != _markerCom &&
         (marker < _markerApp3 || marker > _markerApp12)) {
       out.add(Uint8List.sublistView(bytes, pos, end));
