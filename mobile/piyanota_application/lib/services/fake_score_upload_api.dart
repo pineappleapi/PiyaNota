@@ -1,4 +1,4 @@
-import 'package:dio/dio.dart' show CancelToken;
+import 'package:dio/dio.dart' show CancelToken, ProgressCallback;
 import 'package:flutter/foundation.dart' show debugPrint;
 
 import '../models/score_details.dart';
@@ -46,12 +46,14 @@ class FakeScoreUploadApi implements ScoreUploadApi {
     int? fallbackTempoBpm,
     // The fake has no idempotency table; the real server dedupes on this.
     String? clientSubmissionId,
+    ProgressCallback? onSendProgress,
   }) => _submit(
     details,
     imagePaths.length,
     cancelToken,
     replacesJobId,
     fallbackTempoBpm,
+    onSendProgress,
   );
 
   @override
@@ -62,16 +64,35 @@ class FakeScoreUploadApi implements ScoreUploadApi {
     String? replacesJobId,
     int? fallbackTempoBpm,
     String? clientSubmissionId,
+    ProgressCallback? onSendProgress,
   }) =>
       // The real PIYA-310 counts the pages itself; the fake has no PDF
       // parser, so the library card shows no page count.
-      _submit(details, null, cancelToken, replacesJobId, fallbackTempoBpm);
+      _submit(
+        details,
+        null,
+        cancelToken,
+        replacesJobId,
+        fallbackTempoBpm,
+        onSendProgress,
+      );
 
-  Future<String> _accountAfterLatency(CancelToken? cancelToken) async {
-    await Future.any<void>([
-      Future<void>.delayed(latency),
-      if (cancelToken != null) cancelToken.whenCancel,
-    ]);
+  /// Fake byte counts: one unit per page (or one for a PDF), half sent at
+  /// half the latency, so Processing's upload step is visible on a device.
+  Future<String> _accountAfterLatency(
+    CancelToken? cancelToken,
+    int total,
+    ProgressCallback? onSendProgress,
+  ) async {
+    onSendProgress?.call(0, total);
+    for (final sent in [total ~/ 2, total]) {
+      await Future.any<void>([
+        Future<void>.delayed(latency ~/ 2),
+        if (cancelToken != null) cancelToken.whenCancel,
+      ]);
+      if (cancelToken?.isCancelled ?? false) break;
+      onSendProgress?.call(sent, total);
+    }
     if (cancelToken?.isCancelled ?? false) {
       throw const UploadCancelledException();
     }
@@ -87,8 +108,13 @@ class FakeScoreUploadApi implements ScoreUploadApi {
     CancelToken? cancelToken,
     String? replacesJobId,
     int? fallbackTempoBpm,
+    ProgressCallback? onSendProgress,
   ) async {
-    final account = await _accountAfterLatency(cancelToken);
+    final account = await _accountAfterLatency(
+      cancelToken,
+      pageCount ?? 1,
+      onSendProgress,
+    );
     // The fake library never uses a tempo, so the PIYA-323 field is only
     // logged — enough to check on a device that Settings reached submit.
     debugPrint(

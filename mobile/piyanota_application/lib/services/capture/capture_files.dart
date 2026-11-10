@@ -10,8 +10,9 @@ abstract interface class CaptureFileStore {
   Future<void> delete(String path);
 
   /// Deletes files in the capture folder last modified before [before]:
-  /// leftovers from an earlier session that crashed or was killed.
-  Future<void> clearStale(DateTime before);
+  /// leftovers from an earlier session that crashed or was killed. [keep]
+  /// are paths still in use (an upload in flight, pages handed back).
+  Future<void> clearStale(DateTime before, {Set<String> keep = const {}});
 }
 
 class DiskCaptureFileStore implements CaptureFileStore {
@@ -31,11 +32,14 @@ class DiskCaptureFileStore implements CaptureFileStore {
   }
 
   @override
-  Future<void> clearStale(DateTime before) async {
+  Future<void> clearStale(
+    DateTime before, {
+    Set<String> keep = const {},
+  }) async {
     try {
       final dir = await _directory();
       await for (final entity in dir.list(followLinks: false)) {
-        if (entity is! File) continue;
+        if (entity is! File || keep.contains(entity.path)) continue;
         try {
           if ((await entity.lastModified()).isBefore(before)) {
             await entity.delete();
@@ -74,7 +78,11 @@ class CaptureFileLedger {
     }
   }
 
-  /// Discard, a finished upload, or leaving the screen.
+  /// The pages went to the upload controller, which deletes them from now
+  /// on; nothing is deleted here.
+  void release() => _owned.clear();
+
+  /// Discard, or leaving the screen.
   void deleteAll() {
     final all = _owned.toList();
     _owned.clear();

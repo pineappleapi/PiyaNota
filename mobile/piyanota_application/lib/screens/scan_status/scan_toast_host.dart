@@ -8,6 +8,7 @@ import '../../routes/app_routes.dart';
 import '../../state/export_jobs.dart';
 import '../../state/export_providers.dart';
 import '../../state/processing_providers.dart';
+import '../../state/score_upload_providers.dart';
 import '../../theme/app_theme.dart';
 import '../library/library_messages.dart';
 import '../playback/export_messages.dart';
@@ -98,9 +99,15 @@ class _ScanToastHostState extends ConsumerState<ScanToastHost> {
     final screen = widget.routes.topScreen;
     final settings = screen?.settings;
     final arguments = settings?.arguments;
-    return settings?.name == AppRoutes.processing &&
-        arguments is ProcessingArguments &&
-        arguments.jobId == jobId;
+    if (settings?.name != AppRoutes.processing ||
+        arguments is! ProcessingArguments) {
+      return false;
+    }
+    // Opened straight from "Create score": the job id came later.
+    final uploadKey = arguments.clientSubmissionId;
+    return arguments.jobId == jobId ||
+        (uploadKey != null &&
+            ref.read(scoreUploadsProvider)[uploadKey]?.jobId == jobId);
   }
 
   void _show(TrackedJob job) {

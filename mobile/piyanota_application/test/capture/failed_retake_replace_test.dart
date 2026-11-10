@@ -9,6 +9,7 @@ import 'package:piyanota_application/models/score_details.dart';
 import 'package:piyanota_application/routes/app_routes.dart';
 import 'package:piyanota_application/screens/capture/capture_messages.dart';
 import 'package:piyanota_application/screens/library/score_library_screen.dart';
+import 'package:piyanota_application/screens/processing/processing_messages.dart';
 import 'package:piyanota_application/services/local_submission_store.dart';
 import 'package:piyanota_application/services/score_upload_api.dart';
 import 'package:piyanota_application/state/local_submission_providers.dart';
@@ -121,8 +122,10 @@ void main() {
     expect(_cards(tester), hasLength(1), reason: 'refused attempt stands in');
     expect(await const LocalSubmissionStore().loadDismissed(), isEmpty);
 
-    await tester.tap(find.text(CaptureMessages.createScoreWith(1)));
+    // "Try again" on Processing: a new id (the refusal was definite).
+    await tester.tap(find.text(ProcessingMessages.retry));
     await tester.pumpAndSettle();
+    expect(h.upload.clientIdsSent[1], isNot(h.upload.clientIdsSent[0]));
 
     rows = appContainer(tester).read(localSubmissionsProvider);
     expect(rows, hasLength(1), reason: 'old row and refused attempt gone');

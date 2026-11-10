@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,13 +7,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/processing_status.dart';
 import '../../routes/app_routes.dart';
 import '../../state/export_providers.dart';
+import '../../services/score_upload_api.dart';
 import '../../state/processing_providers.dart';
+import '../../state/score_upload_providers.dart';
 import '../../state/session_actions.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/notification_ask.dart';
 import '../../widgets/primary_pill_button.dart';
 import '../../services/score_library_api.dart';
 import '../../state/score_library_providers.dart';
+import '../capture/capture_messages.dart';
 import '../library/library_messages.dart';
 import '../library/widgets/delete_score_dialog.dart';
 import '../retake/rephotograph.dart';
@@ -31,10 +35,23 @@ import 'processing_messages.dart';
 /// thing from the user: a page that can be retaken (AC5/AC7), a layout
 /// that can't be fixed by retaking (AC6/AC7), connection trouble (wait or
 /// Retry), and an expired session (log in).
+///
+/// Opened straight from "Create score" it has no [jobId] yet: it shows the
+/// upload owned by [scoreUploadsProvider] under [clientSubmissionId], and
+/// switches to following the job in place once the 202 names it.
 class ProcessingScreen extends ConsumerStatefulWidget {
-  const ProcessingScreen({super.key, required this.jobId, required this.title});
+  const ProcessingScreen({
+    super.key,
+    required this.jobId,
+    required this.title,
+    this.clientSubmissionId,
+  });
 
-  final String jobId;
+  final String? jobId;
+
+  /// The upload's key in [scoreUploadsProvider]; null when opened for a
+  /// job that already exists.
+  final String? clientSubmissionId;
 
   /// The score's title, carried to Playback and to a retake.
   final String title;
@@ -77,28 +94,134 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
   static const double _gutterFraction = 0.107; // 44 dp on the 412 dp mockup
   static const double _minGutter = 16;
   static const double _maxGutter = 44;
+  static const int _fullPercent = 100;
+
+  /// Read in initState: dispose can't use ref.
+  late final ScoreUploadsController _uploads = ref.read(
+    scoreUploadsProvider.notifier,
+  );
+
+  /// Null while the upload that makes the job is still sending.
+  late String? _jobId = widget.jobId ?? _upload?.jobId;
+
+  ScoreUpload? get _upload => switch (widget.clientSubmissionId) {
+    final key? => ref.read(scoreUploadsProvider)[key],
+    null => null,
+  };
+
+  /// Only called once [_jobId] is set.
+  String get _id => _jobId!;
 
   @override
   void initState() {
     super.initState();
+    _uploads;
     // Providers can't change while this widget is building.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      ref
-          .read(processingJobsProvider.notifier)
-          .track(widget.jobId, title: widget.title);
-      final job = ref.read(processingJobsProvider)[widget.jobId];
-      if (job != null) _react(job);
+      if (_jobId != null) {
+        _follow();
+      } else if (_upload == null) {
+        // The upload is gone (nothing to show): the library has the row.
+        _backToLibrary();
+      } else {
+        // It may have ended before the first build started listening.
+        _onUpload(_upload);
+      }
     });
+  }
+
+  void _follow() {
+    ref.read(processingJobsProvider.notifier).track(_id, title: widget.title);
+    final job = ref.read(processingJobsProvider)[_id];
+    if (job != null) _react(job);
   }
 
   @override
   void dispose() {
     _completionTimer?.cancel();
+    if (widget.clientSubmissionId case final key?) {
+      // Not inside the tree teardown that is disposing this screen.
+      scheduleMicrotask(() => _uploads.release(key));
+    }
     super.dispose();
   }
 
-  TrackedJob? get _job => ref.read(processingJobsProvider)[widget.jobId];
+  TrackedJob? get _job => ref.read(processingJobsProvider)[_jobId];
+
+  void _onUpload(ScoreUpload? upload) {
+    if (upload == null || _leaving) return;
+    if (upload.jobId case final jobId? when _jobId == null) {
+      // The 202: from here on this is the ordinary Processing view.
+      setState(() {
+        _jobId = jobId;
+        _cancelRequestInFlight = false;
+      });
+      scheduleMicrotask(() {
+        if (mounted) _follow();
+      });
+    } else if (upload.phase == UploadPhase.cancelled) {
+      scheduleMicrotask(() {
+        if (mounted) _backToEdit(cancelled: true);
+      });
+    } else if (upload.phase == UploadPhase.failed && _cancelRequestInFlight) {
+      // The cancel lost the race to a failure: "Try again" must start fresh.
+      setState(() => _cancelRequestInFlight = false);
+    }
+  }
+
+  /// "Cancel sending": same as it was on Capture. The abort ends the
+  /// upload as cancelled, which takes the user back to the pages.
+  void _cancelUpload() {
+    final key = widget.clientSubmissionId;
+    if (key == null || _leaving || _cancelRequestInFlight) return;
+    setState(() => _cancelRequestInFlight = true);
+    _uploads.cancel(key);
+  }
+
+  /// "Back to edit pages", or a cancelled upload: Capture again, with the
+  /// same pages, the error and the id the next send must use.
+  void _backToEdit({bool cancelled = false}) {
+    final key = widget.clientSubmissionId;
+    if (key == null || _leaving) return;
+    final upload = _uploads.takeForEdit(key);
+    if (upload == null) return;
+    _leaving = true;
+    final messenger = ScaffoldMessenger.of(context);
+    Navigator.of(context).pushReplacementNamed(
+      AppRoutes.capturePages,
+      arguments: CapturePagesArguments(
+        details: upload.details,
+        wholeRetake: upload.wholeRetake,
+        resume: upload,
+      ),
+    );
+    if (cancelled) {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text(CaptureMessages.uploadCancelled),
+            duration: AppTheme.snackBarDuration,
+          ),
+        );
+    }
+  }
+
+  /// A failed upload no resend can fix (dead retake, score limit): to the
+  /// library, which reloads to show where things really stand.
+  void _abandonUpload() {
+    final upload = _upload;
+    final retakeJobId = upload?.wholeRetake?.replacesJobId;
+    final error = upload?.error;
+    if (retakeJobId != null &&
+        error is UploadRejectedException &&
+        error.code == jobNotFoundCode) {
+      ref.read(processingJobsProvider.notifier).forget(retakeJobId);
+    }
+    ref.invalidate(scoreLibraryProvider);
+    _backToLibrary();
+  }
 
   void _react(TrackedJob job) {
     if (_leaving) return;
@@ -152,7 +275,7 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
     final unreadable = status?.unreadableVoices ?? const [];
     if (status == null ||
         unreadable.isEmpty ||
-        await RephotographOfferPrefs.isAnswered(widget.jobId)) {
+        await RephotographOfferPrefs.isAnswered(_id)) {
       _openPlayback();
       return;
     }
@@ -171,17 +294,17 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
         // the next tap of the card (AC11).
         _goToLibrary(navigator);
       case RephotographChoice.continuePlayback:
-        await RephotographOfferPrefs.markAnswered(widget.jobId);
+        await RephotographOfferPrefs.markAnswered(_id);
         _leaving = false;
         _finishing = false;
         _openPlayback();
       case RephotographChoice.rephotograph:
-        await RephotographOfferPrefs.markAnswered(widget.jobId);
+        await RephotographOfferPrefs.markAnswered(_id);
         if (!mounted) return;
         await startWholeRetake(
           context,
           ref,
-          jobId: widget.jobId,
+          jobId: _id,
           title: widget.title,
           details: status.details,
           // A retake of a retake keeps pointing at the score's card.
@@ -222,7 +345,13 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
   /// notifications the same way (review M7, PIYA-218 AC11: "the first time
   /// a scan is sent to the background").
   void _leave() {
-    final job = ref.read(processingJobsProvider)[widget.jobId];
+    if (_jobId == null) {
+      // Back is blocked while sending, as it was on Capture: a send that
+      // failed with no screen left would lose the pages (review N2).
+      if (_upload?.phase != UploadPhase.sending) _backToLibrary();
+      return;
+    }
+    final job = ref.read(processingJobsProvider)[_jobId];
     if (job != null && job.isRunning) {
       unawaited(_convertInBackground());
     } else {
@@ -272,7 +401,11 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
     _completionTimer?.cancel();
     final navigator = Navigator.of(context);
     await endLocalSession(ref);
-    _snack(ProcessingMessages.sessionExpired);
+    _snack(
+      _jobId == null
+          ? ProcessingMessages.sessionExpiredUpload
+          : ProcessingMessages.sessionExpired,
+    );
     navigator.pushNamedAndRemoveUntil(AppRoutes.login, (_) => false);
   }
 
@@ -288,9 +421,7 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
       return;
     }
     setState(() => _cancelRequestInFlight = true);
-    final outcome = await ref
-        .read(processingJobsProvider.notifier)
-        .cancel(widget.jobId);
+    final outcome = await ref.read(processingJobsProvider.notifier).cancel(_id);
     if (!mounted) return;
     setState(() {
       _cancelling = false;
@@ -340,7 +471,7 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
       startWholeRetake(
         context,
         ref,
-        jobId: widget.jobId,
+        jobId: _id,
         title: widget.title,
         details: _job?.status?.details,
       ),
@@ -389,7 +520,7 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
     }
     ref.read(processingJobsProvider.notifier)
       ..forgetScore(scoreId)
-      ..forget(widget.jobId);
+      ..forget(_id);
     _snack(LibraryMessages.deleted(widget.title));
     _backToLibrary();
   }
@@ -403,21 +534,144 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
       );
   }
 
+  /// The upload step: bytes sent, then the failure view if it fails.
+  Widget _uploadBody(ScoreUpload? upload) {
+    final error = upload?.error;
+    if (upload != null && error != null) {
+      final key = upload.key;
+      final (String, VoidCallback)? primary = switch (error) {
+        UploadSessionExpiredException() => (
+          CaptureMessages.logIn,
+          () => unawaited(_returnToLogin()),
+        ),
+        _
+            when upload.wholeRetake != null &&
+                CaptureMessages.isDeadWholeRetake(error) =>
+          (CaptureMessages.backToLibrary, _abandonUpload),
+        UploadRejectedException(isScoreLimit: true) => (
+          CaptureMessages.library,
+          _abandonUpload,
+        ),
+        // Fixed on the pages or the details, not by sending again.
+        UploadFileMissingException() => null,
+        _ when CaptureMessages.isDetailsError(error) => null,
+        _ => (ProcessingMessages.retry, () => _uploads.retry(key)),
+      };
+      return _FailureView(
+        heading: ProcessingMessages.uploadFailedHeading,
+        body: error is UploadRejectedException && error.isScoreLimit
+            ? CaptureMessages.scoreLimitBody
+            : (upload.wholeRetake != null
+                      ? CaptureMessages.wholeRetakeError(error)
+                      : null) ??
+                  CaptureMessages.uploadError(error),
+        onBack: _backToLibrary,
+        primary: primary,
+        onBackToEdit: _backToEdit,
+      );
+    }
+    final sent = upload?.sent ?? 0;
+    final total = upload?.total ?? 0;
+    final percent = total > 0
+        ? (sent * _fullPercent ~/ total).clamp(0, _fullPercent)
+        : 0;
+    final session = upload?.session;
+    final pages = session == null || session.hasPdf ? 0 : session.pageCount;
+    // shortcut: the page is read off the byte count as if every page were
+    // the same size; use per-part offsets if users notice it jump.
+    final page = math.min(pages, total == 0 ? 1 : sent * pages ~/ total + 1);
+    return _ProgressView(
+      subtitle: total > 0 && sent >= total
+          ? ProcessingMessages.uploadChecking
+          : pages == 0
+          ? ProcessingMessages.uploadingPdf
+          : ProcessingMessages.uploadingPage(page, pages),
+      percent: percent,
+      cardLabel: ProcessingMessages.uploadSemantics(percent),
+      helper: ProcessingMessages.uploadHelper,
+      cancelLabel: _cancelRequestInFlight
+          ? ProcessingMessages.cancelling
+          : ProcessingMessages.cancelUpload,
+      cancelling: _cancelRequestInFlight,
+      onCancel: upload == null || _leaving ? null : _cancelUpload,
+      // Pages leave the phone only on a 202; the user stays until then.
+      onBackground: null,
+      headingScale: _maxHeadingScale,
+      cardScale: _maxCardScale,
+    );
+  }
+
+  Widget _jobProgress(TrackedJob? job) {
+    final status = job?.status;
+    final phase = job?.phase ?? TrackedPhase.active;
+    final percent = job?.percent ?? 0;
+    final current = status?.currentPage;
+    final total = status?.totalPages;
+    final showPage = current != null && total != null;
+    final seconds =
+        status?.stage != ProcessingStage.complete &&
+            phase != TrackedPhase.complete
+        ? status?.estimatedRemainingSeconds
+        : null;
+    return _ProgressView(
+      subtitle: ProcessingMessages.subtitle(status?.stage),
+      percent: percent,
+      pageText: showPage ? ProcessingMessages.page(current, total) : null,
+      secondsLeft: seconds,
+      cardLabel: ProcessingMessages.cardSemantics(
+        percent: percent,
+        currentPage: showPage ? current : null,
+        totalPages: showPage ? total : null,
+        secondsLeft: seconds,
+      ),
+      helper: switch (phase) {
+        TrackedPhase.reconnecting => ProcessingMessages.reconnecting,
+        _ when job?.isStalled ?? false => ProcessingMessages.stalled,
+        _ => ProcessingMessages.helper,
+      },
+      onRetry: phase == TrackedPhase.paused
+          ? () => ref.read(processingJobsProvider.notifier).retry(_id)
+          : null,
+      cancelLabel: _cancelRequestInFlight
+          ? ProcessingMessages.cancelling
+          : ProcessingMessages.cancelScan,
+      cancelling: _cancelRequestInFlight,
+      onCancel: job?.phase == TrackedPhase.complete || _leaving
+          ? null
+          : _confirmCancel,
+      onBackground: () => unawaited(_convertInBackground()),
+      headingScale: _maxHeadingScale,
+      cardScale: _maxCardScale,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     ref.listen<TrackedJob?>(
-      processingJobsProvider.select((jobs) => jobs[widget.jobId]),
+      processingJobsProvider.select((jobs) => jobs[_jobId]),
       (_, next) {
         if (next != null) _react(next);
       },
     );
     final job = ref.watch(
-      processingJobsProvider.select((jobs) => jobs[widget.jobId]),
+      processingJobsProvider.select((jobs) => jobs[_jobId]),
     );
+    final uploadKey = widget.clientSubmissionId;
+    ScoreUpload? upload;
+    if (uploadKey != null) {
+      ref.listen<ScoreUpload?>(
+        scoreUploadsProvider.select((uploads) => uploads[uploadKey]),
+        (_, next) => _onUpload(next),
+      );
+      upload = ref.watch(
+        scoreUploadsProvider.select((uploads) => uploads[uploadKey]),
+      );
+    }
     final width = MediaQuery.sizeOf(context).width;
     final gutter = (width * _gutterFraction).clamp(_minGutter, _maxGutter);
 
     final Widget body = switch (job?.phase) {
+      _ when _jobId == null => _uploadBody(upload),
       TrackedPhase.failed => _FailureView(
         heading:
             job?.status?.failureReason == FailureReason.unsupportedStaffLayout
@@ -439,18 +693,7 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
         body: ProcessingMessages.cancelledBody,
         onBack: _backToLibrary,
       ),
-      _ => _ProgressView(
-        job: job,
-        cancelling: _cancelRequestInFlight,
-        onCancel: job?.phase == TrackedPhase.complete || _leaving
-            ? null
-            : _confirmCancel,
-        onBackground: () => unawaited(_convertInBackground()),
-        onRetry: () =>
-            ref.read(processingJobsProvider.notifier).retry(widget.jobId),
-        headingScale: _maxHeadingScale,
-        cardScale: _maxCardScale,
-      ),
+      _ => _jobProgress(job),
     };
 
     return PopScope(
@@ -474,7 +717,11 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
                         alignment: Alignment.centerLeft,
                         child: IconButton(
                           tooltip: ProcessingMessages.backToLibrary,
-                          onPressed: _leave,
+                          onPressed:
+                              _jobId == null &&
+                                  _upload?.phase == UploadPhase.sending
+                              ? null
+                              : _leave,
                           color: AppTheme.onboardingHeadingDark,
                           icon: const Icon(Icons.arrow_back_rounded),
                         ),
@@ -492,22 +739,39 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
   }
 }
 
+/// The upload step and the job's progress share this layout; the caller
+/// words it.
 class _ProgressView extends StatelessWidget {
   const _ProgressView({
-    required this.job,
+    required this.subtitle,
+    required this.percent,
+    required this.cardLabel,
+    required this.helper,
+    required this.cancelLabel,
     required this.cancelling,
     required this.onCancel,
     required this.onBackground,
-    required this.onRetry,
     required this.headingScale,
     required this.cardScale,
+    this.pageText,
+    this.secondsLeft,
+    this.onRetry,
   });
 
-  final TrackedJob? job;
+  final String subtitle;
+  final int percent;
+  final String cardLabel;
+  final String? pageText;
+  final int? secondsLeft;
+  final String helper;
+
+  /// Set while polling is paused: the Retry panel replaces [helper].
+  final VoidCallback? onRetry;
+  final String cancelLabel;
   final bool cancelling;
   final VoidCallback? onCancel;
-  final VoidCallback onBackground;
-  final VoidCallback onRetry;
+  /// Null hides "Convert in Background" (the upload step, see [_leave]).
+  final VoidCallback? onBackground;
   final double headingScale;
   final double cardScale;
 
@@ -517,14 +781,7 @@ class _ProgressView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
-    final status = job?.status;
-    final phase = job?.phase ?? TrackedPhase.active;
-    final paused = phase == TrackedPhase.paused;
-    final helper = switch (phase) {
-      TrackedPhase.reconnecting => ProcessingMessages.reconnecting,
-      _ when job?.isStalled ?? false => ProcessingMessages.stalled,
-      _ => ProcessingMessages.helper,
-    };
+    final retry = onRetry;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -549,7 +806,7 @@ class _ProgressView extends StatelessWidget {
         Semantics(
           liveRegion: true,
           child: Text(
-            ProcessingMessages.subtitle(status?.stage),
+            subtitle,
             style: textTheme.titleMedium?.copyWith(
               fontSize: 18,
               fontWeight: FontWeight.w400,
@@ -561,17 +818,16 @@ class _ProgressView extends StatelessWidget {
         MediaQuery.withClampedTextScaling(
           maxScaleFactor: headingScale,
           child: _ProgressCard(
-            percent: job?.percent ?? 0,
-            status: status,
-            showEstimate:
-                status?.stage != ProcessingStage.complete &&
-                phase != TrackedPhase.complete,
+            percent: percent,
+            label: cardLabel,
+            pageText: pageText,
+            secondsLeft: secondsLeft,
             percentScale: cardScale,
           ),
         ),
         const SizedBox(height: 8),
-        if (paused)
-          _PausedPanel(onRetry: onRetry)
+        if (retry != null)
+          _PausedPanel(onRetry: retry)
         else
           Text(
             helper,
@@ -595,30 +851,28 @@ class _ProgressView extends StatelessWidget {
               ),
             ),
             icon: const Icon(Icons.close_rounded),
-            label: Text(
-              cancelling
-                  ? ProcessingMessages.cancelling
-                  : ProcessingMessages.cancelScan,
-            ),
+            label: Text(cancelLabel),
           ),
         ),
-        const SizedBox(height: 8),
-        OutlinedButton(
-          onPressed: onBackground,
-          style: OutlinedButton.styleFrom(
-            foregroundColor: AppTheme.processingSecondary,
-            side: const BorderSide(color: AppTheme.processingSecondary),
-            minimumSize: const Size.fromHeight(_buttonMinHeight),
-            shape: const StadiumBorder(),
-            textStyle: textTheme.labelLarge?.copyWith(
-              fontWeight: FontWeight.w600,
+        if (onBackground != null) ...[
+          const SizedBox(height: 8),
+          OutlinedButton(
+            onPressed: onBackground,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppTheme.processingSecondary,
+              side: const BorderSide(color: AppTheme.processingSecondary),
+              minimumSize: const Size.fromHeight(_buttonMinHeight),
+              shape: const StadiumBorder(),
+              textStyle: textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            child: const Text(
+              ProcessingMessages.convertInBackground,
+              textAlign: TextAlign.center,
             ),
           ),
-          child: const Text(
-            ProcessingMessages.convertInBackground,
-            textAlign: TextAlign.center,
-          ),
-        ),
+        ],
       ],
     );
   }
@@ -629,14 +883,18 @@ class _ProgressView extends StatelessWidget {
 class _ProgressCard extends StatelessWidget {
   const _ProgressCard({
     required this.percent,
-    required this.status,
-    required this.showEstimate,
+    required this.label,
+    required this.pageText,
+    required this.secondsLeft,
     required this.percentScale,
   });
 
   final int percent;
-  final ProcessingStatus? status;
-  final bool showEstimate;
+
+  /// Read when the card is focused, so a tick isn't announced each time.
+  final String label;
+  final String? pageText;
+  final int? secondsLeft;
   final double percentScale;
 
   static const double _radius = 10;
@@ -649,19 +907,12 @@ class _ProgressCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
-    final current = status?.currentPage;
-    final total = status?.totalPages;
-    final showPage = current != null && total != null;
-    final seconds = showEstimate ? status?.estimatedRemainingSeconds : null;
+    final page = pageText;
+    final seconds = secondsLeft;
 
     return Semantics(
       container: true,
-      label: ProcessingMessages.cardSemantics(
-        percent: percent,
-        currentPage: showPage ? current : null,
-        totalPages: showPage ? total : null,
-        secondsLeft: seconds,
-      ),
+      label: label,
       child: ExcludeSemantics(
         child: DecoratedBox(
           decoration: BoxDecoration(
@@ -696,9 +947,9 @@ class _ProgressCard extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
-                            if (showPage)
+                            if (page != null)
                               Text(
-                                ProcessingMessages.page(current, total),
+                                page,
                                 textAlign: TextAlign.end,
                                 style: textTheme.labelSmall?.copyWith(
                                   fontSize: _pageFontSize,
@@ -802,10 +1053,19 @@ class _FailureView extends StatelessWidget {
     this.onRetakeWhole,
     this.onDelete,
     this.deleting = false,
+    this.primary,
+    this.onBackToEdit,
   });
 
   final String heading;
   final ProcessingStatus? status;
+
+  /// Upload failures: the main action (e.g. "Try again"), above "Back to
+  /// edit pages".
+  final (String, VoidCallback)? primary;
+
+  /// Upload failures: back to Capture with the same pages.
+  final VoidCallback? onBackToEdit;
 
   /// Fixed copy for the non-pipeline cases (gone, cancelled); otherwise
   /// worded from [status].
@@ -835,6 +1095,25 @@ class _FailureView extends StatelessWidget {
         (reason.isRetakeable || reason.isWholeRetakeable) &&
         onRetakeWhole != null;
     final unsupported = reason == FailureReason.unsupportedStaffLayout;
+    final edit = onBackToEdit == null
+        ? null
+        : (ProcessingMessages.backToEditPages, onBackToEdit!);
+    const library = ProcessingMessages.backToLibrary;
+    final (String, VoidCallback) main;
+    final (String, VoidCallback)? second;
+    if (canRetakeWhole) {
+      main = (RephotographMessages.rephotograph, onRetakeWhole!);
+      second = (library, onBack);
+    } else if (primary != null) {
+      main = primary!;
+      second = edit ?? (library, onBack);
+    } else if (edit != null) {
+      main = edit;
+      second = (library, onBack);
+    } else {
+      main = (library, onBack);
+      second = null;
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -922,30 +1201,25 @@ class _FailureView extends StatelessWidget {
         ],
         const Spacer(flex: 4),
         const SizedBox(height: 16),
-        if (canRetakeWhole) ...[
-          PrimaryPillButton(
-            label: RephotographMessages.rephotograph,
-            onPressed: onRetakeWhole,
-            // White on the brand blue is 4.3:1; this blue passes 4.5:1.
-            backgroundColor: AppTheme.processingSecondary,
-          ),
+        PrimaryPillButton(
+          label: main.$1,
+          onPressed: main.$2,
+          // White on the brand blue is 4.3:1; this blue passes 4.5:1.
+          backgroundColor: AppTheme.processingSecondary,
+        ),
+        if (second != null) ...[
           const SizedBox(height: 8),
           OutlinedButton(
-            onPressed: onBack,
+            onPressed: second.$2,
             style: OutlinedButton.styleFrom(
               foregroundColor: AppTheme.processingSecondary,
               side: const BorderSide(color: AppTheme.processingSecondary),
               minimumSize: const Size.fromHeight(48),
               shape: const StadiumBorder(),
             ),
-            child: const Text(ProcessingMessages.backToLibrary),
+            child: Text(second.$1),
           ),
-        ] else
-          PrimaryPillButton(
-            label: ProcessingMessages.backToLibrary,
-            onPressed: onBack,
-            backgroundColor: AppTheme.processingSecondary,
-          ),
+        ],
         if (onDelete != null) ...[
           const SizedBox(height: 8),
           TextButton.icon(

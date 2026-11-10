@@ -93,7 +93,8 @@ abstract interface class ScoreUploadApi {
   /// retake of that job (PIYA-101 AC12, PIYA-207 AC12).
   /// [clientSubmissionId] is the phone-made UUID of the local library row;
   /// the server returns the existing job for a repeat of it, so a retry
-  /// after a lost 202 never makes a second score.
+  /// after a lost 202 never makes a second score. [onSendProgress] gets
+  /// (bytes sent, bytes total) while the body uploads.
   Future<SubmittedJob> submitImages({
     required ScoreDetails details,
     required List<String> imagePaths,
@@ -101,10 +102,11 @@ abstract interface class ScoreUploadApi {
     String? replacesJobId,
     int? fallbackTempoBpm,
     String? clientSubmissionId,
+    ProgressCallback? onSendProgress,
   });
 
-  /// PIYA-310: one PDF, rasterised by the server. [replacesJobId] and
-  /// [clientSubmissionId] as for [submitImages].
+  /// PIYA-310: one PDF, rasterised by the server. [replacesJobId],
+  /// [clientSubmissionId] and [onSendProgress] as for [submitImages].
   Future<SubmittedJob> submitPdf({
     required ScoreDetails details,
     required String pdfPath,
@@ -112,8 +114,8 @@ abstract interface class ScoreUploadApi {
     String? replacesJobId,
     int? fallbackTempoBpm,
     String? clientSubmissionId,
+    ProgressCallback? onSendProgress,
   });
-
 }
 
 /// Code the client gives a bare 404 on a retaken job.
@@ -183,6 +185,7 @@ class HttpScoreUploadApi implements ScoreUploadApi {
     String? replacesJobId,
     int? fallbackTempoBpm,
     String? clientSubmissionId,
+    ProgressCallback? onSendProgress,
   }) async {
     // Part order is page order (PIYA-101 context note).
     final form = FormData()
@@ -212,6 +215,7 @@ class HttpScoreUploadApi implements ScoreUploadApi {
         ApiConfig.submitImagesPath,
         form,
         cancelToken: cancelToken,
+        onSendProgress: onSendProgress,
         // The server reads, validates and stores every page before it
         // replies; 4 full-size photos exceeded the 15 s default.
         receiveTimeout: ApiConfig.pdfReceiveTimeout,
@@ -265,6 +269,7 @@ class HttpScoreUploadApi implements ScoreUploadApi {
     String? replacesJobId,
     int? fallbackTempoBpm,
     String? clientSubmissionId,
+    ProgressCallback? onSendProgress,
   }) async {
     final form = FormData()
       ..fields.addAll(
@@ -287,6 +292,7 @@ class HttpScoreUploadApi implements ScoreUploadApi {
         form,
         receiveTimeout: ApiConfig.pdfReceiveTimeout,
         cancelToken: cancelToken,
+        onSendProgress: onSendProgress,
       ),
       replacesJobId: replacesJobId,
     );
@@ -316,12 +322,14 @@ class HttpScoreUploadApi implements ScoreUploadApi {
     FormData form, {
     Duration? receiveTimeout,
     CancelToken? cancelToken,
+    ProgressCallback? onSendProgress,
   }) async {
     final response = await _postRaw(
       path,
       form,
       receiveTimeout: receiveTimeout,
       cancelToken: cancelToken,
+      onSendProgress: onSendProgress,
     );
     return parseSubmittedJob(response.data);
   }
@@ -331,6 +339,7 @@ class HttpScoreUploadApi implements ScoreUploadApi {
     FormData form, {
     Duration? receiveTimeout,
     CancelToken? cancelToken,
+    ProgressCallback? onSendProgress,
   }) async {
     final token = await _sessionStorage.readToken();
     if (token == null || token.isEmpty) {
@@ -348,6 +357,7 @@ class HttpScoreUploadApi implements ScoreUploadApi {
           receiveTimeout: receiveTimeout,
         ),
         cancelToken: cancelToken,
+        onSendProgress: onSendProgress,
       );
     } on DioException catch (e) {
       throw _mapDioError(e);

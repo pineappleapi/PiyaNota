@@ -100,6 +100,23 @@ void main() {
       expect(fresh.existsSync(), isTrue);
     });
 
+    test('clearStale keeps an old file an upload still holds', () async {
+      // Built as page_image_processor builds page paths, so the held path
+      // matches what Directory.list reports.
+      File old(String name) =>
+          File('${dir.path}${Platform.pathSeparator}$name')
+            ..writeAsBytesSync([1])
+            ..setLastModifiedSync(DateTime(2020));
+      final held = old('held.jpg');
+      final loose = old('loose.jpg');
+      await DiskCaptureFileStore(() async => dir).clearStale(
+        DateTime.now(),
+        keep: {held.path},
+      );
+      expect(held.existsSync(), isTrue);
+      expect(loose.existsSync(), isFalse);
+    });
+
     test('deleting a missing file or folder never throws', () async {
       final store = DiskCaptureFileStore(
         () async => Directory('${dir.path}/missing'),

@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:piyanota_application/models/local_submission.dart';
 import 'package:piyanota_application/screens/capture/capture_messages.dart';
+import 'package:piyanota_application/screens/processing/processing_messages.dart';
 import 'package:piyanota_application/services/local_submission_store.dart';
 import 'package:piyanota_application/services/processing_api.dart';
 import 'package:piyanota_application/services/score_upload_api.dart';
@@ -19,6 +20,11 @@ Future<void> _shoot(WidgetTester tester) async {
 
 Future<void> _send(WidgetTester tester) async {
   await tester.tap(find.text(CaptureMessages.createScoreWith(1)));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _retry(WidgetTester tester) async {
+  await tester.tap(find.text(ProcessingMessages.retry));
   await tester.pumpAndSettle();
 }
 
@@ -88,8 +94,9 @@ void main() {
       SubmissionFailure.network,
     );
 
+    // "Try again" on Processing.
     h.upload.onSubmit = null;
-    await _send(tester);
+    await _retry(tester);
     expect(h.upload.clientIdsSent, hasLength(2));
     expect(h.upload.clientIdsSent[1], h.upload.clientIdsSent[0]);
     final rows = container.read(localSubmissionsProvider);
@@ -110,7 +117,7 @@ void main() {
     await _send(tester);
 
     h.upload.onSubmit = null;
-    await _send(tester);
+    await _retry(tester);
     expect(h.upload.clientIdsSent[1], isNot(h.upload.clientIdsSent[0]));
   });
 
@@ -121,6 +128,7 @@ void main() {
     await pumpCapture(tester, h);
     await _shoot(tester);
     await _send(tester);
+    await backToEditPages(tester);
 
     h.upload.onSubmit = null;
     await _shoot(tester); // a second page: the content differs now
@@ -137,7 +145,7 @@ void main() {
     await pumpCapture(tester, h);
     await _shoot(tester);
     await tester.tap(find.text(CaptureMessages.createScoreWith(1)));
-    await tester.pump();
+    await tester.pumpAndSettle();
     await tester.tap(find.text(CaptureMessages.cancelUpload));
     await tester.pumpAndSettle();
 
@@ -151,7 +159,7 @@ void main() {
     await pumpCapture(tester, h);
     await _shoot(tester);
     await tester.tap(find.text(CaptureMessages.createScoreWith(1)));
-    await tester.pump();
+    await tester.pumpAndSettle();
     await tester.tap(find.text(CaptureMessages.cancelUpload));
     await tester.pumpAndSettle();
 
@@ -172,7 +180,7 @@ void main() {
     await pumpCapture(tester, h);
     await _shoot(tester);
     await tester.tap(find.text(CaptureMessages.createScoreWith(1)));
-    await tester.pump();
+    await tester.pumpAndSettle();
     await tester.tap(find.text(CaptureMessages.cancelUpload));
     await tester.pumpAndSettle();
 

@@ -101,6 +101,7 @@ class _PiyaNotaAppState extends State<PiyaNotaApp> {
             return CaptureScreen(
               details: arguments.details,
               wholeRetake: arguments.wholeRetake,
+              resume: arguments.resume,
             );
           },
           AppRoutes.processing: (context) {
@@ -112,6 +113,7 @@ class _PiyaNotaAppState extends State<PiyaNotaApp> {
             return ProcessingScreen(
               jobId: arguments.jobId,
               title: arguments.title,
+              clientSubmissionId: arguments.clientSubmissionId,
             );
           },
           // PIYA-212 AC5: the gate sends an expired session to Login.

@@ -1,13 +1,9 @@
-import 'dart:async' show unawaited;
-
-import 'package:dio/dio.dart' show CancelToken;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/capture_page.dart';
 import '../../models/capture_session.dart';
-import '../../models/library_entry.dart';
 import '../../models/local_submission.dart';
 import '../../models/score_details.dart';
 import '../../routes/app_routes.dart';
@@ -19,11 +15,10 @@ import '../../services/capture/page_image_processor.dart';
 import '../../services/capture/page_picker.dart';
 import '../../services/score_upload_api.dart';
 import '../../state/capture_providers.dart';
-import '../../state/local_submission_providers.dart';
 import '../../state/processing_providers.dart';
 import '../../state/score_library_providers.dart';
 import '../../state/session_actions.dart';
-import '../../state/settings_providers.dart';
+import '../../state/score_upload_providers.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/primary_pill_button.dart';
 import 'capture_messages.dart';
@@ -40,13 +35,22 @@ import 'widgets/page_strip.dart';
 /// With [wholeRetake] set (PIYA-207 AC12) it re-photographs every page of a
 /// failed score and sends them as a new score.
 class CaptureScreen extends ConsumerStatefulWidget {
-  const CaptureScreen({super.key, required this.details, this.wholeRetake});
+  const CaptureScreen({
+    super.key,
+    required this.details,
+    this.wholeRetake,
+    this.resume,
+  });
 
   final ScoreDetails details;
 
   /// PIYA-207 AC12 whole-score retake: every page, sent as a new score
   /// with `replacesJobId`.
   final WholeRetakeArguments? wholeRetake;
+
+  /// "Back to edit pages" from a failed or cancelled upload: its pages,
+  /// id and error, handed back by the upload controller.
+  final ScoreUpload? resume;
 
   @override
   ConsumerState<CaptureScreen> createState() => _CaptureScreenState();
@@ -79,8 +83,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   /// Gallery import progress for the busy overlay (0 total = no count).
   int _prepDone = 0;
   int _prepTotal = 0;
-  bool _submitting = false;
-  CancelToken? _cancelToken;
   ScoreUploadException? _uploadError;
 
   /// Id of the local library row for the send in progress. Kept across a
@@ -114,9 +116,28 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    final resume = widget.resume;
+    if (resume != null) {
+      _session = resume.session;
+      for (final item in _session.items) {
+        _files.own(item.path);
+        if (item.id >= _nextId) _nextId = item.id + 1;
+      }
+      _focusId = _session.isEmpty ? null : _session.items.last.id;
+      _uploadError = resume.error;
+      _clientSubmissionId = resume.clientId;
+      _refusedAttempts.addAll(resume.refusedAttempts);
+    }
     // Leftovers of a session that crashed or was killed. Only one Capture
-    // exists at a time, so anything older than this screen is orphaned.
-    _store.clearStale(DateTime.now().subtract(_staleSlack));
+    // exists at a time, so anything older than this screen is orphaned,
+    // except pages an upload still holds.
+    _store.clearStale(
+      DateTime.now().subtract(_staleSlack),
+      keep: {
+        ...ref.read(scoreUploadsProvider.notifier).filesInUse,
+        for (final item in _session.items) item.path,
+      },
+    );
     // AC2: asked at first use, i.e. when the user reaches the camera.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _startCamera(ask: true);
@@ -126,8 +147,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _cancelToken?.cancel();
-    // Discard, Back, or a finished upload: the pages are no longer needed.
+    // Discard or Back: the pages are no longer needed. After "Create score"
+    // the ledger is empty: the upload controller holds them.
     _files.deleteAll();
     _cameraGeneration++;
     _camera?.dispose();
@@ -237,7 +258,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
 
   // ---------------------------------------------------------- adding pages
 
-  bool get _canAct => _busy == 0 && !_submitting;
+  bool get _canAct => _busy == 0;
 
   int get _photoRoom => _session.photoRoom;
 
@@ -642,7 +663,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   bool get _detailsEdited => !identical(_details, widget.details);
 
   Future<void> _close() async {
-    if (_submitting) return;
     if (_session.isEmpty) {
       _leave();
       return;
@@ -678,7 +698,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
   /// library reloads to show where the scan really stands.
   void _abandonRetake() {
     final retakeJobId = widget.wholeRetake?.replacesJobId;
-    if (retakeJobId == null || _submitting) return;
+    if (retakeJobId == null) return;
     _pendingUndo = null;
     _files.deleteAll();
     final error = _uploadError;
@@ -729,10 +749,10 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     if (!found) navigator.pushReplacementNamed(AppRoutes.scoreLibrary);
   }
 
-  void _cancelSubmit() => _cancelToken?.cancel();
-
+  /// Hands the pages to the upload controller and opens Processing at
+  /// once; the upload, its progress and its failures are shown there.
   Future<void> _submit() async {
-    if (_submitting || _session.isEmpty || _busy > 0) return;
+    if (_session.isEmpty || _busy > 0) return;
     // J8 pre-check; unknown count (Library not loaded) is left to the 409.
     if (widget.wholeRetake == null &&
         // exists: reading would start a fetch when nothing has loaded it.
@@ -742,177 +762,37 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
       await _showScoreLimit();
       return;
     }
-    final cancelToken = CancelToken();
-    setState(() {
-      _submitting = true;
-      _cancelToken = cancelToken;
-      _uploadError = null;
-    });
-    final details = _details;
-    var sent = false;
-    // Read now: the controller is app-lifetime, so it still works if this
-    // screen is gone when the 202 arrives (ref would not).
-    final submissions = ref.read(localSubmissionsProvider.notifier);
+    if (!mounted) return;
+    // Kept from a failed send handed back by "Back to edit pages", so the
+    // server dedupes the resend; edits above dropped it.
     final clientId = _clientSubmissionId ??= newClientSubmissionId();
-    try {
-      final api = ref.read(scoreUploadApiProvider);
-      // Before the upload, so closing the app mid-send keeps the score in
-      // the library.
-      await submissions.begin(
-        clientSubmissionId: clientId,
-        title: details.title.trim().isEmpty
-            ? untitledScoreLabel
-            : details.title.trim(),
-        replacesJobId: widget.wholeRetake?.replacesJobId,
-      );
-      // AC8: a PDF goes to PIYA-310, camera/gallery photos to PIYA-101.
-      final pdf = _session.pdf;
-      final wholeRetake = widget.wholeRetake;
-      // PIYA-212 AC8: "Not sure" sends the Settings default as a fallback
-      // the pipeline uses only when it detects no tempo (PIYA-323).
-      final fallbackTempoBpm = details.tempoBpm == null
-          ? await readFallbackTempo(ref.read(settingsPrefsServiceProvider))
-          : null;
-      final job = pdf != null
-          ? await api.submitPdf(
-              details: details,
-              pdfPath: pdf.path,
-              cancelToken: cancelToken,
-              replacesJobId: wholeRetake?.replacesJobId,
-              fallbackTempoBpm: fallbackTempoBpm,
-              clientSubmissionId: clientId,
-            )
-          : await api.submitImages(
-              details: details,
-              imagePaths: [for (final page in _session.photos) page.path],
-              cancelToken: cancelToken,
-              replacesJobId: wholeRetake?.replacesJobId,
-              fallbackTempoBpm: fallbackTempoBpm,
-              clientSubmissionId: clientId,
-            );
-      await submissions.attachJob(
-        clientSubmissionId: clientId,
-        jobId: job.jobId,
-        scoreId: job.scoreId,
-      );
-      if (wholeRetake != null) {
-        // Accepted: only now does the failed scan (and any refused earlier
-        // attempt at this retake) leave the Library.
-        await submissions.replaceFailedJob(wholeRetake.replacesJobId);
-        for (final id in _refusedAttempts) {
-          await submissions.dismiss(id);
-        }
-        _refusedAttempts.clear();
-      }
-      if (!mounted) return;
-      sent = true;
-      _clientSubmissionId = null;
-      // The server has its own copies now.
-      _pendingUndo = null;
-      _files.deleteAll();
-      final jobs = ref.read(processingJobsProvider.notifier);
-      // The old job is finished with; only the retake is followed.
-      if (wholeRetake != null) jobs.forget(wholeRetake.replacesJobId);
-      // Tracked here, before Processing opens, so the library shows the
-      // card as processing from the moment of submit (PIYA-218 AC2) and
-      // knows at once that an old score is being replaced (PIYA-207 AC12).
-      jobs.track(
-        job.jobId,
-        title: details.title,
-        retakeOfScoreId: wholeRetake?.retakeOfScoreId,
-        scoreId: job.scoreId,
-      );
-      ref.invalidate(scoreLibraryProvider);
-      // Details and Capture leave the stack: Back from Processing returns
-      // to the library, not to a form that was already sent.
-      Navigator.of(context).pushNamedAndRemoveUntil(
-        AppRoutes.processing,
-        (route) =>
-            route.settings.name == AppRoutes.scoreLibrary || route.isFirst,
-        arguments: ProcessingArguments(jobId: job.jobId, title: details.title),
-      );
-    } on UploadCancelledException {
-      // The id is spent: the server now holds a cancel for it (a reused id
-      // would get 409 submission_cancelled), so a second send makes a new
-      // one. The row goes: the user chose not to send it. The server is told
-      // so a request that landed after the abort makes no job (or loses it).
-      _clientSubmissionId = null;
-      unawaited(submissions.cancel(clientId, dismissOnFailure: true));
-      _snack(CaptureMessages.uploadCancelled);
-    } on UploadRejectedException catch (e) {
-      if (e.code == submissionCancelledCode) {
-        // The server holds our cancel for this id: not an error, and the id
-        // is spent, so a later send must make a new one.
-        _clientSubmissionId = null;
-        unawaited(submissions.dismiss(clientId));
-        _snack(CaptureMessages.uploadCancelled);
-        return;
-      }
-      await _recordFailure(
-        submissions,
-        clientId,
-        e.code,
-        definite: e.statusCode != null,
-      );
-      if (!mounted) return;
-      if (e.isScoreLimit) {
-        unawaited(_showScoreLimit());
-      } else {
-        setState(() => _uploadError = e);
-      }
-    } on ScoreUploadException catch (e) {
-      final (code, definite) = switch (e) {
-        UploadSessionExpiredException() => (
-          SubmissionFailure.sessionExpired,
-          true,
-        ),
-        UploadFileMissingException() => (SubmissionFailure.fileMissing, true),
-        _ => (SubmissionFailure.network, false),
-      };
-      await _recordFailure(submissions, clientId, code, definite: definite);
-      if (mounted) setState(() => _uploadError = e);
-    } catch (e, stack) {
-      // Anything unforeseen must still give the screen back, never leave
-      // the button spinning forever.
-      debugPrint('Score upload failed unexpectedly: $e\n$stack');
-      await _recordFailure(
-        submissions,
-        clientId,
-        SubmissionFailure.unknown,
-        definite: false,
-      );
-      if (mounted) {
-        setState(
-          () => _uploadError = const UploadRejectedException(statusCode: null),
+    // A second tap before Processing covers this screen: already on its way.
+    if (ref.read(scoreUploadsProvider)[clientId]?.phase ==
+        UploadPhase.sending) {
+      return;
+    }
+    _pendingUndo = null;
+    _sweepFiles();
+    _files.release();
+    ref
+        .read(scoreUploadsProvider.notifier)
+        .start(
+          clientId: clientId,
+          details: _details,
+          session: _session,
+          wholeRetake: widget.wholeRetake,
+          refusedAttempts: [..._refusedAttempts],
         );
-      }
-    } finally {
-      if (mounted && !sent) {
-        setState(() {
-          _submitting = false;
-          _cancelToken = null;
-        });
-      }
-    }
-  }
-
-  /// Marks the library row failed. A [definite] answer (the server said no,
-  /// or the request never left) frees the id, so edited pages sent next are
-  /// a new submission; an ambiguous one (network drop, no status) keeps it,
-  /// because the server may already have the job and a resend must return it.
-  Future<void> _recordFailure(
-    LocalSubmissionsController submissions,
-    String clientId,
-    String? code, {
-    required bool definite,
-  }) async {
-    if (definite) {
-      _clientSubmissionId = null;
-      if (widget.wholeRetake != null) _refusedAttempts.add(clientId);
-    }
-    await submissions.fail(
-      clientSubmissionId: clientId,
-      code: code ?? SubmissionFailure.unknown,
+    // Details and Capture leave the stack: Back from Processing returns
+    // to the library, not to a form that was already sent.
+    Navigator.of(context).pushNamedAndRemoveUntil(
+      AppRoutes.processing,
+      (route) => route.settings.name == AppRoutes.scoreLibrary || route.isFirst,
+      arguments: ProcessingArguments(
+        jobId: null,
+        title: _details.title,
+        clientSubmissionId: clientId,
+      ),
     );
   }
 
@@ -991,7 +871,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
     return PopScope(
       // Popping by the system would drop edited details; _close hands them
       // back to step 1.
-      canPop: _session.isEmpty && !_submitting && !_detailsEdited,
+      canPop: _session.isEmpty && !_detailsEdited,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) _close();
       },
@@ -1012,7 +892,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                       children: [
                         _TopBar(
                           title: CaptureMessages.alignInFrame,
-                          onClose: _submitting ? null : _close,
+                          onClose: _close,
                           torchOn: _torchOn,
                           onTorch: _camera == null ? null : _toggleTorch,
                         ),
@@ -1100,22 +980,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen>
                               ? CaptureMessages.createScore
                               : CaptureMessages.createScoreWith(count),
                           onPressed: count == 0 || _busy > 0 ? null : _submit,
-                          isLoading: _submitting,
                           backgroundColor: AppTheme.captureAccent,
                           foregroundColor: AppTheme.captureInk,
                         ),
-                        if (_submitting)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 4),
-                            child: TextButton(
-                              onPressed: _cancelSubmit,
-                              style: TextButton.styleFrom(
-                                foregroundColor: AppTheme.captureInk,
-                                minimumSize: const Size(48, 48),
-                              ),
-                              child: const Text(CaptureMessages.cancelUpload),
-                            ),
-                          ),
                       ],
                     ),
                   ),

@@ -68,6 +68,21 @@ class ProcessingMessages {
     return parts.join(', ');
   }
 
+  // Upload step: straight from "Create score", before the server has a job.
+  static String uploadingPage(int current, int total) =>
+      'Uploading page $current of $total';
+  static const String uploadingPdf = 'Uploading your PDF…';
+
+  /// Every byte is sent; the server checks and stores the pages before it
+  /// answers.
+  static const String uploadChecking = 'Checking your pages…';
+  static const String uploadHelper =
+      'Sending your pages. On a slow connection this can take a minute.';
+  static String uploadSemantics(int percent) => 'Uploading, $percent percent';
+  static const String cancelUpload = 'Cancel sending';
+  static const String uploadFailedHeading = 'Your score wasn\'t sent';
+  static const String backToEditPages = 'Back to edit pages';
+
   // Cancel (scan-status spec §3).
   static const String cancelTitle = 'Cancel scan?';
   static const String cancelBody = 'You\'ll lose your progress.';
@@ -93,6 +108,10 @@ class ProcessingMessages {
 
   static const String sessionExpired =
       'Your session has expired. Log in again to keep following this scan.';
+
+  /// Before the 202 there is no scan to follow; the score was not sent.
+  static const String sessionExpiredUpload =
+      'Your session has expired. Log in again, then add your score again.';
 
   // Failure view (AC5–AC7).
   static const String failedHeading = 'We couldn\'t finish this scan';

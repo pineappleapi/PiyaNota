@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:dio/dio.dart' show CancelToken;
+import 'package:dio/dio.dart' show CancelToken, ProgressCallback;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
@@ -14,6 +14,8 @@ import 'package:piyanota_application/models/score_details.dart';
 import 'package:piyanota_application/routes/app_routes.dart';
 import 'package:piyanota_application/screens/capture/capture_screen.dart';
 import 'package:piyanota_application/screens/capture/score_details_screen.dart';
+import 'package:piyanota_application/screens/processing/processing_messages.dart';
+import 'package:piyanota_application/screens/processing/processing_screen.dart';
 import 'package:piyanota_application/services/capture/capture_camera.dart';
 import 'package:piyanota_application/services/capture/capture_files.dart';
 import 'package:piyanota_application/services/capture/capture_permissions.dart';
@@ -28,6 +30,7 @@ import 'package:piyanota_application/services/settings_prefs_service.dart';
 import 'package:piyanota_application/state/auth_providers.dart';
 import 'package:piyanota_application/state/capture_providers.dart';
 import 'package:piyanota_application/state/processing_providers.dart';
+import 'package:piyanota_application/state/score_upload_providers.dart';
 import 'package:piyanota_application/state/submission_reconcile_providers.dart';
 
 import '../auth/auth_test_harness.dart';
@@ -159,12 +162,19 @@ class FakePageImageProcessor implements PageImageProcessor {
 class FakeCaptureFileStore implements CaptureFileStore {
   final List<String> deleted = [];
   final List<DateTime> staleCleared = [];
+  final List<Set<String>> staleKept = [];
 
   @override
   Future<void> delete(String path) async => deleted.add(path);
 
   @override
-  Future<void> clearStale(DateTime before) async => staleCleared.add(before);
+  Future<void> clearStale(
+    DateTime before, {
+    Set<String> keep = const {},
+  }) async {
+    staleCleared.add(before);
+    staleKept.add(keep);
+  }
 }
 
 class FakePageImageSource implements PageImageSource {
@@ -248,11 +258,22 @@ class ScriptedScoreUploadApi implements ScoreUploadApi {
   /// The token passed with the latest submit.
   CancelToken? lastCancelToken;
 
+  /// The progress callback passed with the latest submit.
+  ProgressCallback? lastProgress;
+
+  /// The answer arrives as if the abort came too late (a failure that wins
+  /// the race against Cancel sending).
+  bool ignoreCancel = false;
+
   /// Like the real API, a cancel wins over a still-pending answer.
-  Future<SubmittedJob> _answer(CancelToken? cancelToken) {
+  Future<SubmittedJob> _answer(
+    CancelToken? cancelToken,
+    ProgressCallback? onSendProgress,
+  ) {
     lastCancelToken = cancelToken;
+    lastProgress = onSendProgress;
     final answer = onSubmit?.call() ?? Future.value(job);
-    if (cancelToken == null) return answer;
+    if (cancelToken == null || ignoreCancel) return answer;
     return Future.any([
       answer,
       cancelToken.whenCancel.then<SubmittedJob>(
@@ -269,13 +290,14 @@ class ScriptedScoreUploadApi implements ScoreUploadApi {
     String? replacesJobId,
     int? fallbackTempoBpm,
     String? clientSubmissionId,
+    ProgressCallback? onSendProgress,
   }) {
     detailsSent.add(details);
     fallbackTemposSent.add(fallbackTempoBpm);
     replacesSent.add(replacesJobId);
     clientIdsSent.add(clientSubmissionId);
     imageCalls.add(imagePaths);
-    return _answer(cancelToken);
+    return _answer(cancelToken, onSendProgress);
   }
 
   @override
@@ -286,13 +308,14 @@ class ScriptedScoreUploadApi implements ScoreUploadApi {
     String? replacesJobId,
     int? fallbackTempoBpm,
     String? clientSubmissionId,
+    ProgressCallback? onSendProgress,
   }) {
     detailsSent.add(details);
     fallbackTemposSent.add(fallbackTempoBpm);
     replacesSent.add(replacesJobId);
     clientIdsSent.add(clientSubmissionId);
     pdfCalls.add(pdfPath);
-    return _answer(cancelToken);
+    return _answer(cancelToken, onSendProgress);
   }
 }
 
@@ -328,7 +351,11 @@ class CaptureHarness {
 
   FakeCaptureCamera? get camera => cameras.isEmpty ? null : cameras.last;
 
+  /// Overrides for providers the harness leaves real.
+  final List<Override> extraOverrides = [];
+
   List<Override> get overrides => [
+    ...extraOverrides,
     capturePermissionsProvider.overrideWithValue(permissions),
     deviceChannelProvider.overrideWithValue(device),
     pagePickerProvider.overrideWithValue(picker),
@@ -393,16 +420,12 @@ Future<void> pumpCapture(
             return CaptureScreen(
               details: args.details,
               wholeRetake: args.wholeRetake,
+              resume: args.resume,
             );
           },
-          AppRoutes.processing: (context) {
-            final args =
-                ModalRoute.of(context)!.settings.arguments!
-                    as ProcessingArguments;
-            return Scaffold(
-              body: Text('ROUTE:processing ${args.jobId} ${args.title}'),
-            );
-          },
+          AppRoutes.processing: (context) => ProcessingStandIn(
+            ModalRoute.of(context)!.settings.arguments! as ProcessingArguments,
+          ),
         },
       ),
     ),
@@ -419,4 +442,45 @@ Future<void> pumpCapture(
     );
   }
   await tester.pumpAndSettle();
+}
+
+/// From a failed upload on Processing back to Capture with its pages.
+Future<void> backToEditPages(WidgetTester tester) async {
+  await tester.tap(find.text(ProcessingMessages.backToEditPages));
+  await tester.pumpAndSettle();
+}
+
+/// Processing as Capture tests see it: the real upload step (progress,
+/// failure, cancel), then a marker naming the job once the 202 lands.
+class ProcessingStandIn extends ConsumerStatefulWidget {
+  const ProcessingStandIn(this.args, {super.key});
+
+  final ProcessingArguments args;
+
+  @override
+  ConsumerState<ProcessingStandIn> createState() => _ProcessingStandInState();
+}
+
+class _ProcessingStandInState extends ConsumerState<ProcessingStandIn> {
+  late String? _jobId = widget.args.jobId;
+
+  @override
+  Widget build(BuildContext context) {
+    final key = widget.args.clientSubmissionId;
+    if (_jobId == null && key != null) {
+      _jobId = ref.watch(
+        scoreUploadsProvider.select((uploads) => uploads[key]?.jobId),
+      );
+    }
+    if (_jobId case final jobId?) {
+      return Scaffold(
+        body: Text('ROUTE:processing $jobId ${widget.args.title}'),
+      );
+    }
+    return ProcessingScreen(
+      jobId: null,
+      title: widget.args.title,
+      clientSubmissionId: key,
+    );
+  }
 }

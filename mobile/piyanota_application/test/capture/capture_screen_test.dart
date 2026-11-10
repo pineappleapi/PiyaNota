@@ -11,12 +11,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:piyanota_application/models/score_details.dart';
 import 'package:piyanota_application/screens/capture/capture_messages.dart';
 import 'package:piyanota_application/screens/capture/edit_page_screen.dart';
+import 'package:piyanota_application/screens/processing/processing_messages.dart';
 import 'package:piyanota_application/services/capture/capture_permissions.dart';
 import 'package:piyanota_application/services/capture/device_channel.dart';
 import 'package:piyanota_application/services/capture/page_picker.dart';
 import 'package:piyanota_application/screens/capture/capture_screen.dart';
 import 'package:piyanota_application/services/score_upload_api.dart';
 import 'package:piyanota_application/state/processing_providers.dart';
+import 'package:piyanota_application/state/score_upload_providers.dart';
 
 import '../processing/processing_fakes.dart'
     show expectTrackerCleared, seedOldJob;
@@ -797,29 +799,59 @@ void main() {
       expect(h.upload.imageCalls, isEmpty);
     });
 
-    testWidgets('a second tap while sending does nothing', (tester) async {
+    testWidgets('Create score opens Processing at once and shows the upload', (
+      tester,
+    ) async {
+      final h = CaptureHarness();
+      final pending = Completer<SubmittedJob>();
+      h.upload.onSubmit = () => pending.future;
+      await pumpCapture(tester, h);
+      await _shoot(tester, 2);
+      await tester.tap(find.text(CaptureMessages.createScoreWith(2)));
+      await tester.pumpAndSettle();
+      // Processing before any answer: Capture is gone, one send went out.
+      expect(find.byType(CaptureScreen), findsNothing);
+      expect(h.upload.imageCalls, hasLength(1));
+
+      h.upload.lastProgress!(0, 200);
+      await tester.pump();
+      expect(find.text(ProcessingMessages.uploadingPage(1, 2)), findsOneWidget);
+      h.upload.lastProgress!(120, 200);
+      await tester.pump();
+      expect(find.text(ProcessingMessages.uploadingPage(2, 2)), findsOneWidget);
+      h.upload.lastProgress!(200, 200);
+      await tester.pump();
+      expect(find.text(ProcessingMessages.uploadChecking), findsOneWidget);
+
+      pending.complete(ScriptedScoreUploadApi.job);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('ROUTE:processing job-42'), findsOneWidget);
+    });
+
+    testWidgets('the 202 is handled after Processing has closed', (
+      tester,
+    ) async {
       final h = CaptureHarness();
       final pending = Completer<SubmittedJob>();
       h.upload.onSubmit = () => pending.future;
       await pumpCapture(tester, h);
       await _shoot(tester);
-      final button = find.byType(ElevatedButton).last;
-      await tester.tap(button);
-      await tester.pump();
-      await tester.tap(button, warnIfMissed: false);
-      await tester.pump();
-      expect(h.upload.imageCalls, hasLength(1));
-      expect(find.byType(CircularProgressIndicator), findsOneWidget);
-      expect(_submitButton(tester).onPressed, isNull);
-
-      // Back is blocked while sending.
-      await tester.binding.handlePopRoute();
-      await tester.pump();
-      expect(find.text(CaptureMessages.discardTitle(1)), findsNothing);
+      await tester.tap(find.text(CaptureMessages.createScoreWith(1)));
+      await tester.pumpAndSettle();
+      final c = ProviderScope.containerOf(tester.element(find.byType(Navigator)));
+      tester.state<NavigatorState>(find.byType(Navigator)).pop();
+      await tester.pumpAndSettle();
+      expect(find.text(kLibraryMarker), findsOneWidget);
+      expect(h.files.deleted.where((p) => p.startsWith('prepared/')), isEmpty);
 
       pending.complete(ScriptedScoreUploadApi.job);
       await tester.pumpAndSettle();
-      expect(find.textContaining('ROUTE:processing'), findsOneWidget);
+      expect(
+        c.read(processingJobsProvider).keys,
+        contains(ScriptedScoreUploadApi.job.jobId),
+      );
+      expect(h.files.deleted, contains('prepared/raw-0.jpg'));
+      expect(c.read(scoreUploadsProvider), isEmpty);
     });
 
     testWidgets('a network failure shows a banner and keeps the pages', (
@@ -833,8 +865,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text(CaptureMessages.network), findsOneWidget);
       expect(find.text(CaptureMessages.logIn), findsNothing);
+      // Nothing is deleted before the server has the pages.
+      expect(h.files.deleted.where((p) => p.startsWith('prepared/')), isEmpty);
 
-      // Trying again works without re-adding pages.
+      // Back to edit: same pages, same banner; sending again works.
+      await backToEditPages(tester);
+      expect(find.text(CaptureMessages.network), findsOneWidget);
       h.upload.onSubmit = null;
       await tester.tap(find.text(CaptureMessages.createScoreWith(1)));
       await tester.pumpAndSettle();
@@ -933,15 +969,16 @@ void main() {
       await pumpCapture(tester, h);
       await _shoot(tester, 1);
       ProviderContainer jobs() =>
-          ProviderScope.containerOf(tester.element(find.byType(CaptureScreen)));
+          ProviderScope.containerOf(tester.element(find.byType(Navigator)));
       await tester.tap(find.text(CaptureMessages.createScoreWith(1)));
       await tester.pumpAndSettle();
       expect(find.text(CaptureMessages.network), findsOneWidget);
       expect(jobs().read(processingJobsProvider), isEmpty);
+      await backToEditPages(tester);
 
       fail = false;
       await tester.tap(find.text(CaptureMessages.createScoreWith(1)));
-      await tester.pump();
+      await tester.pumpAndSettle();
       await tester.tap(find.text(CaptureMessages.cancelUpload));
       await tester.pump();
       await tester.pump();
@@ -958,13 +995,16 @@ void main() {
       await pumpCapture(tester, h);
       await _shoot(tester, 2);
       await tester.tap(find.text(CaptureMessages.createScoreWith(2)));
-      await tester.pump();
-      expect(_submitButton(tester).onPressed, isNull);
+      await tester.pumpAndSettle();
+      expect(find.byType(CaptureScreen), findsNothing);
 
       await tester.tap(find.text(CaptureMessages.cancelUpload));
       await tester.pump();
       await tester.pump();
       expect(h.upload.lastCancelToken!.isCancelled, isTrue);
+      await tester.pumpAndSettle();
+      // Back on Capture with both pages.
+      expect(find.text(CaptureMessages.createScoreWith(2)), findsOneWidget);
       expect(find.text(CaptureMessages.uploadCancelled), findsOneWidget);
       expect(find.text(CaptureMessages.cancelUpload), findsNothing);
       expect(find.text(CaptureMessages.network), findsNothing);
@@ -1030,6 +1070,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('Tap Edit details'), findsOneWidget);
       expect(find.textContaining('Go back'), findsNothing);
+      // A resend can't fix it, so Processing offers no Try again.
+      expect(find.text(ProcessingMessages.retry), findsNothing);
+      await backToEditPages(tester);
+      expect(find.textContaining('Tap Edit details'), findsOneWidget);
 
       await tester.tap(find.text(CaptureMessages.editDetails));
       await tester.pumpAndSettle();
@@ -1044,20 +1088,10 @@ void main() {
       expect(find.text(CaptureMessages.createScoreWith(2)), findsOneWidget);
       expect(find.textContaining('Tap Edit details'), findsNothing);
 
-      // Leaving hands the fix back to step 1.
-      await tester.tap(find.byTooltip(CaptureMessages.close));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text(CaptureMessages.discard));
-      await tester.pumpAndSettle();
-      expect(find.text(CaptureMessages.detailsTitle), findsOneWidget);
-      expect(find.text('Ave'), findsOneWidget);
-
-      // And it is what gets sent.
-      await tester.tap(find.text(CaptureMessages.nextAddPages));
-      await tester.pumpAndSettle();
-      await _shoot(tester);
+      // The fix is what gets sent. (Details left the stack on the first
+      // send, so there is no step 1 to hand it back to.)
       h.upload.onSubmit = null;
-      await tester.tap(find.text(CaptureMessages.createScoreWith(1)));
+      await tester.tap(find.text(CaptureMessages.createScoreWith(2)));
       await tester.pumpAndSettle();
       expect(h.upload.detailsSent.last.title, 'Ave');
       expect(find.text('ROUTE:processing job-42 Ave'), findsOneWidget);
@@ -1078,6 +1112,7 @@ void main() {
       await _shoot(tester);
       await tester.tap(find.text(CaptureMessages.createScoreWith(1)));
       await tester.pumpAndSettle();
+      await backToEditPages(tester);
       await tester.tap(find.text(CaptureMessages.editDetails));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).first, 'Salve');
@@ -1099,6 +1134,7 @@ void main() {
       await _shoot(tester);
       await tester.tap(find.text(CaptureMessages.createScoreWith(1)));
       await tester.pumpAndSettle();
+      await backToEditPages(tester);
       await tester.tap(find.text(CaptureMessages.editDetails));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).first, 'Other');
@@ -1223,6 +1259,9 @@ void main() {
       await tester.tap(create);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
+      await show(find.text(ProcessingMessages.backToEditPages));
+      await backToEditPages(tester);
+      expect(tester.takeException(), isNull);
       await show(find.text(CaptureMessages.editDetails));
       expect(
         tester.getSize(find.textContaining('Tap Edit details')).width,
@@ -1233,12 +1272,11 @@ void main() {
       h.upload.onSubmit = () => never.future;
       await show(create);
       await tester.tap(create);
-      await tester.pump();
+      await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       await show(find.text(CaptureMessages.cancelUpload));
       await tester.tap(find.text(CaptureMessages.cancelUpload));
-      await tester.pump();
-      await tester.pump();
+      await tester.pumpAndSettle();
       expect(_submitButton(tester).onPressed, isNotNull);
     });
 
