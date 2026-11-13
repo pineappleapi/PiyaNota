@@ -271,7 +271,9 @@ def test_moonriver_page1_end_to_end(tmp_path: Path) -> None:
     result = run_pipeline([MOONRIVER.read_bytes()], tempo_bpm=90, work_dir=tmp_path, config=config,
                           on_stage=lambda s, p: None)
     print("STAGE_SECONDS", result.stage_seconds)
-    assert len(result.mp3) == 4 and all(result.mp3.values())
+    # New scores are MIDI-only (render_audio=False in the worker), so the four voices come back as MIDI, not MP3.
+    assert sorted(result.midi) == ["alto", "bass", "soprano", "tenor"] and all(result.midi.values())
+    assert not result.mp3
     assert len(result.pages) == 1 and result.pages[0].width > 0 and result.pages[0].height > 0
 
 
