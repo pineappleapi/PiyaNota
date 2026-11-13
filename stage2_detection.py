@@ -68,7 +68,7 @@ STAFFS_PER_SYSTEM = 4
 
 def detect_staff_regions(
     preprocessed_images: list,
-    model_weights: str = "models/best.pt",
+    model_weights: str = "models/staff_detector_yolov8.pt",
     output_dir: str = "data/strips",
     save_strips: bool = True,
     save_viz: bool = False,          # ← new flag
@@ -676,7 +676,7 @@ if __name__ == "__main__":
     parser.add_argument("--input",   default="data/raw",           help="Raw images dir")
     parser.add_argument("--prep",    default="data/preprocessed",  help="Preprocessed dir")
     parser.add_argument("--strips",  default="data/strips",        help="Output strips dir")
-    parser.add_argument("--weights", default="models/best.pt", help="YOLOv8 weights")
+    parser.add_argument("--weights", default="models/staff_detector_yolov8.pt", help="YOLOv8 weights")
     parser.add_argument("--train",   action="store_true",          help="Run training instead")
     parser.add_argument("--data",    default="data/dataset.yaml",  help="Dataset YAML (for training)")
     parser.add_argument("--viz",     action="store_true",          help="Visualize detections with red boxes")

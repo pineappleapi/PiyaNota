@@ -3275,7 +3275,7 @@ PASS2_PROGRESS_UNITS = 1  # pitch inference per strip: fast, but still a visible
 
 def transcribe_voice_sequences(
     voice_sequences: dict,
-    model_weights:   str = "models/phase2_seed1.pt",
+    model_weights:   str = "models/symbol_transcriber_crnn_seed1.pt",
     img_height:      int = 64,
     viz_dir:         str = r"D:\PiyaNota (Code)\data\symbol_detection_viz",
     events_dir:      str = r"D:\PiyaNota (Code)\data\transcribed_symbols",   # ← add this
@@ -3616,12 +3616,12 @@ if __name__ == "__main__":
  
     parser = argparse.ArgumentParser(
         description="PiyaNota Stage 3 — CRNN-CTC Transcription (inference only)")
-    parser.add_argument("--weights",    default="models/phase2_seed1.pt",
+    parser.add_argument("--weights",    default="models/symbol_transcriber_crnn_seed1.pt",
                         help="CRNN weights trained on Kaggle")
     parser.add_argument("--input",      default="data/raw")
     parser.add_argument("--prep",       default="data/preprocessed")
     parser.add_argument("--strips",     default="data/strips")
-    parser.add_argument("--yolo",       default="models/best.pt")
+    parser.add_argument("--yolo",       default="models/staff_detector_yolov8.pt")
     parser.add_argument("--img-height", type=int, default=64,
                         help="Must match Kaggle training height")
     parser.add_argument("--viz-dir",

@@ -27,7 +27,7 @@ Only app code is at the root: `backend/`, `deploy/`, `mobile/`, `tests/`, `docs/
 `training/`, `staff_detector_files/`, the rest of `docs/`, one-off scripts, mobile reference mockups) lives in
 `_archive/`, which is committed locally only and never pushed. Any `docs/`, `training/`, `data/`,
 `ground_truth/` or `staff_detector_files/` path below that is not in the app list above means `_archive/<path>`.
-Weights and the soundfont default to the gitignored `models/` folder (`best.pt`, `phase2_seed1.pt`,
+Weights and the soundfont default to the gitignored `models/` folder (`staff_detector_yolov8.pt`, `symbol_transcriber_crnn_seed1.pt`,
 `clef_key_classifier.pt`, `piano.sf2`), the same layout the Space image copies. `tests/` has 10 files
 (103 pass, 55 expected-failures in `tests/conftest.py`); `backend/tests` needs Postgres at localhost:55432.
 `_archive/golden/golden_check.py` is the golden-output check (10-piece camera set, CPU): run it before and after
@@ -58,14 +58,14 @@ last stage you care about:
 python stage1_preprocessing.py data/raw data/preprocessed
 
 # Stage 2 — preprocessing + YOLOv8 staff detection → strips
-python stage2_detection.py --input data/raw --weights models/best.pt --viz
+python stage2_detection.py --input data/raw --weights models/staff_detector_yolov8.pt --viz
 
 # Stage 4 — full pipeline through SATB reconstruction (no audio)
-python stage4_reconstruction.py --input data/raw --weights <crnn_weights> --yolo models/best.pt
+python stage4_reconstruction.py --input data/raw --weights <crnn_weights> --yolo models/staff_detector_yolov8.pt
 
 # Stage 5 — full pipeline including MP3 synthesis
-python stage5_synthesis.py --input data/raw --weights models/phase2_seed1.pt \
-    --yolo models/best.pt --soundfont models/piano.sf2
+python stage5_synthesis.py --input data/raw --weights models/symbol_transcriber_crnn_seed1.pt \
+    --yolo models/staff_detector_yolov8.pt --soundfont models/piano.sf2
 ```
 
 Training / evaluating the YOLOv8 staff detector:
@@ -101,7 +101,7 @@ later stages import functions from earlier ones rather than duplicating logic.
    restored after border/lyric blanking (which previously erased real staves on camera pages).
    **Non-staff-ink mask + native strip source (2026-09-25, PIYA-121, same branch, BUG-015/BUG-016, committed, unmerged):** after dewarp, `non_staff_ink_mask()` erases ink that is neither the tracked staff nor connected (gap-bridged 0.2 spacing) to it - lyrics, titles, page-edge shadows - while keeping beams, ties, flags, rests and ledger-line notes. Detection/tracking stay at `DETECT_MAX_DIM` = 1600 px; the strip source is binarised once at native resolution (<= 4032 px) through the same perspective matrix and the same upsampled dewarp map, because binarising rests at 1600 px broke their ~1.6 px strokes. `training/run_stage12.py` regenerates strips, manifest, viz and 1:1 eyeball tiles; `training/step3_mask_audit.py` audits ties/beams/band ink (limits in its docstring and BUG-015).
 
-2. **`stage2_detection.py`** — runs a fine-tuned YOLOv8 model (`models/best.pt`)
+2. **`stage2_detection.py`** — runs a fine-tuned YOLOv8 model (`models/staff_detector_yolov8.pt`)
    to find staff-line bounding boxes on each preprocessed page, then:
    - filters by confidence, caps at 16 boxes/page (4 systems × 4 voices max)
    - sorts top-to-bottom and deduplicates boxes that land on the same staff (`_remove_duplicates`)
@@ -200,9 +200,9 @@ later stages import functions from earlier ones rather than duplicating logic.
   outputs per stage, not checked in (see `.gitignore`)
 - `data/detection_viz/`, `data/symbol_detection_viz/` — optional debug visualizations (`--viz` flags)
 - `staff_detector_files/` — YOLOv8 staff-detector training artifacts (weights, PR/F1 curves,
-  confusion matrix); `weights/best.pt` is the model Stage 2 loads by default
-- `models/phase2_seed1.pt` — the pretrained CRNN checkpoint
-  (trained on Kaggle) that Stage 3 loads by default
+  confusion matrix); `models/staff_detector_yolov8.pt` is the model Stage 2 loads by default
+- `models/symbol_transcriber_crnn_seed1.pt` — the A9 C2 chord fine-tuned CRNN checkpoint (epoch 10 of seed 1)
+  (fine-tuned on Kaggle from the phase-2 base `phase2_seed1.pt`) that Stage 3 loads by default
 - `datasets/` — raw third-party training sets (DeepScoresV2 `ds2_dense/`, Camera-PrIMuS,
   camera-grandstaff) used only by `prepare_deepscore.py` / training, not by inference
 - `.pt`/`.pth` files are tracked via Git LFS (`.gitattributes`) except `yolov8n.pt`/`yolov8s.pt`,

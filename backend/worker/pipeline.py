@@ -113,9 +113,9 @@ class PipelineConfig:
 
         clef_key = env.get("PIYA_CLEFKEY_WEIGHTS")  # empty string = explicit opt-out
         return cls(
-            yolo_weights=path("PIYA_YOLO_WEIGHTS", "models/best.pt"),
+            yolo_weights=path("PIYA_YOLO_WEIGHTS", "models/staff_detector_yolov8.pt"),
             crnn_weights=path("PIYA_CRNN_WEIGHTS",
-                              "models/phase2_seed1.pt"),
+                              "models/symbol_transcriber_crnn_seed1.pt"),
             soundfont=path("PIYA_SOUNDFONT", "models/piano.sf2"),
             clef_key_weights=(_REPO_ROOT / CLEF_KEY_DEFAULT if clef_key is None
                               else Path(clef_key) if clef_key else None),

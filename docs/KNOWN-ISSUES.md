@@ -10,7 +10,7 @@ The full research notes, bug tracker (`bug-tracker.md`) and tickets are in the l
   `tests/conftest.py`.
 - **Failed voices and per-bar meter are live** (commits 8e83adb, 2672f4d): an empty voice is reported in
   `failed_voices` and the other voices continue.
-- **Weights are not in git.** Copy `best.pt`, `phase2_seed1.pt`, `clef_key_classifier.pt` and `piano.sf2` into
+- **Weights are not in git.** Copy `staff_detector_yolov8.pt`, `symbol_transcriber_crnn_seed1.pt`, `clef_key_classifier.pt` and `piano.sf2` into
   `models/` (gitignored). The Space image copies the same folder.
 - **ClefKeyNet failed its real-photo gate** (BUG-021), so every event is flagged `clef_key_unvalidated` /
   `review_needed`. Keeping it as the default is a user decision, not a gate pass.

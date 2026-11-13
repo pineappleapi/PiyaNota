@@ -465,8 +465,8 @@ def run_full_pipeline(
     prep_dir:       str = "data/preprocessed",
     strips_dir:     str = "data/strips",
     output_dir:     str = "output/audio",
-    crnn_weights:   str = "models/phase2_seed1.pt",
-    yolo_weights:   str = "models/best.pt",
+    crnn_weights:   str = "models/symbol_transcriber_crnn_seed1.pt",
+    yolo_weights:   str = "models/staff_detector_yolov8.pt",
     soundfont_path: str = "models/piano.sf2",
     bpm:            int = DEFAULT_BPM,
     img_height:     int = 64,
@@ -490,8 +490,8 @@ def run_full_pipeline_with_report(
     prep_dir:       str = "data/preprocessed",
     strips_dir:     str = "data/strips",
     output_dir:     str = "output/audio",
-    crnn_weights:   str = "models/phase2_seed1.pt",
-    yolo_weights:   str = "models/best.pt",
+    crnn_weights:   str = "models/symbol_transcriber_crnn_seed1.pt",
+    yolo_weights:   str = "models/staff_detector_yolov8.pt",
     soundfont_path: str = "models/piano.sf2",
     bpm:            int = DEFAULT_BPM,
     img_height:     int = 64,
@@ -561,8 +561,8 @@ if __name__ == "__main__":
     parser.add_argument("--strips",    default="data/strips")
     parser.add_argument("--output",    default="output/audio",
                         help="Output directory for MP3 files")
-    parser.add_argument("--weights",   default="models/phase2_seed1.pt")
-    parser.add_argument("--yolo",      default="models/best.pt")
+    parser.add_argument("--weights",   default="models/symbol_transcriber_crnn_seed1.pt")
+    parser.add_argument("--yolo",      default="models/staff_detector_yolov8.pt")
     parser.add_argument("--soundfont", default="models/piano.sf2",
                         help="Path to .sf2 piano soundfont")
     parser.add_argument("--bpm",       type=int, default=DEFAULT_BPM,

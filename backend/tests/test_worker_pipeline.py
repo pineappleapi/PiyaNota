@@ -199,7 +199,7 @@ def test_unreadable_page_raises_with_index(tmp_path: Path) -> None:
 def test_from_env_defaults_and_opt_out() -> None:
     default = PipelineConfig.from_env({})
     assert default.clef_key_weights is not None and default.clef_key_weights.name == "clef_key_classifier.pt"
-    assert default.yolo_weights.name == "best.pt" and default.crnn_weights.name == "phase2_seed1.pt"
+    assert default.yolo_weights.name == "staff_detector_yolov8.pt" and default.crnn_weights.name == "symbol_transcriber_crnn_seed1.pt"
     assert PipelineConfig.from_env({"PIYA_CLEFKEY_WEIGHTS": ""}).clef_key_weights is None
     assert PipelineConfig.from_env({"PIYA_CLEFKEY_WEIGHTS": "x.pt"}).clef_key_weights == Path("x.pt")
 
