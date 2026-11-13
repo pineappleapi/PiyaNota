@@ -68,6 +68,49 @@ Changes vs original stage3_transcription.py
       • NOTE_DURATION_TICKS extended with "sixty_fourth" entry.
 """
  
+# DEFENSE INDEX: Ctrl+F any line below (each tag appears once more, above the code it explains).
+#   DEFENSE: stage 3 in one breath     what this file does, input to output
+#   DEFENSE: token vocabulary          the fixed list of symbols the CRNN can write
+#   DEFENSE: vocab safety checks       why a checkpoint must bring the exact token list it was trained with
+#   DEFENSE: clef reference pitch      each clef fixes the MIDI pitch of the bottom staff line
+#   DEFENSE: tenor octave rule         why a Tenor treble clef sounds one octave lower
+#   DEFENSE: fallback clef             which clef is assumed when none is read
+#   DEFENSE: letter steps to semitones why one staff step is not always the same number of semitones
+#   DEFENSE: staff position suffix     how "-L4" / "-S3" becomes a staff step number
+#   DEFENSE: durations in ticks        480 ticks per quarter note, shared with Stage 4/5
+#   DEFENSE: dotted notes              how one, two or three dots lengthen a note
+#   DEFENSE: key signature positions   where sharps/flats of a key signature are printed
+#   DEFENSE: one-glyph key change      why a single accidental after a barline is not a key change
+#   DEFENSE: header override           clef, key and octave decided by ClefKeyNet, not the CRNN
+#   DEFENSE: accidental anchoring      why an accidental not on its note's line/space is thrown away
+#   DEFENSE: mid-piece key change      how a key change after a barline is told apart from inline accidentals
+#   DEFENSE: pitch formula             MIDI = clef reference + staff steps + accidental
+#   DEFENSE: accidental precedence     which accidental wins when several could apply to one note
+#   DEFENSE: five states               the clef -> keysig -> body -> post_bar state machine (+ fixed_header)
+#   DEFENSE: dropped clef recovery     guessing the clef was missed when a key signature appears first
+#   DEFENSE: fixed_header mode         why CRNN clef/key tokens are ignored when ClefKeyNet is on
+#   DEFENSE: barline resets            what a barline clears and why
+#   DEFENSE: ties                      why slur.end marks the NEXT note
+#   DEFENSE: multirest bar count       why a multi-bar rest bumps the bar counter by N-1
+#   DEFENSE: beamed notes              how beam count gives the note length
+#   DEFENSE: confidence                per-note confidence is a min, and it is NOT a trust signal
+#   DEFENSE: CRNN architecture         CNN reads the picture, BiLSTM reads left to right, CTC aligns
+#   DEFENSE: CTC frame width           one CTC output column = 4 input pixels
+#   DEFENSE: greedy CTC decode         pick best symbol per column, merge repeats, drop blanks
+#   DEFENSE: strip normalisation       resize to 64 px and scale pixels the same way as training
+#   DEFENSE: header hallucinations     why invented time signatures on continuation systems are dropped
+#   DEFENSE: system quorum             why a key/meter change must be seen in 3 voices of one system
+#   DEFENSE: two passes                decode every strip first, then infer pitch per strip
+#   DEFENSE: review flags              review_needed and clef_key_disabled flags for the app
+#   DEFENSE: stages 1-3 runner         how the CLI chains preprocessing, detection, ClefKeyNet and CRNN
+#   DEFENSE: SER                       symbol error rate = edit distance / ground-truth length
+
+# DEFENSE: stage 3 in one breath
+# Input: one 64 px tall picture of a single staff (a "strip") from Stage 2. The CRNN turns it into a list of
+# tokens such as clef.G-L2, accidental.sharp-L5, note.quarter-L4, barline. infer_pitch() then walks that list
+# like a musician reading left to right: it remembers the clef, the key signature and any accidentals in the
+# bar, and turns each note token into a MIDI pitch and a length in ticks. The output is one event dict per
+# note or rest, per voice, which Stage 4 lines up into four continuous parts.
 import contextlib
 import hashlib
 import io
@@ -96,6 +139,11 @@ logger = logging.getLogger(__name__)
 # ── Vocabulary ────────────────────────────────────────────────────────────────
 # Camera-PrIMuS agnostic vocabulary — symbols the CRNN can output.
 # Blank token (index 0) is reserved for CTC.
+# DEFENSE: token vocabulary
+# The CRNN is a classifier: at every column of the strip it picks one entry of this list. Each token names a
+# glyph AND where it sits on the staff ("note.quarter-L4" = quarter note on line 4), but not its pitch:
+# "agnostic" means the token ignores clef and key, so pitch is worked out later by rules (infer_pitch).
+# Index 0 ("<blank>") means "nothing new here"; CTC needs it to separate two identical symbols in a row.
  
 VOCAB = [
     "<blank>",
@@ -631,7 +679,7 @@ VOCAB_EXT_A7 = VOCAB_EXT_CHORD_TUPLET + [LAYER_SPLIT_TOKEN] + [
 # Divisi A9 (docs/decisions/piya-106-divisi-a9-design.md section 7): below-staff note heads that A7 cannot output.
 # A closure rule, not data: every A7 note family (duration, beamed and `.l2` forms) at each position from S-2 down to
 # L-3 where A7 lacks it (L-1 too: the Task 5 gap list names note.whole-L-1), then the dot and the three accidentals at those positions. A7 stays the exact prefix so head
-# expansion keeps every old row. The new tokens are frozen in training/vocab_ext_a9_tokens.txt, pinned by sha256.
+# expansion keeps every old row. The new tokens are frozen in _archive/training/vocab_ext_a9_tokens.txt, pinned by sha256.
 BELOW_STAFF_POSITIONS = ("L-1", "S-2", "L-2", "S-3", "L-3")
 BELOW_STAFF_ACCIDENTALS = ("accidental.sharp", "accidental.flat", "accidental.natural")
 VOCAB_EXT_A9_NEW_SHA256 = "a8ab6616b95bc7f9d17feeeff24f28ecba7e6eb990c329d1e4234673383f5974"   # sha256 of the new tokens, one per line with a final newline
@@ -651,13 +699,18 @@ VOCAB_EXT_A9 = VOCAB_EXT_A7 + VOCAB_EXT_A9_NEW
 assert len(set(VOCAB_EXT_A9)) == len(VOCAB_EXT_A9), "VOCAB_EXT_A9 has a duplicate token"
 _A9_NEW_BODY = "\n".join(VOCAB_EXT_A9_NEW) + "\n"
 assert hashlib.sha256(_A9_NEW_BODY.encode()).hexdigest() == VOCAB_EXT_A9_NEW_SHA256, \
-    "VOCAB_EXT_A9 new-token list changed; it is frozen (training/vocab_ext_a9_tokens.txt)"
+    "VOCAB_EXT_A9 new-token list changed; it is frozen (_archive/training/vocab_ext_a9_tokens.txt)"
 
 BLANK_IDX  = 0
 VOCAB_SIZE = len(VOCAB)
 SYM_TO_IDX = {s: i for i, s in enumerate(VOCAB)}
 IDX_TO_SYM = {i: s for i, s in enumerate(VOCAB)}
 
+# DEFENSE: vocab safety checks
+# The model only outputs numbers (row indices); this list turns them back into token names. If a checkpoint
+# trained with a longer list were decoded with a shorter one, index 300 might mean a different symbol and every
+# pitch would be silently wrong. So the code only accepts the four exact known lists, each new one keeps the old
+# one as its prefix (old indices keep their meaning), and the A9 additions are pinned by a sha256 hash.
 # The vocabularies a checkpoint may carry. Decoding with the wrong one maps every index past VOCAB to "<unk>" (or,
 # for a reordered list, to the wrong token), so anything else is refused rather than guessed.
 KNOWN_VOCABS: tuple[list[str], ...] = (VOCAB, VOCAB_EXT_CHORD_TUPLET, VOCAB_EXT_A7, VOCAB_EXT_A9)
@@ -713,6 +766,11 @@ def _vocab_for_head(model: nn.Module) -> list[str]:
 #   C-L2: C4 on line 2 (step 2)  → 2 diatonic steps below C4 → A3 = 57
 #   C-L3: C4 on line 3 (step 4)  → 4 diatonic steps below C4 → F3 = 53
 #   C-L4: C4 on line 4 (step 6)  → adjusted so that 49 + DIATONIC_OFFSET[6]=11 = 60
+#
+# DEFENSE: clef reference pitch
+# A clef is a "ruler": it says which note the bottom staff line is. Every other note is counted in letter
+# steps up or down from that line. Treble: bottom line E4 (MIDI 64). Bass: bottom line G2 (MIDI 43).
+# Only treble and bass are in scope for SATB; the C clefs are kept because Camera-PrIMuS contains them.
  
 CLEF_REFERENCE = {
     "clef.G-L2": 64,   # E4 — standard treble clef
@@ -728,6 +786,12 @@ CLEF_REFERENCE = {
 # Tenor voice sounds an octave lower than written when using a treble clef
 # (treble-8vb / vocal tenor clef). The CRNN outputs clef.G-L2 for both
 # plain treble and treble-8vb, so we resolve the transposition via voice label.
+# DEFENSE: tenor octave rule
+# In choral scores the Tenor part is written in treble clef but men sing it one octave lower (often a small
+# "8" under the clef, often not even printed). The picture of the clef looks the same to the CRNN, so the code
+# uses the voice name instead: Tenor + treble gives bottom line E3 (52) instead of E4 (64), exactly 12
+# semitones lower. Bass clef needs no shift. With ClefKeyNet on, HeaderOverride.octave_shift does this job and
+# this table is not used (see infer_pitch), so the octave can never be lowered twice.
 TENOR_CLEF_REFERENCE = {
     "clef.G-L2": 52,   # E3 — treble 8vb (tenor sounding pitch)
     "clef.G-L1": 52,   # E3 — treble variant 8vb
@@ -742,6 +806,9 @@ TENOR_CLEF_REFERENCE = {
 # Voice → default clef when no clef token is detected on the strip.
 # Tenor uses treble (modern SATB choral convention) — octave shift applied
 # via get_clef_reference(), not via a different clef symbol.
+# DEFENSE: fallback clef
+# The pitch math needs a clef from the first token. Before any clef is read, the voice's usual SATB clef is
+# assumed (treble for S/A/T, bass for B), so a strip whose clef the CRNN missed still gets sensible pitches.
 CLEF_FALLBACK = {
     "Soprano": "clef.G-L2",
     "Alto":    "clef.G-L2",
@@ -772,6 +839,11 @@ def get_clef_reference(clef: str, voice: str) -> int:
 # was one generic C-anchored table applied to every clef, which was only
 # correct for clef.C-L1 -- whose bottom line happens to be C -- and wrong by
 # up to a semitone for treble, bass, and the other C clefs; see BUG-007.)
+# DEFENSE: letter steps to semitones
+# Moving one line/space on the staff moves one letter (E -> F -> G ...), but letters are not evenly spaced in
+# semitones: E-F and B-C are 1 semitone, all others are 2. So "3 steps up" means a different number of
+# semitones depending on the starting letter. The code counts letters from the clef's bottom-line letter
+# and converts each letter to semitones with this table, which handles that unevenness exactly.
 NATURAL_LETTER_SEMITONE = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
 LETTER_ORDER            = ["C", "D", "E", "F", "G", "A", "B"]
 
@@ -823,6 +895,11 @@ def _pitch_class_at_step(step: int, bottom_letter: str) -> str:
     start_idx = LETTER_ORDER.index(bottom_letter)
     return LETTER_ORDER[(start_idx + step) % 7]
  
+# DEFENSE: staff position suffix
+# "L" = on a line, "S" = in a space, numbered from the bottom: L1 bottom line, S1 the space above it, L2 the
+# next line. Lines and spaces alternate, so step = (n - 1) * 2 for a line and (n - 1) * 2 + 1 for a space.
+# Worked example, treble clef: note.quarter-L4 -> step 6 -> six letters above E = D -> E4 (64) + 10 = 74 = D5.
+# Negative numbers (L-1) are ledger lines below the staff.
 def _staff_step(pos_str: str) -> int:
     """Diatonic step (0 = bottom line) of an agnostic position suffix like "L4", "S3", "L-1".
 
@@ -861,6 +938,10 @@ APPLY_MID_METER_CHANGE: bool = True
 SHARP_ORDER = ["F", "C", "G", "D", "A", "E", "B"]
 FLAT_ORDER  = ["B", "E", "A", "D", "G", "C", "F"]
  
+# DEFENSE: durations in ticks
+# Time is counted in integer "ticks", 480 per quarter note (PPQ 480, the MIDI convention), so an eighth is
+# 240 and a whole 1920. Integers avoid rounding drift when hundreds of notes are added up. Stage 5 checks at
+# import that its PPQ equals Stage 4's TICKS_PER_QUARTER, so the three stages cannot disagree on this unit.
 NOTE_DURATION_TICKS = {
     "whole":           1920,
     "half":             960,
@@ -876,6 +957,9 @@ NOTE_DURATION_TICKS = {
 REST_DURATION_TICKS = NOTE_DURATION_TICKS
 
 
+# DEFENSE: dotted notes
+# A dot adds half the note; a second dot adds half of that half. Quarter (480): one dot 720, two dots 840.
+# The formula base * (2^(n+1) - 1) / 2^n gives exactly that series in whole ticks.
 def _dotted_ticks(base_ticks: int, n_dots: int) -> int:
     """Duration of a note/rest with ``n_dots`` augmentation dots (PIYA-109 AC3).
 
@@ -901,6 +985,12 @@ def _dotted_ticks(base_ticks: int, n_dots: int) -> int:
 # Only the in-scope SATB clefs are listed (no C clefs, user decision
 # 2026-09-26); any other clef gets no key-change detection, so its
 # post-barline accidentals are treated as inline.
+#
+# DEFENSE: key signature positions
+# A key signature is always printed in a fixed order and at fixed heights (sharps F C G D A E B, flats
+# B E A D G C F). Checking "is this accidental exactly where a key signature glyph would be, in that order?"
+# is how the code tells a key signature (applies to the whole piece) from an inline accidental (one note,
+# one bar). SHARP_ORDER / FLAT_ORDER above give the letters; this table gives the printed positions.
 KEY_SIG_ORDER: dict[str, dict[str, list[str]]] = {
     "clef.G-L2": {
         "accidental.sharp": ["L5", "S3", "S5", "L4", "S2", "S4", "L3"],
@@ -916,6 +1006,10 @@ KEY_SIG_ORDER: dict[str, dict[str, list[str]]] = {
 # its own key signature (CRNN-read, or the clef/key classifier's in the eval
 # wrapper), so a missed 1-accidental change costs at most the rest of one
 # strip. Hand-set, not tuned.
+# DEFENSE: one-glyph key change
+# Trade-off: a wrongly accepted key change would shift every later note of the strip, a wrongly rejected one
+# only costs the rest of this strip (the next strip re-reads its own key). So one glyph is not enough unless
+# something else vouches for it (ClefKeyNet's next-system key, or a time signature right after it).
 MIN_MID_KEY_CHANGE_ACCIDENTALS = 2
 
 # Divisi chord validators (freeze doc section 6, docs/decisions/piya-106-divisi-arm-freeze.md): V1 member interval
@@ -931,6 +1025,11 @@ CHORD_VOICE_RANGE: dict[str, tuple[int, int]] = {
 }
 
 
+# DEFENSE: header override
+# The CRNN reads clefs badly on real photos (BUG-011: it says "C clef" almost always). ClefKeyNet is a separate
+# small classifier that only looks at the start of each staff and decides clef + key; the voice rule decides
+# the octave. Those three answers are packed into this tuple and handed to infer_pitch, which then trusts them
+# over the CRNN's own header tokens.
 class HeaderOverride(NamedTuple):
     """Clef, opening key and octave decided outside the CRNN (ClefKeyNet + voice rule, stage3_clefkey).
 
@@ -1010,6 +1109,11 @@ def _next_onset_positions(symbols: list[str], idx: int) -> set[str]:
     return set()
 
 
+# DEFENSE: accidental anchoring
+# On paper a sharp/flat/natural is printed directly left of its note, on the same line or space. So if the CRNN
+# says "sharp on L5" but the next note is on S3, the sharp cannot belong to that note: it is most likely a
+# phantom the CRNN invented. Such accidentals are dropped (and named on the next note as
+# unanchored_accidental_dropped for review) instead of changing a pitch.
 def _accidental_is_anchored(symbols: list[str], idx: int) -> bool:
     """True if the inline accidental at ``idx`` sits on the staff position of the note it precedes.
 
@@ -1095,6 +1199,11 @@ def _is_mid_key_change(burst: list[str], symbols: list[str], burst_end: int, acc
     return positions[-1] not in _next_onset_positions(symbols, burst_end - 1)
 
 
+# DEFENSE: mid-piece key change
+# Right after a barline, a run ("burst") of sharps or flats can be either a new key signature or accidentals
+# for the next notes. It counts as a key change only if it matches the printed key-signature order and either
+# has 2+ glyphs, is followed by a time signature, or equals ClefKeyNet's key for the next system. If its last
+# glyph sits on the next note's position, that last glyph is read as the note's accidental instead.
 def _burst_key_change(symbols: list[str], start: int, acc_type: str, active_clef: str,
                       confirmed: Optional[tuple[int, int]]) -> Optional[tuple[int, int, int]]:
     """Reads a sharp/flat burst right after a barline as a key change.
@@ -1277,7 +1386,7 @@ def infer_pitch(
     the V1/V2/V4 flags (``chord_interval_over_octave``, ``chord_three_plus_members``,
     ``chord_member_out_of_range``) and, with confidences, ``chord_confidence`` = min over the members (each
     member's own confidence is the min of its chordnote and accidental tokens). Neither is a trust signal
-    (BUG-011). Monophonic input is unchanged (golden harness, training/phase2/stage3_golden.py).
+    (BUG-011). Monophonic input is unchanged (golden harness, _archive/training/phase2/stage3_golden.py).
 
     Key-signature state machine
     ───────────────────────────
@@ -1445,6 +1554,11 @@ def infer_pitch(
         raise ValueError(
             f"confidences ({len(confidences)}) must be parallel to "
             f"symbols ({len(symbols)})")
+    # DEFENSE: confidence
+    # A note's confidence = the LOWEST score among the tokens that built it (note, its accidental, its dot):
+    # one bad part makes the whole pitch wrong, so averaging would hide it. But it is NOT a trust signal: the
+    # score is how sure the CRNN felt, and on real photos the CRNN is often sure and wrong (BUG-011). It is only
+    # used to rank which note in an over-full bar is most likely the misread (Stage 4 tie-break).
     with_conf = confidences is not None
 
     # Trace entries are written at the top of the NEXT iteration (and once
@@ -1476,6 +1590,13 @@ def infer_pitch(
         # Only anchored accidentals get here, and anchoring requires a position suffix.
         pending_accs[sym.split("-", 1)[1]] = (ACCIDENTAL_OFFSET.get(acc_type, 0), tok_conf, sym)
 
+    # DEFENSE: pitch formula
+    # MIDI pitch = clef reference (bottom-line pitch) + semitones from the bottom line to this step
+    # + alteration (+1 sharp, -1 flat, 0 natural or none). Clamped to the MIDI range 0..127.
+    # DEFENSE: accidental precedence
+    # Which alteration applies, first match wins, same as a musician reads it: (1) an accidental printed right
+    # before this note; (2) a tie from the same step keeps the tied note's pitch; (3) an earlier accidental on
+    # the same step in this bar still holds; (4) otherwise the key signature for this letter.
     def _member_pitch(pos_str: str, tok_conf: float) -> tuple[int, int, float]:
         """(MIDI pitch, staff step, confidence) of a notehead at ``pos_str``; consumes its pending accidental.
 
@@ -1545,6 +1666,17 @@ def infer_pitch(
                 e["chord_confidence"] = chord_conf
 
     # ── Main loop ─────────────────────────────────────────────────────────
+    # DEFENSE: five states
+    # A strip starts with a header (clef, key signature, time signature) and then the music. The same token
+    # means different things in each part: a sharp in the header is part of the key, a sharp in the music
+    # changes one note. ks_stage remembers where we are:
+    #   "clef"     waiting for the clef (the first token of a staff)
+    #   "keysig"   counting the key-signature sharps/flats after the clef
+    #   "body"     the music: notes, rests, inline accidentals, dots, ties, barlines
+    #   "post_bar" the token right after a barline, where a new key or meter may be printed
+    #   "fixed_header" replaces clef+keysig when ClefKeyNet already decided clef and key
+    # (CLAUDE.md lists a fifth state "mid_keysig"; in the code that job is the post_bar key-change check,
+    # there is no state with that name.)
     for tok_idx, sym in enumerate(symbols):
         if tok_idx:
             _trace_token(tok_idx - 1)
@@ -1612,6 +1744,10 @@ def infer_pitch(
                 continue
  
             elif is_sharp or is_flat:
+                # DEFENSE: dropped clef recovery
+                # A sharp/flat before any clef: if it sits exactly where the fallback clef's key signature
+                # would be printed, the CRNN probably just missed the clef, so start counting the key. If not,
+                # it is treated as an ordinary accidental of the first note (or dropped if not anchored).
                 if _is_keysig_position(sym, acc_type, active_clef):
                     print(f"[Stage 3] {voice} p{page_index}: "
                           f"clef not detected — inferring from key-sig position ({sym})")
@@ -1652,6 +1788,12 @@ def infer_pitch(
  
         # ── "fixed_header" ────────────────────────────────────────────────
         elif ks_stage == "fixed_header":
+            # DEFENSE: fixed_header mode
+            # ClefKeyNet already gave clef, key and octave (HeaderOverride). The CRNN's clef is wrong most of the
+            # time on real photos (BUG-011), so its clef tokens are skipped, and its header sharps/flats are not
+            # counted into the key (that would double-count or contradict ClefKeyNet, BUG-027). A header
+            # accidental is kept only if it sits right before the first note on that note's position.
+            # The time signature is still read from the CRNN, because ClefKeyNet does not decide meter.
 
             if sym.startswith("clef."):
                 continue
@@ -1894,6 +2036,10 @@ def infer_pitch(
             dur_name = inner[:dash_idx]              # "quarter", "beamedRight1", …
             pos_str  = inner[dash_idx + 1:]          # "L4", "S3", "L-1"
  
+            # DEFENSE: beamed notes
+            # Beamed notes carry the number of beams instead of a name: 1 beam = eighth, 2 = sixteenth,
+            # 3 = thirty-second, 4 = sixty-fourth (0 is also read as eighth). An unknown name falls back to a
+            # quarter (480 ticks) below so one odd token cannot crash the strip.
             # Map beamed variants → base duration
             for prefix in ("beamedRight", "beamedLeft", "beamedBoth"):
                 if dur_name.startswith(prefix):
@@ -1948,6 +2094,10 @@ def infer_pitch(
  
         # ── Barline ───────────────────────────────────────────────────────
         if sym.startswith("barline"):
+            # DEFENSE: barline resets
+            # Music rule: an accidental lasts only until the end of its bar. So the barline forgets every inline
+            # accidental, counts one more bar (measure_index, which Stage 4 uses to line the voices up), and
+            # moves to "post_bar" to check whether a new key or meter is printed next.
             pending_accs.clear()    # stale inline accidentals — discard
             dropped_acc = None
             measure_alterations = {}
@@ -1985,6 +2135,10 @@ def infer_pitch(
                 events[-1]["confidence"] = tok_conf
             _take_orphan(events[-1])
             current_tick += ticks
+            # DEFENSE: multirest bar count
+            # A "rest for 8 bars" sign is drawn inside ONE bar but lasts 8, so the counter must jump by 7 here;
+            # the barline after it adds the 8th. Otherwise this voice would be 7 bars behind the others.
+            # (Its length uses a whole note per bar, 1920 ticks, i.e. it assumes 4/4.)
             # A multirest is engraved between exactly one pair of barlines
             # regardless of how many bars it spans (digit.N gives that count),
             # so unlike ordinary notes it needs its own measure_index bump here
@@ -2021,6 +2175,10 @@ def infer_pitch(
             continue
  
         if sym.startswith("slur.end"):
+            # DEFENSE: ties
+            # A tie joins two notes of the same pitch into one longer sound. Stage 3 only marks the two ends
+            # ("start" on the first note, "end" on the second); Stage 4 does the merging. Because slur.end comes
+            # before its note in the token list, it is remembered (slur_end_pending) and put on the next note.
             # In Camera-PrIMuS token order slur.end sits BEFORE the note it
             # ends on (start follows note 1, end precedes note 2; verified on
             # all 676 slur pairs in the corpus, which are all semantic ties),
@@ -2079,6 +2237,13 @@ ROWS_PER_FRAME = 4            # CNN map height for a 64 px strip (64 / 2 / 2 / 2
 STRIP_HEIGHT_KEEP_ROWS = 64   # keep_rows is only defined at this input height
 
 
+# DEFENSE: CRNN architecture
+# CRNN = Convolutional + Recurrent Neural Network. The CNN looks at small patches and learns glyph shapes
+# (noteheads, stems, sharps); its pooling shrinks the 64 px height to 4 rows and then to 1 by averaging, while
+# keeping width, so each column of the output describes one thin vertical slice of the staff. The BiLSTM then
+# reads those slices left-to-right AND right-to-left, so each slice knows its neighbours (e.g. a dot belongs to
+# the note before it). The final linear layer scores every vocabulary token per slice. Training uses CTC loss,
+# which needs no per-symbol x-positions in the labels, only the token sequence.
 class CRNN(nn.Module):
     """
     CRNN for music symbol recognition.
@@ -2174,11 +2339,21 @@ def crnn_from_state(state: Mapping[str, torch.Tensor]) -> "CRNN":
 # Input-pixel width of one CTC frame: the two MaxPool2d(2, 2) layers in
 # CRNN.cnn each halve the width; the (2, 1) pools only shrink height. Must be
 # changed together with the backbone or token x-positions drift.
+# DEFENSE: CTC frame width
+# So a 1000 px wide strip gives 250 output columns ("frames"); the CRNN emits one choice per frame. This number
+# is only used to draw boxes and export x-positions, never for pitch.
 CNN_WIDTH_STRIDE = 4
 
 
 # ── Inference ─────────────────────────────────────────────────────────────────
  
+# DEFENSE: greedy CTC decode
+# Per frame, take the highest-scoring token. A glyph is wider than one frame, so it shows up as a run like
+# "note note note"; merge each run into one token, then delete the blanks. Example frames
+# [blank, note, note, blank, note] -> [note, note] (the blank between keeps two real notes apart).
+# "Greedy" = no search over alternatives; beam search without a language model was tried on dev data and
+# gave at most +0.1 pp pitch, so it was not adopted. The per-token confidence returned below is the average
+# top-1 softmax probability over that token's frames: a raw model score, not a calibrated probability.
 def _greedy_ctc_decode(log_probs: torch.Tensor) -> list:
     """
     Greedy CTC decoding: argmax at each timestep then collapse.
@@ -2292,6 +2467,10 @@ def transcribe_strip(
     new_w = max(1, int(w * img_height / h))
     image = cv2.resize(image, (new_w, img_height), interpolation=cv2.INTER_AREA)
 
+    # DEFENSE: strip normalisation
+    # The model only works on input that looks like its training data: 64 px tall (width scaled to keep the
+    # aspect ratio, INTER_AREA so thin staff lines are averaged, not skipped) and pixels mapped from 0..1 to
+    # -1..1 (mean 0.5, std 0.5). Both must match the Kaggle training setup, or accuracy collapses.
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5], std=[0.5]),
@@ -2804,6 +2983,12 @@ CLEF_KEY_DISABLED_FLAG = "clef_key_disabled"  # event flag when Stage 3 runs wit
 # about 8 pp camera and 9 pp digital with pitch unchanged. Conditions follow the choral-conductor review of
 # 2026-09-29: an open-score system shares its barlines and meter, so a real multirest or meter change shows in
 # (nearly) every voice at once, and a multirest's digit tokens are its bar count and must go with it.
+# DEFENSE: header hallucinations
+# The CRNN learned from Camera-PrIMuS, where EVERY sample starts with clef + key + time signature. So on a
+# continuation line (system 2, 3, ...) it often "sees" a time signature that is not printed. Rule: on every
+# system except the first, a header time signature is kept only if 3+ voices of that system read the same one
+# and it differs from the meter already in force (a real change is printed in every staff); a header multirest
+# is kept only if 3+ strips show one; fermatas before the first note are always dropped.
 HEADER_QUORUM = 3  # voices of one system that must agree before a header meter/multirest is believed
 HEADER_METER_CHANGE_FLAG = "header_meter_change_kept"
 _TIME_SIG_PREFIXES = ("digit", "metersign")
@@ -2914,6 +3099,12 @@ def meter_quorum(n_readable: Optional[int]) -> int:
     return max(MIN_METER_QUORUM, min(HEADER_QUORUM, n_readable))
 
 
+# DEFENSE: system quorum
+# In open score all four staves of a system share the same barlines, so a real key or meter change is printed
+# in every voice at the same bar. One voice seeing it alone is more likely a misread. So a key change is applied
+# to ALL voices only when 3+ voices read the same key at the same bar (and then even in a voice that missed the
+# glyphs); anything less is flagged for review instead. Meters use meter_quorum (3, fewer if fewer voices are
+# readable, never below 2).
 def decide_mid_changes(
     system: dict[str, tuple[str, list[dict[str, Any]]]],
     n_readable: Optional[int] = None,
@@ -3084,7 +3275,7 @@ PASS2_PROGRESS_UNITS = 1  # pitch inference per strip: fast, but still a visible
 
 def transcribe_voice_sequences(
     voice_sequences: dict,
-    model_weights:   str = r"D:\PiyaNota (Code)\music_symbol_detection\crnn_cameraprimus_transcription.pt",
+    model_weights:   str = "models/phase2_seed1.pt",
     img_height:      int = 64,
     viz_dir:         str = r"D:\PiyaNota (Code)\data\symbol_detection_viz",
     events_dir:      str = r"D:\PiyaNota (Code)\data\transcribed_symbols",   # ← add this
@@ -3147,6 +3338,11 @@ def transcribe_voice_sequences(
     print(f"[Stage 3] Loaded weights -> {model_weights} "
           f"(epoch {checkpoint.get('epoch', '?')})")
  
+    # DEFENSE: two passes
+    # Pass 1 runs the CRNN on every strip and keeps only the tokens. Then whole systems are checked together
+    # (header filter, key continuity, mid-strip changes), because those rules need all four voices of a system.
+    # Pass 2 runs infer_pitch per strip with those system decisions. Pitch cannot be done in Pass 1 because a
+    # voice's key may depend on what the OTHER voices read.
     # Pass 1: decode every strip. The header filter needs all voices of a system at once (quorum).
     decoded: dict[str, dict[str, Any]] = {}
     n_strips = sum(len(s) for s in voice_sequences.values())
@@ -3211,6 +3407,11 @@ def transcribe_voice_sequences(
                                          system_meter_changes=d["system_meter_changes"])
             if barlines_out is not None:
                 barlines_out[(d["page_index"], d["sys_idx"], d["voice_label"])] = strip_bars
+            # DEFENSE: review flags
+            # The pipeline never silently "fixes" doubtful music; it marks it. Every event of a strip gets
+            # review_needed when the strip ran without ClefKeyNet (CRNN clefs are unreliable), when the header
+            # filter kept a meter change, or when the system had any mid-strip key/meter change (applied,
+            # rejected, unconfirmed or contradicted by the next system's key).
             if d["decision"] is None:
                 for e in events:
                     e["clef_key_flags"] = [CLEF_KEY_DISABLED_FLAG, "review_needed"]
@@ -3303,6 +3504,10 @@ def _apply_system_checks(decoded: dict[str, dict[str, Any]], meter_change_system
 
 # ── Symbol Error Rate ─────────────────────────────────────────────────────────
  
+# DEFENSE: SER
+# Symbol Error Rate: the fewest token substitutions + deletions + insertions that turn the prediction into the
+# ground truth (Levenshtein edit distance), divided by the ground-truth length. 0.0 = perfect; it can exceed
+# 1.0 when the model writes many extra tokens. This is the token-level SER the SOW uses.
 def compute_ser(predicted: list, ground_truth: list) -> float:
     """SER = (S + D + I) / N using dynamic programming edit distance."""
     n = len(ground_truth)
@@ -3373,6 +3578,11 @@ def run_stages_1_to_3(
     Raises:
         FileNotFoundError / ValueError: from ``stage3_clefkey.check_clef_key_weights``.
     """
+    # DEFENSE: stages 1-3 runner
+    # Order: check the ClefKeyNet weights first (fail early, before minutes of work) -> Stage 1 cleans the
+    # photos (keeping an unmasked copy, which ClefKeyNet reads) -> Stage 2 cuts one strip per staff and writes a
+    # manifest -> ClefKeyNet decides clef/key per strip from that manifest -> the CRNN + infer_pitch run.
+    # Imports are inside the function so importing this module does not load Stage 1/2.
     from stage1_preprocessing import preprocess_batch
     from stage2_detection import detect_staff_regions
     import stage3_clefkey
@@ -3406,12 +3616,12 @@ if __name__ == "__main__":
  
     parser = argparse.ArgumentParser(
         description="PiyaNota Stage 3 — CRNN-CTC Transcription (inference only)")
-    parser.add_argument("--weights",    default=r"D:\PiyaNota (Code)\music_symbol_detection\crnn_cameraprimus_transcription.pt",
+    parser.add_argument("--weights",    default="models/phase2_seed1.pt",
                         help="CRNN weights trained on Kaggle")
     parser.add_argument("--input",      default="data/raw")
     parser.add_argument("--prep",       default="data/preprocessed")
     parser.add_argument("--strips",     default="data/strips")
-    parser.add_argument("--yolo",       default="staff_detector_files/weights/best.pt")
+    parser.add_argument("--yolo",       default="models/best.pt")
     parser.add_argument("--img-height", type=int, default=64,
                         help="Must match Kaggle training height")
     parser.add_argument("--viz-dir",

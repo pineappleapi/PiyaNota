@@ -10,6 +10,23 @@ Dependencies:
     Download a piano soundfont (.sf2) e.g. GeneralUser GS or FluidR3.
 """
 
+# DEFENSE INDEX: (Ctrl+F the tag to jump to the explanation)
+#   DEFENSE: stage role        - what Stage 5 does in one breath
+#   DEFENSE: dry render        - why reverb/chorus are switched off
+#   DEFENSE: loudness target   - why every stem is made equally loud
+#   DEFENSE: ppq check         - why PPQ must equal Stage 4's resolution
+#   DEFENSE: client review     - why only two review codes reach the app
+#   DEFENSE: silent track      - why an empty voice still gets a file
+#   DEFENSE: midi fallback     - why MIDI is returned when MP3 fails
+#   DEFENSE: collapse notes    - why identical notes merge into one
+#   DEFENSE: clip overlap      - why same-pitch overlaps are shortened
+#   DEFENSE: pad same length   - why all four voices end at the same time
+#   DEFENSE: fluidsynth order  - why options come before the soundfont
+#   DEFENSE: normalise loudness - where gain is applied to the audio
+#   DEFENSE: peak ceiling      - why a peaky stem stays quieter than target
+#   DEFENSE: review shape      - why build_review maps flags explicitly
+#   DEFENSE: pipeline entry    - how Stages 1-5 chain together
+
 import os
 import re
 import shutil
@@ -25,13 +42,22 @@ import stage3_clefkey
 from stage3_transcription import CLEF_KEY_DISABLED_FLAG
 from stage4_reconstruction import TICKS_PER_QUARTER
 
+# DEFENSE: stage role - Stage 5 takes the note lists from Stage 4 and does three simple things per
+# voice: write a MIDI file, let FluidSynth "play" it with a piano soundfont into a WAV, then
+# turn the WAV into an MP3. One file per voice (Soprano, Alto, Tenor, Bass).
 # FluidSynth output sample rate (midi2audio's former default).
 RENDER_SAMPLE_RATE = 44100
 
+# DEFENSE: dry render - reverb is the "echo in a church" effect. We turn it off so each voice
+# sounds clean and a singer can hear the exact notes; the app can add room sound later.
 # FluidSynth turns reverb and chorus on by default, which smeared the voices and sounded wrong on phone
 # playback (user phone test 2026-11-07, item E). Off gives a dry piano; the app can add room sound later.
 FLUIDSYNTH_DRY_SETTINGS = ["-o", "synth.reverb.active=0", "-o", "synth.chorus.active=0"]
 
+# DEFENSE: loudness target - the four voices are rendered separately, so some come out louder
+# than others (a bass part with few notes vs. a busy soprano). We set every stem to the same
+# loudness (LUFS = how loud it sounds to a human ear) so the user does not have to fix volumes.
+# The peak ceiling stops the loudest instant from distorting after MP3 compression.
 # Loudness baked into every stem (the app player volume is capped at 1.0). Values and sources:
 # docs/decisions/audio-loudness-2026-11.md.
 STEM_TARGET_LUFS = -20.0
@@ -44,6 +70,9 @@ DEFAULT_BPM  = 90           # default tempo if not detected
 # Client-facing review items are capped; the full list goes to the job record (backend-lead review
 # 2026-09-29: Stage 4 bar flags are unbounded, strips are at most 20 pages x 16 staves).
 REVIEW_ITEMS_CAP = 200
+# DEFENSE: client review - the pipeline raises many internal warnings, but a user can only act on
+# one thing: "this voice could not be read, retake the photo". So only those codes go to the app;
+# everything else stays in the job record for us to inspect.
 # Reasons that apply to the whole job, not to one strip; reported once in `reasons`, never as items.
 # The user can only act on a missing or unreadable voice (retake the page); every other flag stays in
 # the job record and logs. No Stage 4 "voice dropped" code exists yet; the name is reserved.
@@ -54,6 +83,9 @@ MIDI_VOLUME  = 100          # note velocity (0–127)
 PIANO_PROGRAM = 0           # General MIDI program 0 = Acoustic Grand Piano
 SUSTAIN_PEDAL_CC = 64       # controller used only as an end-of-piece length pin
 
+# DEFENSE: ppq check - a "tick" is a tiny time unit. Stage 4 counts time in ticks and Stage 5
+# converts ticks to beats by dividing by PPQ. If the two stages used different tick sizes, every
+# note would land at the wrong time, so we crash loudly at import instead of playing wrong music.
 # Stage 4 places events in ticks of TICKS_PER_QUARTER; onset_beats = tick / PPQ
 # is only correct while both use the same resolution.
 if PPQ != TICKS_PER_QUARTER:
@@ -77,7 +109,7 @@ def synthesize_satb(
     satb_sequences:  dict,
     output_dir:      str  = "output/audio",
     bpm:             int  = DEFAULT_BPM,
-    soundfont_path:  str  = "soundfont/piano.sf2",
+    soundfont_path:  str  = "models/piano.sf2",
     render_audio:    bool = True,
 ) -> dict:
     """
@@ -103,6 +135,8 @@ def synthesize_satb(
     total_ticks = _piece_end_tick(satb_sequences)
 
     for voice in VOICES:
+        # DEFENSE: silent track - if one voice could not be read, we still make its file (silence)
+        # so the app always has four tracks of equal length that play in sync.
         # An empty (unreadable) voice still gets a silent track padded to the common length, so the
         # app always has four tracks that stay in sync; Stage 4 reports it via failed_voices.
         events = satb_sequences.get(voice, [])
@@ -134,6 +168,9 @@ def synthesize_satb(
             output_files[voice] = str(mp3_path)
             print(f"  [Stage 5] {voice}: MP3 saved -> {mp3_path}")
         else:
+            # DEFENSE: midi fallback - MP3 needs extra programs (fluidsynth, ffmpeg, a soundfont)
+            # that may be missing on a machine. The MIDI file is already written and is the real
+            # musical result, so we return it instead of failing the whole conversion.
             # Fall back to returning the MIDI if rendering failed
             output_files[voice] = str(midi_path)
             print(f"  [Stage 5] {voice}: MP3 rendering failed, "
@@ -164,6 +201,9 @@ def voice_notes(events: list) -> list:
     Identical (onset, pitch) notes collapse to one (the longest), so a
     duplicated chord note never sounds twice at double velocity.
     """
+    # DEFENSE: collapse notes - if the same pitch is listed twice at the same start time (a
+    # duplicate from an upstream stage), playing both would sound twice as loud. We keep one,
+    # the longest.
     longest: dict = {}
     for e in events:
         if (e["type"] != "note" or e["pitch"] is None
@@ -171,6 +211,9 @@ def voice_notes(events: list) -> list:
             continue
         key = (e["tick_onset"], e["pitch"])
         longest[key] = max(longest.get(key, 0), e["duration_ticks"])
+    # DEFENSE: clip overlap - if the same note starts again before the first one ended, MIDI can
+    # mix up which "note off" belongs to which "note on" and a note hangs forever. We cut the
+    # first note short at the moment the next one starts; a singer sings one note at a time anyway.
     # Same-pitch overlap within one voice: the earlier note is clipped to the
     # next same-pitch onset. Left overlapping, a MIDI writer/synth can pair
     # note-offs with the wrong note-on and leave a note hanging (observed:
@@ -206,6 +249,10 @@ def build_voice_midi(events: list, bpm: int, total_ticks: int) -> MIDIFile:
     the end of the LAST EVENT over all voices, not the last full bar's end, so
     the padding can stop short of a bar line when the final bar is underfull.
     """
+    # DEFENSE: pad same length - a MIDI file ends at its last event, so a voice that stops early
+    # would be shorter and the four tracks would fall out of sync in the app. The last event
+    # below is a do-nothing pedal message placed at the common end time, which stretches every
+    # voice to the same length without adding any sound.
     midi = MIDIFile(1, ticks_per_quarternote=PPQ)
     track = 0
     midi.addTempo(track, 0, bpm)
@@ -263,6 +310,8 @@ def _loudness_gain_db(lufs: float, true_peak_db: float) -> float:
 
     A peaky stem is left quieter than target rather than clipped after MP3 encoding.
     """
+    # DEFENSE: peak ceiling - we want the target loudness, but never so much gain that the
+    # loudest spike would crackle. The smaller of the two gains wins: safe beats loud.
     gain = STEM_TARGET_LUFS - lufs
     return min(gain, STEM_TRUE_PEAK_CEILING_DBTP - true_peak_db)
 
@@ -298,6 +347,9 @@ def _render_to_mp3(
             print("  [Stage 5] WARNING: fluidsynth not found on PATH.")
             return False
 
+        # DEFENSE: fluidsynth order - FluidSynth silently ignores settings written after the
+        # soundfont and MIDI file, and then no WAV appears. So settings go first; we also check
+        # afterwards that the WAV really exists.
         # MIDI → WAV via FluidSynth. Options must come before the soundfont and MIDI file:
         # FluidSynth 2.x ignores options placed after them (midi2audio's order), which left no WAV.
         subprocess.run(
@@ -309,6 +361,8 @@ def _render_to_mp3(
             print(f"  [Stage 5] Rendering error: fluidsynth wrote no WAV at {wav_path}")
             return False
 
+        # DEFENSE: normalise loudness - measure how loud the WAV is, then raise or lower it to the
+        # shared target. Silent files (nothing measurable) are left alone: gain cannot fix silence.
         # WAV → MP3 via pydub + ffmpeg
         audio = AudioSegment.from_wav(str(wav_path))
         loudness = _measure_loudness(wav_path)
@@ -372,6 +426,9 @@ def build_review(stage3_events: dict, stage4_flags: list) -> tuple[dict[str, Any
         (review, full_items): ``review`` is the client object with at most REVIEW_ITEMS_CAP voice items;
         ``full_items`` is the uncapped list of every flag for the job record and logs.
     """
+    # DEFENSE: review shape - the app depends on a fixed JSON shape. We copy fields one by one
+    # (instead of passing internal dicts through) so changing Stage 3/4 internals cannot
+    # silently break the app. "reviewNeeded: False" means nothing was flagged, not "all correct".
     items: list[dict[str, Any]] = []
     for f in stage4_flags:
         if f.get("review_needed"):
@@ -408,9 +465,9 @@ def run_full_pipeline(
     prep_dir:       str = "data/preprocessed",
     strips_dir:     str = "data/strips",
     output_dir:     str = "output/audio",
-    crnn_weights:   str = "crnn_weights/best.pt",
-    yolo_weights:   str = "staff_detector_files/weights/best.pt",
-    soundfont_path: str = "soundfont/piano.sf2",
+    crnn_weights:   str = "models/phase2_seed1.pt",
+    yolo_weights:   str = "models/best.pt",
+    soundfont_path: str = "models/piano.sf2",
     bpm:            int = DEFAULT_BPM,
     img_height:     int = 64,
     clef_key_weights: Optional[str] = str(stage3_clefkey.DEFAULT_CLEF_KEY_CHECKPOINT),
@@ -433,9 +490,9 @@ def run_full_pipeline_with_report(
     prep_dir:       str = "data/preprocessed",
     strips_dir:     str = "data/strips",
     output_dir:     str = "output/audio",
-    crnn_weights:   str = "crnn_weights/best.pt",
-    yolo_weights:   str = "staff_detector_files/weights/best.pt",
-    soundfont_path: str = "soundfont/piano.sf2",
+    crnn_weights:   str = "models/phase2_seed1.pt",
+    yolo_weights:   str = "models/best.pt",
+    soundfont_path: str = "models/piano.sf2",
     bpm:            int = DEFAULT_BPM,
     img_height:     int = 64,
     clef_key_weights: Optional[str] = str(stage3_clefkey.DEFAULT_CLEF_KEY_CHECKPOINT),
@@ -456,6 +513,10 @@ def run_full_pipeline_with_report(
     print("PiyaNota — Full Pipeline")
     print("=" * 60)
 
+    # DEFENSE: pipeline entry - this is the one function that chains everything: photo ->
+    # Stages 1-3 (find staves, read symbols) -> Stage 4 (put voices on one timeline) ->
+    # Stage 5 (make audio). It also builds the review report and a record of which
+    # clef/key checkpoint was used.
     # Stages 1-3
     voice_events = run_stages_1_to_3(input_dir, prep_dir, strips_dir, yolo_weights, crnn_weights,
                                      clef_key_weights, img_height=img_height)
@@ -500,9 +561,9 @@ if __name__ == "__main__":
     parser.add_argument("--strips",    default="data/strips")
     parser.add_argument("--output",    default="output/audio",
                         help="Output directory for MP3 files")
-    parser.add_argument("--weights",   default="crnn_weights/best.pt")
-    parser.add_argument("--yolo",      default="staff_detector_files/weights/best.pt")
-    parser.add_argument("--soundfont", default="soundfont/piano.sf2",
+    parser.add_argument("--weights",   default="models/phase2_seed1.pt")
+    parser.add_argument("--yolo",      default="models/best.pt")
+    parser.add_argument("--soundfont", default="models/piano.sf2",
                         help="Path to .sf2 piano soundfont")
     parser.add_argument("--bpm",       type=int, default=DEFAULT_BPM,
                         help="Playback tempo in BPM")

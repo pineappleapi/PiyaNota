@@ -2,6 +2,33 @@
 PiyaNota - Stage 1: Image Preprocessing Pipeline
 """
 
+# DEFENSE INDEX: search "DEFENSE:" (Ctrl+F) to jump to each plain-English explanation below.
+#   DEFENSE: pipeline order          - the order of the steps inside preprocess_score_page and why it matters
+#   DEFENSE: lyric-blank guard       - why the old band-based lyric blanking refuses to run on noisy pages
+#   DEFENSE: small left border       - why the left border blank is narrower than the right (protect the clef)
+#   DEFENSE: final barline exemption - why the right border blank spares the end of each tracked staff (BUG-039)
+#   DEFENSE: strict perspective gate - why the page-corner warp only runs when the evidence is very strong
+#   DEFENSE: why track curves        - why each staff is followed as a curve instead of one global angle
+#   DEFENSE: 5 px dewarp threshold   - why the dewarp only runs when some staff drifts at least 5 px
+#   DEFENSE: 1600 px vs native       - why detection runs at 1600 px but strips are cut at native resolution
+#   DEFENSE: gray strips             - why strips are gray (not black/white) and erased ink is painted paper grey
+#   DEFENSE: non-staff ink mask      - what is erased (lyrics, titles, dust) and why beams/ties/rests survive
+#   DEFENSE: ledger notes kept       - how notes on ledger lines (off the staff) avoid being erased as text
+#   DEFENSE: untracked staff safety  - two guards so a staff the tracker missed is not erased
+#   DEFENSE: linear extrapolation    - why a staff curve is extended with a straight line past its ends
+#   DEFENSE: two image copies        - why one small copy (detection) and one big copy (strips) are kept
+#   DEFENSE: perspective first       - why the perspective warp runs on the color photo before anything else
+#   DEFENSE: illumination fix        - how shadows and uneven light are removed before thresholding
+#   DEFENSE: dewarp gray first       - why the dewarp is applied to the gray image, then re-binarized
+#   DEFENSE: restore staff rows      - why tracked staff rows are copied back after the blanking steps
+#   DEFENSE: no rotation after dewarp - why the global deskew is measured but not applied after a dewarp
+#   DEFENSE: mask decided again      - why the native page re-runs the mask instead of copying the 1600 px one
+#   DEFENSE: five equal lines        - why "5 evenly spaced lines" is the test for a staff
+#   DEFENSE: two-pass grouping       - why staff finding runs a strict pass, then a looser pass
+#   DEFENSE: vertical-only remap     - why the dewarp only moves pixels up/down, never left/right
+#   DEFENSE: deskew angle average    - why the deskew combines the staffline angle and the barline angle
+#   DEFENSE: lyric band heuristic    - how blank_lyrics_regions picks the rows under a staff to blank
+
 import logging
 import math
 from collections.abc import Callable
@@ -16,6 +43,9 @@ logger = logging.getLogger(__name__)
 
 
 # ── blank_lyrics_regions() safety guard thresholds ────────────────────────────
+# DEFENSE: lyric-blank guard. The old lyric blanking looks for long horizontal lines and treats
+# the space under each staff as lyrics. If it found too few lines, the page is too noisy to
+# trust, so it does nothing: leaving lyrics in is safer than erasing real music.
 # Calibrated against real staffline-mask output: a clean page reliably yields
 # ~5 raw line-bands per staff (5 stafflines), e.g. 40 for 8 staves. A page
 # where staffline detection has effectively failed (noisy/unnormalized camera
@@ -34,6 +64,9 @@ BG_NORM_KERNEL_SIZE = 91   # px; elliptical dilation kernel used to estimate loc
 BG_NORM_BLUR_KSIZE  = 3    # px; mild blur after normalization, to kill grain before thresholding
 BORDER_TOP_PX    = 30
 BORDER_BOTTOM_PX = 100
+# DEFENSE: small left border. Top/bottom/right bands remove shadows of hands, tables and the
+# book spine. The left band is tiny because the clef sits there, and losing the clef breaks
+# every pitch on that line.
 # Left is deliberately much smaller than right: the clef is almost always the
 # first symbol on a staff, sitting close to the left margin — an aggressive
 # left blank risks silently clipping it (infer_pitch() would then fall back
@@ -52,6 +85,9 @@ BORDER_RIGHT_PX  = 80
 BORDER_PROTECT_MARGIN_RATIO = 0.75
 
 # ── Side-border exemption at a tracked staff's right end (BUG-039) ────────────
+# DEFENSE: final barline exemption. The right border blank used to chop off the last barline of
+# camera staves. Now, inside a staff's own rows, it stops 2 line spacings past where the staff
+# was last seen: enough room for a double barline, too little to keep a shadow.
 # On camera pages the staves often run into the fixed BORDER_RIGHT_PX band (measured on the dev
 # pages: 41 camera staves end 3-87 px inside it at the 1600px page), and the blank cut them with a
 # vertical edge, erasing the final barline and the last stretch of staff line. The
@@ -61,6 +97,9 @@ BORDER_PROTECT_MARGIN_RATIO = 0.75
 BORDER_STAFF_END_MARGIN_SPACINGS = 2.0
 
 # ── Perspective correction (camera-photo specific) ────────────────────────────
+# DEFENSE: strict perspective gate. A photo taken at an angle makes the page look like a
+# trapezoid. We only "flatten" it when we clearly see 4 page corners covering most of the
+# photo with background around them. A wrong warp would bend every staff, so when unsure we skip.
 # Corrects keystone/perspective distortion from off-axis phone photography —
 # same rationale as oemer's own dewarp step. Deliberately strict: a missed or
 # false quad must never warp the image, since a bad warp corrupts staff
@@ -81,6 +120,9 @@ PERSPECTIVE_MIN_AREA_RATIO   = 0.6   # quad must cover >= this fraction of the f
 PERSPECTIVE_MIN_MARGIN_FRAC  = 0.015  # quad's bbox must be inset from every frame edge by this fraction of that edge's length
 
 # ── Staff-line tracking + page dewarp (camera-photo specific, BUG-001) ────────
+# DEFENSE: why track curves. A held phone photo bends the page, so one staff can be tilted one
+# way and the next staff another way. One rotation angle cannot fix that. So we follow each
+# staff's 5 lines across the page as its own curve, then straighten each staff separately.
 # Phone photos of a held/curled page are not just rotated: staves drift, curve
 # and change scale across the page (measured 3-4 deg tilt, up to ~80 px of
 # vertical drift per staff, and a curled corner on some pages). correct_to_grid()
@@ -120,6 +162,9 @@ STAFF_EXT_MIN_CONTRAST   = 0.25   # line-position ink minus between-line ink, re
 STAFF_EXT_MAX_MISSES     = 3      # consecutive failed steps before giving up
 STAFF_EXT_SLOPE_POINTS   = 5      # trailing points used to re-estimate the local slope
 STAFF_PROTECT_MARGIN_SPACINGS = 1.25  # rows kept around a tracked staff (ledger lines, clef tails) when undoing over-blanking
+# DEFENSE: 5 px dewarp threshold. Below 5 px of up/down drift a staff already fits inside a
+# straight box, so warping would only add interpolation blur and risk. Clean screenshots stay
+# untouched by the dewarp; only bent camera pages get it.
 DEWARP_MIN_DRIFT_PX      = 5.0    # skip dewarp unless some staff drifts at least this much (the dewarp step is a no-op on already-straight input; later masking still edits the page)
 STAFF_LINES_PER_STAFF    = 5
 STAFF_GROUP_TOL_ABS_PX   = 1.8    # 5-line grouping: absolute floor on the gap-match tolerance (px)...
@@ -131,6 +176,10 @@ STAFF_END_STATE_POINTS   = 8      # points nearest a track end used to estimate 
 KNOT_EPSILON_PX          = 1e-3   # per-knot nudge that keeps dewarp remap knots strictly increasing
 
 # ── Working resolutions ───────────────────────────────────────────────────────
+# DEFENSE: 1600 px vs native. Finding staves only needs the big shapes, so a 1600 px page is
+# fast and enough. But a rest stroke is only ~1.6 px wide at 1600 px and gets lost when turned
+# black/white. So strips are cut from the full-resolution photo, warped by the same geometry,
+# and only shrunk to 64 px tall at the very end.
 # Detection/tracking run on the 1600px page (every STAFF_* constant above was tuned there).
 # Strips are cut from a SECOND, native-resolution page built through the same perspective and
 # dewarp geometry. Measured (PIYA-121, DSMN page 1): downscaling the gray image and denoising
@@ -146,6 +195,9 @@ STRIP_SOURCE_BLUR_SIGMA_PER_SCALE = 0.4  # gaussian sigma per unit of native/det
 STRIP_SOURCE_BLUR_MIN_SIGMA_PX = 0.8
 STRIP_SOURCE_BLOCK_SIZE_1600 = 31  # adaptive-threshold block at 1600px (see _binarize); scaled with the page
 STRIP_SOURCE_THRESHOLD_C = 10     # same offset as _binarize
+# DEFENSE: gray strips. The CRNN learned on gray images, so we give it gray images. Erased ink is
+# painted with the nearby paper colour, not pure white, because a white patch on grey paper is
+# something the model never saw in training.
 # Strips are cut from the normalized GRAY page, not the binary one (PIYA-106 Phase 0b, frozen 2026-09-30,
 # docs/decisions/piya-106-ser-15-plan.md). The CRNN was trained on gray renders: our binarization multiplied
 # its SER ~4x on distorted Camera-PrIMuS and created speck-driven phantom dots/accidentals on photos. The binary
@@ -158,6 +210,10 @@ PAPER_FILL_SIGMA_1600 = 12.0     # px at DETECT_MAX_DIM; paper window wider than
 PAPER_FILL_MIN_WEIGHT = 1e-3     # below this paper weight the local estimate is undefined -> page median paper
 
 # ── Non-staff ink (lyric/text) mask, run once on the straightened page ────────
+# DEFENSE: non-staff ink mask. Rule in one sentence: keep ink that touches a staff, erase ink
+# that floats free. Beams, ties, flags and rests are kept because they are physically joined
+# to notes on the staff (small gaps are bridged). Lyrics and titles float between staves, so
+# they are erased.
 # Everything that is neither a tracked staff nor connected to one is removed. "Connected"
 # means: a component of the ink (nothing subtracted, so beams/ties/rests cannot be cut off
 # their stems or noteheads by a line-removal step) that has a pixel within MASK_ATTACH_TOL_SPACINGS
@@ -165,6 +221,9 @@ PAPER_FILL_MIN_WEIGHT = 1e-3     # below this paper weight the local estimate is
 # opening treated thin flat beams and long ties as neighbouring staff lines.
 MASK_ATTACH_TOL_SPACINGS = 0.75  # x line spacing; ink this close to a band counts as touching the staff
 MASK_LINK_RADIUS_SPACINGS = 0.2  # x line spacing; gaps this small between ink pieces (ties/heads) are bridged
+# DEFENSE: ledger notes kept. A very high or low note sits on a short extra line away from the
+# staff, so the "touches a staff" rule alone would erase it. These constants describe its
+# shape (small blob crossed by one short line) so it is kept, while lyric underlines are not.
 # Ledger-line notes: a notehead centred on a short ledger line floats 1+ spacings off the staff
 # yet is content. Told apart from text by shape: compact glyph with ink on BOTH sides of one
 # short horizontal line (a lyric extender/underscore has ink only above it).
@@ -183,6 +242,7 @@ LEDGER_MAX_LINE_SPACINGS = 0.3
 LEDGER_CHAIN_MAX_LINES = 4
 LEDGER_CHAIN_ROW_TOL_SPACINGS = 0.25  # x line spacing; tolerance on the k-spacing row position
 LEDGER_CHAIN_MIN_OVERLAP_FRAC = 0.5   # fraction of a run that must sit over the previous run
+# DEFENSE: untracked staff safety (guard 1 of 2; guard 2 is the recount in preprocess_score_page).
 # A staff the tracker missed has no band, so its ink would be deleted as "not attached". Any
 # unattached component this wide that contains several long horizontal runs is staff-like and kept.
 MASK_STAFFLIKE_MIN_WIDTH_FRAC = 0.15  # x page width
@@ -190,6 +250,8 @@ MASK_STAFFLIKE_MIN_RUNS = 3
 STAFFLIKE_RUN_SPACINGS = 6.0  # a 'long horizontal run' is at least this many line spacings
 
 
+# DEFENSE: linear extrapolation. A curve fitted to the middle of a staff can shoot off wildly if
+# you follow it past the last measured point, so beyond the ends we continue in a straight line.
 @dataclass
 class StaffCurve:
     """One tracked 5-line staff: center-line and line-spacing as functions of x.
@@ -517,6 +579,10 @@ def preprocess_score_page(
     Returns:
         A PreprocessedPage.
     """
+    # DEFENSE: pipeline order. Shrink -> flatten perspective -> gray -> remove shadows -> denoise
+    # -> black/white -> find and straighten staves -> blank borders -> erase non-staff ink ->
+    # blank lyrics -> put staff rows back -> build the native strip page -> measure/fix tilt.
+    # Geometry is fixed before anything that assumes straight, horizontal staves.
     img_path = Path(image_path)
     full = cv2.imread(str(img_path))
     if full is None:
@@ -524,6 +590,9 @@ def preprocess_score_page(
 
     # Step 0: Downscale large phone images to the detection size; keep a native-resolution copy
     # (capped at STRIP_SOURCE_MAX_DIM) for the strip source.
+    # DEFENSE: two image copies. `bgr` (<= 1600 px) is for finding staves; `hi` (<= 4032 px) is
+    # for cutting strips. pre_k is the size ratio between them, used to apply every later warp
+    # to `hi` in exactly the same way.
     bgr = full
     ph, pw = bgr.shape[:2]
     if max(ph, pw) > DETECT_MAX_DIM:
@@ -537,6 +606,8 @@ def preprocess_score_page(
         hi = cv2.resize(full, (int(pw * scale), int(ph * scale)), interpolation=cv2.INTER_AREA)
     pre_k = (hi.shape[1] / bgr.shape[1], hi.shape[0] / bgr.shape[0])
 
+    # DEFENSE: perspective first. The page edges are only visible in the original photo; after
+    # thresholding they are gone. And the later deskew can only rotate, not undo a trapezoid.
     # Step 0.5: Perspective correction — must run here, on the raw color image,
     # for two reasons: (1) it needs intact page-boundary edges to find the quad
     # via Canny, and Step 1-3 (grayscale/normalize/threshold) exist to isolate
@@ -563,6 +634,9 @@ def preprocess_score_page(
 
     # Step 1.5: Illumination normalization — corrects uneven lighting/shadow
     # gradients common in phone photos, before thresholding ever sees them.
+    # DEFENSE: illumination fix. A wide "dilate" on the gray image keeps the brightest nearby
+    # pixel, which is the paper, so thin ink vanishes and `bg` is a map of the lighting alone.
+    # Dividing by it makes paper evenly white everywhere, so shadows stop looking like ink.
     bg = cv2.morphologyEx(
         gray, cv2.MORPH_DILATE,
         cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (BG_NORM_KERNEL_SIZE, BG_NORM_KERNEL_SIZE))
@@ -585,6 +659,10 @@ def preprocess_score_page(
     # denoised grayscale and re-binarized, not to the binary image, so thin
     # stafflines are interpolated rather than aliased. Skipped (bit-identical
     # to the old path) when no staff drifts >= DEWARP_MIN_DRIFT_PX.
+    # (Note: only the dewarp step itself is skipped; the later non-staff mask still edits the
+    # page, so the final output is not bit-identical to the pre-2026-09-25 path.)
+    # DEFENSE: dewarp gray first. Warping a black/white image makes thin lines jagged or broken.
+    # Warping the smooth gray image and thresholding afterwards keeps the lines clean.
     curves = track_staff_curves(binary)
     dewarped = needs_dewarp(curves)
     map_y: np.ndarray | None = None
@@ -641,6 +719,8 @@ def preprocess_score_page(
         candidate[candidate_remove] = 255
         # A staff the tracker missed has no band; the staff-like rule protects most of those and
         # this recount catches any that would still be damaged.
+        # DEFENSE: untracked staff safety (guard 2 of 2). Re-run the staff tracker on the masked
+        # page; if it now finds fewer staves, the mask hurt real music, so the mask is thrown away.
         if len(track_staff_curves(candidate)) >= len(curves):
             remove, removed_px = candidate_remove, int(candidate_remove.sum())
             print(f"[Mask] {len(staves)} tracked staff(s): removed {removed_px} px of non-staff ink.")
@@ -656,6 +736,9 @@ def preprocess_score_page(
     # strips do not use this page's ink, they come from the strip source).
     binary = blank_lyrics_regions(binary)
 
+    # DEFENSE: restore staff rows. The older blanking rules guess by rows and sometimes wipe a
+    # whole staff on camera pages. The tracker's staves are proven 5-line staves, so their rows
+    # (plus a margin for ledger lines) are copied back from before the blanking.
     # Step 3.3: Undo blanking that erased tracked staves (BUG-001). The band
     # heuristics above merge/misjudge bands on camera pages and wipe whole staves
     # (e.g. a tenor staff between two lyric lines). The tracker's staves are
@@ -680,6 +763,9 @@ def preprocess_score_page(
     # After a dewarp the staves are horizontal by construction; a further global
     # rotation (esp. the barline-angle average, which measures perspective lean,
     # not staff tilt) would only re-tilt them, so angles are measured but not applied.
+    # DEFENSE: no rotation after dewarp. The dewarp already made every staff level; rotating
+    # again would tilt them back. Without a dewarp, the same rotation is also applied to the
+    # native strip pages so they stay aligned with the detection page.
     corrected, h_angle, v_angle = correct_to_grid(binary, bgr, apply_rotation=not dewarped)
     _dbg_save(save_debug, img_path, corrected, "4_corrected")
     print(f"[Stage 1] '{img_path.name}' -> h={h_angle:.2f} deg v={v_angle:.2f} deg")
@@ -735,6 +821,9 @@ def _build_strip_source(hi: np.ndarray, bg: np.ndarray, map_y: np.ndarray | None
         The display gray is the same page with only the border filled (lyrics kept); None unless
         ``build_display``.
     """
+    # DEFENSE: mask decided again. The big page has detail the 1600 px page lost (thin strokes,
+    # tiny dust), so the keep/erase decision is made again on the big page's own ink, using the
+    # same staff positions scaled up.
     gray = cv2.cvtColor(hi, cv2.COLOR_BGR2GRAY)
     h, w = gray.shape
     scale = h / bg.shape[0]
@@ -979,6 +1068,8 @@ def _group_five_lines(peaks: list[float]) -> list[tuple[float, float]]:
     lyric underscores, hairpins, beams and text baselines, none of which
     come in evenly spaced fives.
     """
+    # DEFENSE: five equal lines. Start at a line, guess the gap to the next line, then check the
+    # next three lines land at the same gap. Five lines with equal gaps is the staff signature.
     found: list[tuple[float, float]] = []
     n, i = len(peaks), 0
     while i < n - (STAFF_LINES_PER_STAFF - 1):
@@ -1280,6 +1371,9 @@ def track_staff_curves(binary: np.ndarray) -> list[StaffCurve]:
         block_rows.append((x0 + STAFF_BLOCK_WIDTH / 2.0, _find_line_rows(profile)))
 
     # Pass 1 (strict) only estimates the page's typical spacing; pass 2 finds the staves.
+    # DEFENSE: two-pass grouping. The strict pass misses bent staves but is rarely fooled, so it
+    # is trusted to learn the page's normal line gap. Knowing that gap, the second pass can
+    # accept slightly uneven staves (one off line allowed) without accepting random lines.
     strict = [d for _, rows in block_rows for _, d in _group_five_lines(rows)]
     if not strict:
         return []
@@ -1354,6 +1448,9 @@ def staff_grid_map(shape: tuple[int, int], curves: list[StaffCurve]) -> np.ndarr
     Returns:
         float32 (h, w) array: source row for every output pixel.
     """
+    # DEFENSE: vertical-only remap. The problem is staves bending up and down, so each pixel
+    # column is only slid up/down. Each staff's top and bottom line are pinned to a straight
+    # target height; rows between staves are stretched evenly in between.
     h, w = shape[:2]
     half = (STAFF_LINES_PER_STAFF - 1) / 2.0  # staff spans center +/- 2 spacings
     xs = np.arange(w, dtype=np.float64)
@@ -1459,7 +1556,20 @@ GRID_ROTATION_MIN_DEG = 0.3  # smaller global rotations are measurement noise an
 
 
 def grid_correction_deg(h_angle: float, v_angle: float) -> float:
-    """Global rotation (degrees) correct_to_grid applies; shared so the strip source matches."""
+    """Global rotation (degrees) correct_to_grid applies; shared so the strip source matches.
+
+    Args:
+        h_angle: Median staffline tilt from horizontal (degrees).
+        v_angle: Median barline tilt from vertical (degrees).
+
+    Returns:
+        ``h_angle`` alone when the barline tilt is below GRID_ROTATION_MIN_DEG (no barlines found,
+        or they already look upright), otherwise the mean of the two angles.
+    """
+    # DEFENSE: deskew angle average. If the page is rotated, stafflines tilt from horizontal and
+    # barlines tilt from vertical by the same amount, so both measure the same rotation. When
+    # the barlines show a real tilt, averaging two independent measurements is steadier on phone
+    # photos than trusting stafflines alone.
     return h_angle if abs(v_angle) < GRID_ROTATION_MIN_DEG else (h_angle + v_angle) / 2.0
 
 
@@ -1469,8 +1579,15 @@ def correct_to_grid(binary: np.ndarray, bgr: np.ndarray, apply_rotation: bool = 
     and barlines (vertical) as references. Replaces has_page_boundary logic.
 
     Args:
+        binary: Binarized page (ink = 0).
+        bgr: Color page (currently unused; kept for the call signature).
         apply_rotation: When False, only measures and returns the angles (used
             after dewarp_to_staff_grid(), which already made staves horizontal).
+
+    Returns:
+        (page, h_angle, v_angle): the page rotated by grid_correction_deg() when that
+        rotation exceeds GRID_ROTATION_MIN_DEG and apply_rotation is True (else a copy),
+        plus the measured staffline and barline angles in degrees.
     """
     h, w = binary.shape
     ink = cv2.bitwise_not(binary)
@@ -1679,6 +1796,23 @@ def _blank_border_if_no_staff(binary: np.ndarray, top_px: int, bottom_px: int) -
 
 
 def blank_lyrics_regions(binary: np.ndarray) -> np.ndarray:
+    """Blanks the band of rows below each staff group, where lyrics are printed.
+
+    Older, row-based heuristic, still run on the detection page. Rows it wrongly erases
+    inside a tracked staff are restored afterwards by _restore_staff_rows.
+
+    Args:
+        binary: Binarized page (ink = 0).
+
+    Returns:
+        A copy with the lyric bands painted white, or ``binary`` unchanged when staff-band
+        detection is unreliable on this page.
+    """
+    # DEFENSE: lyric band heuristic. Lyrics sit in the gap between one staff and the next. The
+    # blank starts 0.6 staff heights below a staff (so notes hanging below are kept) and stops
+    # 0.9 staff heights above the next staff (1.0 when the gap is wider than 150 px; the last
+    # staff blanks down to the page bottom), never more
+    # than MAX_BLANK_HEIGHT_RATIO staff heights in one zone.
     h, w = binary.shape
 
     merged = _detect_staff_bands(binary, context="lyric-blank")

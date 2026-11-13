@@ -17,6 +17,36 @@ Timeline model (why it is bar-anchored, not duration-anchored):
     resolved is reported in the returned report / logged -- never absorbed.
 """
 
+# DEFENSE INDEX: Ctrl+F "DEFENSE: <topic>" to jump to each explanation below.
+#   DEFENSE: tick scale          -- why 480 ticks per quarter must match Stage 5
+#   DEFENSE: default meter       -- why a "4/4" from Stage 3 is not trusted as evidence
+#   DEFENSE: tolerance           -- why bar totals may be off by 10 ticks and still count
+#   DEFENSE: hand-set priors     -- every threshold here is a guess, not fit to data
+#   DEFENSE: empty voice         -- why one missing voice does not fail the conversion
+#   DEFENSE: pipeline order      -- the order of steps inside reconstruct_satb_with_report
+#   DEFENSE: strip key           -- why events are grouped by (page, system)
+#   DEFENSE: chord counting      -- why a chord's notes count once in a bar total
+#   DEFENSE: meter consensus     -- how one time signature is picked per system
+#   DEFENSE: meter check         -- why a meter change is checked against bar totals
+#   DEFENSE: bar count vote      -- how the number of bars in a system is decided
+#   DEFENSE: global ticks        -- each system starts at pickup + previous bars x bar length
+#   DEFENSE: pickup grid         -- what counts as a legal pickup length
+#   DEFENSE: pickup excess       -- the structural "one extra short bar" pickup pre-check
+#   DEFENSE: pickup score        -- how each pickup candidate earns points
+#   DEFENSE: pickup accept       -- the score >= 2.0 and lead >= 0.75 rule, else ask the user
+#   DEFENSE: pickup deviants     -- what happens to voices that disagree with the pickup
+#   DEFENSE: bar offset          -- why each event keeps only its offset inside its own bar
+#   DEFENSE: local fallback      -- what happens when a voice's bar count is untrusted
+#   DEFENSE: pickup alignment    -- right-aligning the pickup so bar 1 lines up in all voices
+#   DEFENSE: split-stem divisi   -- a bar about twice as long while the other voices fit
+#   DEFENSE: overflow repair     -- why an over-long bar is repaired instead of dropped
+#   DEFENSE: run scaling         -- squeezing a run of equal notes (triplet or even spread)
+#   DEFENSE: missing barline     -- a bar worth exactly 2+ bars is clipped, not squeezed
+#   DEFENSE: confidence drop     -- why CRNN confidence is only a last-resort tie-break
+#   DEFENSE: slur is tie         -- why a slur from the CRNN is read as a tie
+#   DEFENSE: tie merge           -- why only same-pitch adjacent notes merge into one sound
+#   DEFENSE: tenor range         -- why a too-high Tenor note signals a clef misread
+
 from collections import Counter, defaultdict
 from typing import Any, Optional
 
@@ -26,18 +56,27 @@ Flag = dict[str, Any]
 # ── Expected voices ───────────────────────────────────────────────────────────
 VOICES = ["Soprano", "Alto", "Tenor", "Bass"]
 
+# DEFENSE: tick scale
+# A "tick" is the smallest unit of time; 480 ticks = one quarter note. Stage 3,
+# Stage 4 and Stage 5 must all use the same number, otherwise Stage 5 would
+# play every note too long or too short. 480 divides evenly by 2, 3, 4, 8 and
+# 16, so eighths, sixteenths, dotted notes and triplets are whole ticks.
 # Must equal stage5_synthesis.PPQ and the tick scale of stage3_transcription's
 # NOTE_DURATION_TICKS (whole = 4 quarters). The Stage 5 half is enforced by the
 # import-time RuntimeError in stage5_synthesis.py.
 TICKS_PER_QUARTER = 480
 WHOLE_NOTE_TICKS = 4 * TICKS_PER_QUARTER
 
+# DEFENSE: default meter
+# Stage 3 writes "4/4" whenever it saw no time signature on a strip. Because of
+# that, "4/4" alone cannot prove the music is really in 4/4.
 # Mirrors stage3_transcription.DEFAULT_TIME_SIGNATURE (not imported: Stage 3
 # pulls in torch). Stage 3 stamps this on any strip with no explicit meter
 # token -- i.e. every continuation system -- so it cannot be read as evidence
 # of a real 4/4; see _consensus_time_signatures().
 DEFAULT_TIME_SIGNATURE = "4/4"
 
+# DEFENSE: tolerance
 # Tick tolerance for the per-bar duration check below.
 # 10 ticks (~1/48 of a quarter note at PPQ=480) absorbs int() truncation
 # from repeated dotted-note (*1.5) rounding without masking a genuine
@@ -86,6 +125,10 @@ ACTION_TIE_MERGED = "tie_merged"
 # Flags that also carry review_needed=True ask the user to confirm/fix the
 # bar; a flag without the key is informational (treat as review_needed=False).
 
+# DEFENSE: hand-set priors
+# Plain words: the numbers below were picked by hand so that small hand-made
+# test cases behave sensibly. They were not learned from data and were not
+# checked on a held-out set, so they are reasonable guesses, not measured facts.
 # -- Calibration status of every threshold below ---------------------------
 # ALL thresholds and weights in this module are hand-set priors, NOT fit to
 # data, and none has held-out validation: the pickup evidence scores (2.0 floor,
@@ -96,6 +139,10 @@ ACTION_TIE_MERGED = "tie_merged"
 # sensibly. Treat them as guesses to be tuned on a real held-out set of
 # engraved SATB systems before anyone quotes an accuracy for this stage.
 
+# DEFENSE: pickup grid
+# A pickup (anacrusis) is the short incomplete bar before bar 1. Its length must
+# be a whole number of sixteenth notes (120 ticks): anything else is not a
+# length a composer could write, so it is more likely a misread.
 # Pickup validity: whole multiples of a sixteenth (dotted eighth = 3 units is
 # legal; an eighth-only grid would wrongly reject it), and at least one unit.
 PICKUP_UNIT_TICKS = WHOLE_NOTE_TICKS // 16
@@ -133,6 +180,9 @@ SPLIT_STEM_RATIO_MAX = 2.25
 VOICE_RUN_SCALING_FRACTION = 0.25
 MIN_BARS_FOR_VOICE_FLAG = 4
 # Pickup evidence scoring (see _score_pickup_candidate / _decide_pickups).
+# (All values in this block are hand-set priors; see "DEFENSE: hand-set priors".)
+# Rough scale: one agreeing voice is worth 0.75 points, so 2.0 needs about
+# three pieces of agreeing evidence before a pickup is accepted.
 # Accept the best candidate only with this much total evidence and this lead
 # over the runner-up; below that the pickup is refused and suggested instead.
 PICKUP_MIN_SCORE = 2.0
@@ -166,7 +216,11 @@ PICKUP_STANDARD_LENGTHS = {
     "3/4": {480, 960, 720},
     "6/8": {240, 720},
 }
+# DEFENSE: tenor range
 # Tenor sounds an octave below written; written A4 (MIDI 69) -> 57.
+# A tenor part rarely goes above written A4, so even one note above 57 often
+# means Stage 3 read the wrong clef and shifted the whole voice. One flag is
+# raised for the voice (it only asks for review); see _flag_tenor_range.
 TENOR_MAX_SOUNDING_MIDI = 57
 
 # Per-bar meters (Task 3, 2026-11-04 plan). Used only when Stage 3 stamps time_signature_source on its events
@@ -198,6 +252,9 @@ def reconstruct_satb(voice_events: dict) -> dict:
 
     Raises:
         ValueError if any voice sequence is missing or empty.
+        (Note: since PIYA-108 the wrapped function raises only when ALL four
+        voices are missing or empty; one to three empty voices come back as
+        [] and are listed in the report's failed_voices.)
     """
     satb, _report_data = reconstruct_satb_with_report(voice_events)
     return satb
@@ -241,6 +298,12 @@ def reconstruct_satb_with_report(voice_events: dict) -> tuple[dict, dict]:
     """
     print("\n[Stage 4] Reconstructing SATB part sequences...")
 
+    # DEFENSE: empty voice
+    # If Stage 2/3 could not read one voice (for example a faint Bass staff),
+    # the singers of the other three voices still get their tracks. Failing the
+    # whole conversion would throw away good work. The empty voice is listed in
+    # failed_voices so the app can tell the user. Only when no voice was read
+    # at all is there nothing to play, so only then we raise.
     failed = [v for v in VOICES if not voice_events.get(v)]
     if len(failed) == len(VOICES):
         raise ValueError(
@@ -251,6 +314,12 @@ def reconstruct_satb_with_report(voice_events: dict) -> tuple[dict, dict]:
         print(f"[Stage 4] WARNING: no events for {failed}; continuing with the "
               "other voices (reported as failed voices)")
 
+    # DEFENSE: pipeline order
+    # 1) group events by (page, system); 2) plan the bar layout of the whole
+    # piece first (meters, bar counts, pickup) WITHOUT moving any note; 3) place
+    # each voice-strip onto the shared timeline, repairing bad bars; 4) merge
+    # ties; 5) add whole-piece warning flags. Planning before placing means every
+    # voice is placed against the same bar grid.
     flags: list[Flag] = []
     strips = _split_into_strips(voice_events)
     layout, pickup_ticks, voice_pickup = _plan_layout(strips, flags)
@@ -306,6 +375,10 @@ def _bar_ticks(time_signature: str) -> int:
     return num * WHOLE_NOTE_TICKS // den
 
 
+# DEFENSE: strip key
+# Stage 3 restarts its tick count at 0 on every staff strip, so tick 0 appears
+# once per system. Grouping by (page_index, sys_idx) keeps systems apart; the
+# original tick is saved as local_tick_onset before it is replaced later.
 def _split_into_strips(voice_events: dict) -> dict:
     """
     {(page_index, sys_idx): {voice: [event copies sorted by local tick]}}.
@@ -327,6 +400,10 @@ def _split_into_strips(voice_events: dict) -> dict:
     return strips
 
 
+# DEFENSE: chord counting
+# Notes played together start at the same tick. A bar's length is how much
+# time passes, not how many notes there are, so each start tick is counted
+# once, using its longest note.
 def _measure_ticks(events: list) -> int:
     """
     Summed duration of one measure's events.
@@ -357,6 +434,11 @@ def _measures(events: list) -> Optional[dict]:
     return dict(sorted(grouped.items()))
 
 
+# DEFENSE: meter consensus
+# Legacy path (Stage 3 did not mark where a meter came from). The first system
+# takes its most common meter. A later system changes it only if its most
+# common meter (a tie goes to the non-default one) is not 4/4, because "4/4" there
+# usually just means "no time signature printed on this line".
 def _consensus_time_signatures(strips: dict) -> dict:
     """
     One time signature per strip key.
@@ -516,6 +598,11 @@ def _system_ticks(info: dict) -> int:
     return sum(_bar_len(info, r) for r in range(info["n_bars"]))
 
 
+# DEFENSE: meter check
+# All voices are read by the same CRNN, so they can all misread the same time
+# signature in the same way. The bar totals are a second, independent check:
+# if the notes after a meter change still fill the OLD bar length better than
+# the new one, the change is flagged for the user (not undone automatically).
 def _flag_meter_duration_mismatch(strips: dict, layout: dict, flags: list) -> None:
     """Flags a meter change the bars themselves do not support (review_needed).
 
@@ -610,6 +697,11 @@ def _plan_layout(strips: dict, flags: list) -> tuple[dict, int, dict]:
             n_by_voice[voice] = max(
                 (mi - base) + _measure_span(measures[mi], bar_ticks)
                 for mi in indices if mi >= base)
+        # DEFENSE: bar count vote
+        # Every voice of one system must have the same number of bars. If one
+        # voice missed or invented a barline, the count most voices agree on
+        # wins (a tie goes to the larger count) and that voice is placed by
+        # its own ticks instead (see "DEFENSE: local fallback").
         counts = Counter(n_by_voice.values())
         n_bars = max(counts, key=lambda n: (counts[n], n)) if counts else 0
         bases = {v: voice_base[(key, v)] for v in n_by_voice}
@@ -630,6 +722,10 @@ def _plan_layout(strips: dict, flags: list) -> tuple[dict, int, dict]:
     # JSON-serialisable).
     layout[first_key]["pickup_suffix_ok"] = sorted(suffix_ok)
 
+    # DEFENSE: global ticks
+    # Each system starts where the previous bars end: pickup + the sum of all
+    # earlier bar lengths (taken from the time signature, not from the notes).
+    # So a misread note can never push a later system later in time.
     running = pickup_ticks
     bar_no = 1
     for key in sorted(layout):
@@ -705,6 +801,12 @@ def _first_bar_observations(strips: dict, first_key: tuple,
     return obs
 
 
+# DEFENSE: pickup excess
+# Example: the Tenor sings a 1-beat pickup while the other voices rest. Stage 3
+# writes nothing for a rest-only pickup, so the other voices look like they
+# start on bar 1. The Tenor then has one more bar than them, and its extra
+# ticks equal exactly its short first bar. That pattern is strong structural
+# evidence of a real pickup, so it adds bonus points to that candidate.
 def _excess_bar_pickup(strips: dict[tuple, dict[str, list[Event]]],
                        first_key: tuple[int, int], obs: dict[str, dict],
                        bar_ticks: int) -> Optional[dict[str, Any]]:
@@ -759,7 +861,35 @@ def _score_pickup_candidate(length: int, obs: dict[str, dict],
                             final: dict[str, int], bar_ticks: int, meter: str,
                             excess: Optional[dict[str, Any]] = None
                             ) -> dict[str, Any]:
-    """Evidence score for "the pickup is `length` ticks" (0 = no pickup)."""
+    """Evidence score for "the pickup is `length` ticks" (0 = no pickup).
+
+    Args:
+        length: The candidate pickup length in ticks (0 = no pickup).
+        obs: Per-voice first-bar observations from _first_bar_observations().
+        final: {voice: ticks of its last bar} from _final_bar_ticks().
+        bar_ticks: Length of one full bar in the opening meter.
+        meter: The opening time signature, e.g. "3/4".
+        excess: The _excess_bar_pickup() result, or None.
+
+    Returns:
+        A dict with the candidate's ticks, score, voters, unweighted vote
+        count, complement_voices, standard (bool) and suffix_ok voices.
+    """
+    # DEFENSE: pickup score
+    # Points are added for each piece of evidence (all weights are hand-set
+    # priors, see "DEFENSE: hand-set priors"):
+    #   - votes: each voice whose first bar has this length (+0.75; a rest-only
+    #     bar half that). For "no pickup", each voice with a full first bar.
+    #   - suffix: a voice whose shorter first bar looks like this pickup with
+    #     its first note(s) lost (+half a vote).
+    #   - complement: composers usually shorten the final bar so pickup + final
+    #     bar = one full bar; each voice whose final bar does that (+1, max 2).
+    #   - excess: the structural pre-check agrees (+1 per voice, max 2).
+    #   - rhythm: pairs of voices with the same rhythm in that bar (+0.5, max 1).
+    #   - standard: a common pickup length such as one beat (+0.5), or at least
+    #     a whole number of eighths (+0.25).
+    #   - "no pickup" always gets a small head start (+0.75), because most
+    #     pieces have no pickup.
     tol = DURATION_MISMATCH_TOLERANCE_TICKS
     score, unweighted = 0.0, 0.0
     voters: list = []
@@ -943,6 +1073,12 @@ def _decide_pickups(strips: dict, meters: dict, first_key: tuple,
 
     short_voices = {v: o["ticks"] for v, o in obs.items()
                     if o["kind"] in ("sounding", "rest")}
+    # DEFENSE: pickup accept
+    # A pickup moves every note of the piece, so a wrong one damages a lot.
+    # The best candidate must have enough evidence (score >= 2.0) AND beat the
+    # runner-up clearly (lead >= 0.75). If not, we do not guess: the short
+    # first bar is played as bar 1 and a pickup_suspect flag shows the user
+    # the top candidates and a suggested length to confirm.
     accepted = (best["score"] >= PICKUP_MIN_SCORE
                 and margin >= PICKUP_MIN_MARGIN)
     if not accepted or best["ticks"] == 0:
@@ -964,6 +1100,11 @@ def _decide_pickups(strips: dict, meters: dict, first_key: tuple,
                  candidates=summaries, suggested_pickup_ticks=suggested)
         return {}, 0, set()
 
+    # DEFENSE: pickup deviants
+    # Once a pickup is accepted, voices that disagree are not allowed to change
+    # it. A full first bar is left unshifted and flagged (probably a wrong
+    # barline in that voice). A shorter or longer sounding bar is still lined
+    # up on the downbeat (see "DEFENSE: pickup alignment") and flagged.
     agreed = best["ticks"]
     voice_pickup: dict = {}
     deviants: list = []
@@ -1065,7 +1206,9 @@ def _flag_unreadable_voices(voice_events: dict, flags: list) -> None:
 
 
 def _flag_tenor_range(events: list, flags: list) -> None:
-    """Tenor sounding above written A4 usually means a clef misread
+    """See "DEFENSE: tenor range" at TENOR_MAX_SOUNDING_MIDI.
+
+    Tenor sounding above written A4 usually means a clef misread
     (BUG-011); pitch inference is clef-relative, so the error is uniform and
     silent."""
     high = [e for e in events if e["type"] == "note"
@@ -1131,6 +1274,12 @@ def _place_voice_strip(
             entry["review_needed"] = True
         flags.append(entry)
 
+    # DEFENSE: local fallback
+    # If this voice's bar count disagrees with the other voices, we do not know
+    # which of its bars is which, so bar anchoring would put notes in the wrong
+    # bars. Its own running ticks are still usable, so the strip is placed from
+    # the system start by those ticks, cut at the system end so it cannot spill
+    # into the next system, and flagged for review.
     if measures is None or info["voice_bars"].get(voice) != info["n_bars"]:
         if measures is None:
             flag(FLAG_NO_MEASURES, None, None, None,
@@ -1173,6 +1322,11 @@ def _place_voice_strip(
         _normalise_whole_rest(m_events, bar_ticks)
         first_local = min(e["local_tick_onset"] for e in m_events)
         total = _measure_ticks(m_events)
+        # DEFENSE: pickup alignment
+        # The pickup bar is right-aligned: it ENDS exactly on bar 1's downbeat
+        # (origin = pickup_ticks - total). A shorter pickup gets silence in
+        # front; a longer one keeps only its last notes, so nothing sounds
+        # before tick 0. Either way bar 1 starts at the same tick in every voice.
         if mi < base:
             if abs(total - pickup_ticks) > DURATION_MISMATCH_TOLERANCE_TICKS:
                 own_total = total
@@ -1220,6 +1374,11 @@ def _place_voice_strip(
                              "bar shorter than the time signature (dropped "
                              "note/rest?); remainder plays as silence",
                              "none")
+                # DEFENSE: split-stem divisi
+                # One voice's bar is about two bars long while the other three
+                # fit: likely two singers' rhythms on one staff, read one after
+                # the other. Squeezing would mix them up, so we play only up to
+                # the bar end and flag it.
                 elif split_ranks and rank in split_ranks:
                     m_events, dropped = _clip_to_bar(
                         m_events, first_local, bar_ticks)
@@ -1246,6 +1405,11 @@ def _place_voice_strip(
                         m_events, first_local, bar_ticks, total)
                     flag(kind, bar_no, bar_ticks, total, detail, action,
                          review_needed=True)
+        # DEFENSE: bar offset
+        # Global tick = start of this bar + how far the note is inside its own
+        # bar. The note's position in earlier bars is ignored, so if Stage 3
+        # misread a rhythm in bar 5, only bar 5 is wrong; bar 6 still starts on
+        # time and stays in step with the other three voices.
         for e in m_events:
             e["tick_onset"] = origin + (e["local_tick_onset"] - first_local)
             e["global_bar"] = bar_no
@@ -1365,6 +1529,13 @@ def _rescale_slots(slots: list, i0: int, i1: int, target_total: int) -> None:
             e["local_tick_onset"] -= shift
 
 
+# DEFENSE: run scaling
+# The CRNN most often miscounts a row of equal notes (e.g. beamed eighths) or
+# misses a triplet mark. So if the bar has a run of >= 3 equal-length slots,
+# that run is squeezed to absorb the extra time: exactly 2/3 if it reads as a
+# triplet (3 notes in the time of 2), otherwise spread evenly. Every note is
+# still played; nothing is dropped. A squeeze beyond 1/3, or slots shorter
+# than 60 ticks, is not believable, so then the next repair step is tried.
 def _repair_by_run(m_events: list[Event], slots: list[dict],
                    runs: list[tuple[int, int]], first_local: int,
                    bar_ticks: int, overshoot: int
@@ -1575,6 +1746,13 @@ def _repair_overflow(m_events: list, first_local: int, bar_ticks: int,
          better explanation.)
        - otherwise clip at the bar end, listing dropped notes.
     """
+    # DEFENSE: overflow repair
+    # A bar with too much music is repaired, never the reason to stop. If we
+    # failed the whole conversion, one misread bar would cost the user all
+    # four tracks. If we did nothing, the extra notes would overlap the next
+    # bar and play out of step with the other voices. So the bar is made to fit
+    # exactly, the cheapest likely explanation is tried first, and every repair
+    # is flagged review_needed so the user can see and fix it.
     single = _try_single_token_repair(m_events, first_local, bar_ticks)
     if single is not None:
         return single
@@ -1587,6 +1765,10 @@ def _repair_overflow(m_events: list, first_local: int, bar_ticks: int,
         if repaired is not None:
             return repaired
 
+    # DEFENSE: missing barline
+    # A bar that holds exactly 2, 3, ... bars' worth of music is most likely
+    # two bars whose barline Stage 3 missed, not a tuplet. Squeezing it would
+    # play two bars at double speed, so it is clipped to one bar instead.
     k = round(total / bar_ticks)
     if k >= 2 and abs(total - k * bar_ticks) <= DURATION_MISMATCH_TOLERANCE_TICKS:
         kept, dropped = _clip_to_bar(m_events, first_local, bar_ticks)
@@ -1611,6 +1793,12 @@ def _repair_overflow(m_events: list, first_local: int, bar_ticks: int,
                 "(BUG-015). Scaled into the bar, nothing dropped.",
                 ACTION_COMPRESSED)
 
+    # DEFENSE: confidence drop
+    # CRNN confidence is not calibrated and can be confidently wrong (BUG-011),
+    # so it is used only here, as the last tie-break: when the extra time equals
+    # one note's value (a quarter or shorter) and there is no run to squeeze,
+    # drop the matching note the model was least sure about.
+    # The flag says it is a guess.
     note_events = [e for e in m_events if e["type"] == "note"]
     if (not runs and note_events
             and all(_has_confidence(e) for e in note_events)
@@ -1657,6 +1845,13 @@ def _note_label(e: dict) -> str:
     return str(e.get("note_id") or e.get("symbol") or f"tick {e['tick_onset']}")
 
 
+# DEFENSE: slur is tie
+# A tie joins two notes of the SAME pitch into one longer sound; a slur over
+# different pitches is only a phrasing mark and does not change the sound.
+# The CRNN was trained on Camera-PrIMuS, where every slur mark is really a tie,
+# so it has never seen a phrase slur. We therefore turn a slur into a tie only
+# when it joins a note to the very next note of the same pitch; all other
+# slurs are ignored for audio.
 def _infer_ties_from_slurs(groups: list, flags: list, voice: str) -> None:
     """
     Sets tie_to_next on notes whose slur is really a tie.
@@ -1743,6 +1938,12 @@ def _resolve_ties(events: list, voice: str, flags: list) -> list:
     events are removed, as before; the survivor records tie_span and
     tied_note_ids.
     """
+    # DEFENSE: tie merge
+    # Why only same-pitch, adjacent notes: in music a tie can only connect a
+    # note to the next note of the same pitch. If a rest or another pitch comes
+    # first, the "tie" must be a misread, so we keep the notes separate and flag
+    # it instead of inventing one long note. Merging adds the durations into
+    # the first note, so Stage 5 plays one held note, not two attacks.
     groups = _onset_groups(events)
     _infer_ties_from_slurs(groups, flags, voice)
 
@@ -1851,8 +2052,8 @@ if __name__ == "__main__":
     parser.add_argument("--input",   default="data/raw")
     parser.add_argument("--prep",    default="data/preprocessed")
     parser.add_argument("--strips",  default="data/strips")
-    parser.add_argument("--weights", default="crnn_weights/best.pt")
-    parser.add_argument("--yolo",    default="staff_detector_files/weights/best.pt")
+    parser.add_argument("--weights", default="models/phase2_seed1.pt")
+    parser.add_argument("--yolo",    default="models/best.pt")
     parser.add_argument("--img-height", type=int, default=64)
     stage3_clefkey.add_clef_key_args(parser)
     args = parser.parse_args()

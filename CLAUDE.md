@@ -20,6 +20,19 @@ for the current caveat on that doc's state. There is no `run_pipeline.py` despit
 referencing one — each stage script is runnable standalone and stage 5 exposes `run_full_pipeline()`
 as the closest equivalent to a top-level runner.
 
+## Repo layout after the 2026-11-12 cleanup (branch `worktree-cleanup-lean-repo`)
+
+Only app code is at the root: `backend/`, `deploy/`, `mobile/`, `tests/`, `docs/` (deploy, ERD, timing,
+`KNOWN-ISSUES.md`) and the nine pipeline modules. Everything else (research, `ground_truth/`, `gt/`, `data/`,
+`training/`, `staff_detector_files/`, the rest of `docs/`, one-off scripts, mobile reference mockups) lives in
+`_archive/`, which is committed locally only and never pushed. Any `docs/`, `training/`, `data/`,
+`ground_truth/` or `staff_detector_files/` path below that is not in the app list above means `_archive/<path>`.
+Weights and the soundfont default to the gitignored `models/` folder (`best.pt`, `phase2_seed1.pt`,
+`clef_key_classifier.pt`, `piano.sf2`), the same layout the Space image copies. `tests/` has 10 files
+(103 pass, 55 expected-failures in `tests/conftest.py`); `backend/tests` needs Postgres at localhost:55432.
+`_archive/golden/golden_check.py` is the golden-output check (10-piece camera set, CPU): run it before and after
+any refactor. `python _archive/golden/golden_check.py check`.
+
 ## Setup
 
 ```bash
@@ -45,14 +58,14 @@ last stage you care about:
 python stage1_preprocessing.py data/raw data/preprocessed
 
 # Stage 2 — preprocessing + YOLOv8 staff detection → strips
-python stage2_detection.py --input data/raw --weights staff_detector_files/weights/best.pt --viz
+python stage2_detection.py --input data/raw --weights models/best.pt --viz
 
 # Stage 4 — full pipeline through SATB reconstruction (no audio)
-python stage4_reconstruction.py --input data/raw --weights <crnn_weights> --yolo staff_detector_files/weights/best.pt
+python stage4_reconstruction.py --input data/raw --weights <crnn_weights> --yolo models/best.pt
 
 # Stage 5 — full pipeline including MP3 synthesis
-python stage5_synthesis.py --input data/raw --weights music_symbol_detection/crnn_cameraprimus_transcription.pt \
-    --yolo staff_detector_files/weights/best.pt --soundfont soundfont/piano.sf2
+python stage5_synthesis.py --input data/raw --weights models/phase2_seed1.pt \
+    --yolo models/best.pt --soundfont models/piano.sf2
 ```
 
 Training / evaluating the YOLOv8 staff detector:
@@ -88,7 +101,7 @@ later stages import functions from earlier ones rather than duplicating logic.
    restored after border/lyric blanking (which previously erased real staves on camera pages).
    **Non-staff-ink mask + native strip source (2026-09-25, PIYA-121, same branch, BUG-015/BUG-016, committed, unmerged):** after dewarp, `non_staff_ink_mask()` erases ink that is neither the tracked staff nor connected (gap-bridged 0.2 spacing) to it - lyrics, titles, page-edge shadows - while keeping beams, ties, flags, rests and ledger-line notes. Detection/tracking stay at `DETECT_MAX_DIM` = 1600 px; the strip source is binarised once at native resolution (<= 4032 px) through the same perspective matrix and the same upsampled dewarp map, because binarising rests at 1600 px broke their ~1.6 px strokes. `training/run_stage12.py` regenerates strips, manifest, viz and 1:1 eyeball tiles; `training/step3_mask_audit.py` audits ties/beams/band ink (limits in its docstring and BUG-015).
 
-2. **`stage2_detection.py`** — runs a fine-tuned YOLOv8 model (`staff_detector_files/weights/best.pt`)
+2. **`stage2_detection.py`** — runs a fine-tuned YOLOv8 model (`models/best.pt`)
    to find staff-line bounding boxes on each preprocessed page, then:
    - filters by confidence, caps at 16 boxes/page (4 systems × 4 voices max)
    - sorts top-to-bottom and deduplicates boxes that land on the same staff (`_remove_duplicates`)
@@ -120,7 +133,7 @@ later stages import functions from earlier ones rather than duplicating logic.
    `stage3_clefkey.decisions_for_pages` decides clef (voice rule), key (per-system vote) and octave, and
    `infer_pitch(header_override=..., next_system_key=...)` uses them. In that `fixed_header` mode CRNN clefs are
    ignored and no CRNN header accidental counts into the key. The CLI default checkpoint is
-   `training/clef_key_artifacts/t4_full_seed20260926_runA/clef_key_classifier.pt` (resolved from the repo; its sha256 is checked only at that default path; gitignored, copy it from the
+   `models/clef_key_classifier.pt` (the t4_full_seed20260926_runA checkpoint; resolved from the repo; its sha256 is checked only at that default path; gitignored, copy it from the
    training tree). Missing weights raise, and `--no-clef-key` opts out (CRNN clef/key, BUG-011).
    `run_full_pipeline` defaults to the checkpoint too; `clef_key_weights=None` opts out and flags every
    event `clef_key_disabled` / `review_needed`. A mid-strip key change counts with one glyph when it
@@ -164,8 +177,9 @@ later stages import functions from earlier ones rather than duplicating logic.
      `review_needed`.
    An empty voice is reported in `failed_voices` and the others continue; `ValueError` only when all
    four are empty (PIYA-108 AC4/AC5, 2026-10-09). Bars are laid out per measure at their own meter
-   (PIYA-108 AC6/AC7), and lossy repairs carry a `start_tick`/`end_tick` span that Stage 5 renders
-   silent (PIYA-108 AC8, PIYA-109 AC8). Known gaps: mid-bar system breaks are not handled, and Stage 3 cannot
+   (PIYA-108 AC6/AC7). The muted-span part (a `start_tick`/`end_tick` span that Stage 5 renders silent,
+   PIYA-108 AC8 / PIYA-109 AC8) is NOT on main: `muted_measures` is always `[]` (`docs/KNOWN-ISSUES.md`).
+   Known gaps: mid-bar system breaks are not handled, and Stage 3 cannot
    currently represent chords (its `chord_id` block never fires, and Camera-PrIMuS has no chord token),
    so simultaneous notes in one voice (e.g. Bass divisi) arrive as sequential notes until the
    vocabulary/retraining work lands.
@@ -187,7 +201,7 @@ later stages import functions from earlier ones rather than duplicating logic.
 - `data/detection_viz/`, `data/symbol_detection_viz/` — optional debug visualizations (`--viz` flags)
 - `staff_detector_files/` — YOLOv8 staff-detector training artifacts (weights, PR/F1 curves,
   confusion matrix); `weights/best.pt` is the model Stage 2 loads by default
-- `music_symbol_detection/crnn_cameraprimus_transcription.pt` — the pretrained CRNN checkpoint
+- `models/phase2_seed1.pt` — the pretrained CRNN checkpoint
   (trained on Kaggle) that Stage 3 loads by default
 - `datasets/` — raw third-party training sets (DeepScoresV2 `ds2_dense/`, Camera-PrIMuS,
   camera-grandstaff) used only by `prepare_deepscore.py` / training, not by inference

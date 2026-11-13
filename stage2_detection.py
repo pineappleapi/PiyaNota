@@ -3,6 +3,25 @@ PiyaNota - Stage 2: Staff Region Detection (YOLOv8)
 Detects and extracts individual staff strips from preprocessed score pages.
 """
 
+# DEFENSE INDEX: (press Ctrl+F and paste the tag to jump to the explanation)
+#   DEFENSE: voice map         - why staves are labelled Soprano/Alto/Tenor/Bass by position
+#   DEFENSE: strip height      - why every strip is 64 px high
+#   DEFENSE: yolo call         - the one YOLO model call per page
+#   DEFENSE: confidence filter - dropping weak detections
+#   DEFENSE: cap 16            - at most 4 systems x 4 voices per page
+#   DEFENSE: sort and dedupe   - top-to-bottom order, one box per staff
+#   DEFENSE: cross-check       - YOLO checked against the classical line tracker
+#   DEFENSE: divisible by 4    - open-score check (staff count must be a multiple of 4)
+#   DEFENSE: full width        - why boxes are stretched to the page width
+#   DEFENSE: group of 4        - why groups of 4 staves become S/A/T/B
+#   DEFENSE: native strips     - why strips are cut from the high-resolution copy
+#   DEFENSE: manifest          - the JSON that traces a strip back to its page
+#   DEFENSE: reconcile rules   - when the line tracker overrides YOLO
+#   DEFENSE: classical box     - why the line tracker is an independent opinion
+#   DEFENSE: adaptive crop     - why the crop grows past a fixed margin
+#   DEFENSE: line removal      - why staff lines are erased before measuring glyphs
+#   DEFENSE: neighbour limits  - why a crop never reaches into the next staff
+
 import json
 import logging
 from collections.abc import Callable
@@ -21,11 +40,17 @@ logger = logging.getLogger(__name__)
 
 
 # ── Voice assignment by vertical index within a 4-staff SATB system ──────────
+# DEFENSE: voice map - In open-score SATB each voice has its own staff, and the staves are always
+# printed top to bottom as Soprano, Alto, Tenor, Bass. So the position inside a system (1st, 2nd,
+# 3rd, 4th staff) tells us the voice; no music reading is needed for this step.
 VOICE_MAP = {1: "Soprano", 2: "Alto", 3: "Tenor", 4: "Bass"}
 
 # Detection thresholds
 CONF_THRESHOLD = 0.4   # minimum confidence to keep a detection
 NMS_THRESHOLD  = 0.3   # IoU threshold for Non-Maximum Suppression
+# DEFENSE: strip height - The Stage 3 neural network (CRNN) was trained on images exactly 64 px
+# tall, so every staff is shrunk to 64 px high (width scales with it to keep the shape). A fixed
+# height lets the network read any photo the same way; changing it here breaks Stage 3.
 STRIP_HEIGHT   = 64     # fixed height for CRNN-CTC input (px); must equal Stage 3's img_height
 
 
@@ -43,7 +68,7 @@ STAFFS_PER_SYSTEM = 4
 
 def detect_staff_regions(
     preprocessed_images: list,
-    model_weights: str = "staff_detector_files\\weights\\best.pt",
+    model_weights: str = "models/best.pt",
     output_dir: str = "data/strips",
     save_strips: bool = True,
     save_viz: bool = False,          # ← new flag
@@ -98,27 +123,44 @@ def detect_staff_regions(
         img_h, img_w = image_bgr.shape[:2]
 
         # ── Single model call per page ────────────────────────────────────
+        # DEFENSE: yolo call - YOLO looks at the whole page once and returns a rectangle for each
+        # staff it believes it sees, with a confidence between 0 and 1. conf= drops weak guesses;
+        # iou= merges heavily overlapping rectangles (Non-Maximum Suppression).
         results = model(image_bgr, conf=CONF_THRESHOLD, iou=NMS_THRESHOLD, verbose=False)
 
 
         boxes   = _extract_boxes(results)
 
+        # DEFENSE: confidence filter - A weak guess is more likely a false staff than a real one,
+        # and one extra staff would shift every voice label after it, so we drop it early.
         # Rule 1: Filter out low-confidence detections before grouping
         boxes = [b for b in boxes if b["conf"] >= CONF_THRESHOLD]
 
+        # DEFENSE: cap 16 - The project supports at most 4 systems per page with 4 voices each,
+        # so more than 16 boxes must contain mistakes; keep the 16 most confident ones.
         # Rule 2: cap at 16 (4 systems × 4 voices max)
         if len(boxes) > 16:
             boxes = sorted(boxes, key=lambda b: b["conf"], reverse=True)[:16]
 
+        # DEFENSE: sort and dedupe - The voice is decided by vertical position, so boxes must be
+        # in exact top-to-bottom order (by box centre "cy"). Then two boxes less than 30 px apart
+        # are treated as the same staff detected twice, and only the more confident one stays.
         # Rule 3: sort top-to-bottom for correct SATB grouping
         boxes = sorted(boxes, key=lambda b: b["cy"])
 
         # Rule 3.5: remove duplicate detections on the same staff
         boxes = _remove_duplicates(boxes, min_cy_gap=30)
 
+        # DEFENSE: cross-check - YOLO is a trained model and can miss a staff on a tilted or curled
+        # camera photo. A second, non-learning method (following the five staff lines with plain
+        # image processing) counts the staves independently. If the two agree we trust YOLO; if
+        # not, the line tracker may repair the result (see DEFENSE: reconcile rules).
         # Rule 3.55: cross-check against the classical staff tracker (BUG-001).
         boxes = _reconcile_with_classical(boxes, image_bgr, page_index)
 
+        # DEFENSE: divisible by 4 - Open score means one staff per voice, so every system has
+        # exactly 4 staves and the page total must be a multiple of 4. If not, we stop with an
+        # error instead of guessing, because a wrong count would give a voice the wrong notes.
         # Rule 3.6: staff-count validation — open-score enforcement (PIYA-105 #4)
         if len(boxes) != 0 and len(boxes) % 4 != 0:
             raise ValueError(
@@ -132,6 +174,9 @@ def detect_staff_regions(
         for b in boxes:
             print(f"  [Stage 2] y1={b['y1']} y2={b['y2']} height={b['y2']-b['y1']}px conf={b['conf']:.2f}")
 
+        # DEFENSE: full width - Staff lines always run from the left edge to the right edge of the
+        # page, but YOLO's box may stop early or start late and cut off the first or last notes.
+        # Setting x1=0 and x2=page width guarantees the strip holds the whole line of music.
         # Rule 4: stretch to full width — stafflines always span full page
         for b in boxes:
             b["x1"] = 0
@@ -147,6 +192,9 @@ def detect_staff_regions(
         if save_viz:
             _draw_and_save_viz(image_bgr, boxes, page_index, viz_path)
 
+        # DEFENSE: group of 4 - Boxes are now in top-to-bottom order and the count is a multiple of
+        # 4, so each consecutive group of 4 is one system (one line of the choir score). Inside a
+        # group, position 1/2/3/4 becomes Soprano/Alto/Tenor/Bass through VOICE_MAP.
         systems = [boxes[i:i+4] for i in range(0, len(boxes), 4)]
 
         box_index = {id(b): i for i, b in enumerate(boxes)}
@@ -154,6 +202,11 @@ def detect_staff_regions(
             for v_idx, box in enumerate(system, start=1):
                 voice = VOICE_MAP.get(v_idx, f"Voice_{v_idx}")
                 strip_id = f"page{page_index:03d}_sys{sys_idx:02d}_{voice}_vidx{v_idx}"
+                # DEFENSE: native strips - Detection runs on a 1600 px copy of the page, but thin
+                # symbols (rests, ties) are only about 1-2 px wide there and break. So the box
+                # position is found on the small copy and the strip is cut from the
+                # full-resolution copy of the same page, then shrunk to 64 px high (INTER_AREA
+                # averages pixels, which keeps thin strokes visible).
                 crop: dict | None = {} if geometry_out is not None else None
                 strip = _crop_and_resize(
                     image_bgr, box, STRIP_HEIGHT, strip_id=strip_id,
@@ -164,6 +217,9 @@ def detect_staff_regions(
                         page_index=page_index, sys_idx=sys_idx, voice=voice,
                         staff_y1=int(box["y1"]), staff_y2=int(box["y2"]), **crop))
                 voice_sequences[voice].append((strip, page_index, sys_idx, voice, v_idx))
+                # DEFENSE: manifest - One record per strip (page, system, voice, box, and whether
+                # YOLO or the line tracker found it) so any later mistake can be traced back to
+                # the exact place on the original page.
                 manifest.append({
                     "strip_id": strip_id, "page": page_index, "system": sys_idx,
                     "voice": voice, "source": box.get("source", "yolo"),
@@ -194,6 +250,9 @@ def _classical_boxes(image_bgr: np.ndarray) -> tuple[list[dict], list[StaffCurve
     Returns:
         (boxes sorted top-to-bottom, matching curves).
     """
+    # DEFENSE: classical box - YOLO learned from examples and can be fooled by unfamiliar looks;
+    # the line tracker only follows the five horizontal lines, so its mistakes are of a different
+    # kind. Two different methods agreeing is stronger evidence than one.
     gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
     _, binary = cv2.threshold(gray, BINARY_THRESHOLD, 255, cv2.THRESH_BINARY)
     curves = track_staff_curves(binary)
@@ -221,6 +280,11 @@ def _reconcile_with_classical(boxes: list, image_bgr: np.ndarray, page_index: in
     valid open-score layout; otherwise YOLO's result is returned and the caller's
     divisible-by-4 validation still applies (PIYA-105 #4).
     """
+    # DEFENSE: reconcile rules - Three outcomes. (1) Same count and every YOLO box close to a
+    # tracked staff: keep YOLO untouched. (2) They disagree and the tracker's count is a multiple
+    # of 4: trust the tracker (it fills missed staves, removes false ones). (3) They disagree but
+    # the tracker's count is not a multiple of 4: keep YOLO, and the later divisible-by-4 check
+    # raises the error. The tracker was tuned on only 7 photos, so every override is logged.
     classical, _ = _classical_boxes(image_bgr)
     n_c, n_y = len(classical), len(boxes)
     if n_c == 0 or n_c > MAX_BOXES_PER_PAGE:
@@ -400,6 +464,10 @@ def _extract_boxes(results) -> list:
 # opposite -- removing it made the model worse, not better).
 
 
+# DEFENSE: adaptive crop - Cutting a fixed margin above and below the staff chops off the tall
+# treble clef, high notes on ledger lines and long stems. So the margin is the MINIMUM and the
+# crop grows to include anything physically attached to the staff, up to a maximum (1.5 x staff
+# height), so the 64 px strip still shows whole symbols like the training images did.
 # Content-adaptive strip extent. A fixed pad (0.5 x box height) matches CameraPrIMuS's
 # ~50% staff/height ratio on average, but clips the treble clef, ledger-line notes and
 # long stems on real photos. CameraPrIMuS crops follow the content extent, so we keep the
@@ -451,6 +519,9 @@ def _staff_glyph_components(
     if ink.size == 0:
         return None
 
+    # DEFENSE: line removal - Staff lines touch every note, so if left in, all the music on the
+    # page would look like one giant connected blob. We find long thin horizontal runs (the
+    # lines), erase them, then measure the separate symbols that remain (noteheads, stems, clef).
     kernel = cv2.getStructuringElement(
         cv2.MORPH_RECT, (max(int(height * CROP_LINE_KERNEL_HEIGHTS), 3), 1))
     staff_lines = cv2.morphologyEx(ink, cv2.MORPH_OPEN, kernel)
@@ -525,8 +596,11 @@ def _content_extent(image: np.ndarray, box: dict,
 
 def _neighbor_limits(boxes: list, index: int, img_h: int) -> tuple[int, int]:
     """Returns the page rows halfway to the staves above and below boxes[index]."""
+    # DEFENSE: neighbour limits - A barline runs through all four staves of a system, so it looks
+    # "attached" to every staff. Without a limit the crop of one staff would grow into the next
+    # one. Halfway between two staves is the fair dividing line.
     box = boxes[index]
-    upper = (boxes[index - 1]["y2"] + box["y1"]) // 2 if index > 0 else 0
+    upper =(boxes[index - 1]["y2"] + box["y1"]) // 2 if index > 0 else 0
     lower = (box["y2"] + boxes[index + 1]["y1"]) // 2 if index + 1 < len(boxes) else img_h
     return int(upper), int(lower)
 
@@ -602,7 +676,7 @@ if __name__ == "__main__":
     parser.add_argument("--input",   default="data/raw",           help="Raw images dir")
     parser.add_argument("--prep",    default="data/preprocessed",  help="Preprocessed dir")
     parser.add_argument("--strips",  default="data/strips",        help="Output strips dir")
-    parser.add_argument("--weights", default="staff_detector_files\\weights\\best.pt", help="YOLOv8 weights")
+    parser.add_argument("--weights", default="models/best.pt", help="YOLOv8 weights")
     parser.add_argument("--train",   action="store_true",          help="Run training instead")
     parser.add_argument("--data",    default="data/dataset.yaml",  help="Dataset YAML (for training)")
     parser.add_argument("--viz",     action="store_true",          help="Visualize detections with red boxes")

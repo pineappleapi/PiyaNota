@@ -9,6 +9,17 @@ clef is below the checkpoint's threshold.
 Not wired into Stage 3 yet: Stage 3 still reads its clef from the CRNN. This is the decision rule only.
 No threshold here is fitted: ``clef_threshold`` and ``g8vb_reliable`` come from the frozen checkpoint.
 """
+# DEFENSE INDEX: (Ctrl+F the tag to jump to the explanation)
+#   DEFENSE: voice limits the clef      - each voice may only use some clefs (ALLOWED_CLEFS)
+#   DEFENSE: fallback clef              - what we use when the classifier is unsure (DEFAULT_CLEF)
+#   DEFENSE: why Tenor is an octave lower - treble clef on Tenor/Bass is sung 8vb (TREBLE_8VB_VOICES)
+#   DEFENSE: no double octave shift     - octave_shift must not be added twice (ClefDecision)
+#   DEFENSE: input checks               - reject bad probabilities early (_validate)
+#   DEFENSE: class to token and shift   - how a clef class becomes a token + octave (_to_output)
+#   DEFENSE: raw probability, no renormalise - why restricting never fakes confidence (resolve_clef)
+#   DEFENSE: pooling G and G8vb         - treble family counted together (resolve_clef)
+#   DEFENSE: threshold or default       - accept best clef or fall back (resolve_clef)
+#   DEFENSE: review flags               - when a human is asked to check (resolve_clef)
 from __future__ import annotations
 
 import math
@@ -19,6 +30,9 @@ from clef_key_core import CLEF_CLASSES
 
 VOICES: tuple[str, ...] = ("Soprano", "Alto", "Tenor", "Bass")
 
+# DEFENSE: voice limits the clef
+# Simple idea: a Soprano never reads a bass clef, so we do not let the classifier pick one for her.
+# Fewer choices per voice means fewer ways for the model to be confidently wrong.
 # User decision 2026-09-28. Tenor may be written in treble, treble-8vb or bass clef; Bass in bass or
 # treble-8vb. "other" (C clefs and the like) is allowed for no voice: C clefs are out of scope.
 ALLOWED_CLEFS: Mapping[str, frozenset[str]] = {
@@ -28,12 +42,17 @@ ALLOWED_CLEFS: Mapping[str, frozenset[str]] = {
     "Bass": frozenset({"F", "G8vb"}),
 }
 
+# DEFENSE: fallback clef
+# If the model is not sure, we guess the clef that voice almost always uses (safer than a random guess).
 # Used when no allowed clef reaches the threshold (clef unreadable).
 DEFAULT_CLEF: Mapping[str, str] = {"Soprano": "G", "Alto": "G", "Tenor": "G8vb", "Bass": "F"}
 
 TREBLE_TOKEN = "clef.G-L2"
 BASS_TOKEN = "clef.F-L4"
 OCTAVE_DOWN = -12
+# DEFENSE: why Tenor is an octave lower
+# In choir scores the Tenor is often printed with a normal treble clef, but men sing it one octave
+# lower than written (12 semitones). The picture of the clef looks the same, so the voice decides.
 # Choral convention (choral-conductor brief, user-confirmed 2026-09-28): a plain treble clef on a tenor
 # line is still sung an octave lower. Voices listed here read any treble-family clef 8vb.
 TREBLE_8VB_VOICES: frozenset[str] = frozenset({"Tenor", "Bass"})
@@ -44,6 +63,10 @@ _PROB_SUM_TOLERANCE = 1e-3
 @dataclass(frozen=True)
 class ClefDecision:
     """Resolved clef for one staff.
+
+    # DEFENSE: no double octave shift
+    # The octave drop is decided here once. Stage 3 also has its own Tenor rule, so using both
+    # would drop the Tenor two octaves.
 
     Attributes:
         clef_class: One of ``CLEF_CLASSES`` except "other".
@@ -63,6 +86,9 @@ class ClefDecision:
     flags: tuple[str, ...] = field(default_factory=tuple)
 
 
+# DEFENSE: input checks
+# Fail loudly on a wrong voice name, wrong number of probabilities, NaN, or probabilities that do not
+# add up to 1. A silent bad input would give a wrong clef and therefore wrong pitches everywhere.
 def _validate(voice: str, clef_probs: Sequence[float], clef_threshold: float) -> None:
     if voice not in ALLOWED_CLEFS:
         raise ValueError(f"unknown voice {voice!r}; expected one of {VOICES}")
@@ -78,6 +104,9 @@ def _validate(voice: str, clef_probs: Sequence[float], clef_threshold: float) ->
 
 def _to_output(clef_class: str, voice: str) -> tuple[str, int, tuple[str, ...]]:
     """Maps a resolved class to (token, octave_shift, informational flags)."""
+    # DEFENSE: class to token and shift
+    # Stage 3 only understands two clef tokens (treble, bass). So G8vb = treble token + 12 semitones down.
+    # A plain G on Tenor/Bass is also shifted down, and flagged so a human knows we assumed it.
     if clef_class == "F":
         return BASS_TOKEN, 0, ()
     if clef_class == "G8vb":
@@ -110,10 +139,16 @@ def resolve_clef(voice: str, clef_probs: Sequence[float], clef_threshold: float,
         ValueError: On an unknown voice, a malformed probability vector or an out-of-range threshold.
     """
     _validate(voice, clef_probs, clef_threshold)
+    # DEFENSE: raw probability, no renormalise
+    # We compare the allowed clefs' original probabilities. If we rescaled them after dropping the
+    # forbidden ones, a weak guess (say 30%) could look like 100% and pass as "sure".
     probs = dict(zip(CLEF_CLASSES, (float(p) for p in clef_probs)))
     classifier_top = max(CLEF_CLASSES, key=lambda c: probs[c])
     allowed = ALLOWED_CLEFS[voice]
 
+    # DEFENSE: pooling G and G8vb
+    # On a low voice a treble clef and a treble-8vb clef give the same sound, and the model often cannot
+    # tell them apart. So we add their probabilities and treat them as one "treble family".
     # On a low voice G and G8vb sound the same (both read 8vb), so their probabilities are pooled even when
     # the checkpoint can tell them apart; otherwise a Bass read as plain G would fall to the F default.
     # Pooling is also forced when g8vb_reliable is False (plan 3.3 rule 3). Caveat: the threshold was
@@ -135,6 +170,9 @@ def resolve_clef(voice: str, clef_probs: Sequence[float], clef_threshold: float,
 
     best = max(sorted(scores), key=lambda c: scores[c])  # sorted: deterministic tie-break
     flags: list[str] = []
+    # DEFENSE: threshold or default
+    # If the best allowed clef is confident enough, trust it. If not, use the voice's usual clef and
+    # ask a human to review. The threshold comes from the trained checkpoint, not hand-picked here.
     if scores[best] >= clef_threshold:
         chosen = best
         if best == top_family:
@@ -146,6 +184,9 @@ def resolve_clef(voice: str, clef_probs: Sequence[float], clef_threshold: float,
         chosen = DEFAULT_CLEF[voice]
         source = "voice_default"
         flags += ["clef_unsure", "clef_below_threshold", "review_needed"]
+    # DEFENSE: review flags
+    # Flags never change the audio. They tell the app which staves a person should double-check
+    # (model overruled by the voice rule, model unsure, or an unsupported C clef seen).
     if classifier_top == "other":
         flags.append("clef_out_of_scope")
     # Treble-8vb on a Bass line is rare in SATB and usually means the layout shifted (a Tenor in the Bass
