@@ -1,12 +1,12 @@
 """Clef and key-signature crop classifier: the shared crop contract and the network.
 
 This file is the single source of truth for BOTH training (the Kaggle notebook
-training/piyanota-clef-keysig-kaggle.ipynb writes this exact text to
+_archive/training/piyanota-clef-keysig-kaggle.ipynb writes this exact text to
 /kaggle/working/clef_key_core.py) and inference (Stage 3 must import this file
 unchanged). The crop is defined in staff spaces, so it does not depend on image
 resolution. Changing any constant below changes what the network sees and
 invalidates trained weights: bump CROP_SPEC_VERSION when you do.
-The local script training/train_clef_key.py imports this file directly (no copy).
+The local script _archive/training/train_clef_key.py imports this file directly (no copy).
 
 Input contract (decided 2026-09-26, see docs/decisions/piya-106-clef-keysig-detector-plan.md):
 the page passed to make_input() is BINARY, ink = 0 and paper = 255, produced the
@@ -18,6 +18,18 @@ so the masked page can lose exactly the detail this model exists to see.
 The network input is a fixed INPUT_H x INPUT_W image, so there is no padding and
 the batch composition cannot change a prediction (BatchNorm runs in eval mode).
 """
+# DEFENSE INDEX: (Ctrl+F the tag to jump to the explanation)
+#   DEFENSE: shared file        - why training and inference import this same file
+#   DEFENSE: crop in spaces     - why the crop is measured in staff spaces, not pixels
+#   DEFENSE: crop size          - where the 128x96 network input size comes from
+#   DEFENSE: antialias blur     - why the page is blurred before shrinking
+#   DEFENSE: staff left edge    - how the start of the staff (clef zone) is found
+#   DEFENSE: warp math          - how the staff window is cut out and straightened
+#   DEFENSE: region trick       - why only a small piece of the huge page is processed
+#   DEFENSE: ink flip           - why the input is flipped so ink = 1
+#   DEFENSE: two heads          - one network, two answers (clef and key)
+#   DEFENSE: flatten not pool   - why position information is kept
+#   DEFENSE: temperature        - why logits are divided before softmax
 from __future__ import annotations
 
 import math
@@ -28,18 +40,29 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+# DEFENSE: shared file - training and inference must see the exact same crop. If they
+# each had their own copy, one could drift and the trained weights would silently get
+# the wrong kind of picture. CROP_SPEC_VERSION is the "edition number" of the crop recipe.
 CROP_SPEC_VERSION: int = 1
 
 # Geometry of the crop, in staff spaces (sp = distance between two staff lines).
+# DEFENSE: crop in spaces - phone photos have different sizes, but a staff always has
+# 4 gaps between its 5 lines. Measuring in "gaps" instead of pixels makes the crop cover
+# the same musical area (clef + key signature) no matter how big the photo is.
 PX_PER_SPACE: int = 8            # output resolution; the "8" of treble-8vb is ~1.2 sp tall -> ~10 px
 CROP_LEFT_SPACES: float = 1.0    # context left of the first staff-line column (bracket, barline)
 CROP_RIGHT_SPACES: float = 15.0  # clef (~3 sp) + up to 7 key accidentals (~1 sp each) + slack
 CROP_ABOVE_SPACES: float = 4.0   # a G clef rises ~2 sp above the top line
 CROP_BELOW_SPACES: float = 4.0   # the treble-8vb "8" sits ~1.5-3 sp below the bottom line
 STAFF_SPACES: float = 4.0        # five lines = four spaces
+# DEFENSE: crop size - width = (1 + 15) spaces * 8 px = 128; height = (4 + 4 + 4) spaces
+# * 8 px = 96. The network needs one fixed size, so there is never any padding.
 INPUT_W: int = int(round((CROP_LEFT_SPACES + CROP_RIGHT_SPACES) * PX_PER_SPACE))                  # 128
 INPUT_H: int = int(round((CROP_ABOVE_SPACES + STAFF_SPACES + CROP_BELOW_SPACES) * PX_PER_SPACE))  # 96
 
+# DEFENSE: antialias blur - the page is much bigger than the 8 px per space we want, so
+# we shrink it. Shrinking a thin pen stroke without blurring first can make it vanish
+# (like a thin line skipped by a coarse sampler). A small blur averages it in instead.
 # Gaussian pre-blur before down-sampling, as a fraction of the down-scale factor, so thin
 # strokes are area-averaged instead of aliased away (same idea as Stage 1's strip source blur).
 ANTIALIAS_SIGMA_PER_DOWNSCALE: float = 0.4
@@ -82,6 +105,11 @@ def staff_left_edge(binary: np.ndarray, top_line_y: float, bottom_line_y: float,
     Returns:
         Column index, or None if no column has enough continuous line ink.
     """
+    # DEFENSE: staff left edge - the staff lines start at the page's left, but the page
+    # also has margin, shadows and text. We call a column "start of staff" when at least 3
+    # of the 5 lines each have unbroken ink for 2 spaces to the right of it. Checking
+    # runs of ink on several lines is hard to fool with a single stray mark.
+    # The cumsum below is a fast way to ask "is every column in this window inked?".
     ink = binary < 128
     h, w = ink.shape
     sp = (bottom_line_y - top_line_y) / STAFF_SPACES
@@ -118,10 +146,16 @@ def warp_staff_region(img: np.ndarray, x0: float, top_line_y: float, bottom_line
     Returns:
         uint8 array (round((above+4+below)*pps), round((left+right)*pps)).
     """
+    # DEFENSE: warp math - we build a 2x3 matrix `m` that says "output pixel (i, j) comes
+    # from this spot on the page". It does three jobs at once: shift to the staff start,
+    # scale so one staff space = px_per_space pixels, and optionally rotate/shift a little
+    # (that wobble is only used in training so the net tolerates imperfect staff detection).
+    # `ox0`/`oy0` are the window's top-left corner relative to the staff centre; the
+    # `0.5 * s` terms line up pixel centres rather than pixel corners.
     sp = (bottom_line_y - top_line_y) / STAFF_SPACES
     if sp <= 0:
         raise ValueError("bottom_line_y must be below top_line_y")
-    out_w = int(round((left_sp + right_sp) * px_per_space))
+    out_w =int(round((left_sp + right_sp) * px_per_space))
     out_h = int(round((above_sp + STAFF_SPACES + below_sp) * px_per_space))
     sp_eff = sp * scale
     s = sp_eff / px_per_space                      # source px per output px
@@ -135,6 +169,10 @@ def warp_staff_region(img: np.ndarray, x0: float, top_line_y: float, bottom_line
                   [sn * s, c * s, ay + sn * ox0 + c * oy0]], dtype=np.float64)
 
     # Work on the bounding region only (pages are up to 4032 px), padded for the blur.
+    # DEFENSE: region trick - blurring a whole 4032 px page for every staff would be slow.
+    # We find where the 4 corners of our window land on the page, copy just that piece
+    # (plus a small border so the blur has neighbours), blur it, then warp it. Areas that
+    # fall off the page are filled with white paper (255).
     corners = np.array([[0, 0, 1], [out_w, 0, 1], [0, out_h, 1], [out_w, out_h, 1]], dtype=np.float64)
     src = corners @ m.T
     sigma = ANTIALIAS_SIGMA_PER_DOWNSCALE * s if s > 1.0 else 0.0
@@ -174,6 +212,9 @@ def make_input(binary_page: np.ndarray, x0: float, top_line_y: float, bottom_lin
                              CROP_LEFT_SPACES, CROP_RIGHT_SPACES, CROP_ABOVE_SPACES,
                              CROP_BELOW_SPACES, dx_spaces=dx_spaces, dy_spaces=dy_spaces,
                              scale=scale, angle_deg=angle_deg)
+    # DEFENSE: ink flip - the page is black ink on white paper (ink = 0). Networks learn
+    # easier when "something is here" is a big number, so we flip it: ink = 1, paper = 0,
+    # and scale to the range 0..1.
     return (255.0 - crop.astype(np.float32)) / 255.0
 
 
@@ -191,7 +232,16 @@ class ClefKeyNet(nn.Module):
     The flattened 6x8 map (not a global average pool) keeps horizontal position, which the
     key head needs to count accidentals and to separate the key signature from the first
     note's accidentals.
+
+    Input is (N, 1, INPUT_H, INPUT_W) from make_input(); output is a tuple of raw scores
+    (logits): (N, 4) for CLEF_CLASSES and (N, 15) for KEY_CLASSES (-7..+7).
     """
+    # DEFENSE: two heads - the clef and the key are read from the same picture, so one
+    # shared "eyes" part (features/reduce/trunk) feeds two small decision layers
+    # (clef_head, key_head). Cheaper than two networks.
+    # DEFENSE: flatten not pool - the 4 conv blocks each halve the size (96x128 -> 6x8).
+    # We keep that 6x8 grid as-is instead of averaging it, so the net still knows WHERE
+    # a sharp or flat sits (left to right), which is how you count the key signature.
 
     def __init__(self, width: int = 32, dropout: float = 0.3) -> None:
         super().__init__()
@@ -216,8 +266,16 @@ class ClefKeyNet(nn.Module):
 def predict_probs(model: ClefKeyNet, inputs: np.ndarray, clef_temperature: float,
                   key_temperature: float, device: Optional[torch.device] = None
                   ) -> Tuple[np.ndarray, np.ndarray]:
-    """Temperature-scaled class probabilities for a batch of make_input() arrays (N, H, W)."""
-    device = device or next(model.parameters()).device
+    """Temperature-scaled class probabilities for a batch of make_input() arrays (N, H, W).
+
+    Returns:
+        (clef_probs (N, 4), key_probs (N, 15)); each row sums to 1.
+    """
+    # DEFENSE: temperature - a trained net tends to be over-confident. Dividing the raw
+    # scores by a number > 1 before softmax spreads the probabilities out, so "90% sure"
+    # is closer to being right 90% of the time. The two temperatures are fitted after
+    # training (one for clef, one for key) and passed in. Does not change the top pick.
+    device =device or next(model.parameters()).device
     model.eval()
     x = torch.from_numpy(np.ascontiguousarray(inputs, dtype=np.float32)).unsqueeze(1).to(device)
     clef_logits, key_logits = model(x)

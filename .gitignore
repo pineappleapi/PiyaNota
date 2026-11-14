@@ -13,8 +13,6 @@ backend/.env
 *.pt
 *.pth
 *.onnx
-!yolov8n.pt
-!yolov8s.pt
 checkpoints/
 models/weights/
 
@@ -61,3 +59,6 @@ gt/**/crops/
 .neon
 node_modules/
 .env.local
+
+# Local model weights + soundfont (copy into models/; the Space image copies the same folder)
+/models/

@@ -28,6 +28,20 @@ It changes only where the clef, key and octave come from, through ``infer_pitch`
 Known limit: the classifier fails the real-photo gate (BUG-021, ~4.5% of clefs confidently wrong), so
 its flags are kept on every event for review.
 """
+# DEFENSE INDEX: (press Ctrl+F and search "DEFENSE:" plus the tag)
+#   DEFENSE: gate-flag        - why every event is marked "review needed" while the classifier is unproven
+#   DEFENSE: checkpoint-hash  - why the model file's sha256 fingerprint is checked
+#   DEFENSE: crop-contract    - why a checkpoint with a different crop spec is refused
+#   DEFENSE: crop-geometry    - how a strip is matched to a tracked staff and cropped for the classifier
+#   DEFENSE: voice-rule-clef  - why the voice rule (not the CRNN) decides the clef
+#   DEFENSE: key-vote         - why the key is voted once per system, by confident strips only
+#   DEFENSE: key-carry        - what happens when a system has no clear majority key
+#   DEFENSE: adjacent-systems - why a missing system means "no confirmation"
+#   DEFENSE: key-continuity   - R1: why a key change needs a second sign before it is believed
+#   DEFENSE: c-major-evidence - why a switch to C major needs two signs, not one
+#   DEFENSE: fail-loud        - why missing weights stop the run instead of a silent fallback
+#   DEFENSE: header-override  - how the decided clef/key/octave is handed to infer_pitch
+#   DEFENSE: event-flags      - how review flags end up on every note event
 from __future__ import annotations
 
 import argparse
@@ -47,12 +61,15 @@ import clef_key_core as ck
 import stage3_transcription as s3
 from clef_voice_rules import ClefDecision, resolve_clef
 
+# DEFENSE: checkpoint-hash - A sha256 is a fingerprint of the file. Pinning it means we know the exact
+# trained weights that were validated are the ones running; a stale or wrong copy is rejected.
 # Resolved from the repo, not the working directory, so the API and CLIs find the same file. The checkpoint
-# is gitignored (copy it from the training tree); the hash pins the T4 seed-20260926 run A weights that
+# is gitignored (copy it into models/ from the training tree); the hash pins the T4 seed-20260926 run A weights that
 # the BUG-021 validation and the fresh-photo eval used.
-DEFAULT_CLEF_KEY_CHECKPOINT = (Path(__file__).resolve().parent / "training" / "clef_key_artifacts"
-                               / "t4_full_seed20260926_runA" / "clef_key_classifier.pt")
+DEFAULT_CLEF_KEY_CHECKPOINT = Path(__file__).resolve().parent / "models" / "clef_key_classifier.pt"
 DEFAULT_CLEF_KEY_SHA256 = "e718d4479b1310369b64cfaf9a8f1ff433179543ffa9d1810b24c683de13fe10"
+# DEFENSE: gate-flag - Honest labelling: the classifier did not pass our own accuracy test on real photos,
+# so we still use it (the user chose to) but tell the app "please double-check this" on every note.
 # The checkpoint failed its real-photo gate (BUG-021: ~4.5% of clefs confidently wrong, which no per-strip
 # flag catches). The user accepted it as the default only with every event flagged for review, so while
 # this is False each version (b) event carries CLEF_KEY_UNVALIDATED_FLAG and review_needed. Set it True
@@ -114,6 +131,8 @@ class ClefKeyModel:
 
 def load_clef_key_model(path: Path = DEFAULT_CLEF_KEY_CHECKPOINT) -> ClefKeyModel:
     """Loads the frozen checkpoint and refuses one whose crop contract differs from clef_key_core.py."""
+    # DEFENSE: crop-contract - The model learned from images cropped in one exact way. If the crop code
+    # changed since training, its answers would be garbage, so the version numbers must match.
     ckpt: dict[str, Any] = torch.load(path, map_location="cpu", weights_only=False)
     if ckpt.get("smoke_test"):
         raise RuntimeError(f"{path} is a smoke-test checkpoint")
@@ -129,7 +148,7 @@ def load_clef_key_model(path: Path = DEFAULT_CLEF_KEY_CHECKPOINT) -> ClefKeyMode
 def classify_page(page: Any, manifest: Sequence[dict[str, Any]], ckm: ClefKeyModel) -> list[ClefKeyReading]:
     """Runs the classifier on every Stage 2 strip of one page.
 
-    Geometry follows the real-photo validation's deployment path (training/eval_clef_key_realval.py):
+    Geometry follows the real-photo validation's deployment path (_archive/training/eval_clef_key_realval.py):
     the Stage 2 box is mapped onto Stage 1's UNMASKED native page, snapped to the nearest tracked staff,
     and cropped with staff_left_edge() + make_input().
 
@@ -137,6 +156,9 @@ def classify_page(page: Any, manifest: Sequence[dict[str, Any]], ckm: ClefKeyMod
         page: stage1_preprocessing.PreprocessedPage from ``preprocess_score_page(keep_unmasked=True)``.
         manifest: This page's Stage 2 manifest entries.
     """
+    # DEFENSE: crop-geometry - We use the page BEFORE text/shadow erasing (unmasked), because the clef and key
+    # glyphs sit at the staff's left edge and the eraser could damage them. Each YOLO box is snapped to the
+    # nearest staff that Stage 1 tracked (within 1 spacing), then the crop starts at the staff's left edge.
     unmasked, staves = page.strip_unmasked, page.strip_staves or []
     det_h, det_w = page.detect.shape[:2]
     readings: list[ClefKeyReading] = []
@@ -173,6 +195,9 @@ def classify_page(page: Any, manifest: Sequence[dict[str, Any]], ckm: ClefKeyMod
 
 def decide(readings: Sequence[ClefKeyReading], ckm: ClefKeyModel) -> dict[str, StripDecision]:
     """Clef per strip (voice rule) and key per system (confident-majority vote), in page/system order."""
+    # DEFENSE: key-vote - All four voices of a system share one key signature, so the four strips vote
+    # together. Only strips that are confident (above key_threshold) get a vote, and the winner must have
+    # MORE than half of those votes. One bad strip can then not change the key for the whole system.
     no_read = [1.0 / len(ck.CLEF_CLASSES)] * len(ck.CLEF_CLASSES)  # below any threshold -> voice default
     systems: dict[tuple[int, int], list[ClefKeyReading]] = {}
     for r in readings:
@@ -193,6 +218,9 @@ def decide(readings: Sequence[ClefKeyReading], ckm: ClefKeyModel) -> dict[str, S
             sys_key, source = top[0][0], "system_majority"
             vote = sys_key
         elif carried is not None:
+            # DEFENSE: key-carry - No clear majority: assume the key did not change (keys change rarely),
+            # reuse the previous system's key, and flag it for a human. The very first system has no
+            # previous key, so it falls back to summed probabilities, then to C major as a last resort.
             sys_key, source = carried, "carried_from_previous_system"
             sys_flags = ["key_no_majority", "review_needed"]
         else:
@@ -208,6 +236,10 @@ def decide(readings: Sequence[ClefKeyReading], ckm: ClefKeyModel) -> dict[str, S
                 flags += ["key_overridden_by_system", "review_needed"]
             if r.clef_probs is None:
                 flags.append("no_classifier_geometry")
+            # DEFENSE: voice-rule-clef - The clef is decided by resolve_clef: the classifier's guess is
+            # accepted only if confident AND allowed for that voice (e.g. Soprano is treble, Bass is bass).
+            # Otherwise the voice default is used. The CRNN's own clef is ignored: it almost always
+            # answers the same wrong clef on real scores (BUG-011).
             decision = resolve_clef(r.voice, r.clef_probs or no_read, ckm.clef_threshold, ckm.g8vb_reliable)
             out[r.strip_id] = StripDecision(decision, sys_key, source, sorted(set(flags)), vote_key=vote)
     _set_next_keys(out, {k: [r.strip_id for r in v] for k, v in systems.items()})
@@ -218,12 +250,18 @@ def _set_next_keys(out: dict[str, StripDecision], systems: dict[tuple[int, int],
     """Sets each strip's ``next_key`` to the adjacent next system's key (None when there is none)."""
     order = sorted(systems)
     for this, nxt in zip(order, order[1:] + [None]):
+        # DEFENSE: adjacent-systems - The "next system's key" is only evidence if that system really
+        # follows this one. If detection skipped a system, the gap is unknown, so we pass None.
         # A system Stage 2 missed in between has an unknown key, so it confirms nothing.
         next_key = out[systems[nxt][0]].key if nxt is not None and _systems_adjacent(this, nxt) else None
         for sid in systems[this]:
             out[sid].next_key = next_key
 
 
+# DEFENSE: key-continuity - In plain words: a real key change is rare and usually comes with a hint
+# (next system agrees, a small "courtesy" signature, cancelling naturals, a meter change). The classifier
+# sometimes misreads one system, so a sudden change with no hint is probably a misread and the old key is kept
+# (and flagged, with both candidates shown to the reviewer).
 # ── R1: key continuity between systems (choral-conductor + ml-cv-lead review 2026-09-30) ──────────────────
 # A key signature is reprinted on every system and changes rarely, and then usually with a meter change, a
 # courtesy signature at the end of the previous system or cancelling naturals. ClefKeyNet fails its gate
@@ -233,6 +271,8 @@ def _set_next_keys(out: dict[str, StripDecision], systems: dict[tuple[int, int],
 # corroborate each other, which also keeps a wrong hold from spreading past one system.
 KEY_CHANGE_UNCONFIRMED_FLAG = "key_change_unconfirmed"      # change held back, old key kept
 KEY_CHANGE_UNVERIFIABLE_FLAG = "key_change_unverifiable"    # change accepted with no next system to check
+# DEFENSE: c-major-evidence - C major means "no sharps or flats". A missed signature also looks like "none",
+# so a jump TO C major is the most likely misread and asks for two hints instead of one.
 # Corroborators needed. A change to C major with no naturals anywhere is the classic misread (a missed
 # signature reads as none), so it needs two; other changes to fewer accidentals need the usual one, since
 # modern editions often omit cancelling naturals (choral-conductor). Hand-set, not tuned.
@@ -241,7 +281,11 @@ KEY_CHANGE_TO_C_NO_NATURALS_MIN_EVIDENCE = 2
 
 
 def header_override(decision: StripDecision) -> s3.HeaderOverride:
-    """infer_pitch's header override for a strip decision."""
+    """infer_pitch's header override for a strip decision.
+
+    # DEFENSE: header-override - This packs the three decided facts (clef token, key, octave shift) into
+    # the object that tells Stage 3's infer_pitch to use them instead of the CRNN's own header guesses.
+    """
     return s3.HeaderOverride(decision.clef.token, decision.key, decision.clef.octave_shift)
 
 
@@ -407,11 +451,13 @@ def check_clef_key_weights(path: Optional[str]) -> Optional[Path]:
         print("[Stage 3] WARNING: ClefKeyNet disabled; clef/key come from the CRNN (BUG-011 applies). "
               "Every event is flagged clef_key_disabled / review_needed.")
         return None
+    # DEFENSE: fail-loud - Silently running without the classifier would give wrong pitches that look
+    # fine. A clear error is safer: either supply the weights or explicitly pass --no-clef-key.
     resolved = Path(path).resolve()
     if not resolved.is_file():
         raise FileNotFoundError(
-            f"ClefKeyNet checkpoint not found: {resolved}. Copy it from the training tree "
-            f"(training/clef_key_artifacts/t4_full_seed20260926_runA/) or pass --no-clef-key to run without it.")
+            f"ClefKeyNet checkpoint not found: {resolved}. Copy it into models/ "
+            f"(it is the t4_full_seed20260926_runA checkpoint, sha256 {DEFAULT_CLEF_KEY_SHA256[:12]}...) or pass --no-clef-key to run without it.")
     digest = file_sha256(resolved)
     if resolved == DEFAULT_CLEF_KEY_CHECKPOINT and digest != DEFAULT_CLEF_KEY_SHA256:
         raise ValueError(f"ClefKeyNet checkpoint {resolved} has sha256 {digest}, expected "
@@ -501,6 +547,8 @@ def infer_pitch_b(tokens: Sequence[str], confs: Sequence[float], voice: str, pag
     if info["mid_key_changes"]:
         flags += ["crnn_mid_strip_key_change", "review_needed"]
     flags = sorted(set(flags))
+    # DEFENSE: event-flags - Every note carries the strip's flags so the app can show "check this".
+    # While the gate is not passed, all notes also get the unvalidated flag (see gate-flag above).
     event_flags = flags if CLEF_KEY_GATE_PASSED else sorted(set(flags) | {CLEF_KEY_UNVALIDATED_FLAG, "review_needed"})
     for e in events:
         e["clef_key_flags"] = event_flags

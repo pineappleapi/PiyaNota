@@ -45,8 +45,8 @@ side are accepted by the other.
    (the Render service URL, starting with `https://`). Render then redeploys and applies the migration.
 7. Copy the model files into `<space>/models/` under exactly these names. The source paths are in the main checkout (`D:/PiyaNota`),
    because the weights are not in this worktree:
-   - `staff_detector_files/weights/best.pt` as `models/best.pt`
-   - `music_symbol_detection/phase2_kaggle_models/seed1/phase2_seed1.pt` as `models/phase2_seed1.pt`
+   - `staff_detector_files/weights/best.pt` (the YOLOv8 staff detector) as `models/staff_detector_yolov8.pt`
+   - `data/a9_c2_out/s1/a9_c2_c_s1/phase2_seed1_epoch10.pt` (the A9 C2 chord fine-tune, the scored model) as `models/symbol_transcriber_crnn_seed1.pt`
    - `training/clef_key_artifacts/t4_full_seed20260926_runA/clef_key_classifier.pt` as `models/clef_key_classifier.pt`
      (this file is ignored by version control in the main repository, so it exists only on your PC; without it every job fails with a "missing model file" log line)
    - `soundfont/piano.sf2` as `models/piano.sf2`

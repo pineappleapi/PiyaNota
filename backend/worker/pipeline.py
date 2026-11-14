@@ -4,6 +4,21 @@ The stage modules live at the repo root and need torch/cv2, which the API image 
 they are imported lazily and reached only through a ``Stages`` bundle that tests replace with fakes.
 """
 
+# DEFENSE INDEX: (Ctrl+F the tag to jump to the explanation)
+#   DEFENSE: lazy imports     - why torch/cv2 stage modules are imported inside real_stages(), not at the top
+#   DEFENSE: stages bundle    - why every pipeline step is a field of one Stages object (tests swap in fakes)
+#   DEFENSE: fixed reasons    - why failure reasons sent to clients are fixed text, never exception text
+#   DEFENSE: cpu only         - why CUDA is switched off before torch loads
+#   DEFENSE: progress bands   - how stage percentages and in-stage bands stay in order and never hit 100
+#   DEFENSE: validate first   - why inputs and model files are checked before any heavy work
+#   DEFENSE: input guard      - why only bad-photo errors become PipelineError and real bugs propagate
+#   DEFENSE: blank pages      - why unreadable whole pages are flagged here
+#   DEFENSE: cancel via progress - why on_progress may raise and nothing may swallow it
+#   DEFENSE: free memory      - why big image planes are dropped after the JPEGs exist
+#   DEFENSE: empty check      - why "all voices empty" is tested before Stage 4
+#   DEFENSE: failed voices    - why a failed voice stays in the list (silent track) instead of vanishing
+#   DEFENSE: midi only        - why the new score output is MIDI and MP3 is a legacy path
+
 from __future__ import annotations
 
 import json
@@ -25,6 +40,10 @@ CRNN_STRIP_HEIGHT = 64  # Stage 3 CRNN input height
 CLEAN_PAGE_JPEG_QUALITY = 90
 STRIPS_MANIFEST = "manifest.json"
 
+# DEFENSE: progress bands - the app shows one progress bar for the whole job. Each stage owns a slice of
+# 0-100: STAGE_PERCENT is where the slice starts, the *_BAND tuples are how far we creep inside it
+# while the stage runs. Bands end just before the next stage starts so the bar never goes backwards,
+# and only complete_job (outside this file) writes 100.
 # (job status, percent reported when the stage starts), in pipeline order.
 STAGE_PERCENT = (("preprocessing", 5), ("detecting_staff", 25), ("transcribing", 40),
                  ("reconstructing", 85), ("synthesizing", 92))
@@ -38,7 +57,9 @@ TRANSCRIBE_BAND = (40, 84)  # Stage 3 Pass 1 (CRNN forward, ~90%) then Pass 2, w
 
 ProgressFn = Callable[[int, int], None]
 
-CLEF_KEY_DEFAULT = "training/clef_key_artifacts/t4_full_seed20260926_runA/clef_key_classifier.pt"
+CLEF_KEY_DEFAULT = "models/clef_key_classifier.pt"
+# DEFENSE: fixed reasons - these strings go to the phone app. We never put exception text in them,
+# because it could leak file paths or internals. Each stage gets one short, user-safe sentence instead.
 STAGE_FAILURE_REASONS = {"preprocessing": "no readable page", "detecting_staff": "no readable staves",
                          "transcribing": "could not read the notation"}
 
@@ -92,18 +113,25 @@ class PipelineConfig:
 
         clef_key = env.get("PIYA_CLEFKEY_WEIGHTS")  # empty string = explicit opt-out
         return cls(
-            yolo_weights=path("PIYA_YOLO_WEIGHTS", "staff_detector_files/weights/best.pt"),
+            yolo_weights=path("PIYA_YOLO_WEIGHTS", "models/staff_detector_yolov8.pt"),
             crnn_weights=path("PIYA_CRNN_WEIGHTS",
-                              "music_symbol_detection/phase2_kaggle_models/seed1/phase2_seed1.pt"),
-            soundfont=path("PIYA_SOUNDFONT", "soundfont/piano.sf2"),
+                              "models/symbol_transcriber_crnn_seed1.pt"),
+            soundfont=path("PIYA_SOUNDFONT", "models/piano.sf2"),
             clef_key_weights=(_REPO_ROOT / CLEF_KEY_DEFAULT if clef_key is None
                               else Path(clef_key) if clef_key else None),
         )
 
 
+# DEFENSE: stages bundle - the real stages need torch and OpenCV, which are slow to load and absent
+# from the API image. Putting each step in one Stages object lets unit tests pass cheap fake functions
+# with the same shapes, so the worker logic is tested without any ML libraries.
 @dataclass(frozen=True)
 class Stages:
-    """One callable per pipeline step so tests can inject fakes."""
+    """One callable per pipeline step so tests can inject fakes.
+
+    Each field matches one real stage function (see ``real_stages``); a fake only has to accept and
+    return the same shapes.
+    """
 
     preprocess: Callable[[str, str, bool, ProgressFn | None], list[Any]]
     clean_page: Callable[[Any], CleanPage]
@@ -140,6 +168,11 @@ def real_stages() -> Stages:
     CUDA_VISIBLE_DEVICES=-1 is set here, before torch is imported, and is the only CPU guard; the worker
     entry point should set it too. The caller removes work_dir.
     """
+    # DEFENSE: cpu only - the server has no GPU we want to depend on. Setting this to -1 hides all GPUs
+    # from torch, but it only works if done BEFORE torch is imported, which is why it sits right here.
+    # DEFENSE: lazy imports - the imports below are inside this function on purpose. Importing the
+    # stage modules pulls in torch/cv2, so the API process (which never converts) stays light and
+    # starts fast; only the worker that calls real_stages() pays that cost.
     os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # empty string crashes ultralytics
     import cv2
     import stage3_clefkey
@@ -192,6 +225,15 @@ def real_stages() -> Stages:
 
 
 def _validate_inputs(page_jpegs: list[bytes], config: PipelineConfig) -> None:
+    """Fail fast, before any heavy work: all model files exist and every page is a real image.
+
+    Raises:
+        PipelineError: "service misconfigured" for a missing model (our fault, details only in the
+            log) or a short fixed reason for bad pages (the user's photo).
+    """
+    # DEFENSE: validate first - a missing weights file or a corrupt upload would otherwise fail
+    # minutes into the run. Checking now gives an instant, clear answer. img.verify() reads the file
+    # structure without decoding all pixels, so it is cheap.
     required = [config.yolo_weights, config.crnn_weights, config.soundfont]
     if config.clef_key_weights is not None:
         required.append(config.clef_key_weights)
@@ -220,6 +262,9 @@ def _input_errors() -> tuple[type[BaseException], ...]:
 
 def _guard(status: str, call: Callable[[], Any]) -> Any:
     """Map input-caused failures to PipelineError with a fixed reason; real bugs (TypeError...) propagate."""
+    # DEFENSE: input guard - only errors a bad photo can cause (ValueError, missing file, OpenCV error)
+    # become a friendly "could not read" failure. Anything else, like a TypeError, is OUR bug: it is
+    # left to crash loudly so we notice and fix it instead of blaming the user's photo.
     try:
         return call()
     except _input_errors() as exc:
@@ -231,6 +276,9 @@ def _flag_blank_pages(satb: dict[str, list[dict[str, Any]]], flags: list[dict[st
 
     Stage 4 only sees pages that have events, so a fully unreadable page would otherwise be lost silently.
     """
+    # DEFENSE: blank pages - if page 2 of 3 produced no notes at all, Stage 4 never hears about it and
+    # the song would just be shorter with no warning. We compare the pages we received with the pages
+    # that have events and raise a "review needed" flag for the missing ones, for every voice.
     seen = {e["page_index"] for evs in satb.values() for e in evs if "page_index" in e}
     blank = [p for p in range(1, n_pages + 1) if p not in seen] if seen else []
     if not blank:
@@ -260,7 +308,17 @@ def run_pipeline(
     ``timing`` makes Stages 2 and 3 record strip geometry and barline positions for the timing export.
     ``on_progress`` gets an overall percent inside the preprocessing and transcribing bands; it may raise to abort a cancelled job,
     so nothing here may swallow its exception.
+
+    Returns:
+        PipelineResult with per-voice MIDI (and MP3 on the legacy path), failed voices, review flags,
+        cleaned pages and per-stage timings.
+
+    Raises:
+        PipelineError: input or configuration problem with a client-safe reason.
     """
+    # DEFENSE: cancel via progress - the user can cancel a job. The worker does that by making
+    # on_progress raise an exception; the stages call it often, so the job stops at the next update.
+    # That is why none of the code here may catch broad exceptions around those calls.
     _validate_inputs(page_jpegs, config)
     t_libs = monotonic()
     st = stages or real_stages()
@@ -290,6 +348,8 @@ def run_pipeline(
     use_ck = config.clef_key_weights is not None
     pages = _guard("preprocessing", lambda: st.preprocess(str(in_dir), str(prep), use_ck, band(PREPROCESS_BAND)))
     clean = [st.clean_page(p) for p in pages]
+    # DEFENSE: free memory - a 12 MP photo keeps big image arrays alive. The app only needs the JPEGs
+    # made just above, so we drop the heavy arrays now to keep the worker's RAM low for later stages.
     # Free the native display planes (and the whole PreprocessedPage when ClefKeyNet is off) now that
     # the JPEGs exist; the worker otherwise holds ~24 MB per 12 MP page until synthesis ends.
     pages = [tuple(p) if use_ck else tuple(p[:3]) for p in pages]
@@ -314,6 +374,9 @@ def run_pipeline(
     seconds["transcribing"] = monotonic() - t
 
     t = begin("reconstructing")
+    # DEFENSE: empty check - "no notes in any voice" is the one case we report as unreadable photos.
+    # We test it ourselves instead of catching Stage 4's ValueError, so a different ValueError (a real
+    # bug) is not blamed on the user.
     # Stage 4 raises ValueError only when all four voices are empty; checking here keeps any other
     # ValueError (a real bug) from being reported to the client as unreadable photos.
     if not any(events.get(v) for v in VOICES):
@@ -328,6 +391,8 @@ def run_pipeline(
     paths = st.synthesize(satb, str(out), tempo_bpm, str(config.soundfont))
     seconds["synthesizing"] = monotonic() - t
 
+    # DEFENSE: midi only - the new flow makes MIDI files (small, the phone plays them) and skips MP3
+    # rendering. The mp3 dict stays only so older or injected stages still work.
     # Stage 5 falls back to a .mid when rendering fails; an unreadable voice is a silent MP3 and
     # is listed by Stage 4, not inferred from a missing file.
     mp3 = {v.lower(): Path(p).read_bytes() for v, p in paths.items() if Path(p).suffix == ".mp3"}
@@ -339,6 +404,10 @@ def run_pipeline(
     rendered = mp3.keys() if mp3 else midi.keys()
     if not rendered:
         raise PipelineError("audio rendering failed")
+    # DEFENSE: failed voices - a voice that Stage 4 could not read (or has no output file) is still
+    # listed in `failed`, in fixed S-A-T-B order, instead of being dropped. The app then shows that
+    # voice as "unreadable" and the other three still play. Its MIDI is removed below, so there is
+    # nothing wrong to play, and its cause is the fixed text FAILED_VOICE_CAUSE.
     # A voice with no rendered file must not vanish from failedVoices.
     failed = [v.lower() for v in VOICES
               if v in report.get("failed_voices", []) or v.lower() not in rendered]

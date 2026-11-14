@@ -12,8 +12,8 @@ ENV PYTHONUNBUFFERED=1 \
     PIYA_REQUIRE_HTTPS=true \
     PIYA_MAIL_BACKEND=log \
     PIYA_MAIL_FROM=noreply@piyanota.invalid \
-    PIYA_YOLO_WEIGHTS=/app/models/best.pt \
-    PIYA_CRNN_WEIGHTS=/app/models/phase2_seed1.pt \
+    PIYA_YOLO_WEIGHTS=/app/models/staff_detector_yolov8.pt \
+    PIYA_CRNN_WEIGHTS=/app/models/symbol_transcriber_crnn_seed1.pt \
     PIYA_CLEFKEY_WEIGHTS=/app/models/clef_key_classifier.pt \
     PIYA_SOUNDFONT=/app/models/piano.sf2
 

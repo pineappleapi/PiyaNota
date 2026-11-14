@@ -5,6 +5,18 @@ any inconsistency returns ``{"events": []}`` and logs the reason, because audio 
 without a highlight (docs/decisions/piya-106-timing-x-mapping.md).
 """
 
+# DEFENSE INDEX: (Ctrl+F the tag)
+#   DEFENSE: never raises     why build_timing swallows errors and returns empty
+#   DEFENSE: page numbering   1-based pipeline pages vs 0-based app pages
+#   DEFENSE: blend rule       why CTC x and bar interpolation are averaged only when close
+#   DEFENSE: strip to page    how a strip pixel becomes a page pixel
+#   DEFENSE: constant tempo   how ticks become milliseconds
+#   DEFENSE: median barlines  why barlines are the median across the four voices
+#   DEFENSE: bar layout       bar list, pickup is bar 0
+#   DEFENSE: missing barline  guess for the last barline the CRNN often drops
+#   DEFENSE: first bar left   why bar 1 starts at the first note, not a real barline
+#   DEFENSE: x interpolation  note x placed by its tick position inside its bar
+
 from __future__ import annotations
 
 import logging
@@ -19,8 +31,14 @@ STRIP_HEIGHT_PX = 64          # Stage 2 STRIP_HEIGHT; strip x is in these pixels
 DEFAULT_PPQ = 480             # Stage 4 TICKS_PER_QUARTER
 STAFF_LINE_GAPS = 4           # a 5-line staff box spans 4 staff spaces
 MS_PER_MINUTE = 60000
+# DEFENSE: blend rule - we have two guesses for a note's x: the CRNN's own x (accurate when the
+# model read the right spot, but sometimes far off) and the even spread of ticks across the bar (steady,
+# but notes are not engraved evenly). If they are close we average them; if they disagree by more than
+# this we distrust the CRNN and keep the bar spread.
 # Blend a CTC x with the bar interpolation only when they agree within this many staff spaces.
 BLEND_MAX_STAFF_SPACES = 1.0
+# DEFENSE: page numbering - the pipeline counts pages from 1, the app counts from 0, so the output
+# subtracts this constant once (out_page = page - PIPELINE_FIRST_PAGE).
 # Stage 1 numbers pages from 1; the app and ``page_sizes`` are 0-based.
 PIPELINE_FIRST_PAGE = 1
 VOICES = ("Soprano", "Alto", "Tenor", "Bass")
@@ -57,14 +75,23 @@ class TimingInconsistent(Exception):
 
 
 def strip_x_to_page_x(strip_x: float, geo: StripGeometry) -> float:
-    """Converts a strip x (64 px high strip) to a cleaned-page x."""
+    """Converts a strip x (64 px high strip) to a cleaned-page x.
+
+    # DEFENSE: strip to page - the CRNN sees a strip squashed to 64 px tall. To undo that we scale
+    # back up by (original crop height / 64), convert from the high-res source to the detection page
+    # with kx, then add where the crop started on the page.
+    """
     if not math.isfinite(strip_x):
         raise TimingInconsistent(f"non-finite strip x {strip_x}")
     return geo.crop_x1 + strip_x * (geo.crop_h_src / STRIP_HEIGHT_PX) / geo.kx
 
 
 def timestamp_ms(tick: int, bpm: int, ppq: int = DEFAULT_PPQ) -> int:
-    """Milliseconds of ``tick`` at constant tempo ``bpm`` (the bpm the MIDI is rendered with)."""
+    """Milliseconds of ``tick`` at constant tempo ``bpm`` (the bpm the MIDI is rendered with).
+
+    # DEFENSE: constant tempo - ticks / ppq = quarter notes; one quarter lasts 60000 / bpm ms. The
+    # audio is rendered at one fixed bpm, so the highlight uses the same bpm and stays in sync.
+    """
     return round(tick / ppq * MS_PER_MINUTE / bpm)
 
 
@@ -77,6 +104,9 @@ def median_barlines(per_voice: dict[str, list[float]]) -> list[float]:
     Returns:
         Medians (empty when no voice has barlines). Ties for the mode go to the larger count.
     """
+    # DEFENSE: median barlines - all four voices sit on the same page, so their barlines should line
+    # up. Each voice is read separately and some miss or invent a barline. We keep only voices with the
+    # most common barline count, then take the median per bar so one bad voice cannot move the result.
     counts: dict[int, int] = {}
     for xs in per_voice.values():
         counts[len(xs)] = counts.get(len(xs), 0) + 1
@@ -89,6 +119,9 @@ def median_barlines(per_voice: dict[str, list[float]]) -> list[float]:
 
 def _bar_layout(report: dict[str, Any]) -> list[dict[str, Any]]:
     """Flat bar list (pickup = bar 0) from the Stage 4 report."""
+    # DEFENSE: bar layout - Stage 4 already knows each system's start tick and bar lengths. We flatten
+    # that into one list of bars with start tick and length. A pickup (partial first bar) is bar 0 so
+    # real bars still count from 1.
     bars: list[dict[str, Any]] = []
     pickup = int(report.get("pickup_ticks", 0))
     for i, sysinfo in enumerate(report["systems"]):
@@ -115,6 +148,9 @@ def _bar_edges(rights: list[float], first_left: float | None, n_bars: int) -> li
     extrapolated with the mean bar width. The first bar's left edge is the median first-note x,
     because the header width is not known.
     """
+    # DEFENSE: missing barline - the last bar of a system ends at the page edge, so the CRNN often
+    # reports one barline too few. If exactly one is missing we add one more bar of average width.
+    # Any other count mismatch is not safe to guess, so it raises and the highlight is skipped.
     if len(rights) == n_bars - 1 and n_bars >= 2:
         width = (rights[-1] - rights[0]) / (len(rights) - 1) if len(rights) > 1 else rights[0] - (first_left or 0.0)
         rights = rights + [rights[-1] + width]
@@ -152,6 +188,8 @@ def build_timing(
     Returns:
         The timing dict. Never raises: the reason for an empty result is logged.
     """
+    # DEFENSE: never raises - the highlight is a bonus feature. If anything looks wrong we log why and
+    # return an empty list, so the user still gets their audio instead of a failed conversion.
     try:
         return _build(events, strips, barlines, page_sizes, report, bpm, ppq)
     except (TimingInconsistent, KeyError, ValueError, TypeError, ZeroDivisionError, IndexError) as exc:
@@ -185,6 +223,8 @@ def _build(events: dict[str, list[dict[str, Any]]], strips: list[StripGeometry],
                      for v in voice_geo}
         sys_events = [(v, e) for v, evs in events.items() for e in evs
                       if e.get("type") == "note" and e["page_index"] == page and e["sys_idx"] == sysi]
+        # DEFENSE: first bar left - the clef, key and time signature at the start have unknown width, so
+        # we cannot see where bar 1 really begins. We use the median x of the first notes instead.
         # Left edge of bar 1 per voice: the note at the bar's first tick, else that voice's leftmost note.
         first_xs = []
         for v in voice_geo:
@@ -222,6 +262,9 @@ def _build(events: dict[str, list[dict[str, Any]]], strips: list[StripGeometry],
             if idx is None:
                 raise TimingInconsistent(f"tick {tick} outside system bars (p{page} s{sysi} {voice})")
             bar, (left, right) = sys_bars[idx], edges[idx]
+            # DEFENSE: x interpolation - a note at 25% of the way through its bar (by tick) is drawn 25%
+            # of the way between the bar's left and right barline. Then the blend rule below nudges it
+            # toward the CRNN's own x when the two agree.
             x = left + (tick - bar["startTick"]) / bar["durTicks"] * (right - left)
             if "ctc_x" in e:
                 ctc = strip_x_to_page_x(e["ctc_x"], g)
