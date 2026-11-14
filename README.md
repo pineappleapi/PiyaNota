@@ -1,175 +1,110 @@
-# PiyaNota — Proof-of-Concept Setup Guide
+# PiyaNota
 
-## Project Structure
+PiyaNota turns a photo of **open-score** printed SATB choral music (one staff per voice: Soprano, Alto,
+Tenor, Bass) into four piano audio tracks, one per voice. It is a thesis project with three parts:
+
+| Part | Folder | What it is |
+|---|---|---|
+| Android app | `mobile/piyanota_application/` | Flutter app: photograph a score, upload it, play the four voices. |
+| API | `backend/` | Flask API (auth, uploads, job queue, library) deployed on Render, with Postgres on Neon. |
+| Recognition pipeline | repo root (`stage*.py` and helpers) | Reads the photo and writes the MIDI/audio. Run by the conversion worker in `backend/worker/`. |
+
+Start with [`docs/README.md`](docs/README.md) for the documentation map. [`CLAUDE.md`](CLAUDE.md) is the long
+project guide (it is also the instruction file for the Claude Code assistant used on this repo).
+
+## How a photo becomes audio
 
 ```
-piyanota/
-├── stage1_preprocessing.py   # Stage 1: Image preprocessing
-├── stage2_detection.py       # Stage 2: YOLOv8 staff detection
-├── run_pipeline.py           # Main runner (Stage 1 → 2)
-├── requirements.txt          # Python dependencies
-└── data/
-    ├── dataset.yaml          # YOLOv8 training config
-    ├── raw/                  # ← PUT YOUR SCORE IMAGES HERE
-    ├── preprocessed/         # Auto-created by Stage 1
-    ├── strips/               # Auto-created by Stage 2
-    └── images/ + labels/     # Your annotated training data
+photo -> Stage 1 preprocess -> Stage 2 find staves -> Stage 3 read symbols -> Stage 4 build four voices -> Stage 5 MIDI + audio
 ```
 
----
+| Stage | File | Job |
+|---|---|---|
+| 1 | `stage1_preprocessing.py` | Grayscale, denoise, binarize, straighten the page and each staff, mask non-staff ink. |
+| 2 | `stage2_detection.py` | YOLOv8 finds each staff; the four staves of a system become Soprano/Alto/Tenor/Bass strips. |
+| 3 | `stage3_transcription.py` | CRNN-CTC reads each strip into music tokens, then `infer_pitch()` turns them into MIDI pitches. |
+| 4 | `stage4_reconstruction.py` | Merges strips into one timeline per voice: ties, bars, pickup, meter, repairs, review flags. |
+| 5 | `stage5_synthesis.py` | Writes one MIDI per voice and renders MP3 through FluidSynth. |
 
-## Step-by-Step VSCode Setup
+Helpers at the root, all imported by flat name (the worker image and the tests rely on that):
 
-### 1. Install Prerequisites
+| File | Role | Used by |
+|---|---|---|
+| `stage3_clefkey.py` | Stage 3 variant that takes clef, key and octave from the clef/key classifier instead of the CRNN. This is the default. | Stage 3/4/5 CLIs, `run_full_pipeline` |
+| `clef_key_core.py` | The clef/key classifier network and its crop definition. One file shared with the Kaggle training notebook, so it must not change on its own. | `stage3_clefkey.py`, `clef_voice_rules.py` |
+| `clef_voice_rules.py` | Limits the classifier's clef to the clefs that voice actually uses. | `stage3_clefkey.py`, tests |
+| `timing_export.py` | Maps Stage 4 events to page pixels and milliseconds for the app's note highlight. Pure Python, no torch. | `backend/worker/main.py` |
 
-- **Python 3.10+** — https://www.python.org/downloads/
-  - During install, check ✅ "Add Python to PATH"
-- **VSCode** — https://code.visualstudio.com/
-- **Git** (optional but recommended) — https://git-scm.com/
+The full details of each stage are in `CLAUDE.md` (section "Pipeline architecture").
 
----
+## Repo map
 
-### 2. Open the Project in VSCode
+```
+README.md  CLAUDE.md  render.yaml  requirements.txt
+stage1..stage5, stage3_clefkey, clef_key_core, clef_voice_rules, timing_export   (the pipeline)
+backend/     Flask API, worker, migrations, scripts, tests   (see backend/README.md)
+mobile/      Flutter app                                      (see its README)
+tests/       pipeline tests                                   (pytest)
+docs/        deploy guides, ERD, decisions, known issues      (see docs/README.md)
+models/      model weights + soundfont, NOT in git            (see below)
+.claude/     assistant tooling (agents, hooks), not app code
+```
 
-1. Create a folder on your computer, e.g. `C:\Projects\piyanota` (Windows) or `~/projects/piyanota` (Mac/Linux)
-2. Copy all the files from this package into that folder
-3. Open VSCode → **File → Open Folder** → select the folder
-
----
-
-### 3. Install the Python Extension
-
-1. In VSCode, press `Ctrl+Shift+X` (Extensions sidebar)
-2. Search **Python** → install the one by Microsoft
-3. Search **Pylance** → install it too (better autocomplete)
-
----
-
-### 4. Create a Virtual Environment
-
-Open the VSCode terminal: **Terminal → New Terminal** (or `` Ctrl+` ``)
+## Setup
 
 ```bash
-# Windows
 python -m venv venv
-venv\Scripts\activate
-
-# Mac / Linux
-python3 -m venv venv
-source venv/bin/activate
-```
-
-You should see `(venv)` appear at the start of your terminal prompt.
-
----
-
-### 5. Select the Virtual Environment in VSCode
-
-1. Press `Ctrl+Shift+P` → type **Python: Select Interpreter**
-2. Choose the one that shows `venv` in the path (e.g. `.\venv\Scripts\python.exe`)
-
----
-
-### 6. Install Dependencies
-
-In the terminal (with venv active):
-
-```bash
+venv\Scripts\activate          # Windows
 pip install -r requirements.txt
+# GPU (optional, NVIDIA CUDA 12.1), install separately:
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 ```
 
-This installs OpenCV, NumPy, and Ultralytics YOLOv8.
-YOLOv8 will also auto-download `yolov8n.pt` on first run (~6 MB).
+Stage 5 audio also needs a system `fluidsynth`, `ffmpeg` on PATH, and the packages listed (commented) in
+`requirements.txt`.
 
-> **If you have an NVIDIA GPU**, install PyTorch with CUDA for faster training:
-> ```bash
-> pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-> pip install ultralytics opencv-python numpy Pillow PyYAML
-> ```
+**Model files are not in git.** Put these four files in `models/` (the pipeline and the worker read them from
+there):
 
----
+- `staff_detector_yolov8.pt` (Stage 2)
+- `symbol_transcriber_crnn_seed1.pt` (Stage 3)
+- `clef_key_classifier.pt` (clef/key classifier)
+- `piano.sf2` (soundfont)
 
-### 7. Add Your Score Images
+Paths can be overridden with `PIYA_YOLO_WEIGHTS`, `PIYA_CRNN_WEIGHTS`, `PIYA_CLEFKEY_WEIGHTS` and `PIYA_SOUNDFONT`.
 
-Place your SATB score photos (JPG or PNG) inside `data/raw/`.
-Even 1–2 images work for a demo.
+## Run the pipeline
 
----
-
-### 8. Run the Pipeline
+Each stage script runs everything before it, so run the last stage you need. Put photos in `data/raw/`.
 
 ```bash
-# Basic run (Stage 1 + Stage 2):
-python run_pipeline.py --input data/raw
-
-# With debug images saved (shows each preprocessing step):
-python run_pipeline.py --input data/raw --debug
+python stage5_synthesis.py --input data/raw \
+    --weights models/symbol_transcriber_crnn_seed1.pt \
+    --yolo models/staff_detector_yolov8.pt \
+    --soundfont models/piano.sf2
 ```
 
-Outputs appear in:
-- `data/preprocessed/` — thresholded, skew-corrected pages
-- `data/strips/` — individual staff strips per voice
+There is no `run_pipeline.py`. `run_full_pipeline()` in `stage5_synthesis.py` is the single entry point the
+worker calls. Stages 1 to 4 can be run the same way (`python stage2_detection.py --input data/raw --viz`).
 
----
-
-### 9. (Optional) Training YOLOv8
-
-Once you have annotated images:
+## Run the tests
 
 ```bash
-python run_pipeline.py --train --data data/dataset.yaml --epochs 50
+python -m pytest tests -q                    # pipeline: 117 pass, 55 expected failures (tests/conftest.py)
+python -m pytest backend/tests -q            # backend: needs Postgres on localhost:55432
+cd mobile/piyanota_application
+flutter analyze && flutter test
 ```
 
-Best weights saved to: `runs/train/piyanota_staff_detector/weights/best.pt`
+The 55 expected failures are tests for muted-span/meter-vote code that is not on `main` (see
+`docs/KNOWN-ISSUES.md`).
 
-Then use them:
-```bash
-python run_pipeline.py --input data/raw --weights runs/train/piyanota_staff_detector/weights/best.pt
-```
+## Deploying
 
----
+- API: Render builds `backend/Dockerfile` from `render.yaml`. Guide: [`docs/deploy/render-api.md`](docs/deploy/render-api.md).
+- Conversion worker: runs on the developer laptop against the same Neon database. Guide:
+  [`docs/deploy/local-worker.md`](docs/deploy/local-worker.md).
 
-### 10. Evaluating the Trained Model (mAP)
+## Scope
 
-```bash
-python run_pipeline.py --eval \
-  --weights runs/train/piyanota_staff_detector/weights/best.pt \
-  --data data/dataset.yaml
-```
-
-This prints **mAP50** and **mAP50-95** — the metrics from your Sprint 4 acceptance criteria.
-
----
-
-## Annotating Your SATB Score Images (for Training)
-
-Use **Roboflow** (free, web-based):
-1. Go to https://roboflow.com → create a free account
-2. Create a project → Object Detection → class name: `staff`
-3. Upload your score images → draw bounding boxes around each staff line
-4. Export as **YOLOv8 format** → download and place in `data/images/` and `data/labels/`
-
-Aim for at least **50–80 annotated staff regions** for fine-tuning.
-
----
-
-## What to Show at Your Defense
-
-| What | Where |
-|---|---|
-| Preprocessed image (thresholded, skew-corrected) | `data/preprocessed/` |
-| Debug intermediates (each preprocessing step) | `data/debug/` (run with `--debug`) |
-| Detected staff strips per voice | `data/strips/` |
-| Training loss curve (if trained) | `runs/train/.../results.png` |
-| mAP scores (if trained) | Terminal output of `--eval` |
-
----
-
-## Troubleshooting
-
-| Problem | Fix |
-|---|---|
-| `ModuleNotFoundError: ultralytics` | Run `pip install -r requirements.txt` with venv active |
-| `No images found` | Make sure images are in `data/raw/` and are `.jpg` or `.png` |
-| `No staff regions detected` | Try a clearer photo; the pretrained model may not recognize music staves yet — train first |
-| VSCode doesn't find Python | Press `Ctrl+Shift+P` → Python: Select Interpreter → pick the venv one |
+Open-score SATB only. Closed-score (two-staff piano-reduction style) is out of scope. Fermatas are out of scope. Two rhythms on one staff (`layer.split` divisi) are a known limit: Stage 4 flags the bar for review.

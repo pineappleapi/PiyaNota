@@ -46,19 +46,13 @@ instance/
 data/
 datasets/
 runs/
-staff_detector_files/weights/
-# Clef/key classifier local training (PIYA-106): cached crops and run artifacts
-training/clef_key_cache/
-training/clef_key_artifacts/
 # Stage 5 audio: soundfonts are large third-party binaries, installed locally (see README/CLAUDE.md)
 soundfont/
 *.sf2
 
-# Hand-annotation viewing crops under gt/ (hundreds of MB of PNGs, regenerable from the photos); GT sources and labels stay tracked.
-gt/**/crops/
 .neon
 node_modules/
 .env.local
 
-# Local model weights + soundfont (copy into models/; the Space image copies the same folder)
+# Local model weights + soundfont (copy into models/)
 /models/

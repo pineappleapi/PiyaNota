@@ -68,7 +68,7 @@ class Settings:
     # XFF chain on Render is longer (Cloudflare + Render) than the proto chain we can rely on.
     trusted_proxy_for_count: int | None = None
     # Temporary: exposes the proxy headers the app sees so trusted_proxy_count can be set from
-    # evidence. Remove with the endpoint in app.py once recorded in docs/backend/deploy.md.
+    # evidence. Remove with the endpoint in app.py once recorded in docs/deploy/render-api.md.
     debug_headers: bool = False
     max_content_length: int = 100 * _MB
     max_image_bytes: int = 10 * _MB
