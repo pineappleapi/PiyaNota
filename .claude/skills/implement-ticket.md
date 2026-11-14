@@ -1,6 +1,6 @@
 # Implement Ticket
 Given a PIYA ticket ID:
-1. Read that specific ticket from /docs/tickets/module{N}-*.md
+1. Read that specific ticket from _archive/docs/tickets/module{N}-*.md (local only)
 2. State the plan and a one-line risk assessment
 3. Wait for approval before editing
 4. Implement, matching acceptance criteria exactly

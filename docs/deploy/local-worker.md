@@ -13,21 +13,32 @@ serves them. The worker runs on the developer laptop; no hosted GPU or Hugging F
 
 ## Environment variables
 
+Keep them in a launcher script **outside the repo** (it holds secrets), for example
+`D:\PiyaNota-worker\start-worker.ps1`.
+
 | Variable | Value |
 |---|---|
+| `PIYA_ENV` | `prod` (then the variables below marked required must be set, or the worker stops with a message naming the missing one). |
 | `PIYA_DATABASE_URL` | Neon **unpooled** (direct) connection string, the same one Render uses as `DATABASE_URL`. |
 | `PIYA_STORAGE_BACKEND` | `db` |
 | `PIYA_MEDIA_HMAC_KEY` | Exactly the same value as on Render, so links signed by one side verify on the other. |
 | `PIYA_PUBLIC_BASE_URL` | The Render URL, starting with `https://`. |
+| `PIYA_RESET_CODE_HMAC_KEY`, `PIYA_LOG_HASH_KEY` | Long random strings; required in prod. |
+| `PIYA_REQUIRE_HTTPS` | `true` |
+| `PIYA_MAIL_BACKEND`, `PIYA_MAIL_FROM` | `log` and any sender address; the worker sends no mail, but prod needs them set. |
+| `CUDA_VISIBLE_DEVICES` | `-1` to force CPU (what the golden check uses); omit to use an NVIDIA GPU. |
 
-Model paths are read from `models/` unless `PIYA_YOLO_WEIGHTS`, `PIYA_CRNN_WEIGHTS`, `PIYA_CLEFKEY_WEIGHTS` or
-`PIYA_SOUNDFONT` is set. Never write these values into a tracked file.
+Model paths default to the repo's `models/` folder. Set `PIYA_YOLO_WEIGHTS`, `PIYA_CRNN_WEIGHTS`,
+`PIYA_CLEFKEY_WEIGHTS` and `PIYA_SOUNDFONT` only to point somewhere else. Never write these values into a
+tracked file.
 
 ## Start
 
-From the repository root:
+The last two lines of the launcher: go to the repository root, then start the worker with the Python that has the
+requirements installed.
 
 ```
+Set-Location D:\PiyaNota
 backend/.venv/Scripts/python -m backend.worker --loop
 ```
 
