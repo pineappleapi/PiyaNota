@@ -28,8 +28,8 @@ Only app code is at the root: `backend/`, `deploy/`, `mobile/`, `tests/`, `docs/
 `_archive/`, which is committed locally only and never pushed. Any `docs/`, `training/`, `data/`,
 `ground_truth/` or `staff_detector_files/` path below that is not in the app list above means `_archive/<path>`.
 Weights and the soundfont default to the gitignored `models/` folder (`staff_detector_yolov8.pt`, `symbol_transcriber_crnn_seed1.pt`,
-`clef_key_classifier.pt`, `piano.sf2`), the same layout the Space image copies. `tests/` has 10 files
-(103 pass, 55 expected-failures in `tests/conftest.py`); `backend/tests` needs Postgres at localhost:55432.
+`clef_key_classifier.pt`, `piano.sf2`), the same layout the Space image copies. `tests/` has 11 files
+(117 pass, 55 expected-failures in `tests/conftest.py`); `backend/tests` needs Postgres at localhost:55432.
 `_archive/golden/golden_check.py` is the golden-output check (10-piece camera set, CPU): run it before and after
 any refactor. `python _archive/golden/golden_check.py check`.
 
@@ -179,10 +179,12 @@ later stages import functions from earlier ones rather than duplicating logic.
    four are empty (PIYA-108 AC4/AC5, 2026-10-09). Bars are laid out per measure at their own meter
    (PIYA-108 AC6/AC7). The muted-span part (a `start_tick`/`end_tick` span that Stage 5 renders silent,
    PIYA-108 AC8 / PIYA-109 AC8) is NOT on main: `muted_measures` is always `[]` (`docs/KNOWN-ISSUES.md`).
-   Known gaps: mid-bar system breaks are not handled, and Stage 3 cannot
-   currently represent chords (its `chord_id` block never fires, and Camera-PrIMuS has no chord token),
-   so simultaneous notes in one voice (e.g. Bass divisi) arrive as sequential notes until the
-   vocabulary/retraining work lands.
+   Known gaps: mid-bar system breaks are not handled. Same-stem divisi chords are supported: the A9 C2
+   CRNN emits `chordnote-*` tokens, Stage 3 turns them into simultaneous notes that share a `chord_id`
+   (unique per strip, so key it on `(page_index, sys_idx, chord_id)`), and Stage 5 plays them together.
+   Two rhythms on one staff (`layer.split`) are not handled (accepted limitation, 2026-11-08): Stage 4's
+   split-stem check (`divisi_rhythm_split_suspected`) clips that bar to its length and flags it
+   `review_needed`. `tests/test_stage4_divisi.py` covers that check.
 
 5. **`stage5_synthesis.py`** — converts each voice's event list into a single-track MIDI file (ticks
    converted to beats via `PPQ = 480`), then renders MIDI → WAV → MP3 through FluidSynth + a `.sf2`
