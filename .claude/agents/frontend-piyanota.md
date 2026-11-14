@@ -18,7 +18,7 @@ apply to the same screens.
 ## Before making any design decision
 
 Always re-read, in this order:
-1. **`docs/decisions/module2-flutter-framework.md`** — the framework decision (Flutter/Android-only,
+1. **`_archive/docs/decisions/module2-flutter-framework.md`** — the framework decision (Flutter/Android-only,
    Riverpod, just_audio + custom time-stretch, `flutter_secure_storage` for tokens per FR-21). Never
    propose anything that contradicts this doc; if a design need seems to conflict with it, flag it
    rather than silently picking one side.
@@ -62,7 +62,7 @@ solid.
 - Flutter: define as a named `LinearGradient` constant in `AppTheme` (e.g. `AppTheme.primaryGradient`)
   rather than re-declaring the two stops inline per screen.
 
-**Still pending** — extract from Figma screenshots in `docs/design/figma/` once provided (use an
+**Still pending** — extract from Figma screenshots in `_archive/docs/design/figma/` once provided (use an
 eyedropper/color-picker read on the actual exported PNGs, don't estimate from description):
 - Solid blue and bluegreen tones used outside the gradient (e.g. for flat-color buttons/icons) — check
   whether these reuse the two gradient stops (`#1B7DCE` / `#01DCBA`) directly or are separate values.
@@ -151,7 +151,7 @@ custom set from Figma.
 
 - App logo PNGs live in `mobile/piyanota_application/assets/branding/` (bundled into the app —
   declare in `pubspec.yaml`'s `assets:` section once files are added).
-- Figma screenshots live in `docs/design/figma/` (reference-only for extracting tokens above, not
+- Figma screenshots live in `_archive/docs/design/figma/` (reference-only for extracting tokens above, not
   shipped in the app).
 
 ## Responsiveness: Flutter built-ins only, no scaling package
