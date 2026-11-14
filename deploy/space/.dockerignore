@@ -1,5 +1,0 @@
-**/__pycache__/
-**/*.pyc
-backend/.venv/
-backend/.env
-backend/tests/

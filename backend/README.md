@@ -3,6 +3,24 @@
 Flask API for Module 3. Configuration comes from `PIYA_*` environment variables (see
 `backend/.env.example`); the app does not read a `.env` file itself.
 
+## Where things are
+
+| File / folder | Job |
+|---|---|
+| `app.py` | Flask app factory, JSON error envelope, `/healthz`. |
+| `routes_auth.py`, `routes_account.py` | Sign-up, login, password reset, account info and deletion. |
+| `routes_jobs.py` | Score upload (`POST /api/jobs`, `/api/jobs/pdf`), job status, cancel. |
+| `routes_scores.py`, `routes_media.py`, `routes_piano.py` | Score library and results, signed media download, piano octave setting. |
+| `config.py`, `db.py`, `migrate.py`, `migrations/` | Settings from `PIYA_*` variables, the Postgres pool, the SQL migration runner and its `.up.sql`/`.down.sql` files. |
+| `security.py`, `access.py`, `throttle.py`, `validation.py` | Password hashing and sessions, per-user record scoping, rate limits, request checks. |
+| `envelope.py`, `failure_codes.py`, `logutil.py` | Response format, the stable failure codes the app parses, log helpers that never print user data. |
+| `storage.py`, `mailer.py`, `standardize.py`, `midi_combined.py` | Object storage, password-reset mail, upload/PDF page standardizing, the one combined MIDI the app plays. |
+| `completion.py`, `background.py` | Marking a job done or failed, background cleanup (deletion queue, expiry). |
+| `worker/` | The conversion worker (`python -m backend.worker --loop`): `queue.py` claims jobs, `pipeline.py` calls the Stage 1-5 modules at the repo root, `main.py` publishes the results. |
+| `scripts/` | `smoke.py` (API contract check), `smoke_convert.py` (worker end to end on real photos), `jobs_cli.py` (operator CLI), `bench_intake.py` (upload benchmark), `check_secrets.py` (fails if git tracks a secret). |
+| `tests/` | One `test_*.py` per area; need Postgres (see Tests). |
+| `Dockerfile` | The API image Render builds from `render.yaml`. |
+
 ## Setup (Windows)
 
 ```
@@ -13,7 +31,8 @@ backend/.venv/Scripts/python -m pip install -r backend/requirements-dev.txt
 ## Tests
 
 Tests need PostgreSQL at `TEST_DATABASE_URL` (default `postgresql://piya:piya@localhost:55432/piya_test`).
-Start it with:
+Any Postgres 16 on port 55432 with that user, password and database works (a portable Windows build is fine
+when Docker is not available). With Docker:
 
 ```
 docker run -d --name piya-pg-test -e POSTGRES_USER=piya -e POSTGRES_PASSWORD=piya -e POSTGRES_DB=piya_test -p 55432:5432 postgres:16

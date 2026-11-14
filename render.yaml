@@ -1,5 +1,5 @@
 # Render Blueprint: one free Docker web service. Secrets are never in this file (sync: false);
-# set them in the Render dashboard. See docs/backend/deploy.md.
+# set them in the Render dashboard. See docs/deploy/render-api.md.
 services:
   - type: web
     name: piyanota-api
@@ -13,8 +13,8 @@ services:
         value: prod
       - key: PIYA_REQUIRE_HTTPS
         value: "true"
-      # Backends: db stores media in Neon so the Space worker and this API share it (needs the two
-      # sync: false vars below, identical on the Space). Mail is Brevo (live since 2026-11-02);
+      # Backends: db stores media in Neon so the laptop worker and this API share it (needs the two
+      # sync: false vars below, identical on the worker). Mail is Brevo (live since 2026-11-02);
       # dashboard-only values for sync: false vars survive a Blueprint sync, plain values do not.
       # To switch storage to b2, also set the PIYA_B2_* vars below.
       - key: PIYA_STORAGE_BACKEND

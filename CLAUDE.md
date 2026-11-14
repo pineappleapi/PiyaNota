@@ -28,7 +28,7 @@ Only app code is at the root: `backend/`, `deploy/`, `mobile/`, `tests/`, `docs/
 `_archive/`, which is committed locally only and never pushed. Any `docs/`, `training/`, `data/`,
 `ground_truth/` or `staff_detector_files/` path below that is not in the app list above means `_archive/<path>`.
 Weights and the soundfont default to the gitignored `models/` folder (`staff_detector_yolov8.pt`, `symbol_transcriber_crnn_seed1.pt`,
-`clef_key_classifier.pt`, `piano.sf2`), the same layout the Space image copies. `tests/` has 11 files
+`clef_key_classifier.pt`, `piano.sf2`), the layout the worker reads. `tests/` has 11 files
 (117 pass, 55 expected-failures in `tests/conftest.py`); `backend/tests` needs Postgres at localhost:55432.
 `_archive/golden/golden_check.py` is the golden-output check (10-piece camera set, CPU): run it before and after
 any refactor. `python _archive/golden/golden_check.py check`.
@@ -80,7 +80,7 @@ The CRNN-CTC symbol transcriber (Stage 3) is trained separately on Kaggle — th
 inference with it (`stage3_transcription.py` loads a `.pt` checkpoint containing a `model_state` dict
 plus an `epoch` field).
 
-There is no test suite, linter, or CI config in this repo.
+Tests: `python -m pytest tests -q` (pipeline), `python -m pytest backend/tests -q` (backend, needs Postgres), `flutter analyze` and `flutter test` (app). There is no linter or CI config.
 
 ## Pipeline architecture
 
@@ -460,4 +460,4 @@ Commit messages: `PIYA-XXX: <summary>`. Never commit without explicit user revie
 ## Backend
 
 Module 3 (Flask API) lives in `backend/`; setup and tests are in `backend/README.md`, deployment in
-`docs/backend/deploy.md`. The live contract check is `python -m backend.scripts.smoke <base_url>`.
+`docs/deploy/render-api.md`. The live contract check is `python -m backend.scripts.smoke <base_url>`.
